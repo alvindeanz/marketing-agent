@@ -1,0 +1,4 @@
+*.local-stale-*
+*.bak*
+.DS_Store
+.credentials.md
