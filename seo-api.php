@@ -1120,7 +1120,7 @@ if($m==='GET'&&$ROUTE==='/events'){
     $events=[];
 
     /* ---- 任务类：apply / config / publish ---- */
-    $tq=db()->prepare("SELECT id,title,ops,output_url,updated_at FROM seo_tasks
+    $tq=db()->prepare("SELECT id,title,ops,output_url,result_note,updated_at FROM seo_tasks
                        WHERE client_id=? AND status='done' ORDER BY id");
     $tq->execute([$cid]);
     $tasks=$tq->fetchAll();
@@ -1161,6 +1161,13 @@ if($m==='GET'&&$ROUTE==='/events'){
             $tid=(string)$t['id'];
             $kind=ev_task_kind($t['ops'],$t['output_url']);
             if($kind===null)continue;
+            /* apply 类（prepare 模式的站点变更）要有实锤才算事件：要么真跑过
+               apply_task（appliedAt 命中），要么巡检/人工在 result_note 里盖了
+               [applied] 章。任务被归档置完成（如方案只存档不执行）时两者都没有，
+               不产事件，否则曲线上会出现一根从未发生过的"站点变更"标注。 */
+            if($kind==='apply'
+               && !isset($appliedAt[$tid])
+               && strpos((string)$t['result_note'],'[applied]')===false)continue;
             if($kind==='publish'){
                 /* 标题多半已经是"博文：xxx"，再加一层前缀就重复了，去掉再拼。 */
                 $label=ev_label('博文发布',preg_replace('/^博文[:：]\s*/u','',(string)$t['title']));
