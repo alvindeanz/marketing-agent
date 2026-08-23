@@ -1,0 +1,1528 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>HornTech SEO Agent</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
+.hidden{display:none!important}
+.muted{color:#64748b}
+
+/* Top bar */
+.top-bar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid #1e293b;background:#161b26;position:sticky;top:0;z-index:50}
+.top-bar h1{font-size:20px;font-weight:700;color:#f8fafc}
+.top-bar .left{display:flex;align-items:baseline}
+.top-bar .sub{font-size:12px;color:#64748b;margin-left:10px;font-weight:400}
+.top-bar .right{display:flex;align-items:center;gap:12px}
+.module-tabs{display:flex;gap:2px;background:#1e2433;border-radius:8px;padding:2px}
+.module-tab{padding:6px 16px;border-radius:6px;border:none;background:transparent;color:#64748b;font-size:13px;cursor:pointer;font-weight:500}
+.module-tab.active{background:#3b82f6;color:#fff}
+
+/* Console shell */
+.console{display:flex;align-items:flex-start;min-height:calc(100vh - 57px)}
+.sidebar{width:250px;flex-shrink:0;border-right:1px solid #1e293b;background:#161b26;min-height:calc(100vh - 57px);padding:12px 10px 24px;position:sticky;top:57px;max-height:calc(100vh - 57px);overflow-y:auto}
+.content{flex:1;min-width:0;padding:16px 24px 48px}
+@media(max-width:820px){.console{flex-direction:column}.sidebar{width:100%;position:static;max-height:none;min-height:0;border-right:none;border-bottom:1px solid #1e293b}}
+
+/* Sidebar */
+.sb-head{display:flex;align-items:center;justify-content:space-between;padding:4px 8px 10px}
+.sb-title{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.6px}
+.sb-add{background:transparent;border:1px solid #2d3748;color:#94a3b8;border-radius:6px;font-size:12px;padding:2px 9px;cursor:pointer;line-height:1.5}
+.sb-add:hover{border-color:#475569;color:#e2e8f0}
+.sb-row{display:flex;align-items:center;gap:6px;padding:7px 9px;border-radius:8px;cursor:pointer;margin-bottom:2px;border:1px solid transparent}
+.sb-row:hover{background:#1e2433}
+.sb-row.on{background:#1e2433;border-color:#3b82f6}
+.sb-name{flex:1;min-width:0;font-size:13px;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-row.on .sb-name{color:#f1f5f9;font-weight:600}
+.sb-row.arch .sb-name{color:#64748b}
+.sb-pill{font-size:10px;padding:1px 6px;border-radius:20px;font-weight:600;flex-shrink:0}
+.sb-pill.tasks{background:#1e3a5f;color:#60a5fa}
+.sb-pill.facts{background:#422006;color:#fb923c}
+.sb-act{opacity:0;font-size:11px;color:#475569;cursor:pointer;flex-shrink:0;padding:0 2px}
+.sb-row:hover .sb-act{opacity:1}
+.sb-act:hover{color:#e2e8f0}
+.sb-group{margin-top:14px;border-top:1px solid #1e293b;padding-top:10px}
+.sb-group-head{font-size:11px;color:#475569;padding:4px 9px;cursor:pointer;user-select:none}
+.sb-group-head:hover{color:#94a3b8}
+.sb-empty{font-size:12px;color:#3d4f63;font-style:italic;padding:8px 9px}
+
+/* Client header + view tabs */
+.client-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.client-head h2{font-size:18px;color:#f8fafc}
+.client-head .dom{font-size:12px;color:#64748b;word-break:break-all}
+.view-tabs{display:flex;gap:2px;background:#1e2433;border-radius:8px;padding:2px}
+.view-tab{padding:6px 14px;border-radius:6px;border:none;background:transparent;color:#64748b;font-size:12.5px;cursor:pointer;font-weight:500}
+.view-tab.on{background:#3b82f6;color:#fff}
+
+/* Panels */
+.sec{margin-bottom:20px}
+.sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.sec-title{font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px}
+.panel{background:#1e2433;border:1px solid #2d3748;border-radius:10px;padding:16px}
+
+/* Buttons */
+.btn{padding:7px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;cursor:pointer;color:#fff;background:#3b82f6}
+.btn:hover{background:#2563eb}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:transparent;border:1px solid #2d3748;color:#94a3b8}
+.btn.ghost:hover{border-color:#475569;color:#e2e8f0;background:transparent}
+.btn.green{background:#166534}
+.btn.green:hover{background:#15803d}
+.btn.red{background:#7f1d1d}
+.btn.red:hover{background:#991b1b}
+.btn.tiny{padding:3px 9px;font-size:11px;border-radius:6px}
+
+/* Forms */
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.fld label{display:block;font-size:11px;color:#64748b;margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px}
+.fld input,.fld textarea,.fld select{width:100%;padding:8px 10px;background:#0f1117;border:1px solid #2d3748;border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;font-family:inherit}
+.fld input:focus,.fld textarea:focus,.fld select:focus{border-color:#3b82f6}
+.fld textarea{resize:vertical;min-height:60px;line-height:1.5}
+.form-actions{display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap}
+.save-hint{font-size:12px;color:#4ade80}
+
+/* Dashboard */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.stat{background:#0f1117;border:1px solid #2d3748;border-radius:9px;padding:11px 13px}
+.stat .k{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.stat .v{font-size:17px;font-weight:700;color:#e2e8f0}
+.stat .n{font-size:11px;color:#64748b;margin-top:3px}
+.stat.warn{border-color:#78350f}
+.stat.warn .v{color:#fb923c}
+.stat.bad{border-color:#7f1d1d}
+.stat.bad .v{color:#f87171}
+.stat.ok .v{color:#4ade80}
+.matrix{width:100%;border-collapse:collapse;font-size:12.5px}
+.matrix th{text-align:left;font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;padding:7px 9px;border-bottom:1px solid #2d3748;font-weight:600}
+.matrix td{padding:8px 9px;border-bottom:1px solid #1e293b;color:#cbd5e1}
+.matrix td.zero{color:#334155}
+.matrix td.own{color:#f1f5f9;font-weight:600}
+.banner{background:#1a1408;border:1px solid #78350f;border-radius:9px;padding:10px 14px;font-size:12.5px;color:#fbbf24;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+
+/* Plans */
+.plan-body{background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:14px;font-size:13px;line-height:1.7;color:#cbd5e1;max-height:420px;overflow-y:auto}
+.plan-body h2{font-size:15px;color:#f1f5f9;margin:10px 0 6px}
+.plan-body h3{font-size:14px;color:#e2e8f0;margin:10px 0 4px}
+.plan-body h4{font-size:13px;color:#94a3b8;margin:8px 0 4px}
+.plan-body code{background:#1e2433;padding:1px 5px;border-radius:4px;font-size:12px}
+.plan-row{display:flex;align-items:center;gap:10px;background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:10px 12px;margin-bottom:8px;flex-wrap:wrap}
+.plan-row .pr-main{flex:1;min-width:180px;font-size:13px;color:#cbd5e1}
+.plan-meta{font-size:11px;color:#64748b}
+
+/* Badges */
+.badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap}
+.badge.draft{background:#1e3a5f;color:#60a5fa}
+.badge.active{background:#052e16;color:#22c55e}
+.badge.superseded{background:#1e2433;color:#64748b;border:1px solid #334155}
+.badge.rejected{background:#450a0a;color:#f87171}
+.badge.proposed{background:#422006;color:#fb923c}
+.badge.approved{background:#1e3a5f;color:#60a5fa}
+.badge.in_progress{background:#3b1f6e;color:#c084fc}
+.badge.review{background:#422006;color:#fbbf24}
+.badge.done{background:#052e16;color:#22c55e}
+.badge.blocked{background:#450a0a;color:#f87171}
+.badge.queued{background:#1e2433;color:#94a3b8;border:1px solid #334155}
+.badge.running{background:#1e3a5f;color:#60a5fa}
+.badge.failed{background:#450a0a;color:#f87171}
+.badge.mod{background:#161b26;color:#7c6fcd;border:1px solid #312b52}
+.badge.pri{cursor:pointer;user-select:none}
+.badge.pri:hover{filter:brightness(1.35)}
+.badge.P0{background:#450a0a;color:#f87171}
+.badge.P1{background:#422006;color:#fb923c}
+.badge.P2{background:#1e2433;color:#94a3b8;border:1px solid #334155}
+.badge.P3{background:#161b26;color:#4d5b6e;border:1px solid #232b3c}
+.badge.unconfirmed{background:#422006;color:#fbbf24}
+.badge.confirmed{background:#052e16;color:#22c55e}
+.badge.agent{background:#3b1f6e;color:#c084fc}
+.badge.manual{background:#1e2433;color:#94a3b8;border:1px solid #334155}
+.badge.client{background:#1e3a5f;color:#60a5fa}
+.badge.archived{background:#1e2433;color:#64748b;border:1px solid #334155}
+.badge.attn{background:#450a0a;color:#f87171}
+.badge.agency{background:#161b26;color:#94a3b8;border:1px solid #2d3748}
+.ops-tag{font-size:10.5px;padding:1px 6px;border-radius:5px;background:#161b26;border:1px solid #2d3748;color:#7c8ba1;white-space:nowrap}
+
+/* 例外队列 */
+.exc-group{border:1px solid #2d3748;border-radius:9px;margin-bottom:8px;overflow:hidden;background:#0f1117}
+.exc-head{display:flex;align-items:center;gap:8px;padding:9px 13px;cursor:pointer;font-size:12.5px;color:#cbd5e1;user-select:none}
+.exc-head:hover{background:#1e2433}
+.exc-head .n{margin-left:auto;font-size:11px;color:#64748b}
+.exc-dot{width:7px;height:7px;border-radius:50%;background:#f87171;flex-shrink:0}
+.exc-body{padding:0 13px 10px}
+.exc-item{padding:7px 0;border-top:1px solid #1e293b;color:#cbd5e1;font-size:12.5px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.exc-item .t{flex:1;min-width:140px;word-break:break-word}
+
+/* 待放行 */
+.rel-row{display:flex;gap:9px;align-items:flex-start;background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:10px 12px;margin-bottom:6px}
+.rel-row input[type=checkbox]{margin-top:3px;width:14px;height:14px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0}
+.rel-main{flex:1;min-width:0}
+.rel-note{font-size:12px;color:#64748b;line-height:1.5;margin-top:4px;white-space:pre-wrap;word-break:break-word}
+
+/* 博客交付三件套 */
+.blog-box{margin-top:8px;border:1px solid #26324a;border-radius:8px;background:#141a26;padding:9px 11px}
+.blog-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:#94a3b8;margin-bottom:5px}
+.blog-k{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0}
+.blog-row a{color:#60a5fa;text-decoration:none;word-break:break-all}
+.blog-row a:hover{text-decoration:underline}
+.blog-social{font-size:12px;color:#cbd5e1;line-height:1.6;white-space:pre-wrap;word-break:break-word;background:#0f1117;border:1px solid #2d3748;border-radius:7px;padding:8px 10px;margin-bottom:5px}
+.blog-gist{font-size:11.5px;color:#64748b;line-height:1.55;word-break:break-word}
+
+/* 反馈框 */
+.fb-box{margin-top:8px;border-top:1px solid #1e293b;padding-top:9px}
+.fb-title{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.fb-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+.fb-check{display:flex;align-items:center;gap:5px;font-size:11.5px;color:#94a3b8;cursor:pointer;user-select:none}
+.fb-check input[type=checkbox]{margin:0;width:13px;height:13px;accent-color:#3b82f6;cursor:pointer}
+.fb-row select{width:auto;padding:5px 8px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;color:#e2e8f0;font-size:11.5px;outline:none;font-family:inherit}
+.fb-row select:focus{border-color:#3b82f6}
+.fb-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center}
+.fb-thumb{position:relative;width:64px;height:64px;border:1px solid #2d3748;border-radius:7px;overflow:hidden;background:#0f1117;flex-shrink:0}
+.fb-thumb img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
+.fb-thumb .x{position:absolute;top:1px;right:1px;width:16px;height:16px;line-height:14px;text-align:center;border-radius:50%;background:rgba(15,17,23,.85);border:1px solid #2d3748;color:#94a3b8;font-size:11px;cursor:pointer}
+.fb-thumb .x:hover{color:#f87171;border-color:#7f1d1d}
+.fb-up{font-size:11px;color:#64748b}
+.fb-hist{margin-top:10px}
+.fb-item{border-top:1px solid #1e293b;padding:7px 0;font-size:11.5px;line-height:1.55}
+.fb-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px}
+.fb-note{color:#cbd5e1;white-space:pre-wrap;word-break:break-word}
+.fb-text{color:#64748b;white-space:pre-wrap;word-break:break-word;margin-top:2px}
+
+/* 批方案弹窗 */
+.appr-list{max-height:320px;overflow-y:auto;margin:8px 0 4px}
+.appr-item{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid #1e293b}
+.appr-item input[type=checkbox]{margin-top:3px;width:14px;height:14px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0}
+.appr-item .t{flex:1;min-width:0;font-size:12.5px;color:#cbd5e1;word-break:break-word}
+
+/* Swimlanes */
+.lanes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start}
+@media(max-width:900px){.lanes{grid-template-columns:1fr}}
+.lane{background:#1e2433;border:1px solid #2d3748;border-radius:10px;overflow:hidden}
+.lane-head{padding:10px 14px;border-bottom:1px solid #2d3748;display:flex;align-items:center;justify-content:space-between}
+.lane-name{font-size:13px;font-weight:600;color:#f1f5f9}
+.lane-count{font-size:11px;color:#64748b}
+.lane-hidden{color:#3d4f63}
+.tb-group{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tb-select{padding:6px 9px;background:#0f1117;border:1px solid #2d3748;border-radius:8px;color:#94a3b8;font-size:12px;outline:none;font-family:inherit;cursor:pointer}
+.tb-select:focus{border-color:#3b82f6}
+.lane-body{padding:8px 12px 12px}
+.grp-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.6px;margin:10px 0 5px}
+.tcard{background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:9px 11px;margin-bottom:6px}
+.tcard-top{display:flex;align-items:flex-start;gap:7px}
+.tcard-title{flex:1;font-size:13px;color:#e2e8f0;line-height:1.45;min-width:0;word-break:break-word}
+.tcard-detail{font-size:12px;color:#64748b;line-height:1.5;margin-top:5px;white-space:pre-wrap}
+.tcard-meta{display:flex;align-items:center;gap:6px;margin-top:7px;flex-wrap:wrap}
+.tcard-meta a{color:#60a5fa;font-size:11px;text-decoration:none;word-break:break-all}
+.tcard-meta a:hover{text-decoration:underline}
+.tcard input[type=checkbox]{margin-top:3px;width:14px;height:14px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0}
+.lane-empty{font-size:12px;color:#3d4f63;font-style:italic;padding:8px 0}
+
+/* Tables (jobs + facts) */
+.job-btns{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+table.grid{width:100%;border-collapse:collapse;font-size:12.5px}
+table.grid th{text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid #2d3748;font-weight:600}
+table.grid td{padding:9px 10px;border-bottom:1px solid #1e293b;color:#cbd5e1;vertical-align:top}
+table.grid tr:hover td{background:#232b3c}
+table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
+.log-cell{padding:0!important}
+.log-box{background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:10px 12px;margin:0 10px 10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:1.6;color:#94a3b8;white-space:pre-wrap;max-height:340px;overflow-y:auto}
+.log-toggle{color:#60a5fa;cursor:pointer;font-size:11px}
+.log-toggle:hover{text-decoration:underline}
+
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:flex-start;justify-content:center;padding:60px 20px;overflow-y:auto}
+.modal-bg.show{display:flex}
+.modal{background:#1e2433;border:1px solid #2d3748;border-radius:12px;padding:20px;width:100%;max-width:440px}
+.modal h3{font-size:15px;color:#f1f5f9;margin-bottom:14px}
+.modal .or{font-size:11px;color:#475569;text-align:center;margin:10px 0}
+
+/* Deny + toast */
+.deny{display:flex;align-items:center;justify-content:center;min-height:70vh;padding:20px}
+.deny-box{background:#1e2433;border:1px solid #2d3748;border-radius:12px;padding:36px;max-width:420px;text-align:center}
+.deny-box h2{font-size:17px;color:#f8fafc;margin-bottom:8px}
+.deny-box p{font-size:13px;color:#64748b;line-height:1.6}
+#toast{position:fixed;right:20px;bottom:20px;background:#1e2433;border:1px solid #2d3748;border-radius:10px;padding:11px 16px;font-size:13px;color:#e2e8f0;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:300;display:none;max-width:340px}
+#toast.err{border-color:#7f1d1d;color:#fca5a5}
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <div class="left">
+    <h1>SEO Agent</h1>
+    <span class="sub">多客户控制台</span>
+  </div>
+  <div class="right">
+    <div class="module-tabs">
+      <button class="module-tab" onclick="location.href='/seo'">SEO</button>
+      <button class="module-tab" onclick="location.href='/sem'">SEM</button>
+      <button class="module-tab" onclick="location.href='/website'">Website</button>
+      <button class="module-tab" onclick="location.href='/sales/'">Sales</button>
+      <button class="module-tab active">SEO Agent</button>
+    </div>
+    <div id="userbar"></div>
+  </div>
+</div>
+
+<div class="deny hidden" id="denyView">
+  <div class="deny-box">
+    <h2>无访问权限</h2>
+    <p>SEO Agent 控制台仅限 admin 使用。如果需要访问，请联系管理员调整账号角色。</p>
+  </div>
+</div>
+
+<div class="console hidden" id="appView">
+
+  <aside class="sidebar">
+    <div class="sb-head">
+      <span class="sb-title">客户</span>
+      <button class="sb-add" onclick="openAddClient()">+ 添加</button>
+    </div>
+    <div id="sbList"></div>
+    <div class="sb-group" id="sbArchGroup">
+      <div class="sb-group-head" id="sbArchHead" onclick="toggleArchived()"></div>
+      <div id="sbArchived" class="hidden"></div>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="client-head">
+      <div>
+        <h2 id="clientName">未选择客户</h2>
+        <span class="dom" id="clientDomain"></span>
+      </div>
+      <div class="view-tabs" id="viewTabs"></div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="v_dash"></div>
+
+    <!-- 方案 -->
+    <div id="v_plan" class="hidden">
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">当前生效方案</div>
+          <span class="plan-meta" id="planMeta"></span>
+        </div>
+        <div class="panel">
+          <div id="activePlanBox"></div>
+          <div style="margin-top:16px">
+            <div class="sec-title" style="font-size:11px;margin-bottom:8px">待审方案与历史版本</div>
+            <div id="planList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务 -->
+    <div id="v_tasks" class="hidden">
+      <div class="sec hidden" id="releaseSec">
+        <div class="sec-head">
+          <div class="sec-title">待放行</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="plan-meta" id="relCount"></span>
+            <button class="btn ghost" onclick="toggleAllRelease()">全选 / 全不选</button>
+            <button class="btn green" id="relBtn" onclick="releaseTasks()">批量放行</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="plan-meta" style="margin-bottom:10px">这些任务 agent 已经准备好改动，放行后会排一个 apply 任务真正落地。取消勾选的保持待放行。</div>
+          <div id="releaseList"></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">任务泳道</div>
+          <div class="tb-group">
+            <span class="plan-meta" id="taskFilterHint"></span>
+            <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已完成</button>
+            <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
+              <option value="0">全部时间</option>
+              <option value="7">近 7 天</option>
+              <option value="30">近 30 天</option>
+              <option value="90">近 90 天</option>
+            </select>
+            <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
+          </div>
+        </div>
+        <div class="panel hidden" id="addTaskPanel" style="margin-bottom:12px">
+          <div class="grid2">
+            <div class="fld"><label>标题</label><input id="nt_title" placeholder="任务标题"></div>
+            <div class="fld"><label>模块</label><select id="nt_module">
+              <option value="technical">technical</option><option value="onpage">onpage</option>
+              <option value="content">content</option><option value="local">local</option>
+              <option value="offpage">offpage</option></select></div>
+            <div class="fld"><label>负责方</label><select id="nt_owner">
+              <option value="agency">agency</option><option value="client">client</option>
+              <option value="agent">agent</option></select></div>
+            <div class="fld"><label>优先级</label><select id="nt_priority">
+              <option value="P0">P0</option><option value="P1">P1</option>
+              <option value="P2" selected>P2</option><option value="P3">P3</option></select></div>
+            <div class="fld"><label>Sprint</label><input id="nt_sprint" placeholder="W33"></div>
+            <div class="fld" style="grid-column:1/-1"><label>说明</label><textarea id="nt_detail"></textarea></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn" id="ntSaveBtn" onclick="addTask()">创建</button>
+            <button class="btn ghost" onclick="toggleAddTask()">取消</button>
+          </div>
+        </div>
+        <div class="lanes" id="lanes"></div>
+      </div>
+    </div>
+
+    <!-- Jobs -->
+    <div id="v_jobs" class="hidden">
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">Job 控制台</div>
+          <span class="plan-meta">列表每 15 秒自动刷新</span>
+        </div>
+        <div class="panel">
+          <div class="job-btns">
+            <button class="btn" onclick="fireJob('discover',this)">摸底 Discover</button>
+            <button class="btn" onclick="fireJob('pull_data',this)">拉数据</button>
+            <button class="btn" onclick="fireJob('plan',this)">规划方案</button>
+            <button class="btn" onclick="fireJob('execute_task',this)">执行选中任务</button>
+            <button class="btn" onclick="fireJob('report',this)">生成报告</button>
+            <button class="btn" title="通读该客户全局状态，给出诊断与下一步建议。只读分析，不会改动任何东西。结果看下面的 job 日志，工作区里另存一份巡检报告文件。" onclick="fireJob('triage',this)">Fable 巡检</button>
+            <button class="btn ghost" onclick="loadJobs()">刷新</button>
+          </div>
+          <div class="plan-meta" id="pickHint" style="margin-bottom:4px"></div>
+          <div class="plan-meta" style="margin-bottom:12px">Fable 巡检：通读全局给出诊断与下一步建议，结果看 job 日志与工作区里的巡检报告文件。</div>
+          <table class="grid">
+            <thead><tr><th style="width:50px">ID</th><th style="width:110px">类型</th><th style="width:85px">状态</th><th style="width:85px">耗时</th><th style="width:80px">Token</th><th style="width:100px">创建人</th><th style="width:145px">创建时间</th><th>日志</th></tr></thead>
+            <tbody id="jobRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 档案 + Facts -->
+    <div id="v_profile" class="hidden">
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">客户档案</div>
+          <span class="plan-meta" id="profileMeta"></span>
+        </div>
+        <div class="panel">
+          <div class="grid2">
+            <div class="fld"><label>Platform</label><input id="pf_platform" placeholder="WebForger"></div>
+            <div class="fld"><label>Domain</label><input id="pf_domain" placeholder="https://www.example.co.nz/"></div>
+            <div class="fld"><label>GA4 Property</label><input id="pf_ga4_property" placeholder="363223275"></div>
+            <div class="fld"><label>GSC Property</label><input id="pf_gsc_property" placeholder="URL 前缀或 sc-domain:"></div>
+            <div class="fld"><label>Semrush Project</label><input id="pf_semrush_project" placeholder="项目 ID 或名称"></div>
+            <div class="fld"><label>报告语言</label><select id="pf_report_lang">
+              <option value="en">English</option><option value="zh">中文</option></select></div>
+            <div class="fld"><label>Target Keywords（逗号或换行分隔）</label><textarea id="pf_target_keywords"></textarea></div>
+            <div class="fld"><label>Business Goals</label><textarea id="pf_business_goals"></textarea></div>
+            <div class="fld"><label>Conversion Goals</label><textarea id="pf_conversion_goals"></textarea></div>
+            <div class="fld" style="grid-column:1/-1"><label>Notes（数据口径、历史坑）</label><textarea id="pf_notes" style="min-height:80px"></textarea></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn" id="pfSaveBtn" onclick="saveProfile()">保存档案</button>
+            <button class="btn ghost" onclick="loadProfile()">重新载入</button>
+            <span class="save-hint hidden" id="pfSaved">已保存</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">Facts 知识库</div>
+          <span class="plan-meta" id="factsMeta"></span>
+        </div>
+        <div class="panel">
+          <table class="grid">
+            <thead><tr><th style="width:190px">Fact Key</th><th>Value</th><th style="width:80px">来源</th><th style="width:100px">状态</th><th style="width:130px">操作</th></tr></thead>
+            <tbody id="factRows"></tbody>
+          </table>
+          <div class="grid2" style="margin-top:14px">
+            <div class="fld"><label>新增 fact key</label><input id="nf_key" placeholder="business.opening_hours"></div>
+            <div class="fld"><label>Value</label><input id="nf_value" placeholder="Mon-Fri 9-5"></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn" id="nfSaveBtn" onclick="addFact()">新增 fact</button>
+            <span class="plan-meta">手工新增默认 source=manual、status=confirmed</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="modal-bg" id="addBg">
+  <div class="modal">
+    <h3>添加客户到 SEO Agent</h3>
+    <div class="fld"><label>选择 Ops Tracker 现有客户</label><select id="ac_existing"></select></div>
+    <div class="or">或</div>
+    <div class="fld"><label>输入新客户名（会在 clients 表新建）</label><input id="ac_name" placeholder="New Client Ltd"></div>
+    <div class="form-actions">
+      <button class="btn" id="acSaveBtn" onclick="submitAddClient()">创建档案</button>
+      <button class="btn ghost" onclick="closeAddClient()">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="apprBg">
+  <div class="modal" style="max-width:580px">
+    <h3>批准方案</h3>
+    <div class="plan-meta" id="apprHint"></div>
+    <div class="appr-list" id="apprList"></div>
+    <div class="form-actions">
+      <button class="btn green" id="apprOkBtn" onclick="submitApprove()">确认批准</button>
+      <button class="btn ghost" onclick="closeApprove()">取消</button>
+      <span class="plan-meta" id="apprCount"></span>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API='/seo-api.php';
+const PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','business_goals','conversion_goals','notes'];
+const TASK_STATUSES=['proposed','approved','in_progress','review','blocked','done'];
+const OWNERS=['agency','client','agent'];
+const LANES=[{key:'agency',name:'Agency 团队'},{key:'client',name:'Client 客户'},{key:'agent',name:'Agent 机器'}];
+const JOB_LABEL={discover:'摸底',pull_data:'拉数据',plan:'规划方案',execute_task:'执行任务',apply_task:'落地改动',report:'生成报告',feedback:'解析反馈',triage:'Fable 巡检'};
+const FB_SOURCE_LABEL={manual:'团队判断',client:'客户原话'};
+const FB_STATUS={pending:{cls:'queued',name:'待解析'},parsed:{cls:'done',name:'已解析'},failed:{cls:'failed',name:'解析失败'}};
+const FB_MAX_IMAGES=5;
+const FB_MAX_BYTES=5*1024*1024;
+const FB_MIME=['image/png','image/jpeg','image/webp'];
+const PRIORITIES=['P0','P1','P2','P3'];
+const SNAP_SOURCES=['discovery','ga4','gsc','semrush','content_registry'];
+const VIEWS=[{key:'dash',name:'Dashboard'},{key:'plan',name:'方案'},{key:'tasks',name:'任务'},{key:'jobs',name:'Jobs'},{key:'profile',name:'档案'}];
+
+let token=localStorage.getItem('ops_token');
+let clientsData=[];
+let curId=0,curView='dash';
+let tasksData=[],jobsData=[],factsData=[];
+let openLogs={},picked={},relPick={},archOpen=false;
+let fbOpen={},fbDraft={},fbSource={},fbComplete={},fbHist={};
+/* 截图：fbImgs 是待提交的文件名，fbBlobs 是取回来的 blob URL 缓存 */
+let fbImgs={},fbUploading={},fbBlobs={},fbBlobBusy={};
+/* 博客任务的客户话术，按任务 id 存一份纯文本供复制按钮取用 */
+let blogSocial={};
+/* 任务视图筛选：默认藏起已完成，时间窗默认全部。只存内存，刷新即重置 */
+let showDone=false,taskDays=0;
+let lastOverview=null,lastAttention=null,excOpen={};
+let apprPlanId=0,apprTasks=[],apprPick={};
+
+function priIdx(p){const n=PRIORITIES.indexOf(p||'P2');return n<0?2:n}
+function getRole(){
+  try{
+    let p=String(token).split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
+    while(p.length%4)p+='=';
+    return (JSON.parse(atob(p))||{}).role||'';
+  }catch(e){return ''}
+}
+function doLogout(){
+  localStorage.removeItem('ops_token');localStorage.removeItem('ops_user');localStorage.removeItem('ops_display_name');
+  location.href='/';
+}
+window.doLogout=doLogout;
+
+async function api(path,method='GET',body=null){
+  const opts={method,headers:{'Authorization':'Bearer '+token}};
+  if(body){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(body)}
+  const r=await fetch(API+path,opts);
+  if(r.status===401){doLogout();return null}
+  let d=null;
+  try{d=await r.json()}catch(e){d={}}
+  d._status=r.status;
+  return d;
+}
+
+function toast(msg,isErr){
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.className=isErr?'err':'';
+  el.style.display='block';
+  clearTimeout(window._tt);
+  window._tt=setTimeout(()=>{el.style.display='none'},3500);
+}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function fail(d,msg){
+  if(!d)return true;
+  if(d._status>=400){toast(d.error||msg,true);return true}
+  return false;
+}
+
+/* 极简 Markdown：标题、粗体、行内代码、换行 */
+function mdRender(s){
+  if(!s||!String(s).trim())return '<span class="muted">暂无内容</span>';
+  let h=esc(s);
+  h=h.replace(/^###\s+(.*)$/gm,'<h4>$1</h4>')
+     .replace(/^##\s+(.*)$/gm,'<h3>$1</h3>')
+     .replace(/^#\s+(.*)$/gm,'<h2>$1</h2>')
+     .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
+     .replace(/`([^`]+)`/g,'<code>$1</code>')
+     .replace(/<\/(h2|h3|h4)>\n/g,'</$1>')
+     .replace(/\n/g,'<br>');
+  return h;
+}
+
+/* ================= 路由 ================= */
+function navTo(id,view){location.hash='#/c/'+id+'/'+(view||'dash')}
+
+function router(){
+  const mm=String(location.hash||'').replace(/^#/,'').match(/^\/c\/(\d+)(?:\/([a-z]+))?/);
+  const prevId=curId;
+  if(mm){
+    curId=parseInt(mm[1],10);
+    curView=VIEWS.some(v=>v.key===mm[2])?mm[2]:'dash';
+  }else{
+    const first=clientsData.filter(c=>c.status==='active')[0]||clientsData[0];
+    if(first){navTo(first.client_id,'dash');return}
+    curId=0;curView='dash';
+  }
+  if(prevId!==curId){
+    picked={};relPick={};openLogs={};excOpen={};
+    fbOpen={};fbDraft={};fbSource={};fbComplete={};fbHist={};fbImgs={};fbUploading={};
+    releaseFbBlobs();
+    tasksData=[];jobsData=[];factsData=[];lastOverview=null;lastAttention=null;
+  }
+  render();
+}
+
+function render(){
+  renderSidebar();
+  const c=clientsData.filter(x=>x.client_id===curId)[0];
+  document.getElementById('clientName').textContent=c?c.name:(curId?('客户 #'+curId):'未选择客户');
+  document.getElementById('clientDomain').textContent=c?(c.domain||'未填写域名'):'';
+  document.getElementById('viewTabs').innerHTML=curId?VIEWS.map(v=>
+    '<button class="view-tab'+(v.key===curView?' on':'')+'" onclick="navTo('+curId+',\''+v.key+'\')">'+v.name+'</button>').join(''):'';
+  VIEWS.forEach(v=>{
+    const el=document.getElementById('v_'+v.key);
+    if(el)el.classList.toggle('hidden',v.key!==curView||!curId);
+  });
+  if(!curId){
+    document.getElementById('v_dash').classList.remove('hidden');
+    document.getElementById('v_dash').innerHTML='<div class="panel"><span class="muted">左侧还没有客户。点「+ 添加」把一个 Ops Tracker 客户接进来。</span></div>';
+    return;
+  }
+  loadView();
+}
+
+function loadView(){
+  if(curView==='dash')loadOverview();
+  else if(curView==='plan')loadPlans();
+  else if(curView==='tasks')loadTasks();
+  else if(curView==='jobs'){loadJobs();renderPickHint()}
+  else if(curView==='profile'){loadProfile();loadFacts()}
+}
+
+/* ================= 侧边栏 ================= */
+async function loadClients(keepView){
+  const d=await api('/clients');
+  if(fail(d,'客户列表载入失败'))return;
+  clientsData=d.clients||[];
+  if(keepView)renderSidebar();
+  else router();
+}
+
+function sbRow(c){
+  const on=c.client_id===curId;
+  const arch=c.status==='archived';
+  let pills='';
+  if(c.tasks_open)pills+='<span class="sb-pill tasks" title="待办任务">'+c.tasks_open+'</span>';
+  if(c.facts_pending)pills+='<span class="sb-pill facts" title="待确认 facts">'+c.facts_pending+'</span>';
+  const act=arch
+    ? '<span class="sb-act" title="恢复" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'active\')">恢复</span>'
+    : '<span class="sb-act" title="归档" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'archived\')">归档</span>';
+  return '<div class="sb-row'+(on?' on':'')+(arch?' arch':'')+'" onclick="navTo('+c.client_id+',\''+curView+'\')">'+
+    '<span class="sb-name" title="'+esc(c.name)+'">'+esc(c.name)+'</span>'+pills+act+'</div>';
+}
+
+function renderSidebar(){
+  const act=clientsData.filter(c=>c.status!=='archived');
+  const arch=clientsData.filter(c=>c.status==='archived');
+  document.getElementById('sbList').innerHTML=act.length?act.map(sbRow).join(''):'<div class="sb-empty">还没有客户。</div>';
+  const grp=document.getElementById('sbArchGroup');
+  grp.classList.toggle('hidden',!arch.length);
+  document.getElementById('sbArchHead').textContent=(archOpen?'▾ ':'▸ ')+'已归档 ('+arch.length+')';
+  const box=document.getElementById('sbArchived');
+  box.classList.toggle('hidden',!archOpen);
+  box.innerHTML=arch.map(sbRow).join('');
+}
+function toggleArchived(){archOpen=!archOpen;renderSidebar()}
+
+async function setClientStatus(id,status){
+  if(status==='archived'&&!confirm('归档该客户？归档后收进侧边栏底部，数据不删除。'))return;
+  const d=await api('/profile','PUT',{client_id:id,status});
+  if(fail(d,'状态更新失败'))return;
+  toast(status==='archived'?'已归档':'已恢复');
+  loadClients(true);
+}
+
+/* ---- 添加客户 ---- */
+async function openAddClient(){
+  document.getElementById('ac_name').value='';
+  const sel=document.getElementById('ac_existing');
+  sel.innerHTML='<option value="">载入中...</option>';
+  document.getElementById('addBg').classList.add('show');
+  const d=await api('/clients/available');
+  if(fail(d,'可选客户载入失败')){sel.innerHTML='<option value="">载入失败</option>';return}
+  const list=d.clients||[];
+  sel.innerHTML='<option value="">-- 不选，用下面的新名字 --</option>'+
+    list.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('');
+}
+function closeAddClient(){document.getElementById('addBg').classList.remove('show')}
+document.getElementById('addBg').addEventListener('click',e=>{if(e.target.id==='addBg')closeAddClient()});
+
+async function submitAddClient(){
+  const id=document.getElementById('ac_existing').value;
+  const name=document.getElementById('ac_name').value.trim();
+  if(!id&&!name){toast('选一个现有客户或输入新名字',true);return}
+  const btn=document.getElementById('acSaveBtn');
+  btn.disabled=true;
+  const d=await api('/clients','POST',id?{client_id:parseInt(id,10)}:{name});
+  btn.disabled=false;
+  if(!d)return;
+  if(d._status===409){toast('该客户已经在 SEO Agent 里了',true);return}
+  if(fail(d,'创建失败'))return;
+  closeAddClient();
+  toast('已添加 '+d.name);
+  const newId=d.client_id;
+  const dd=await api('/clients');
+  if(!fail(dd,'客户列表载入失败')){clientsData=dd.clients||[];navTo(newId,'profile')}
+}
+
+/* ================= Dashboard ================= */
+function snapCard(src,s){
+  if(!s)return '<div class="stat bad"><div class="k">'+src+'</div><div class="v">未拉取</div><div class="n">还没有快照</div></div>';
+  const h=s.age_hours;
+  const cls=h>168?'bad':(h>24?'warn':'ok');
+  const age=h<1?'刚刚':(h<48?(h+' 小时前'):(Math.floor(h/24)+' 天前'));
+  return '<div class="stat '+cls+'"><div class="k">'+src+'</div><div class="v">'+age+'</div>'+
+    '<div class="n">'+esc(s.created_at||'')+' · '+(s.bytes||0)+' B</div></div>';
+}
+
+/* ---- 例外队列 ---- */
+function toggleExc(k){excOpen[k]=!excOpen[k];renderDash()}
+
+function excGroup(key,title,items,inner){
+  const n=items.length;
+  const open=!!excOpen[key];
+  return '<div class="exc-group"><div class="exc-head" onclick="toggleExc(\''+key+'\')">'+
+    (n?'<span class="exc-dot"></span>':'')+
+    '<span>'+(open?'▾':'▸')+' '+title+'</span><span class="n">'+n+'</span></div>'+
+    (open?('<div class="exc-body">'+(n?inner:'<div class="lane-empty">无。</div>')+'</div>'):'')+'</div>';
+}
+
+function excTaskLine(t){
+  const pr=PRIORITIES[priIdx(t.priority)];
+  return '<div class="exc-item"><span class="badge '+pr+'">'+pr+'</span>'+
+    '<span class="t">'+esc(t.title)+'</span>'+
+    '<span class="badge mod">'+esc(t.module)+'</span>'+
+    '<span class="badge '+t.status+'">'+t.status+'</span></div>';
+}
+
+function excSection(at){
+  if(!at)return '';
+  const ft=at.flagged_tasks||[],co=at.client_open||[],fj=at.failed_jobs||[];
+  const total=ft.length+co.length+fj.length;
+  let html='<div class="sec"><div class="sec-head"><div class="sec-title">例外队列</div>'+
+    '<span class="plan-meta">'+(total?('共 '+total+' 项待处理'):'当前没有需要人工介入的事项')+'</span></div><div class="panel">';
+  html+=excGroup('flagged','需人判断的任务',ft,ft.map(excTaskLine).join(''));
+  html+=excGroup('client','客户待答',co,co.map(excTaskLine).join(''));
+  html+=excGroup('jobs','失败 Job',fj,fj.map(j=>'<div class="exc-item">'+
+    '<span class="t">#'+j.id+' '+(JOB_LABEL[j.type]||esc(j.type))+'</span>'+
+    '<span class="muted">'+esc(j.created_at||'')+'</span>'+
+    '<button class="btn tiny ghost" onclick="navTo('+curId+',\'jobs\')">去控制台</button></div>').join(''));
+  if(at.pending_facts_count){
+    html+='<div class="plan-meta" style="margin-top:8px">另有 '+at.pending_facts_count+' 条 fact 待确认。</div>';
+  }
+  html+='</div></div>';
+  return html;
+}
+
+async function loadOverview(){
+  const both=await Promise.all([api('/overview?client_id='+curId),api('/attention?client_id='+curId)]);
+  const d=both[0];
+  if(fail(d,'Dashboard 载入失败'))return;
+  lastOverview=d;
+  lastAttention=(both[1]&&both[1]._status<400)?both[1]:null;
+  renderDash();
+}
+
+function renderDash(){
+  const d=lastOverview;
+  if(!d)return;
+  const snapMap={};
+  (d.snapshots||[]).forEach(s=>{snapMap[s.source]=s});
+  let html=excSection(lastAttention);
+  if(d.facts&&d.facts.pending){
+    html+='<div class="banner"><span>有 '+d.facts.pending+' 条 agent 提交的 fact 待确认。</span>'+
+      '<button class="btn tiny" onclick="navTo('+curId+',\'profile\')">去确认</button></div>';
+  }
+  html+='<div class="sec"><div class="sec-head"><div class="sec-title">数据快照新鲜度</div></div>'+
+    '<div class="stats-grid">'+SNAP_SOURCES.map(s=>snapCard(s,snapMap[s])).join('')+'</div></div>';
+
+  const ap=d.active_plan;
+  html+='<div class="sec"><div class="sec-head"><div class="sec-title">方案与知识库</div></div><div class="stats-grid">'+
+    '<div class="stat'+(ap?' ok':' warn')+'"><div class="k">生效方案</div><div class="v">'+(ap?('v'+ap.version):'无')+'</div>'+
+    '<div class="n">'+(ap?('plan #'+ap.id):'先跑一次规划方案')+'</div></div>'+
+    '<div class="stat'+(d.draft_plans?' warn':'')+'"><div class="k">待审草稿</div><div class="v">'+(d.draft_plans||0)+'</div>'+
+    '<div class="n">'+(d.draft_plans?'<span class="log-toggle" onclick="navTo('+curId+',\'plan\')">去审阅</span>':'无')+'</div></div>'+
+    '<div class="stat ok"><div class="k">已确认 facts</div><div class="v">'+((d.facts||{}).confirmed||0)+'</div><div class="n">进 LLM 简报</div></div>'+
+    '<div class="stat'+((d.facts||{}).pending?' warn':'')+'"><div class="k">待确认 facts</div><div class="v">'+((d.facts||{}).pending||0)+'</div><div class="n">agent 提交</div></div>'+
+    '</div></div>';
+
+  const tm=d.tasks||{};
+  html+='<div class="sec"><div class="sec-head"><div class="sec-title">任务分布</div>'+
+    '<button class="btn ghost" onclick="navTo('+curId+',\'tasks\')">打开泳道</button></div><div class="panel">'+
+    '<table class="matrix"><thead><tr><th>负责方</th>'+TASK_STATUSES.map(s=>'<th>'+s+'</th>').join('')+'<th>合计</th></tr></thead><tbody>'+
+    OWNERS.map(o=>{
+      const row=tm[o]||{};
+      let sum=0;
+      const cells=TASK_STATUSES.map(s=>{const n=row[s]||0;sum+=n;return '<td class="'+(n?'':'zero')+'">'+n+'</td>'}).join('');
+      return '<tr><td class="own">'+o+'</td>'+cells+'<td class="own">'+sum+'</td></tr>';
+    }).join('')+'</tbody></table></div></div>';
+
+  const lj=d.last_jobs||[];
+  html+='<div class="sec"><div class="sec-head"><div class="sec-title">最近 Job</div>'+
+    '<button class="btn ghost" onclick="navTo('+curId+',\'jobs\')">打开控制台</button></div><div class="panel">'+
+    (lj.length?('<table class="grid"><thead><tr><th style="width:60px">ID</th><th style="width:120px">类型</th><th style="width:100px">状态</th><th style="width:100px">耗时</th><th>创建时间</th></tr></thead><tbody>'+
+      lj.map(j=>'<tr><td>#'+j.id+'</td><td>'+(JOB_LABEL[j.type]||esc(j.type))+'</td>'+
+        '<td><span class="badge '+j.status+'">'+j.status+'</span></td>'+
+        '<td>'+(j.secs===null?'-':(j.secs+'s'))+'</td><td class="muted">'+esc(j.created_at||'')+'</td></tr>').join('')+
+      '</tbody></table>'):'<span class="lane-empty">还没有 job 记录。</span>')+'</div></div>';
+
+  document.getElementById('v_dash').innerHTML=html;
+}
+
+/* ================= 档案 ================= */
+async function loadProfile(){
+  const d=await api('/profile?client_id='+curId);
+  if(fail(d,'档案载入失败'))return;
+  const p=d.profile||{};
+  PROFILE_FIELDS.forEach(f=>{const el=document.getElementById('pf_'+f);if(el)el.value=p[f]||''});
+  const kw=p.target_keywords;
+  document.getElementById('pf_target_keywords').value=Array.isArray(kw)?kw.join('\n'):(kw||'');
+  document.getElementById('pf_report_lang').value=p.report_lang||'en';
+  document.getElementById('profileMeta').textContent=d.profile
+    ?('client_id '+curId+' · '+(p.status||'active')+' · 更新于 '+(p.updated_at||'-'))
+    :('client_id '+curId+' · 尚未建档');
+}
+
+async function saveProfile(){
+  const btn=document.getElementById('pfSaveBtn');
+  btn.disabled=true;
+  const body={client_id:curId,target_keywords:document.getElementById('pf_target_keywords').value,
+    report_lang:document.getElementById('pf_report_lang').value};
+  PROFILE_FIELDS.forEach(f=>{const el=document.getElementById('pf_'+f);if(el)body[f]=el.value});
+  const d=await api('/profile','PUT',body);
+  btn.disabled=false;
+  if(fail(d,'保存失败'))return;
+  const hint=document.getElementById('pfSaved');
+  hint.classList.remove('hidden');
+  setTimeout(()=>hint.classList.add('hidden'),2000);
+  loadProfile();
+  loadClients(true);
+}
+
+/* ================= Facts ================= */
+async function loadFacts(){
+  const d=await api('/facts?client_id='+curId);
+  if(fail(d,'Facts 载入失败'))return;
+  factsData=d.facts||[];
+  const pending=factsData.filter(f=>f.status==='unconfirmed').length;
+  document.getElementById('factsMeta').textContent=factsData.length+' 条 · 待确认 '+pending;
+  document.getElementById('factRows').innerHTML=factsData.length?factsData.map(f=>{
+    const confirm=f.status==='unconfirmed'
+      ?'<button class="btn tiny green" onclick="confirmFact('+f.id+')">确认</button> ':'';
+    return '<tr><td>'+esc(f.fact_key)+'</td>'+
+      '<td class="wrap">'+esc(f.value)+'</td>'+
+      '<td><span class="badge '+f.source+'">'+f.source+'</span></td>'+
+      '<td><span class="badge '+f.status+'">'+(f.status==='unconfirmed'?'待确认':'已确认')+'</span></td>'+
+      '<td>'+confirm+'<button class="btn tiny ghost" onclick="editFact('+f.id+')">改值</button></td></tr>';
+  }).join(''):'<tr><td colspan="5"><span class="lane-empty">还没有 fact。跑一次摸底 Discover，或在下面手工新增。</span></td></tr>';
+}
+
+async function confirmFact(id){
+  const d=await api('/facts/'+id,'PATCH',{status:'confirmed'});
+  if(fail(d,'确认失败'))return;
+  loadFacts();loadClients(true);
+}
+
+async function editFact(id){
+  const f=factsData.filter(x=>x.id===id)[0];
+  const v=prompt('修改 '+(f?f.fact_key:'fact')+' 的值：',f?(f.value||''):'');
+  if(v===null)return;
+  const d=await api('/facts/'+id,'PATCH',{value:v});
+  if(fail(d,'保存失败'))return;
+  loadFacts();
+}
+
+async function addFact(){
+  const key=document.getElementById('nf_key').value.trim();
+  if(!key){toast('fact key 不能为空',true);return}
+  const btn=document.getElementById('nfSaveBtn');
+  btn.disabled=true;
+  const d=await api('/facts','POST',{client_id:curId,fact_key:key,value:document.getElementById('nf_value').value,source:'manual',status:'confirmed'});
+  btn.disabled=false;
+  if(fail(d,'新增失败'))return;
+  document.getElementById('nf_key').value='';
+  document.getElementById('nf_value').value='';
+  loadFacts();loadClients(true);
+}
+
+/* ================= 方案 ================= */
+async function loadPlans(){
+  const d=await api('/plans?client_id='+curId);
+  if(fail(d,'方案载入失败'))return;
+  const plans=d.plans||[];
+  const active=plans.filter(p=>p.status==='active')[0];
+  const box=document.getElementById('activePlanBox');
+  if(active){
+    document.getElementById('planMeta').textContent='当前生效 v'+active.version+' · 批准人 '+(active.approved_by||'-');
+    box.innerHTML='<div class="plan-row"><span class="badge active">active</span><span class="pr-main">v'+active.version+
+      ' · 作者 '+esc(active.authored_by||'-')+' · '+esc(active.created_at||'')+'</span></div>'+
+      '<div class="plan-body">'+mdRender(active.body)+'</div>';
+  }else{
+    document.getElementById('planMeta').textContent='暂无生效方案';
+    box.innerHTML='<div class="plan-body"><span class="muted">还没有生效的方案。先跑一次「规划方案」，再在下方批准草稿。</span></div>';
+  }
+  const others=plans.filter(p=>p.status!=='active');
+  document.getElementById('planList').innerHTML=others.length?others.map(p=>{
+    let acts='';
+    if(p.status==='draft'){
+      acts='<button class="btn tiny green" onclick="approvePlan('+p.id+')">批准</button>'+
+           '<button class="btn tiny red" onclick="rejectPlan('+p.id+')">打回</button>';
+    }
+    const rr=p.reject_reason?'<div class="plan-meta" style="width:100%;margin-top:4px">打回理由：'+esc(p.reject_reason)+'</div>':'';
+    return '<div class="plan-row"><span class="badge '+p.status+'">'+p.status+'</span>'+
+      '<span class="pr-main">v'+p.version+' · 作者 '+esc(p.authored_by||'-')+' · '+esc(p.created_at||'')+'</span>'+
+      acts+
+      '<button class="btn tiny ghost" onclick="togglePlanBody('+p.id+')">查看</button>'+
+      '<div class="plan-body hidden" id="pb_'+p.id+'" style="width:100%;margin-top:8px">'+mdRender(p.body)+'</div>'+rr+'</div>';
+  }).join(''):'<div class="lane-empty">暂无其他版本。</div>';
+}
+function togglePlanBody(id){document.getElementById('pb_'+id).classList.toggle('hidden')}
+
+/* 批准前先过一遍该方案下的 proposed 任务，取消勾选的留在 proposed */
+async function approvePlan(id){
+  apprPlanId=id;
+  const d=await api('/tasks?client_id='+curId);
+  if(fail(d,'任务载入失败'))return;
+  apprTasks=(d.tasks||[]).filter(t=>String(t.plan_id)===String(id)&&t.status==='proposed');
+  apprPick={};
+  apprTasks.forEach(t=>{apprPick[t.id]=true});
+  document.getElementById('apprHint').textContent=apprTasks.length
+    ?('批准后该方案生效，下面 '+apprTasks.length+' 个待定任务会转为 approved。取消勾选的保持 proposed。')
+    :'该方案下没有待定任务，批准后仅方案本身生效。该客户其他生效方案会被置为 superseded。';
+  renderApprList();
+  document.getElementById('apprBg').classList.add('show');
+}
+
+function renderApprList(){
+  document.getElementById('apprList').innerHTML=apprTasks.map(t=>{
+    const pr=PRIORITIES[priIdx(t.priority)];
+    return '<div class="appr-item"><input type="checkbox"'+(apprPick[t.id]?' checked':'')+
+      ' onchange="setApprPick('+t.id+',this.checked)">'+
+      '<div class="t">'+esc(t.title)+
+      '<div class="tcard-meta"><span class="badge '+pr+'">'+pr+'</span>'+attnBadge(t)+
+      '<span class="badge mod">'+esc(t.module)+'</span><span class="badge '+t.owner_type+'">'+t.owner_type+'</span>'+
+      opsTags(t)+'</div></div></div>';
+  }).join('');
+  renderApprCount();
+}
+function setApprPick(id,on){apprPick[id]=on;renderApprCount()}
+function renderApprCount(){
+  const on=apprTasks.filter(t=>apprPick[t.id]).length;
+  document.getElementById('apprCount').textContent='勾选 '+on+' / '+apprTasks.length+'，排除 '+(apprTasks.length-on)+' 个';
+}
+function closeApprove(){document.getElementById('apprBg').classList.remove('show')}
+document.getElementById('apprBg').addEventListener('click',e=>{if(e.target.id==='apprBg')closeApprove()});
+
+async function submitApprove(){
+  const exclude=apprTasks.filter(t=>!apprPick[t.id]).map(t=>t.id);
+  const btn=document.getElementById('apprOkBtn');
+  btn.disabled=true;
+  const d=await api('/plans/'+apprPlanId+'/approve','POST',{exclude_task_ids:exclude});
+  btn.disabled=false;
+  if(fail(d,'批准失败'))return;
+  closeApprove();
+  toast('方案已批准，'+(d.approved_count||0)+' 个任务转 approved，'+(d.excluded_count||0)+' 个保留待定');
+  loadPlans();
+  loadClients(true);
+}
+async function rejectPlan(id){
+  const reason=prompt('打回理由（必填）：');
+  if(reason===null)return;
+  if(!reason.trim()){toast('必须填写打回理由',true);return}
+  const d=await api('/plans/'+id+'/reject','POST',{reason:reason.trim()});
+  if(fail(d,'打回失败'))return;
+  toast('方案已打回');
+  loadPlans();
+}
+
+/* ================= 任务 ================= */
+function toggleAddTask(){document.getElementById('addTaskPanel').classList.toggle('hidden')}
+
+async function addTask(){
+  const title=document.getElementById('nt_title').value.trim();
+  if(!title){toast('标题不能为空',true);return}
+  const btn=document.getElementById('ntSaveBtn');
+  btn.disabled=true;
+  const d=await api('/tasks','POST',{
+    client_id:curId,
+    title,
+    module:document.getElementById('nt_module').value,
+    owner_type:document.getElementById('nt_owner').value,
+    priority:document.getElementById('nt_priority').value,
+    sprint:document.getElementById('nt_sprint').value.trim(),
+    detail:document.getElementById('nt_detail').value
+  });
+  btn.disabled=false;
+  if(fail(d,'创建失败'))return;
+  document.getElementById('nt_title').value='';
+  document.getElementById('nt_detail').value='';
+  toggleAddTask();
+  loadTasks();loadClients(true);
+}
+
+async function loadTasks(){
+  const d=await api('/tasks?client_id='+curId);
+  if(fail(d,'任务载入失败'))return;
+  tasksData=d.tasks||[];
+  renderLanes();
+}
+
+/* ---- 任务视图过滤 ----
+   一条铁律：只有 done 的卡会被藏起来。任何还没办完的任务，不管多老，
+   永远显示，时间筛选只用来压历史噪音，不许把需要人处理的东西挡住。 */
+function taskTime(t){return String((t&&(t.updated_at||t.created_at))||'')}
+function withinWindow(t){
+  if(!taskDays)return true;
+  const ms=Date.parse(taskTime(t).replace(' ','T'));
+  if(isNaN(ms))return true;
+  return (Date.now()-ms)<=taskDays*86400000;
+}
+function taskVisible(t){
+  if(t.status!=='done')return true;
+  return showDone&&withinWindow(t);
+}
+function toggleShowDone(){showDone=!showDone;renderLanes()}
+function setTaskDays(v){taskDays=parseInt(v,10)||0;renderLanes()}
+
+function renderLanes(){
+  let hiddenTotal=0;
+  document.getElementById('lanes').innerHTML=LANES.map(lane=>{
+    const rows=tasksData.filter(t=>t.owner_type===lane.key);
+    const vis=rows.filter(taskVisible);
+    const hidden=rows.length-vis.length;
+    hiddenTotal+=hidden;
+    let body='';
+    TASK_STATUSES.forEach(st=>{
+      const grp=vis.filter(t=>t.status===st).sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
+      if(!grp.length)return;
+      body+='<div class="grp-label">'+st+' ('+grp.length+')</div>';
+      body+=grp.map(t=>taskCard(t,lane.key)).join('');
+    });
+    if(!body)body='<div class="lane-empty">'+(hidden?'只有已完成任务，已按当前筛选隐藏。':'暂无任务。')+'</div>';
+    return '<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
+      '<span class="lane-count">'+vis.length+
+      (hidden?' <span class="lane-hidden">(+'+hidden+' 已完成)</span>':'')+
+      '</span></div><div class="lane-body">'+body+'</div></div>';
+  }).join('');
+  const tg=document.getElementById('doneToggle');
+  if(tg)tg.className=showDone?'btn':'btn ghost';
+  const hint=document.getElementById('taskFilterHint');
+  if(hint){
+    hint.textContent=hiddenTotal
+      ?('已隐藏 '+hiddenTotal+' 个已完成任务，未办完的不受筛选影响')
+      :'未办完的任务永远显示，筛选只作用于已完成';
+  }
+  renderRelease();
+  renderPickHint();
+  hydrateFeedback();
+}
+
+function taskCard(t,lane){
+  const pickable=(lane==='agent'&&t.status==='approved');
+  const cb=pickable?'<input type="checkbox" onchange="togglePick('+t.id+',this.checked)"'+(picked[t.id]?' checked':'')+'>':'';
+  let acts='';
+  if(t.status==='proposed')acts+='<button class="btn tiny green" onclick="setTaskStatus('+t.id+',\'approved\')">批准</button>';
+  if(lane==='client'&&t.status!=='done')acts+='<button class="btn tiny ghost" onclick="setTaskStatus('+t.id+',\'done\')">标记完成</button>';
+  if(t.status==='review')acts+='<button class="btn tiny green" onclick="setTaskStatus('+t.id+',\'done\')">放行</button>';
+  const link=t.output_url?'<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出链接</a>':'';
+  const detail=t.detail?'<div class="tcard-detail">'+esc(t.detail)+'</div>':'';
+  const pr=PRIORITIES[priIdx(t.priority)];
+  const priBadge='<span class="badge pri '+pr+'" title="点击切换优先级" onclick="cyclePriority('+t.id+',\''+pr+'\')">'+pr+'</span>';
+  acts+='<button class="btn tiny ghost" onclick="toggleFeedback('+t.id+')">'+(fbOpen[t.id]?'收起反馈':'反馈')+'</button>';
+  return '<div class="tcard">'+
+    '<div class="tcard-top">'+cb+'<div class="tcard-title"><span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div></div>'+
+    detail+
+    '<div class="tcard-meta">'+priBadge+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+
+    (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+
+    '<span class="badge '+t.status+'">'+t.status+'</span>'+link+acts+'</div>'+
+    (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
+    (fbOpen[t.id]?feedbackBox(t):'')+'</div>';
+}
+
+/* ---- 博客交付三件套 ---- */
+/* runner 把预览链接、客户话术、要点写成固定格式的 result_note，这里拆开来渲染。
+   话术夹在 <<< 和 >>> 之间，是为了让复制按钮拿到一份干净可直接粘贴的文本。 */
+function isBlogTask(t){
+  return String(t.ops||'').split(',').map(x=>x.trim().toLowerCase()).indexOf('blog-draft')>=0;
+}
+function parseBlogNote(note){
+  const s=String(note||'');
+  const link=(s.match(/预览链接：(\S+)/)||[])[1]||'';
+  const m=s.match(/<<<\s*\n([\s\S]*?)\n\s*>>>/);
+  const gist=(s.match(/要点：([\s\S]*)/)||[])[1]||'';
+  return {link,social:m?m[1].trim():'',gist:gist.trim()};
+}
+function blogDeliverable(t){
+  const b=parseBlogNote(t.result_note);
+  if(!b.link&&!b.social)return '';
+  blogSocial[t.id]=b.social;
+  let h='<div class="blog-box">';
+  if(b.link){
+    h+='<div class="blog-row"><span class="blog-k">预览</span>'+
+      '<a href="'+esc(b.link)+'" target="_blank" rel="noopener">'+esc(b.link)+'</a></div>';
+  }
+  if(b.social){
+    h+='<div class="blog-row"><span class="blog-k">客户话术</span>'+
+      '<button class="btn tiny ghost" onclick="copySocial('+t.id+')">复制话术</button></div>'+
+      '<div class="blog-social" id="blog_social_'+t.id+'">'+esc(b.social)+'</div>';
+  }
+  if(b.gist)h+='<div class="blog-gist">'+esc(b.gist)+'</div>';
+  return h+'</div>';
+}
+async function copySocial(id){
+  const txt=blogSocial[id]||'';
+  if(!txt){toast('没有可复制的话术',true);return}
+  try{
+    await navigator.clipboard.writeText(txt);
+    toast('话术已复制，可以直接粘到微信');
+  }catch(e){
+    /* http 页面或旧浏览器拿不到剪贴板权限，退回选中让人自己按快捷键 */
+    const el=document.getElementById('blog_social_'+id);
+    if(el&&window.getSelection&&document.createRange){
+      const r=document.createRange();
+      r.selectNodeContents(el);
+      const sel=window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    toast('浏览器不允许自动复制，已帮你选中话术，手动复制即可',true);
+  }
+}
+
+/* ---- 反馈框 ---- */
+function toggleFeedback(id){
+  fbOpen[id]=!fbOpen[id];
+  if(fbOpen[id]&&!fbHist[id]){loadFeedback(id);return}
+  renderLanes();
+}
+function setFbDraft(id,v){fbDraft[id]=v}
+function setFbSource(id,v){fbSource[id]=v}
+function setFbComplete(id,on){fbComplete[id]=on}
+
+async function loadFeedback(id){
+  const d=await api('/tasks/'+id+'/feedback');
+  if(fail(d,'反馈历史载入失败'))return;
+  fbHist[id]=d.feedback||[];
+  renderLanes();
+}
+
+function fbItem(f){
+  const st=FB_STATUS[f.status]||{cls:'queued',name:f.status};
+  const src=FB_SOURCE_LABEL[f.source]||f.source;
+  const body=String(f.text_short||'');
+  const raw=body?('<div class="fb-text">'+esc(body)+(f.truncated?' ...':'')+'</div>'):'';
+  const note=f.parsed_note?('<div class="fb-note">'+esc(f.parsed_note)+'</div>'):'';
+  const imgs=(f.images||[]).filter(n=>/^[a-f0-9]{32}\.(png|jpg|jpeg|webp)$/.test(n));
+  const shots=imgs.length?('<div class="fb-thumbs">'+imgs.map(n=>fbThumb(n,0)).join('')+'</div>'):'';
+  return '<div class="fb-item"><div class="fb-meta">'+
+    '<span class="badge '+f.source+'">'+src+'</span>'+
+    '<span class="badge '+st.cls+'">'+st.name+'</span>'+
+    '<span class="muted">'+esc(f.created_at||'')+'</span>'+
+    '<span class="muted">'+esc(f.created_by||'')+'</span>'+
+    (imgs.length?'<span class="muted">截图 '+imgs.length+' 张</span>':'')+
+    (f.job_id?'<span class="muted">job #'+f.job_id+'</span>':'')+
+    '</div>'+note+raw+shots+'</div>';
+}
+
+function feedbackBox(t){
+  const id=t.id;
+  const hist=fbHist[id];
+  const src=fbSource[id]||'manual';
+  const done=fbComplete[id]!==false;
+  const list=hist===undefined
+    ? '<div class="lane-empty">反馈历史载入中。</div>'
+    : (hist.length?hist.map(fbItem).join(''):'<div class="lane-empty">还没有反馈记录。</div>');
+  return '<div class="fb-box">'+
+    '<div class="fb-title">反馈</div>'+
+    '<div class="fld"><textarea id="fb_text_'+id+'" oninput="setFbDraft('+id+',this.value)" '+
+      'onpaste="onFbPaste('+id+',event)" '+
+      'placeholder="贴客户原话，或写团队自己的判断。截图可以直接 Ctrl+V 粘进来。写完提交，agent 会把里面的事实拆出来入库。">'+
+      esc(fbDraft[id]||'')+'</textarea></div>'+
+    '<div class="fb-thumbs" id="fb_imgs_'+id+'"></div>'+
+    '<input type="file" class="hidden" id="fb_file_'+id+'" accept="image/png,image/jpeg,image/webp" multiple '+
+      'onchange="onFbPick('+id+',this)">'+
+    '<div class="fb-row">'+
+      '<select onchange="setFbSource('+id+',this.value)">'+
+        '<option value="manual"'+(src==='manual'?' selected':'')+'>团队判断</option>'+
+        '<option value="client"'+(src==='client'?' selected':'')+'>客户原话</option>'+
+      '</select>'+
+      '<label class="fb-check"><input type="checkbox"'+(done?' checked':'')+
+        ' onchange="setFbComplete('+id+',this.checked)">解析后办结此任务</label>'+
+      '<button class="btn tiny ghost" onclick="pickFbFiles('+id+')">添加截图</button>'+
+      '<button class="btn tiny" id="fb_btn_'+id+'" onclick="submitFeedback('+id+')">提交反馈</button>'+
+    '</div>'+
+    '<div class="fb-hist">'+list+'</div></div>';
+}
+
+/* ---- 反馈截图 ---- */
+/* 图片端点要带 JWT，img src 直接指过去带不上头，所以一律 fetch 成 blob 再挂 URL。 */
+function releaseFbBlobs(){
+  Object.keys(fbBlobs).forEach(n=>{try{URL.revokeObjectURL(fbBlobs[n])}catch(e){}});
+  fbBlobs={};fbBlobBusy={};
+}
+
+function applyFbImg(name){
+  const url=fbBlobs[name];
+  if(!url)return;
+  const els=document.querySelectorAll('img[data-fb="'+name+'"]');
+  for(let k=0;k<els.length;k++)els[k].src=url;
+}
+
+async function ensureFbImg(name){
+  if(fbBlobs[name]){applyFbImg(name);return}
+  if(fbBlobBusy[name])return;
+  fbBlobBusy[name]=true;
+  try{
+    const r=await fetch(API+'/feedback_file/'+encodeURIComponent(name),{headers:{'Authorization':'Bearer '+token}});
+    if(r.status===401){doLogout();return}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    fbBlobs[name]=URL.createObjectURL(await r.blob());
+    applyFbImg(name);
+  }catch(e){
+    toast('截图载入失败：'+name,true);
+  }
+  fbBlobBusy[name]=false;
+}
+
+/* 泳道重渲后把所有截图位补上，顺便刷新待提交的缩略图行 */
+function hydrateFeedback(){
+  Object.keys(fbOpen).forEach(id=>{if(fbOpen[id])renderFbStrip(id)});
+  const els=document.querySelectorAll('img[data-fb]');
+  for(let k=0;k<els.length;k++){
+    const n=els[k].getAttribute('data-fb');
+    if(fbBlobs[n])els[k].src=fbBlobs[n];
+    else ensureFbImg(n);
+  }
+}
+
+function fbThumb(name,removeId){
+  const x=removeId?('<span class="x" title="移除" onclick="removeFbImg('+removeId+',\''+name+'\')">×</span>'):'';
+  return '<div class="fb-thumb"><img data-fb="'+name+'" alt="截图" title="点击看原图" '+
+    'onclick="openFbImg(\''+name+'\')">'+x+'</div>';
+}
+
+/* 只重画缩略图行，不动整条泳道，免得上传完把光标从文本域里踢出去 */
+function renderFbStrip(id){
+  const box=document.getElementById('fb_imgs_'+id);
+  if(!box)return;
+  const list=fbImgs[id]||[];
+  const up=fbUploading[id]||0;
+  box.innerHTML=list.map(n=>fbThumb(n,id)).join('')+
+    (up?'<span class="fb-up">上传中 '+up+' 张...</span>':'')+
+    (!list.length&&!up?'<span class="fb-up">还没有截图。可以直接在上面的输入框里粘贴。</span>':'');
+  hydrateFbStripImgs(box);
+}
+
+function hydrateFbStripImgs(box){
+  const els=box.querySelectorAll('img[data-fb]');
+  for(let k=0;k<els.length;k++){
+    const n=els[k].getAttribute('data-fb');
+    if(fbBlobs[n])els[k].src=fbBlobs[n];
+    else ensureFbImg(n);
+  }
+}
+
+async function openFbImg(name){
+  if(!fbBlobs[name])await ensureFbImg(name);
+  if(fbBlobs[name])window.open(fbBlobs[name],'_blank','noopener');
+}
+
+function pickFbFiles(id){
+  const el=document.getElementById('fb_file_'+id);
+  if(el)el.click();
+}
+
+function onFbPick(id,el){
+  const files=Array.prototype.slice.call(el.files||[]);
+  el.value='';
+  if(files.length)uploadFbFiles(id,files);
+}
+
+function onFbPaste(id,ev){
+  const items=(ev.clipboardData&&ev.clipboardData.items)||[];
+  const files=[];
+  for(let k=0;k<items.length;k++){
+    const it=items[k];
+    if(it.kind==='file'&&String(it.type||'').indexOf('image/')===0){
+      const f=it.getAsFile();
+      if(f)files.push(f);
+    }
+  }
+  if(!files.length)return;
+  ev.preventDefault();
+  uploadFbFiles(id,files);
+}
+
+async function uploadFbFiles(id,files){
+  if(!fbImgs[id])fbImgs[id]=[];
+  for(let k=0;k<files.length;k++){
+    const f=files[k];
+    if(fbImgs[id].length+(fbUploading[id]||0)>=FB_MAX_IMAGES){toast('最多 '+FB_MAX_IMAGES+' 张截图',true);break}
+    if(FB_MIME.indexOf(f.type)<0){toast('只支持 png、jpeg、webp 截图',true);continue}
+    if(f.size>FB_MAX_BYTES){toast('单张截图不能超过 5MB',true);continue}
+    fbUploading[id]=(fbUploading[id]||0)+1;
+    renderFbStrip(id);
+    const fd=new FormData();
+    fd.append('file',f,f.name||'screenshot.png');
+    let d=null;
+    try{
+      const r=await fetch(API+'/feedback_upload',{method:'POST',headers:{'Authorization':'Bearer '+token},body:fd});
+      if(r.status===401){doLogout();return}
+      try{d=await r.json()}catch(e){d={}}
+      d._status=r.status;
+    }catch(e){d=null}
+    fbUploading[id]=Math.max(0,(fbUploading[id]||1)-1);
+    if(!d||d._status>=400){
+      /* 413 是 nginx 在 PHP 之前就把包退了，报文里不会有我们的 error 字段 */
+      const why=(d&&d._status===413)
+        ? '截图太大，被服务器在入口就退回了（413），需要调大 nginx client_max_body_size'
+        : ((d&&d.error)||'截图上传失败');
+      toast(why,true);
+      renderFbStrip(id);
+      continue;
+    }
+    fbImgs[id].push(d.name);
+    renderFbStrip(id);
+  }
+}
+
+function removeFbImg(id,name){
+  fbImgs[id]=(fbImgs[id]||[]).filter(n=>n!==name);
+  renderFbStrip(id);
+}
+
+async function submitFeedback(id){
+  const el=document.getElementById('fb_text_'+id);
+  const text=(el?el.value:(fbDraft[id]||'')).trim();
+  const imgs=fbImgs[id]||[];
+  if(!text&&!imgs.length){toast('写点内容，或者贴一张截图',true);return}
+  if(text.length>20000){toast('反馈太长了，最多 20000 字',true);return}
+  if(fbUploading[id]){toast('还有截图在上传，等一下再提交',true);return}
+  const btn=document.getElementById('fb_btn_'+id);
+  if(btn)btn.disabled=true;
+  const d=await api('/tasks/'+id+'/feedback','POST',{
+    text,
+    images:imgs,
+    source:fbSource[id]||'manual',
+    complete_on_parse:fbComplete[id]!==false
+  });
+  if(btn)btn.disabled=false;
+  if(fail(d,'提交失败'))return;
+  fbDraft[id]='';
+  fbImgs[id]=[];
+  toast('反馈已入队解析，job #'+d.job_id);
+  await loadFeedback(id);
+  loadTasks();
+}
+
+function attnBadge(t){return Number(t.attention)?'<span class="badge attn" title="模型标记需要人判断">需人判断</span>':''}
+function opsTags(t){
+  if(!t.ops)return '';
+  return String(t.ops).split(',').map(o=>o.trim()).filter(o=>o!=='')
+    .map(o=>'<span class="ops-tag">'+esc(o)+'</span>').join('');
+}
+
+/* ---- 待放行 ---- */
+function renderRelease(){
+  const rev=tasksData.filter(t=>t.status==='review');
+  const sec=document.getElementById('releaseSec');
+  sec.classList.toggle('hidden',!rev.length);
+  if(!rev.length)return;
+  rev.forEach(t=>{if(!(t.id in relPick))relPick[t.id]=true});
+  document.getElementById('releaseList').innerHTML=rev.map(t=>{
+    const note=String(t.result_note||'');
+    const blog=isBlogTask(t);
+    const short=note.length>150?(note.slice(0,150)+'...'):note;
+    const link=t.output_url?'<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出链接</a>':'';
+    return '<div class="rel-row">'+
+      '<input type="checkbox"'+(relPick[t.id]?' checked':'')+' onchange="setRelPick('+t.id+',this.checked)">'+
+      '<div class="rel-main"><div class="tcard-title">'+esc(t.title)+'</div>'+
+      (blog?blogDeliverable(t):(short?'<div class="rel-note">'+esc(short)+'</div>':''))+
+      '<div class="tcard-meta">'+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+link+
+      '<button class="btn tiny ghost" onclick="setTaskStatus('+t.id+',\'done\')">直接置完成</button></div></div></div>';
+  }).join('');
+  renderRelCount();
+}
+function setRelPick(id,on){relPick[id]=on;renderRelCount()}
+function relIds(){
+  return tasksData.filter(t=>t.status==='review'&&relPick[t.id]).map(t=>t.id);
+}
+function renderRelCount(){
+  const el=document.getElementById('relCount');
+  if(!el)return;
+  const rev=tasksData.filter(t=>t.status==='review').length;
+  el.textContent='已选 '+relIds().length+' / '+rev;
+}
+function toggleAllRelease(){
+  const rev=tasksData.filter(t=>t.status==='review');
+  const allOn=relIds().length===rev.length;
+  rev.forEach(t=>{relPick[t.id]=!allOn});
+  renderRelease();
+}
+
+async function releaseTasks(){
+  const ids=relIds();
+  if(!ids.length){toast('先勾选要放行的任务',true);return}
+  if(!confirm('放行 '+ids.length+' 个任务？会排一个 apply 任务把改动真正落地。'))return;
+  const btn=document.getElementById('relBtn');
+  btn.disabled=true;
+  const d=await api('/tasks/release','POST',{client_id:curId,task_ids:ids});
+  setTimeout(()=>{btn.disabled=false},1200);
+  if(!d)return;
+  if(d._status===409){toast('已有 apply 任务在跑（job #'+(d.job_id||'?')+'），等它跑完再放行。',true);return}
+  if(fail(d,'放行失败'))return;
+  toast('已放行 '+d.count+' 个任务，job #'+d.job_id);
+  loadTasks();
+}
+
+function togglePick(id,on){picked[id]=on;renderPickHint()}
+function pickedIds(){return Object.keys(picked).filter(k=>picked[k]).map(k=>parseInt(k,10))}
+function renderPickHint(){
+  const el=document.getElementById('pickHint');
+  if(!el)return;
+  const n=pickedIds().length;
+  el.textContent=n?('已选 '+n+' 个 agent 任务，「执行选中任务」会把它们塞进 payload。'):'在「任务」视图勾选已批准的 agent 任务，再回来点「执行选中任务」。';
+}
+
+async function cyclePriority(id,cur){
+  const next=PRIORITIES[(priIdx(cur)+1)%PRIORITIES.length];
+  const d=await api('/tasks/'+id,'PATCH',{priority:next});
+  if(fail(d,'优先级更新失败'))return;
+  loadTasks();
+}
+
+async function setTaskStatus(id,status){
+  const d=await api('/tasks/'+id,'PATCH',{status});
+  if(fail(d,'更新失败'))return;
+  loadTasks();loadClients(true);
+}
+
+/* ================= Jobs ================= */
+async function fireJob(type,btn){
+  const payload={};
+  if(type==='execute_task'){
+    const ids=pickedIds();
+    if(!ids.length){toast('先在「任务」视图勾选已批准的 agent 任务',true);return}
+    payload.task_ids=ids;
+  }
+  btn.disabled=true;
+  const d=await api('/jobs','POST',{client_id:curId,type,payload});
+  setTimeout(()=>{btn.disabled=false},1200);
+  if(!d)return;
+  if(d._status===409){toast('已有同类任务在跑（job #'+(d.job_id||'?')+'），等它跑完再触发。',true);return}
+  if(fail(d,'创建 job 失败'))return;
+  toast('已排队 job #'+d.id+'（'+(JOB_LABEL[type]||type)+'）');
+  loadJobs();
+}
+
+async function retryJob(id,btn){
+  btn.disabled=true;
+  const d=await api('/jobs/'+id+'/retry','POST',{});
+  setTimeout(()=>{btn.disabled=false},1200);
+  if(!d)return;
+  if(d._status===409){toast('已有同类任务在跑，无法重跑。',true);return}
+  if(fail(d,'重跑失败'))return;
+  toast('已重新排队 job #'+d.id);
+  loadJobs();
+}
+
+function fmtDur(j){
+  if(j.status==='queued')return '排队中';
+  if(!j.claimed_at)return '-';
+  if(j.status==='running')return '运行中';
+  if(!j.finished_at)return '-';
+  const a=Date.parse(String(j.claimed_at).replace(' ','T'));
+  const b=Date.parse(String(j.finished_at).replace(' ','T'));
+  if(isNaN(a)||isNaN(b))return '-';
+  let s=Math.max(0,Math.round((b-a)/1000));
+  if(s<60)return s+'s';
+  const mnt=Math.floor(s/60);
+  if(mnt<60)return mnt+'m '+(s%60)+'s';
+  return Math.floor(mnt/60)+'h '+(mnt%60)+'m';
+}
+
+async function loadJobs(){
+  const d=await api('/jobs?client_id='+curId+'&limit=30');
+  if(fail(d,'Job 载入失败'))return;
+  jobsData=d.jobs||[];
+  renderJobs();
+}
+
+function renderJobs(){
+  if(!jobsData.length){
+    document.getElementById('jobRows').innerHTML='<tr><td colspan="8"><span class="lane-empty">还没有 job 记录。</span></td></tr>';
+    return;
+  }
+  document.getElementById('jobRows').innerHTML=jobsData.map(j=>{
+    const retry=j.status==='failed'?'<button class="btn tiny red" onclick="retryJob('+j.id+',this)">重跑</button>':'';
+    const hasLog=j.log_text&&String(j.log_text).trim()!=='';
+    const toggle=hasLog?'<span class="log-toggle" onclick="toggleLog('+j.id+')">'+(openLogs[j.id]?'收起日志':'展开日志')+'</span>':'<span class="muted">无日志</span>';
+    let row='<tr><td>#'+j.id+'</td>'+
+      '<td>'+(JOB_LABEL[j.type]||esc(j.type))+'</td>'+
+      '<td><span class="badge '+j.status+'">'+j.status+'</span></td>'+
+      '<td>'+fmtDur(j)+'</td>'+
+      '<td>'+(j.token_usage||0)+'</td>'+
+      '<td>'+esc(j.created_by||'-')+'</td>'+
+      '<td class="muted">'+esc(j.created_at||'')+'</td>'+
+      '<td>'+toggle+' '+retry+'</td></tr>';
+    if(hasLog&&openLogs[j.id]){
+      row+='<tr><td colspan="8" class="log-cell"><div class="log-box">'+esc(j.log_text)+'</div></td></tr>';
+    }
+    return row;
+  }).join('');
+}
+function toggleLog(id){openLogs[id]=!openLogs[id];renderJobs()}
+
+/* ================= 启动 ================= */
+window.addEventListener('hashchange',router);
+
+function boot(){
+  if(!token){location.href='/';return}
+  if(getRole()!=='admin'){
+    document.getElementById('denyView').classList.remove('hidden');
+    document.getElementById('appView').classList.add('hidden');
+    return;
+  }
+  document.getElementById('appView').classList.remove('hidden');
+  loadClients(false);
+  setInterval(()=>{
+    if(!token||!curId||document.visibilityState!=='visible')return;
+    if(document.activeElement&&(document.activeElement.tagName==='INPUT'||document.activeElement.tagName==='TEXTAREA'))return;
+    if(document.getElementById('addBg').classList.contains('show'))return;
+    if(document.getElementById('apprBg').classList.contains('show'))return;
+    if(curView==='jobs')loadJobs();
+    else if(curView==='dash')loadOverview();
+  },15000);
+}
+boot();
+</script>
+<script src="/bugwidget.js"></script>
+<script src="/userbar.js"></script>
+</body>
+</html>

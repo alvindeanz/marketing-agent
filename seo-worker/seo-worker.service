@@ -1,0 +1,26 @@
+[Unit]
+Description=SEO agent worker (ops-tracker) headless job listener
+Documentation=file:/data/aira/seo-worker/deploy.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root by design: this box (ros-work) has exactly one Claude Code
+# install, root's (/root/.local/bin/claude, shared with the Kira/Aira bots).
+# Per-user installs are forbidden here; see deploy.md.
+User=root
+WorkingDirectory=/data/aira/seo-worker
+ExecStart=/usr/bin/node /data/aira/seo-worker/listener.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=mixed
+Environment=NODE_ENV=production
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=append:/data/aira/seo-worker/logs/worker.log
+StandardError=append:/data/aira/seo-worker/logs/worker.err.log
+
+[Install]
+WantedBy=multi-user.target
