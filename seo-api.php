@@ -650,10 +650,19 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
         finfo_close($fi);
     }
     if($mime===''){
-        /* No finfo means no veto, and an unvetted upload is not worth having. */
-        res(500,['error'=>'fileinfo extension is unavailable, refusing to store an unverified upload']);
+        /* 250 的 PHP 没有 fileinfo（feedback 靠 getimagesize 兜底，文本没有对应物）。
+           退化成字节级否决：pdf 验魔数，文本类拒绝含 NUL 的二进制。否决精神不变。 */
+        $head=(string)@file_get_contents($tmp,false,null,0,8192);
+        if($ext==='pdf'){
+            if(strncmp($head,'%PDF-',5)!==0)res(400,['error'=>'File contents do not look like pdf']);
+            $mime='application/pdf';
+        }else{
+            if(strpos($head,"\0")!==false)res(400,['error'=>'File looks binary, refusing for a text extension']);
+            $mime='text/plain';
+        }
+    }elseif(!dl_mime_ok($ext,$mime)){
+        res(400,['error'=>'File contents do not look like '.$ext.', sniffed '.$mime]);
     }
-    if(!dl_mime_ok($ext,$mime))res(400,['error'=>'File contents do not look like '.$ext.', sniffed '.$mime]);
     if(!dl_dir_ready())res(500,['error'=>'Deliverable directory is missing or not writable: '.dl_dir()]);
 
     $stored=bin2hex(random_bytes(16)).'.'.$ext;
