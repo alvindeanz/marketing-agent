@@ -164,11 +164,24 @@ function ensure_deliverables_schema(){
         stored_name VARCHAR(64) NOT NULL,
         bytes INT NOT NULL DEFAULT 0,
         mime VARCHAR(128) NOT NULL DEFAULT '',
+        uploaded_by VARCHAR(64) NOT NULL DEFAULT '',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_seo_deliverables_stored (stored_name),
         KEY idx_seo_deliverables_task (task_id, id),
         KEY idx_seo_deliverables_client (client_id, id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    /* uploaded_by arrived later, when humans got the same upload button the
+       worker had. Guarded by an information_schema read for the same reason as
+       seo_feedback.images: MariaDB 10.3 has no ADD COLUMN IF NOT EXISTS, so the
+       read is what makes this idempotent. Rows that predate it read as '', which
+       the board shows as the worker, because that is all there was. */
+    $ic=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_deliverables' AND COLUMN_NAME='uploaded_by'");
+    $ic->execute();
+    $has=$ic->fetch();
+    $ic->closeCursor();
+    if(!$has){
+        db()->exec("ALTER TABLE seo_deliverables ADD COLUMN uploaded_by VARCHAR(64) NOT NULL DEFAULT '' AFTER mime");
+    }
 }
 
 /* seo_snapshots.source is an ENUM too, and content_registry was added to it
@@ -385,6 +398,19 @@ function dl_mime_ok($ext,$mime){
     return in_array($mime,['application/json','application/csv','application/x-empty','inode/x-empty'],true);
 }
 
+/* The veto without fileinfo, which is what actually runs: 250's PHP has no
+   fileinfo extension, so finfo_open() is simply not there and the sniff above
+   never gets a chance. Judged on the first bytes of the file:
+     pdf   must open with the %PDF- magic
+     text  must carry no NUL byte, which is what separates a text file from
+           every binary format worth worrying about
+   Returns the mime to record, or '' when the bytes are refused. */
+function dl_bytes_ok($ext,$head){
+    $head=(string)$head;
+    if($ext==='pdf')return strncmp($head,'%PDF-',5)===0?'application/pdf':'';
+    return strpos($head,"\0")===false?'text/plain':'';
+}
+
 /* The deliverable rows for a set of task ids, keyed by task id.
    One query for the whole board, so the task list does not fan out per card. */
 function deliverables_by_task($ids){
@@ -392,7 +418,7 @@ function deliverables_by_task($ids){
     if(!$ids)return [];
     ensure_deliverables_schema();
     $in=implode(',',array_fill(0,count($ids),'?'));
-    $q=db()->prepare("SELECT id,task_id,orig_name,stored_name,bytes,mime,created_at
+    $q=db()->prepare("SELECT id,task_id,orig_name,stored_name,bytes,mime,uploaded_by,created_at
         FROM seo_deliverables WHERE task_id IN ($in) ORDER BY task_id,id");
     $q->execute($ids);
     $by=[];
@@ -600,18 +626,23 @@ if($m==='GET'&&preg_match('#^/feedback_file/([A-Za-z0-9._-]+)$#',$ROUTE,$mm)){
     exit;
 }
 
-// POST /tasks/{id}/deliverables -> one finished file the worker wants a human
-// to collect, multipart form field "file", optional form field "name" carrying
-// the original filename when the multipart filename is not trustworthy.
-// Worker only: this is the tail of a job, never a browser action.
-// Idempotent on (task_id, orig_name): re-running a task replaces the previous
-// copy instead of stacking another one on the card. Replacement is "write the
-// new file under a new random name, then drop the old row", because the files
-// belong to the www user and this API can not always unlink them. A physical
-// file we failed to remove is reported back and logged, never retried.
+// POST /tasks/{id}/deliverables -> one file attached to a task, multipart form
+// field "file", optional form field "name" carrying the original filename when
+// the multipart filename is not trustworthy.
+// Both layers, and the direction runs both ways: the worker files what a job
+// produced for a human to carry off (a disavow list for Search Console), and a
+// human files what they were handed (a client's spreadsheet, a list somebody
+// assembled by hand) for the record and for the next run to read.
+// uploaded_by records which of the two it was.
+// Idempotent on (task_id, orig_name): re-uploading the same name replaces the
+// previous copy instead of stacking another one on the card. Replacement is
+// "write the new file under a new random name, then drop the old row", because
+// the files belong to the www user and this API can not always unlink them. A
+// physical file we failed to remove is reported back and logged, never retried.
 if($m==='POST'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
-    auth_worker();
+    $u=auth_any();
     ensure_deliverables_schema();
+    $who=(string)($u['username']??'');
     $tid=(int)$mm[1];
     $tq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
     $tq->execute([$tid]);
@@ -651,14 +682,14 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
     }
     if($mime===''){
         /* 250 的 PHP 没有 fileinfo（feedback 靠 getimagesize 兜底，文本没有对应物）。
-           退化成字节级否决：pdf 验魔数，文本类拒绝含 NUL 的二进制。否决精神不变。 */
+           退化成字节级否决：pdf 验魔数，文本类拒绝含 NUL 的二进制。否决精神不变。
+           这是线上真正跑的那条路，判定逻辑在 dl_bytes_ok() 里，可单测。 */
         $head=(string)@file_get_contents($tmp,false,null,0,8192);
-        if($ext==='pdf'){
-            if(strncmp($head,'%PDF-',5)!==0)res(400,['error'=>'File contents do not look like pdf']);
-            $mime='application/pdf';
-        }else{
-            if(strpos($head,"\0")!==false)res(400,['error'=>'File looks binary, refusing for a text extension']);
-            $mime='text/plain';
+        $mime=dl_bytes_ok($ext,$head);
+        if($mime===''){
+            res(400,['error'=>$ext==='pdf'
+                ?'File contents do not look like pdf'
+                :'File looks binary, refusing for a text extension']);
         }
     }elseif(!dl_mime_ok($ext,$mime)){
         res(400,['error'=>'File contents do not look like '.$ext.', sniffed '.$mime]);
@@ -672,8 +703,8 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
     /* New row first, old rows second. A crash between the two shows a duplicate
        on the card, which a human can see and clean up; the other order would
        show nothing at all. */
-    db()->prepare("INSERT INTO seo_deliverables(task_id,client_id,orig_name,stored_name,bytes,mime)VALUES(?,?,?,?,?,?)")
-        ->execute([$tid,$cid,$orig,$stored,$size,$mime]);
+    db()->prepare("INSERT INTO seo_deliverables(task_id,client_id,orig_name,stored_name,bytes,mime,uploaded_by)VALUES(?,?,?,?,?,?,?)")
+        ->execute([$tid,$cid,$orig,$stored,$size,$mime,$who]);
     $did=(int)db()->lastInsertId();
 
     $old=db()->prepare("SELECT id,stored_name FROM seo_deliverables WHERE task_id=? AND orig_name=? AND id<>?");
@@ -686,13 +717,14 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
         $sp=dl_path($s['stored_name']);
         if(is_file($sp)&&!@unlink($sp))$orphans[]=$s['stored_name'];
     }
-    audit('seo-worker','seo_deliverable_upload',(string)$tid,[
+    audit($who,'seo_deliverable_upload',(string)$tid,[
         'client_id'=>$cid,'deliverable_id'=>$did,'orig_name'=>$orig,'stored_name'=>$stored,
         'bytes'=>$size,'mime'=>$mime,'replaced'=>count($stale),'orphan_files'=>$orphans
     ]);
     res(200,[
         'ok'=>true,'id'=>$did,'task_id'=>$tid,'orig_name'=>$orig,'stored_name'=>$stored,
-        'bytes'=>$size,'mime'=>$mime,'replaced'=>count($stale),'orphan_files'=>$orphans
+        'bytes'=>$size,'mime'=>$mime,'uploaded_by'=>$who,
+        'replaced'=>count($stale),'orphan_files'=>$orphans
     ]);
 }
 
@@ -703,7 +735,7 @@ if($m==='GET'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
     auth_any();
     ensure_deliverables_schema();
     $tid=(int)$mm[1];
-    $s=db()->prepare("SELECT id,task_id,client_id,orig_name,stored_name,bytes,mime,created_at
+    $s=db()->prepare("SELECT id,task_id,client_id,orig_name,stored_name,bytes,mime,uploaded_by,created_at
         FROM seo_deliverables WHERE task_id=? ORDER BY id");
     $s->execute([$tid]);
     $rows=$s->fetchAll();
