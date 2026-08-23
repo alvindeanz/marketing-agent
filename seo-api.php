@@ -36,6 +36,32 @@ $DELIVERABLE_MAX_BYTES=5*1024*1024;
    dropping a value here would make the ALTER truncate existing rows. */
 define('SNAPSHOT_SOURCES',['ga4','gsc','semrush','discovery','content_registry']);
 
+/* 日粒度时序表 seo_metrics_daily 允许的指标名，唯一权威清单。
+   前端图表、worker 写入、GET /metrics 校验三处共用，永远不要在别处另抄一份。
+   只增不改：改名等于把历史行变成孤儿，删名等于让老行读不出来。
+   口径：
+     gsc_impressions / gsc_clicks          GSC 按日全量（已排除垃圾词正则）
+     gsc_impressions_brand / gsc_clicks_brand
+                                           GSC 按日 query 维度里命中品牌正则的部分。
+                                           GSC 会匿名化长尾 query，匿名行拿不到，
+                                           所以品牌值恒 <= 全量值，两者相减得到的
+                                           "非品牌" 里混着匿名部分，前端别当精确差值用。
+     ga4_sessions_organic                  GA4 按日 Organic Search 渠道会话
+     ga4_leads                             GA4 按日 form_submit + generate_lead
+                                           + click_to_call 三个事件的 eventCount 之和
+     rank_top3 / rank_top10 / rank_top20   Semrush 自然位次分档累计值（含前档，
+                                           top10 包含 top3）。只算自然结果，
+                                           SERP feature 占位（AI Overview 引用那种）
+                                           不计入，这是 2026-08 踩过的坑。
+     rank_tracked                          Semrush 自然排名词总数（top100 累计）
+     ref_domains                           Semrush 引荐域总数
+   排名与引荐域是"拉取当日一个点"，不是按日连续，无历史可回填。 */
+define('METRIC_NAMES',[
+    'gsc_impressions','gsc_clicks','gsc_impressions_brand','gsc_clicks_brand',
+    'ga4_sessions_organic','ga4_leads',
+    'rank_top3','rank_top10','rank_top20','rank_tracked','ref_domains'
+]);
+
 /* Every action a ruling may turn into. Hard coded here, on the server, because
    this list is the whole safety boundary of the decision inbox: the model that
    reads a human ruling proposes actions, it never executes them. Anything not
@@ -215,7 +241,9 @@ function ensure_job_types(){
     static $done=false;
     if($done)return;
     $done=true;
-    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling'];
+    /* backfill_metrics 加在这里的同时必须加进 seo-worker/runner_host.js 的
+       KNOWN_TYPES，两边漏一边 worker 领到活直接崩。2026-08 apply_task 就是这么炸的。 */
+    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics'];
     $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='type'");
     $q->execute();
     $col=$q->fetch();
@@ -227,6 +255,67 @@ function ensure_job_types(){
     if(!$missing)return;
     $list=implode(',',array_map(function($w){return "'".$w."'";},$want));
     db()->exec("ALTER TABLE agent_jobs MODIFY type ENUM($list) NOT NULL");
+}
+
+/* 日粒度时序表，首次访问 /metrics 系端点时惰性建表，同 seo_feedback 的套路。
+   seo_snapshots 存的是 28 天窗口的一大坨 JSON，能看当期总量看不了连续趋势；
+   这张表把同样的数据摊成 (client, 日期, 指标名) 三元组，一行一个点，
+   Dashboard 的趋势图、逐层转化率曲线、排名分档全部读它。
+
+   UNIQUE KEY (client_id,d,m) 是幂等的全部依据：worker 重跑同一窗口只会覆盖
+   同名同日的值，不会堆重复行，所以回填 job 可以随便重跑。
+   v 用 DOUBLE 而不是 INT：转化率、平均位次这类将来要加的指标是小数。
+   没有外键，和 seo_feedback / seo_deliverables / seo_inbox 一致：这批惰性建的
+   表都不挂外键，删客户时留下的孤儿行是看得见的垃圾，不是跑一半的 500。
+
+   顺带惰性补 seo_profiles.brand_regex：品牌词拆分要一条正则区分品牌搜索和
+   非品牌搜索，人工填优先，空着由 worker 从客户名/域名确定性推导。
+   MariaDB 10.3 没有 ADD COLUMN IF NOT EXISTS，靠 information_schema 读实现幂等。 */
+function ensure_metrics_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_metrics_daily (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT NOT NULL,
+        d DATE NOT NULL,
+        m VARCHAR(40) NOT NULL,
+        v DOUBLE NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_seo_metrics_daily (client_id, d, m),
+        KEY idx_seo_metrics_daily_read (client_id, m, d)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $ic=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_profiles' AND COLUMN_NAME='brand_regex'");
+    $ic->execute();
+    $has=$ic->fetch();
+    $ic->closeCursor();
+    if(!$has){
+        db()->exec("ALTER TABLE seo_profiles ADD COLUMN brand_regex TEXT DEFAULT NULL AFTER target_keywords");
+    }
+}
+
+/* 日期入参校验。时序端点全部按 DATE 比较，格式不对直接 400，
+   不做"猜一下用户想要哪天"这种事。 */
+function ymd_ok($s){return (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/',(string)$s);}
+
+/* POST /metrics 的整批校验与去重，抽成函数是为了能单测：这里一行判错，
+   要么整批 400 挡住正常写入，要么把脏数据放进时序表。
+   返回 [$rows, null] 或 [null, '错误说明']。全批先校验再写，一行不合格整批拒，
+   半批写进去比不写更难查。
+   批内出现重复的 (d,m) 时后者胜：MySQL 多行 upsert 碰上批内重复键的行为
+   依赖行序，与其赌不如自己收敛，顺便让"同一批发两次"完全等价。 */
+function metrics_rows_prepare($cid,$rows){
+    $seen=[];
+    foreach(array_values($rows) as $n=>$r){
+        if(!is_array($r))return [null,"row #$n: not an object"];
+        $d=(string)($r['d']??'');
+        if(!ymd_ok($d))return [null,"row #$n: bad date \"$d\", want YYYY-MM-DD"];
+        $mn=(string)($r['m']??'');
+        if(!in_array($mn,METRIC_NAMES,true))return [null,"row #$n: unknown metric \"$mn\""];
+        if(!array_key_exists('v',$r)||!is_numeric($r['v']))return [null,"row #$n: v must be numeric"];
+        $seen[$d.'|'.$mn]=[$cid,$d,$mn,(float)$r['v']];
+    }
+    return [array_values($seen),null];
 }
 
 /* seo_inbox: the decision inbox behind the console's chat tab.
@@ -459,7 +548,9 @@ elseif(($bp=strpos($ROUTE,'.php'))!==false)$ROUTE=substr($ROUTE,$bp+4);
 $ROUTE=rtrim($ROUTE,'/');
 if($ROUTE==='')$ROUTE='/';
 
-$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','business_goals','conversion_goals','notes'];
+/* brand_regex 排在最后，是后加的列（见 ensure_metrics_schema）。留空表示
+   "让 worker 自己从客户名或域名推"，不是"这个客户没有品牌词"。 */
+$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','business_goals','conversion_goals','notes','brand_regex'];
 
 /* =========================================================
    Worker endpoints (service token)
@@ -884,6 +975,251 @@ if($m==='GET'&&preg_match('#^/snapshots/(\d+)$#',$ROUTE,$mm)){
     res(200,['snapshot'=>$r]);
 }
 
+/* =========================================================
+   日粒度时序：seo_metrics_daily 的读写口，加上从现有数据推导的动作事件。
+   snapshot 回答"这 28 天怎么样"，这一段回答"每天怎么样、哪天动了什么手"。
+   ========================================================= */
+
+// POST /metrics -> worker 批量 upsert 按日指标。幂等：靠 UNIQUE(client_id,d,m)，
+// 同一窗口重跑只覆盖不堆行，所以回填 job 随便重跑。
+// body { client_id, rows: [{ d:'YYYY-MM-DD', m:'gsc_clicks', v:123 }, ...] }
+// 全批先校验再写，一行不合格整批 400：半批写进去比不写更难查。
+if($m==='POST'&&$ROUTE==='/metrics'){
+    auth_worker();
+    ensure_metrics_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $rows=$i['rows']??null;
+    if(!is_array($rows))res(400,['error'=>'rows required']);
+    if(!$rows)res(200,['ok'=>true,'rows'=>0]);
+    /* 一次 2000 行。回填 180 天 x 6 个指标约 1080 行，一批装得下；
+       worker 侧仍然分块发，这个上限只是防呆。 */
+    if(count($rows)>2000)res(400,['error'=>'batch too large, max 2000 rows']);
+    list($clean,$err)=metrics_rows_prepare($cid,$rows);
+    if($err!==null)res(400,['error'=>$err]);
+    $p=db();
+    $written=0;
+    $p->beginTransaction();
+    try{
+        /* 200 行一条语句：够快，又不会把 max_allowed_packet 或
+           prepared statement 的占位符数量顶到天上。 */
+        foreach(array_chunk($clean,200) as $chunk){
+            $ph=implode(',',array_fill(0,count($chunk),'(?,?,?,?)'));
+            $args=[];
+            foreach($chunk as $row){foreach($row as $x)$args[]=$x;}
+            $p->prepare("INSERT INTO seo_metrics_daily(client_id,d,m,v)VALUES $ph
+                         ON DUPLICATE KEY UPDATE v=VALUES(v)")->execute($args);
+            $written+=count($chunk);
+        }
+        $p->commit();
+    }catch(Exception $e){
+        if($p->inTransaction())$p->rollBack();
+        res(500,['error'=>'metrics upsert failed']);
+    }
+    res(200,['ok'=>true,'rows'=>$written]);
+}
+
+// GET /metrics?client_id=&from=&to=&metrics=a,b,c -> 按指标分组的日粒度序列。
+// 日期升序，缺的日子不补零：补零会把"那天没数据"画成"那天是 0"，
+// 这两件事在趋势图上意思完全不同，交给前端决定怎么显示。
+// metrics 省略 = 全部指标；请求过的指标即使一行没有也会回一个空数组，
+// 前端拿到的 key 集合永远稳定，不用写 undefined 判断。
+if($m==='GET'&&$ROUTE==='/metrics'){
+    auth_admin();
+    ensure_metrics_schema();
+    $cid=need_client();
+    $to=(string)($_GET['to']??'');
+    $from=(string)($_GET['from']??'');
+    if($to===''){$to=date('Y-m-d');}
+    if($from===''){$from=date('Y-m-d',strtotime($to.' -89 day'));}
+    if(!ymd_ok($from)||!ymd_ok($to))res(400,['error'=>'from/to 必须是 YYYY-MM-DD']);
+    if(strcmp($from,$to)>0)res(400,['error'=>'from 不能晚于 to']);
+    /* 跨度上限：一个客户一天最多 11 行，800 天 x 11 约 8800 行，
+       够画三年趋势又不至于让一次误请求把整张表拖出来。 */
+    if((strtotime($to)-strtotime($from))/86400>800)res(400,['error'=>'区间过长，上限 800 天']);
+
+    $want=METRIC_NAMES;
+    $sel=trim((string)($_GET['metrics']??''));
+    if($sel!==''){
+        $want=[];
+        foreach(explode(',',$sel) as $x){
+            $x=trim($x);
+            if($x==='')continue;
+            if(!in_array($x,METRIC_NAMES,true))res(400,['error'=>"unknown metric \"$x\""]);
+            if(!in_array($x,$want,true))$want[]=$x;
+        }
+        if(!$want)res(400,['error'=>'metrics 参数为空']);
+    }
+
+    $out=[];
+    foreach($want as $x)$out[$x]=[];
+    $in=implode(',',array_fill(0,count($want),'?'));
+    $args=array_merge([$cid,$from,$to],$want);
+    $s=db()->prepare("SELECT d,m,v FROM seo_metrics_daily
+                      WHERE client_id=? AND d BETWEEN ? AND ? AND m IN ($in)
+                      ORDER BY m,d");
+    $s->execute($args);
+    foreach($s->fetchAll() as $r){
+        $out[$r['m']][]=['d'=>$r['d'],'v'=>(float)$r['v']];
+    }
+    res(200,['ok'=>true,'from'=>$from,'to'=>$to,'metrics'=>$out]);
+}
+
+/* GET /events 用的两个小工具。
+   ev_label: 事件标签统一收口，中文一句话，去掉换行，砍到 80 字。
+   ev_pick_date: 从一段文本里捞第一个 YYYY-MM-DD，捞不到回 null。 */
+function ev_label($prefix,$text){
+    $t=trim(preg_replace('/\s+/u',' ',(string)$text));
+    if(mb_strlen($t,'UTF-8')>80)$t=mb_substr($t,0,80,'UTF-8').'…';
+    return $prefix===''?$t:($prefix.'：'.$t);
+}
+function ev_pick_date($text){
+    if(preg_match('/(\d{4}-\d{2}-\d{2})/',(string)$text,$mm))return $mm[1];
+    return null;
+}
+/* 一条已办结的任务算哪类事件，或者根本不算事件。抽成函数是为了能单测：
+   这段规则决定趋势图上画不画那根竖线，判错了比不画更误导人。
+     output_url 落在 /blog/ 下，或 ops 里带 blog-publish  -> publish（博文上线）
+     ops 指向 GA4/GTM/GSC/GBP 这类配置面                  -> config（配置变更）
+     ops 非空的其余情况                                    -> apply（站点变更）
+     ops 为空且不是博文                                    -> null（分析或沟通类，
+       站点上什么都没变，不该出现在时间轴上）
+   注意判定顺序：博文优先于 ops，因为博文任务的 ops 是 blog-draft，
+   按 ops 判会被归成 apply。 */
+function ev_task_kind($ops,$outputUrl){
+    $ops=trim((string)$ops);
+    $url=(string)$outputUrl;
+    if(strpos($url,'/blog/')!==false||stripos($ops,'blog-publish')!==false)return 'publish';
+    if($ops==='')return null;
+    if(preg_match('/(^|,)\s*(ga4|gtm|gsc|gbp)[-_]/i',$ops))return 'config';
+    return 'apply';
+}
+
+// GET /events?client_id=&from=&to= -> 时间轴上的动作标注，画在趋势图上做因果对照。
+//
+// 不建新表，全部从现有数据确定性推导。规则宁缺勿滥：推不出可靠日期的一律不出，
+// 因为一个日期错位的标注比没有标注更能误导人。四类来源：
+//   apply   已办结且带 ops 标签的任务，也就是真的动了站点的那些
+//   config  同上，但 ops 指向的是 GA4/GTM/GSC 这类配置面，不是站点内容
+//   publish 已办结且 output_url 落在 /blog/ 下的任务，博文上线
+//   offpage seo_facts 里记录 disavow 提交这类站外动作的条目
+// 日期取值优先级：audit_log 里那条把任务置为 done 的记录（唯一真实的完成时刻）
+//   > 对应 apply_task job 的 finished_at > seo_tasks.updated_at（会被后续编辑
+//   带偏，所以排最后）。
+if($m==='GET'&&$ROUTE==='/events'){
+    auth_admin();
+    $cid=need_client();
+    $to=(string)($_GET['to']??'');
+    $from=(string)($_GET['from']??'');
+    if($to===''){$to=date('Y-m-d');}
+    if($from===''){$from=date('Y-m-d',strtotime($to.' -89 day'));}
+    if(!ymd_ok($from)||!ymd_ok($to))res(400,['error'=>'from/to 必须是 YYYY-MM-DD']);
+    if(strcmp($from,$to)>0)res(400,['error'=>'from 不能晚于 to']);
+
+    $events=[];
+
+    /* ---- 任务类：apply / config / publish ---- */
+    $tq=db()->prepare("SELECT id,title,ops,output_url,updated_at FROM seo_tasks
+                       WHERE client_id=? AND status='done' ORDER BY id");
+    $tq->execute([$cid]);
+    $tasks=$tq->fetchAll();
+
+    if($tasks){
+        $ids=[];
+        foreach($tasks as $t)$ids[]=(int)$t['id'];
+
+        /* 完成时刻的第一来源：audit_log。worker 办结走 seo_task_complete，
+           人手在看板上置完成走 seo_task_update 且 detail 里带 "status":"done"。
+           取 MIN 是"第一次被置为完成"，任务被重开再办结时不会把标注挪到后面。
+           detail 是 JSON 列，MariaDB 10.3 底下就是 LONGTEXT，LIKE 可以直接用。 */
+        $in=implode(',',array_fill(0,count($ids),'?'));
+        $aq=db()->prepare("SELECT target,MIN(created_at) AS done_at FROM audit_log
+                           WHERE action IN('seo_task_complete','seo_task_update')
+                             AND target IN ($in)
+                             AND (action='seo_task_complete' OR detail LIKE '%\"status\":\"done\"%')
+                           GROUP BY target");
+        $aq->execute($ids);
+        $doneAt=[];
+        foreach($aq->fetchAll() as $r)$doneAt[(string)$r['target']]=$r['done_at'];
+
+        /* 第二来源：apply_task job 的 finished_at。payload 是 {"task_ids":[...]}，
+           在 PHP 里解，不用 JSON 函数，省得跟 10.3 的 JSON 支持较劲。
+           按 id 升序遍历，后面的 job 覆盖前面的，落到"最后一次真的 apply"。 */
+        $jq=db()->prepare("SELECT payload,finished_at FROM agent_jobs
+                           WHERE client_id=? AND type='apply_task' AND status='done'
+                             AND finished_at IS NOT NULL ORDER BY id");
+        $jq->execute([$cid]);
+        $appliedAt=[];
+        foreach($jq->fetchAll() as $j){
+            $pl=json_decode((string)$j['payload'],true);
+            if(!is_array($pl)||!isset($pl['task_ids'])||!is_array($pl['task_ids']))continue;
+            foreach($pl['task_ids'] as $x)$appliedAt[(string)(int)$x]=$j['finished_at'];
+        }
+
+        foreach($tasks as $t){
+            $tid=(string)$t['id'];
+            $kind=ev_task_kind($t['ops'],$t['output_url']);
+            if($kind===null)continue;
+            if($kind==='publish'){
+                /* 标题多半已经是"博文：xxx"，再加一层前缀就重复了，去掉再拼。 */
+                $label=ev_label('博文发布',preg_replace('/^博文[:：]\s*/u','',(string)$t['title']));
+            }elseif($kind==='config'){
+                $label=ev_label('配置变更',$t['title']);
+            }else{
+                $label=ev_label('站点变更',$t['title']);
+            }
+            $when=$doneAt[$tid]??($appliedAt[$tid]??$t['updated_at']);
+            if(!$when)continue;
+            $d=substr((string)$when,0,10);
+            if(!ymd_ok($d))continue;
+            $events[]=['d'=>$d,'label'=>$label,'kind'=>$kind];
+        }
+    }
+
+    /* ---- 站外类：seo_facts 里的 disavow 提交记录 ----
+       实际键名带阶段编号（link.disavow_stage1_submitted），所以匹配写成
+       "含 disavow 且含 submitted"，literal 的 disavow_submitted 是它的子集。
+       日期优先从 value 正文里捞（人写的那条自带提交日），捞不到才退到 updated_at，
+       因为 updated_at 是"这行最后被改的时刻"，不是"这件事发生的时刻"。 */
+    $fq=db()->prepare("SELECT fact_key,value,updated_at FROM seo_facts
+                       WHERE client_id=? AND fact_key LIKE '%disavow%submitted%' ORDER BY fact_key");
+    $fq->execute([$cid]);
+    foreach($fq->fetchAll() as $f){
+        $val=(string)$f['value'];
+        if(trim($val)==='')continue;
+        $d=ev_pick_date($val);
+        if(!$d)$d=substr((string)$f['updated_at'],0,10);
+        if(!ymd_ok($d))continue;
+        /* 只留第一句：value 常常带着观察窗、后续计划这些跟当天动作无关的尾巴。 */
+        $first=preg_split('/[；;。\r\n]/u',$val)[0];
+        /* 开头那个日期已经变成 d 了，标签里不用再重复一遍。 */
+        $first=preg_replace('/^\s*\d{4}-\d{2}-\d{2}\s*/','',$first);
+        $events[]=['d'=>$d,'label'=>ev_label('',$first),'kind'=>'offpage'];
+    }
+
+    /* 区间过滤 + 去重 + 排序。去重按 (日期, 类型, 标签)：同一件事从两条路径
+       推出来时只留一条。排序按日期升序，同日按类型和标签，保证同样的数据
+       永远给出同样的顺序，前端不用自己再排。 */
+    $seen=[];
+    $outEv=[];
+    foreach($events as $e){
+        if(strcmp($e['d'],$from)<0||strcmp($e['d'],$to)>0)continue;
+        $k=$e['d'].'|'.$e['kind'].'|'.$e['label'];
+        if(isset($seen[$k]))continue;
+        $seen[$k]=true;
+        $outEv[]=$e;
+    }
+    usort($outEv,function($a,$b){
+        $c=strcmp($a['d'],$b['d']);
+        if($c)return $c;
+        $c=strcmp($a['kind'],$b['kind']);
+        if($c)return $c;
+        return strcmp($a['label'],$b['label']);
+    });
+    res(200,['ok'=>true,'from'=>$from,'to'=>$to,'events'=>$outEv]);
+}
+
 // POST /plans -> agent files a new draft plan (headless runner, job type=plan)
 if($m==='POST'&&$ROUTE==='/plans'){
     auth_worker();
@@ -951,6 +1287,8 @@ if($m==='POST'&&$ROUTE==='/tasks/bulk'){
 // GET /context?client_id= -> single briefing payload for the LLM runner
 if($m==='GET'&&$ROUTE==='/context'){
     auth_worker();
+    /* worker 的品牌词拆分要读 profile.brand_regex，这里保证列存在再 SELECT *。 */
+    ensure_metrics_schema();
     $cid=need_client();
     $pf=db()->prepare("SELECT * FROM seo_profiles WHERE client_id=?");
     $pf->execute([$cid]);
@@ -1717,6 +2055,8 @@ if($m==='GET'&&$ROUTE==='/overview'){
 // GET /profile?client_id=
 if($m==='GET'&&$ROUTE==='/profile'){
     auth_admin();
+    /* brand_regex 是惰性加的列，控制台要能编辑它，所以读之前先保证列存在。 */
+    ensure_metrics_schema();
     $cid=need_client();
     $s=db()->prepare("SELECT * FROM seo_profiles WHERE client_id=?");
     $s->execute([$cid]);
@@ -1762,15 +2102,28 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     if($lang==='')$lang='en';
     if(mb_strlen($lang,'UTF-8')>8)res(400,['error'=>'bad report_lang']);
 
-    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,target_keywords,business_goals,conversion_goals,notes,status,report_lang)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+    /* brand_regex 是后加的列，写之前先确保它存在（老库上这是一次 ALTER，之后是 no-op）。
+       同时做一次校验：坏正则存进去会让 worker 每次拉数据都炸在同一个地方，
+       宁可在这里 400 也不要把地雷埋进 profile。 */
+    ensure_metrics_schema();
+    $br=trim((string)$vals['brand_regex']);
+    if($br!==''){
+        if(mb_strlen($br,'UTF-8')>500)res(400,['error'=>'brand_regex 过长，上限 500 字符']);
+        if(@preg_match('/'.str_replace('/','\\/',$br).'/iu','')===false)res(400,['error'=>'brand_regex 不是合法正则']);
+    }
+    $vals['brand_regex']=$br;
+
+    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON DUPLICATE KEY UPDATE platform=VALUES(platform),domain=VALUES(domain),ga4_property=VALUES(ga4_property),
             gsc_property=VALUES(gsc_property),semrush_project=VALUES(semrush_project),target_keywords=VALUES(target_keywords),
+            brand_regex=VALUES(brand_regex),
             business_goals=VALUES(business_goals),conversion_goals=VALUES(conversion_goals),notes=VALUES(notes),
             status=VALUES(status),report_lang=VALUES(report_lang)";
     db()->prepare($sql)->execute([
         $cid,$vals['platform'],$vals['domain'],$vals['ga4_property'],$vals['gsc_property'],
-        $vals['semrush_project'],$kwJson,$vals['business_goals'],$vals['conversion_goals'],$vals['notes'],$st,$lang
+        $vals['semrush_project'],$kwJson,$vals['brand_regex'],
+        $vals['business_goals'],$vals['conversion_goals'],$vals['notes'],$st,$lang
     ]);
     audit($u['username'],'seo_profile_save',(string)$cid,['domain'=>$vals['domain'],'status'=>$st,'report_lang'=>$lang]);
     res(200,['ok'=>true]);
@@ -2130,9 +2483,12 @@ if($m==='POST'&&$ROUTE==='/jobs'){
     /* feedback is here so a stuck note can be re-queued by hand; the normal
        path is POST /tasks/{id}/feedback, which also writes the seo_feedback row.
        triage is read only: it looks at everything and writes a report, nothing else. */
-    if(!in_array($type,['discover','pull_data','plan','execute_task','report','feedback','triage'],true))res(400,['error'=>'bad type']);
+    /* backfill_metrics 零 LLM，把 GSC/GA4 的历史按日数据补进 seo_metrics_daily。
+       幂等可重跑，所以放开给控制台手动触发。 */
+    if(!in_array($type,['discover','pull_data','plan','execute_task','report','feedback','triage','backfill_metrics'],true))res(400,['error'=>'bad type']);
     if($type==='feedback')ensure_feedback_schema();
     if($type==='triage')ensure_job_types();
+    if($type==='backfill_metrics'){ensure_job_types();ensure_metrics_schema();}
     $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type=? AND status IN('queued','running') LIMIT 1");
     $dup->execute([$cid,$type]);
     $d=$dup->fetch();

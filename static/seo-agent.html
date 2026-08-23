@@ -83,6 +83,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fld textarea{resize:vertical;min-height:60px;line-height:1.5}
 .form-actions{display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap}
 .save-hint{font-size:12px;color:#4ade80}
+.fld-hint{font-size:10.5px;color:#475569;margin-top:4px;line-height:1.5}
+.fld-err{font-size:11px;color:#f87171;margin-top:4px;line-height:1.5;word-break:break-word}
 
 /* Dashboard */
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
@@ -269,6 +271,56 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 .modal{background:#1e2433;border:1px solid #2d3748;border-radius:12px;padding:20px;width:100%;max-width:440px}
 .modal h3{font-size:15px;color:#f1f5f9;margin-bottom:14px}
 .modal .or{font-size:11px;color:#475569;text-align:center;margin:10px 0}
+
+/* 数据洞察 */
+.ins-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+@media(max-width:1180px){.ins-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:700px){.ins-kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:#0f1117;border:1px solid #2d3748;border-radius:9px;padding:11px 13px}
+.kpi .k{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.kpi .v{font-size:23px;font-weight:700;color:#f1f5f9;line-height:1.15;letter-spacing:-.4px}
+.kpi .d{font-size:11.5px;margin-top:6px;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.kpi .up{color:#4ade80}
+.kpi .down{color:#f87171}
+.kpi .flat{color:#94a3b8}
+.kpi .na{color:#64748b}
+.kpi .pd{color:#475569;font-size:10.5px}
+.ins-gran{display:flex;gap:2px;background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:2px}
+.ins-gran button{padding:4px 12px;border-radius:6px;border:none;background:transparent;color:#64748b;font-size:11.5px;cursor:pointer;font-weight:500;font-family:inherit}
+.ins-gran button.on{background:#3b82f6;color:#fff}
+.ins-chart{position:relative;width:100%}
+.ins-chart svg{width:100%;height:auto;display:block}
+.ins-hit{cursor:crosshair}
+.ins-tip{position:absolute;pointer-events:none;display:none;background:#0b0e14;border:1px solid #2d3748;border-radius:8px;padding:7px 10px;font-size:11.5px;color:#e2e8f0;line-height:1.65;box-shadow:0 6px 18px rgba(0,0,0,.6);z-index:20;max-width:280px;min-width:130px}
+.ins-tip .tl{color:#64748b;font-size:10.5px;margin-bottom:3px}
+.ins-tip .tr{display:flex;align-items:center;gap:6px}
+.ins-tip .sw{width:8px;height:8px;border-radius:2px;flex-shrink:0;display:inline-block;vertical-align:middle}
+.ins-tip .te{margin-top:5px;padding-top:5px;border-top:1px solid #1e293b;color:#cbd5e1;font-size:11px;word-break:break-word}
+.ins-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:#94a3b8;margin-bottom:4px;align-items:center}
+.ins-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.ins-legend .sep{width:1px;height:11px;background:#2d3748}
+.ins-legend .ev{font-size:11px;color:#64748b}
+.ins-rates{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:900px){.ins-rates{grid-template-columns:1fr}}
+.ins-two{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:start}
+@media(max-width:900px){.ins-two{grid-template-columns:1fr}}
+.ins-mini{background:#1e2433;border:1px solid #2d3748;border-radius:10px;padding:12px 13px}
+.ins-mini .k{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px}
+.ins-mini .big{font-size:21px;font-weight:700;color:#f1f5f9;line-height:1.2;margin:4px 0 2px;letter-spacing:-.3px}
+.ins-mini .sub{font-size:10.5px;color:#475569;margin-bottom:6px}
+.ins-empty{font-size:12px;color:#4a5b70;font-style:italic;padding:16px 4px;text-align:center;line-height:1.7}
+.ins-ranks{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+.ins-rk{background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:9px 10px}
+.ins-rk .k{font-size:10px;color:#64748b;letter-spacing:.4px;margin-bottom:4px}
+.ins-rk .v{font-size:19px;font-weight:700;color:#f1f5f9}
+.brand-bar{display:flex;height:15px;border-radius:8px;overflow:hidden;background:#0f1117;border:1px solid #2d3748;margin:9px 0 8px}
+.brand-bar span{display:block;height:100%}
+.brand-row{display:flex;align-items:baseline;gap:7px;font-size:11.5px;color:#94a3b8;padding:3px 0}
+.brand-row .nm{flex:1;min-width:0}
+.brand-row .vv{color:#e2e8f0;font-weight:600}
+.brand-row .up{color:#4ade80}
+.brand-row .down{color:#f87171}
+.brand-row .flat,.brand-row .na{color:#64748b}
 
 /* Deny + toast */
 .deny{display:flex;align-items:center;justify-content:center;min-height:70vh;padding:20px}
@@ -469,6 +521,11 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <div class="fld"><label>GA4 Property</label><input id="pf_ga4_property" placeholder="363223275"></div>
             <div class="fld"><label>GSC Property</label><input id="pf_gsc_property" placeholder="URL 前缀或 sc-domain:"></div>
             <div class="fld"><label>Semrush Project</label><input id="pf_semrush_project" placeholder="项目 ID 或名称"></div>
+            <div class="fld"><label>Brand Regex（品牌词正则）</label>
+              <input id="pf_brand_regex" placeholder="留空由后端从客户名和域名自动推导">
+              <div class="fld-hint">用来把 GSC 点击拆成品牌与非品牌。写坏了保存会被后端挡下并在这里报错。</div>
+              <div class="fld-err hidden" id="pfBrandErr"></div>
+            </div>
             <div class="fld"><label>报告语言</label><select id="pf_report_lang">
               <option value="en">English</option><option value="zh">中文</option></select></div>
             <div class="fld"><label>Target Keywords（逗号或换行分隔）</label><textarea id="pf_target_keywords"></textarea></div>
@@ -539,11 +596,11 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
 <script>
 const API='/seo-api.php';
-const PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','business_goals','conversion_goals','notes'];
+const PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','brand_regex','business_goals','conversion_goals','notes'];
 const TASK_STATUSES=['proposed','approved','in_progress','review','blocked','done'];
 const OWNERS=['agency','client','agent'];
 const LANES=[{key:'agency',name:'Agency 团队'},{key:'client',name:'Client 客户'},{key:'agent',name:'Agent 机器'}];
-const JOB_LABEL={discover:'摸底',pull_data:'拉数据',plan:'规划方案',execute_task:'执行任务',apply_task:'落地改动',report:'生成报告',feedback:'解析反馈',triage:'Fable 巡检'};
+const JOB_LABEL={discover:'摸底',pull_data:'拉数据',backfill_metrics:'回填历史数据',plan:'规划方案',execute_task:'执行任务',apply_task:'落地改动',report:'生成报告',feedback:'解析反馈',triage:'Fable 巡检'};
 const FB_SOURCE_LABEL={manual:'团队判断',client:'客户原话'};
 const FB_STATUS={pending:{cls:'queued',name:'待解析'},parsed:{cls:'done',name:'已解析'},failed:{cls:'failed',name:'解析失败'}};
 const FB_MAX_IMAGES=5;
@@ -645,6 +702,7 @@ function router(){
     fbOpen={};fbDraft={};fbSource={};fbComplete={};fbHist={};fbImgs={};fbUploading={};
     releaseFbBlobs();
     tasksData=[];jobsData=[];factsData=[];lastOverview=null;lastAttention=null;
+    insReset();
   }
   render();
 }
@@ -818,6 +876,7 @@ async function loadOverview(){
   lastOverview=d;
   lastAttention=(both[1]&&both[1]._status<400)?both[1]:null;
   renderDash();
+  loadInsights(false);
 }
 
 function renderDash(){
@@ -863,7 +922,765 @@ function renderDash(){
         '<td>'+(j.secs===null?'-':(j.secs+'s'))+'</td><td class="muted">'+esc(j.created_at||'')+'</td></tr>').join('')+
       '</tbody></table>'):'<span class="lane-empty">还没有 job 记录。</span>')+'</div></div>';
 
-  document.getElementById('v_dash').innerHTML=html;
+  /* 洞察区单独挂在 #insWrap，快照区写 #dashRest。分开是为了让 15 秒轮询重画快照时
+     不把洞察区的 SVG 和 tooltip 绑定一起拆掉，鼠标悬停不会每 15 秒被打断。 */
+  const root=document.getElementById('v_dash');
+  if(!document.getElementById('insWrap')||!document.getElementById('dashRest')){
+    root.innerHTML='<div id="insWrap"></div><div id="dashRest"></div>';
+  }
+  document.getElementById('dashRest').innerHTML=html;
+  renderInsights();
+}
+
+/* ================= 数据洞察 =================
+   首屏先给数字，再给一张主趋势大图，然后才是拆解。漏斗不画方块图，画逐层转化率的时序线，
+   因为方块图只说明当下，时序线才看得出哪一层在动。动作标注（events）叠在趋势线上，
+   是这块唯一的差异化：曝光涨了要能一眼看到是哪天上线了什么。
+
+   下面 INSIGHTS-PURE-START / END 之间是纯函数区：只吃参数吐字符串或对象，
+   不碰 DOM、不读全局状态。tests/insights.test.js 靠这两行标记把整块抠出来跑断言，
+   改标记文字要同步改测试脚本。 */
+
+/* INSIGHTS-PURE-START */
+var INS_COLOR={impr:'#818cf8',clicks:'#38bdf8',ctr:'#38bdf8',fit:'#2dd4bf',cvr:'#f59e0b',
+  t3:'#4ade80',t10:'#60a5fa',t20:'#a78bfa',brand:'#c084fc',nonbrand:'#38bdf8'};
+var INS_EVENT_COLOR={apply:'#60a5fa',publish:'#4ade80',offpage:'#fb923c',config:'#c084fc',manual:'#94a3b8'};
+var INS_EVENT_NAME={apply:'落地改动',publish:'内容发布',offpage:'站外动作',config:'配置变更',manual:'人工操作'};
+var INS_GRAN=[{k:'day',n:'日'},{k:'week',n:'周'},{k:'month',n:'月'},{k:'d90',n:'90 天'}];
+
+function insEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+/* ---- 日期：全程 UTC 毫秒算，避开本地时区把 YYYY-MM-DD 挪一天 ---- */
+function insD(s){var p=String(s||'').split('-');return Date.UTC(+p[0],(+p[1])-1,+p[2])}
+function insDs(ms){var d=new Date(ms),m=d.getUTCMonth()+1,q=d.getUTCDate();
+  return d.getUTCFullYear()+'-'+(m<10?'0':'')+m+'-'+(q<10?'0':'')+q}
+function insShift(s,n){return insDs(insD(s)+n*86400000)}
+function insDiff(a,b){return Math.round((insD(b)-insD(a))/86400000)}
+function insRange(from,to){var out=[],t=insD(from),e=insD(to);while(t<=e){out.push(insDs(t));t+=86400000}return out}
+function insMonday(s){var w=new Date(insD(s)).getUTCDay();return insShift(s,w===0?-6:1-w)}
+function insMonthStart(s){return String(s).slice(0,7)+'-01'}
+function insMonthEnd(s){var y=+String(s).slice(0,4),m=+String(s).slice(5,7);
+  return insDs(Date.UTC(m===12?y+1:y,m===12?0:m,1)-86400000)}
+function insMD(s){return (+String(s).slice(5,7))+'/'+(+String(s).slice(8,10))}
+
+/* ---- 桶：一律只取「已完整结束」的周期，今天不算 ---- */
+function insBuckets(gran,today){
+  var out=[],i,starts,m;
+  if(gran==='month'){
+    m=insMonthStart(insShift(insMonthStart(today),-1));
+    starts=[];
+    for(i=0;i<6;i++){starts.unshift(m);m=insMonthStart(insShift(m,-1))}
+    for(i=0;i<starts.length;i++)out.push({key:starts[i],from:starts[i],to:insMonthEnd(starts[i]),label:(+starts[i].slice(5,7))+' 月'});
+    return out;
+  }
+  if(gran==='week'){
+    m=insShift(insMonday(today),-7);
+    starts=[];
+    for(i=0;i<13;i++){starts.unshift(m);m=insShift(m,-7)}
+    for(i=0;i<starts.length;i++)out.push({key:starts[i],from:starts[i],to:insShift(starts[i],6),label:insMD(starts[i])});
+    return out;
+  }
+  var y=insShift(today,-1),n=(gran==='d90')?90:30,d;
+  for(i=n-1;i>=0;i--){d=insShift(y,-i);out.push({key:d,from:d,to:d,label:insMD(d)})}
+  return out;
+}
+
+/* ---- 序列：后端缺日不补零，补零在这里做（sum 模式下缺日天然计 0） ---- */
+function insMapOf(series){var m={},a=series||[],i;for(i=0;i<a.length;i++){if(a[i]&&a[i].d!=null)m[a[i].d]=Number(a[i].v)||0}return m}
+function insFill(series,from,to){
+  var m=insMapOf(series),days=insRange(from,to),out=[],i;
+  for(i=0;i<days.length;i++)out.push({d:days[i],v:m[days[i]]==null?0:m[days[i]]});
+  return out;
+}
+function insSumRange(series,from,to){
+  var a=series||[],s=0,has=false,i;
+  for(i=0;i<a.length;i++){
+    if(!a[i]||a[i].d==null)continue;
+    if(a[i].d>=from&&a[i].d<=to){s+=Number(a[i].v)||0;has=true}
+  }
+  return {sum:s,has:has};
+}
+function insLastIn(series,from,to){
+  var a=series||[],v=null,i;
+  for(i=0;i<a.length;i++){if(a[i]&&a[i].d>=from&&a[i].d<=to)v=Number(a[i].v)||0}
+  return v;
+}
+function insLastPoint(series){var a=series||[];return a.length?(Number(a[a.length-1].v)||0):null}
+function insAgg(series,buckets,mode){
+  var b=buckets||[],out=[],i;
+  for(i=0;i<b.length;i++)out.push(mode==='last'?insLastIn(series,b[i].from,b[i].to):insSumRange(series,b[i].from,b[i].to).sum);
+  return out;
+}
+function insSmooth(vals,win){
+  var a=vals||[],w=win||7,out=[],i,j,s,c;
+  for(i=0;i<a.length;i++){
+    s=0;c=0;
+    for(j=Math.max(0,i-w+1);j<=i;j++){if(a[j]==null||!isFinite(a[j]))continue;s+=a[j];c++}
+    out.push(c?s/c:null);
+  }
+  return out;
+}
+function insLastNonNull(a){var i;for(i=(a||[]).length-1;i>=0;i--){if(a[i]!=null&&isFinite(a[i]))return a[i]}return null}
+
+/* ---- 环比：粒度决定「最近一个完整周期」是什么 ---- */
+function insKpiPeriod(gran,today){
+  var c,p;
+  if(gran==='month'){
+    c=insMonthStart(insShift(insMonthStart(today),-1));
+    p=insMonthStart(insShift(c,-1));
+    return {cur:{from:c,to:insMonthEnd(c)},prev:{from:p,to:insMonthEnd(p)},name:'上月',cmp:'上月 vs 上上月'};
+  }
+  if(gran==='week'){
+    c=insShift(insMonday(today),-7);p=insShift(c,-7);
+    return {cur:{from:c,to:insShift(c,6)},prev:{from:p,to:insShift(p,6)},name:'上周',cmp:'上周 vs 前一周'};
+  }
+  /* 日粒度不做昨日 vs 前日：单日噪声吃掉信号。改成跟图上窗口一致的滚动 30 天对比。 */
+  var y=insShift(today,-1),n=(gran==='d90')?90:30;
+  var cf=insShift(y,-(n-1)),pt=insShift(cf,-1),pf=insShift(pt,-(n-1));
+  return {cur:{from:cf,to:y},prev:{from:pf,to:pt},
+    name:(gran==='d90')?'近 90 天':'近 30 天',
+    cmp:(gran==='d90')?'近 90 天 vs 前 90 天':'近 30 天 vs 前 30 天'};
+}
+function insDelta(cur,prev){
+  if(cur==null||prev==null||!isFinite(cur)||!isFinite(prev))return {pct:null,dir:'na'};
+  if(!(prev>0))return {pct:null,dir:'na'};
+  var p=(cur-prev)/prev*100;
+  return {pct:p,dir:Math.abs(p)<0.05?'flat':(p>0?'up':'down')};
+}
+function insDeltaPP(cur,prev){
+  if(cur==null||prev==null||!isFinite(cur)||!isFinite(prev))return {pp:null,dir:'na'};
+  var d=(cur-prev)*100;
+  return {pp:d,dir:Math.abs(d)<0.005?'flat':(d>0?'up':'down')};
+}
+
+/* ---- 数字格式 ---- */
+function insFmtNum(n){
+  if(n==null||!isFinite(n))return '--';
+  return String(Math.round(Number(n))).replace(/\B(?=(\d{3})+(?!\d))/g,',');
+}
+function insFmtShort(n){
+  if(n==null||!isFinite(n))return '';
+  var a=Math.abs(n);
+  if(a>=1000000)return (n/1000000).toFixed(a>=10000000?0:1)+'M';
+  if(a>=1000)return (n/1000).toFixed(a>=10000?0:1)+'k';
+  return String(Math.round(n*100)/100);
+}
+function insFmtPct(v,dig){
+  if(v==null||!isFinite(v))return '--';
+  return (v*100).toFixed(dig==null?1:dig)+'%';
+}
+
+/* ---- KPI 计分卡 ---- */
+function insKpiCards(metrics,gran,today){
+  var m=metrics||{},P=insKpiPeriod(gran,today);
+  function g(k,r){return insSumRange(m[k]||[],r.from,r.to)}
+  var im=g('gsc_impressions',P.cur),ip=g('gsc_impressions',P.prev);
+  var cm=g('gsc_clicks',P.cur),cp=g('gsc_clicks',P.prev);
+  var sm=g('ga4_sessions_organic',P.cur),sp=g('ga4_sessions_organic',P.prev);
+  var lm=g('ga4_leads',P.cur),lp=g('ga4_leads',P.prev);
+  var ctrC=im.sum>0?cm.sum/im.sum:null,ctrP=ip.sum>0?cp.sum/ip.sum:null;
+  return {period:P,cards:[
+    {key:'impr',name:'曝光',has:im.has,val:im.sum,txt:insFmtNum(im.sum),d:insDelta(im.sum,ip.sum),pp:false},
+    {key:'clicks',name:'点击',has:cm.has,val:cm.sum,txt:insFmtNum(cm.sum),d:insDelta(cm.sum,cp.sum),pp:false},
+    {key:'ctr',name:'CTR',has:im.has&&ctrC!=null,val:ctrC,txt:insFmtPct(ctrC,2),d:insDeltaPP(ctrC,ctrP),pp:true},
+    {key:'sessions',name:'自然会话',has:sm.has,val:sm.sum,txt:insFmtNum(sm.sum),d:insDelta(sm.sum,sp.sum),pp:false},
+    {key:'leads',name:'线索',has:lm.has,val:lm.sum,txt:insFmtNum(lm.sum),d:insDelta(lm.sum,lp.sum),pp:false}
+  ]};
+}
+
+/* ---- 逐层转化率：分母为零的桶给 null，折线自己断开，不画也不算 ---- */
+function insRateSeries(metrics,buckets){
+  var m=metrics||{};
+  var im=insAgg(m.gsc_impressions||[],buckets,'sum');
+  var cl=insAgg(m.gsc_clicks||[],buckets,'sum');
+  var se=insAgg(m.ga4_sessions_organic||[],buckets,'sum');
+  var le=insAgg(m.ga4_leads||[],buckets,'sum');
+  function div(a,b){var o=[],i;for(i=0;i<a.length;i++)o.push(b[i]>0?a[i]/b[i]:null);return o}
+  return {ctr:div(cl,im),fit:div(se,cl),cvr:div(le,se)};
+}
+
+/* ---- 排名分档：top10 含 top3、top20 含 top10，堆叠前要先拆成互斥band ---- */
+function insRankBands(metrics,buckets){
+  var m=metrics||{};
+  var t3=insAgg(m.rank_top3||[],buckets,'last');
+  var t10=insAgg(m.rank_top10||[],buckets,'last');
+  var t20=insAgg(m.rank_top20||[],buckets,'last');
+  var b3=[],b10=[],b20=[],i,A,B,C;
+  for(i=0;i<buckets.length;i++){
+    if(t3[i]==null&&t10[i]==null&&t20[i]==null){b3.push(null);b10.push(null);b20.push(null);continue}
+    A=t3[i]||0;B=t10[i]||0;C=t20[i]||0;
+    b3.push(A);b10.push(Math.max(0,B-A));b20.push(Math.max(0,C-B));
+  }
+  return {t3:b3,t4_10:b10,t11_20:b20};
+}
+
+/* ---- 品牌拆分 ---- */
+function insBrandSplit(metrics,gran,today){
+  var m=metrics||{},bs=m.gsc_clicks_brand;
+  if(!bs||!bs.length)return {ok:false};
+  var P=insKpiPeriod(gran,today);
+  var tot=insSumRange(m.gsc_clicks||[],P.cur.from,P.cur.to).sum;
+  var br=insSumRange(bs,P.cur.from,P.cur.to).sum;
+  var totP=insSumRange(m.gsc_clicks||[],P.prev.from,P.prev.to).sum;
+  var brP=insSumRange(bs,P.prev.from,P.prev.to).sum;
+  var nb=Math.max(0,tot-br),nbP=Math.max(0,totP-brP);
+  return {ok:true,period:P,total:tot,brand:br,nonbrand:nb,
+    share:tot>0?br/tot:null,
+    dBrand:insDelta(br,brP),dNon:insDelta(nb,nbP)};
+}
+
+/* ---- 事件：同日先合并，再落到当前粒度的桶里（周/月粒度下同桶也合并） ---- */
+function insGroupEventsByDay(events){
+  var a=events||[],m={},i,k,keys,out=[];
+  for(i=0;i<a.length;i++){
+    if(!a[i]||!a[i].d)continue;
+    k=String(a[i].d);
+    if(!m[k])m[k]=[];
+    m[k].push({d:k,label:String(a[i].label==null?'':a[i].label),kind:String(a[i].kind||'manual')});
+  }
+  keys=Object.keys(m).sort();
+  for(i=0;i<keys.length;i++)out.push({d:keys[i],items:m[keys[i]]});
+  return out;
+}
+function insEventsToBuckets(grouped,buckets){
+  var g=grouped||[],b=buckets||[],hit={},i,j,out=[],keys;
+  for(i=0;i<g.length;i++){
+    for(j=0;j<b.length;j++){
+      if(g[i].d>=b[j].from&&g[i].d<=b[j].to){
+        if(!hit[j])hit[j]=[];
+        hit[j]=hit[j].concat(g[i].items);
+        break;
+      }
+    }
+  }
+  keys=Object.keys(hit);
+  for(i=0;i<keys.length;i++)out.push({i:+keys[i],items:hit[keys[i]]});
+  out.sort(function(a,c){return a.i-c.i});
+  return out;
+}
+
+/* ---- SVG：手写，零外部库 ---- */
+function insNiceMax(v){
+  if(!(v>0)||!isFinite(v))return 1;
+  var e=Math.pow(10,Math.floor(Math.log10(v))),f=v/e;
+  var n=f<=1?1:f<=1.5?1.5:f<=2?2:f<=2.5?2.5:f<=3?3:f<=4?4:f<=5?5:f<=8?8:10;
+  return n*e;
+}
+function insMaxOf(arrs){
+  var m=0,i,j,a;
+  for(i=0;i<(arrs||[]).length;i++){a=arrs[i]||[];for(j=0;j<a.length;j++){if(a[j]!=null&&isFinite(a[j])&&a[j]>m)m=a[j]}}
+  return m;
+}
+function insHasFinite(a){var i;for(i=0;i<(a||[]).length;i++){if(a[i]!=null&&isFinite(a[i]))return true}return false}
+function insPath(vals,xs,yf){
+  var d='',pen=false,i,v;
+  for(i=0;i<vals.length;i++){
+    v=vals[i];
+    if(v==null||!isFinite(v)){pen=false;continue}
+    d+=(pen?'L':'M')+xs[i].toFixed(1)+' '+yf(v).toFixed(1)+' ';
+    pen=true;
+  }
+  return d.replace(/\s+$/,'');
+}
+function insIsolated(vals){
+  var out=[],i,a,b;
+  for(i=0;i<vals.length;i++){
+    if(vals[i]==null||!isFinite(vals[i]))continue;
+    a=i>0?vals[i-1]:null;b=i<vals.length-1?vals[i+1]:null;
+    if((a==null||!isFinite(a))&&(b==null||!isFinite(b)))out.push(i);
+  }
+  return out;
+}
+function insEmptyBox(msg){return '<div class="ins-empty">'+insEsc(msg)+'</div>'}
+
+/* insChart：数据入，完整 HTML 字符串出。tooltip 需要的每点坐标和文案打包成 JSON
+   塞进 data-ins，交互由 insBind 读这个包，纯函数这边不碰 DOM。 */
+function insChart(cfg){
+  cfg=cfg||{};
+  var w=cfg.w||920,h=cfg.h||280;
+  var pl=cfg.padL==null?54:cfg.padL,pr=cfg.padR==null?54:cfg.padR;
+  var pt=cfg.padT==null?12:cfg.padT,pb=cfg.padB==null?34:cfg.padB;
+  var labels=cfg.labels||[],series=cfg.series||[],evs=cfg.events||[];
+  var n=labels.length,i,s,k;
+  if(!n||!series.length)return insEmptyBox(cfg.empty||'暂无数据');
+  var live=false;
+  for(i=0;i<series.length;i++){if(insHasFinite(series[i].values))live=true}
+  if(!live)return insEmptyBox(cfg.empty||'暂无数据');
+  var iw=Math.max(10,w-pl-pr),ih=Math.max(10,h-pt-pb);
+  var xs=[];
+  for(i=0;i<n;i++)xs.push(n===1?(pl+iw/2):(pl+iw*i/(n-1)));
+  var lArr=[],rArr=[],hasR=false;
+  for(i=0;i<series.length;i++){
+    if(series[i].axis==='r'){rArr.push(series[i].values);hasR=true}else lArr.push(series[i].values);
+  }
+  var maxL=insNiceMax(insMaxOf(lArr)),maxR=insNiceMax(insMaxOf(rArr));
+  function yL(v){return pt+ih-(v/maxL)*ih}
+  function yR(v){return pt+ih-(v/maxR)*ih}
+  var g='',y,vL,vR;
+  for(i=0;i<=4;i++){
+    y=pt+ih*i/4;
+    g+='<line x1="'+pl+'" y1="'+y.toFixed(1)+'" x2="'+(pl+iw)+'" y2="'+y.toFixed(1)+'" stroke="#1e293b" stroke-width="1"/>';
+    vL=maxL*(1-i/4);
+    g+='<text x="'+(pl-8)+'" y="'+(y+3.5).toFixed(1)+'" text-anchor="end" font-size="10" fill="#475569">'+
+      (cfg.pct?insFmtPct(vL,1):insFmtShort(vL))+'</text>';
+    if(hasR){
+      vR=maxR*(1-i/4);
+      g+='<text x="'+(pl+iw+8)+'" y="'+(y+3.5).toFixed(1)+'" text-anchor="start" font-size="10" fill="#475569">'+insFmtShort(vR)+'</text>';
+    }
+  }
+  var step=Math.max(1,Math.ceil(n/(cfg.xTicks||8)));
+  for(i=0;i<n;i+=step){
+    g+='<text x="'+xs[i].toFixed(1)+'" y="'+(pt+ih+17)+'" text-anchor="middle" font-size="10" fill="#475569">'+insEsc(labels[i])+'</text>';
+  }
+  /* 事件竖虚线画在折线底下，别盖住数据 */
+  for(i=0;i<evs.length;i++){
+    var x=xs[evs[i].i];
+    if(x==null)continue;
+    var kk={},kl;
+    for(k=0;k<evs[i].items.length;k++)kk[evs[i].items[k].kind]=1;
+    kl=Object.keys(kk);
+    var col=kl.length===1?(INS_EVENT_COLOR[kl[0]]||'#94a3b8'):'#94a3b8';
+    g+='<line x1="'+x.toFixed(1)+'" y1="'+pt+'" x2="'+x.toFixed(1)+'" y2="'+(pt+ih)+'" stroke="'+col+'" stroke-width="1" stroke-dasharray="3 4" opacity=".5"/>'+
+      '<polygon points="'+(x-4).toFixed(1)+','+(pt+ih+6.5)+' '+(x+4).toFixed(1)+','+(pt+ih+6.5)+' '+x.toFixed(1)+','+(pt+ih+0.5)+'" fill="'+col+'"/>';
+  }
+  for(i=0;i<series.length;i++){
+    s=series[i];
+    var yf=s.axis==='r'?yR:yL;
+    var d=insPath(s.values,xs,yf);
+    if(d)g+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="'+(s.width||2)+'" stroke-linejoin="round" stroke-linecap="round"/>';
+    var iso=insIsolated(s.values);
+    for(k=0;k<iso.length;k++)g+='<circle cx="'+xs[iso[k]].toFixed(1)+'" cy="'+yf(s.values[iso[k]]).toFixed(1)+'" r="2.6" fill="'+s.color+'"/>';
+  }
+  var hov='<g class="ins-hover" style="display:none"><line class="ins-cross" x1="0" x2="0" y1="'+pt+'" y2="'+(pt+ih)+'" stroke="#64748b" stroke-width="1" stroke-dasharray="2 3"/>';
+  for(i=0;i<series.length;i++)hov+='<circle class="ins-dot" r="3.6" fill="'+series[i].color+'" stroke="#0f1117" stroke-width="1.5" style="display:none"/>';
+  hov+='</g>';
+  var pay={w:w,n:n,pl:pl,iw:iw,xs:[],labels:labels,s:[],e:{}};
+  for(i=0;i<n;i++)pay.xs.push(+xs[i].toFixed(1));
+  for(i=0;i<series.length;i++){
+    s=series[i];
+    var yf2=s.axis==='r'?yR:yL,ys=[],ts=[];
+    for(k=0;k<n;k++){
+      var v=s.values[k];
+      if(v==null||!isFinite(v)){ys.push(null);ts.push(null)}
+      else{ys.push(+yf2(v).toFixed(1));ts.push(s.pct?insFmtPct(v,2):insFmtNum(v))}
+    }
+    pay.s.push({name:s.name,color:s.color,y:ys,t:ts});
+  }
+  for(i=0;i<evs.length;i++)pay.e[evs[i].i]=evs[i].items;
+  return '<div class="ins-chart" data-ins="'+insEsc(JSON.stringify(pay))+'">'+
+    '<svg viewBox="0 0 '+w+' '+h+'">'+g+hov+
+    '<rect class="ins-hit" x="'+pl+'" y="'+pt+'" width="'+iw+'" height="'+ih+'" fill="transparent"/></svg>'+
+    '<div class="ins-tip"></div></div>';
+}
+
+/* insStack：堆叠面积。少于两个有数据的桶直接返回空串，调用方改成只显示数字。 */
+function insStack(cfg){
+  cfg=cfg||{};
+  var w=cfg.w||460,h=cfg.h||150,pl=36,pr=10,pt=10,pb=20;
+  var labels=cfg.labels||[],bands=cfg.bands||[],i,j,b;
+  var keep=[];
+  for(i=0;i<labels.length;i++){
+    for(j=0;j<bands.length;j++){if(bands[j].values[i]!=null){keep.push(i);break}}
+  }
+  if(keep.length<2)return '';
+  var iw=w-pl-pr,ih=h-pt-pb,xs=[],tot=[],s;
+  for(j=0;j<keep.length;j++)xs.push(keep.length===1?(pl+iw/2):(pl+iw*j/(keep.length-1)));
+  for(j=0;j<keep.length;j++){s=0;for(i=0;i<bands.length;i++)s+=bands[i].values[keep[j]]||0;tot.push(s)}
+  var mx=insNiceMax(insMaxOf([tot]));
+  function y(v){return pt+ih-(v/mx)*ih}
+  var g='',yy;
+  for(i=0;i<=2;i++){
+    yy=pt+ih*i/2;
+    g+='<line x1="'+pl+'" y1="'+yy.toFixed(1)+'" x2="'+(pl+iw)+'" y2="'+yy.toFixed(1)+'" stroke="#1e293b"/>'+
+      '<text x="'+(pl-6)+'" y="'+(yy+3.5).toFixed(1)+'" text-anchor="end" font-size="9" fill="#475569">'+insFmtShort(mx*(1-i/2))+'</text>';
+  }
+  var base=[],top=[],d;
+  for(j=0;j<keep.length;j++)base.push(0);
+  for(i=0;i<bands.length;i++){
+    top=[];
+    for(j=0;j<keep.length;j++)top.push(base[j]+(bands[i].values[keep[j]]||0));
+    d='M'+xs[0].toFixed(1)+' '+y(top[0]).toFixed(1);
+    for(j=1;j<keep.length;j++)d+=' L'+xs[j].toFixed(1)+' '+y(top[j]).toFixed(1);
+    for(j=keep.length-1;j>=0;j--)d+=' L'+xs[j].toFixed(1)+' '+y(base[j]).toFixed(1);
+    d+=' Z';
+    g+='<path d="'+d+'" fill="'+bands[i].color+'" fill-opacity=".34" stroke="'+bands[i].color+'" stroke-width="1.2"/>';
+    base=top;
+  }
+  var st=Math.max(1,Math.ceil(keep.length/5));
+  for(j=0;j<keep.length;j+=st)g+='<text x="'+xs[j].toFixed(1)+'" y="'+(pt+ih+14)+'" text-anchor="middle" font-size="9" fill="#475569">'+insEsc(labels[keep[j]])+'</text>';
+  return '<div class="ins-chart"><svg viewBox="0 0 '+w+' '+h+'">'+g+'</svg></div>';
+}
+
+/* ---- HTML 片段（同样是纯函数） ---- */
+function insDeltaHtml(c){
+  if(!c.has)return '<span class="na">暂无数据</span>';
+  var d=c.d||{};
+  if(d.dir==='na')return '<span class="na">无对比基数</span>';
+  var ar=d.dir==='up'?'▲':(d.dir==='down'?'▼':'●');
+  var num=c.pp?(Math.abs(d.pp).toFixed(2)+' pp'):(Math.abs(d.pct).toFixed(1)+'%');
+  return '<span class="'+d.dir+'">'+ar+' '+num+'</span>';
+}
+function insKpiHtml(k){
+  var out='<div class="ins-kpis">',i,c;
+  for(i=0;i<k.cards.length;i++){
+    c=k.cards[i];
+    out+='<div class="kpi"><div class="k">'+insEsc(c.name)+'</div>'+
+      '<div class="v">'+(c.has?c.txt:'--')+'</div>'+
+      '<div class="d">'+insDeltaHtml(c)+'<span class="pd">'+insEsc(k.period.cmp)+'</span></div></div>';
+  }
+  return out+'</div>';
+}
+function insLegendHtml(items,withEvents){
+  var out='<div class="ins-legend">',i;
+  for(i=0;i<items.length;i++)out+='<span><i style="background:'+items[i].color+'"></i>'+insEsc(items[i].name)+'</span>';
+  if(withEvents){
+    out+='<span class="sep"></span><span class="ev">动作标注</span>';
+    var ks=['apply','publish','offpage','config','manual'];
+    for(i=0;i<ks.length;i++)out+='<span class="ev"><i style="background:'+INS_EVENT_COLOR[ks[i]]+'"></i>'+INS_EVENT_NAME[ks[i]]+'</span>';
+  }
+  return out+'</div>';
+}
+function insRateCardHtml(cfg){
+  var cur=insLastNonNull(cfg.values);
+  return '<div class="ins-mini"><div class="k">'+insEsc(cfg.name)+'</div>'+
+    '<div class="big">'+(cur==null?'--':insFmtPct(cur,2))+'</div>'+
+    '<div class="sub">'+insEsc(cfg.sub)+'</div>'+
+    (insHasFinite(cfg.values)
+      ? insChart({w:400,h:120,padL:44,padR:10,padT:8,padB:24,xTicks:4,pct:true,labels:cfg.labels,events:cfg.events,
+          series:[{name:cfg.name,color:cfg.color,values:cfg.values,pct:true,width:1.8}]})
+      : insEmptyBox('分母为零或数据缺失，暂不画线'))+
+    '</div>';
+}
+function insRankHtml(metrics,buckets){
+  var m=metrics||{};
+  var nums=[
+    {k:'Top 3',v:insLastPoint(m.rank_top3)},
+    {k:'Top 10',v:insLastPoint(m.rank_top10)},
+    {k:'Top 20',v:insLastPoint(m.rank_top20)},
+    {k:'追踪词', v:insLastPoint(m.rank_tracked)}
+  ];
+  var out='<div class="ins-ranks">',i;
+  for(i=0;i<nums.length;i++)out+='<div class="ins-rk"><div class="k">'+insEsc(nums[i].k)+'</div><div class="v">'+(nums[i].v==null?'--':insFmtNum(nums[i].v))+'</div></div>';
+  out+='</div>';
+  var bands=insRankBands(m,buckets);
+  var labels=[],j;
+  for(j=0;j<buckets.length;j++)labels.push(buckets[j].label);
+  var svg=insStack({labels:labels,bands:[
+    {name:'Top 3',color:INS_COLOR.t3,values:bands.t3},
+    {name:'4-10',color:INS_COLOR.t10,values:bands.t4_10},
+    {name:'11-20',color:INS_COLOR.t20,values:bands.t11_20}
+  ]});
+  if(!svg){
+    var any=nums[0].v!=null||nums[1].v!=null||nums[2].v!=null||nums[3].v!=null;
+    return out+insEmptyBox(any?'排名历史还不够两个周期，先只看数字，攒够了自动出堆叠图。':'还没有 Semrush 排名数据。');
+  }
+  return out+insLegendHtml([{name:'Top 3',color:INS_COLOR.t3},{name:'4-10',color:INS_COLOR.t10},{name:'11-20',color:INS_COLOR.t20}],false)+svg;
+}
+function insBrandHtml(b){
+  if(!b||!b.ok)return insEmptyBox('未配置品牌词规则。在客户档案里补上 brand_regex，这里会拆出品牌与非品牌点击。');
+  if(!(b.total>0))return insEmptyBox('该周期没有点击数据，无法拆分品牌与非品牌。');
+  var bw=(b.share*100),nw=100-bw;
+  function dh(d){
+    if(!d||d.dir==='na')return '<span class="na">无对比</span>';
+    var ar=d.dir==='up'?'▲':(d.dir==='down'?'▼':'●');
+    return '<span class="'+d.dir+'">'+ar+' '+Math.abs(d.pct).toFixed(1)+'%</span>';
+  }
+  return '<div class="brand-bar">'+
+    '<span style="width:'+bw.toFixed(1)+'%;background:'+INS_COLOR.brand+'"></span>'+
+    '<span style="width:'+nw.toFixed(1)+'%;background:'+INS_COLOR.nonbrand+'"></span></div>'+
+    '<div class="brand-row"><i style="width:9px;height:9px;border-radius:2px;background:'+INS_COLOR.brand+';display:inline-block"></i>'+
+      '<span class="nm">品牌词点击</span><span class="vv">'+insFmtNum(b.brand)+'</span><span>'+insFmtPct(b.share,1)+'</span>'+dh(b.dBrand)+'</div>'+
+    '<div class="brand-row"><i style="width:9px;height:9px;border-radius:2px;background:'+INS_COLOR.nonbrand+';display:inline-block"></i>'+
+      '<span class="nm">非品牌点击</span><span class="vv">'+insFmtNum(b.nonbrand)+'</span><span>'+insFmtPct(b.total>0?b.nonbrand/b.total:null,1)+'</span>'+dh(b.dNon)+'</div>'+
+    '<div class="plan-meta" style="margin-top:7px">'+insEsc(b.period.cmp)+'。非品牌涨才是 SEO 真在拉新增，品牌涨多半是别的渠道在带。</div>';
+}
+function insHasAny(m){
+  var keys=['gsc_impressions','gsc_clicks','ga4_sessions_organic','ga4_leads','rank_tracked','rank_top10','rank_top3','rank_top20'],i;
+  for(i=0;i<keys.length;i++){if(((m||{})[keys[i]]||[]).length)return true}
+  return false;
+}
+
+/* insBody：整个洞察区的 HTML。给定 metrics/events/gran/today 就完全确定，可在 node 里断言。 */
+function insBody(metrics,events,gran,today,note,backfillQueued){
+  var m=metrics||{},i;
+  var head='<div class="sec"><div class="sec-head"><div class="sec-title">数据洞察</div><div class="tb-group">'+
+    (note?'<span class="plan-meta">'+insEsc(note)+'</span>':'')+
+    (backfillQueued
+      ? '<button class="btn ghost tiny" disabled>已入队，稍后刷新</button>'
+      : '<button class="btn ghost tiny" onclick="fireBackfill(this)">回填历史数据</button>')+
+    '<div class="ins-gran">';
+  for(i=0;i<INS_GRAN.length;i++)head+='<button class="'+(INS_GRAN[i].k===gran?'on':'')+'" onclick="setInsGran(\''+INS_GRAN[i].k+'\')">'+INS_GRAN[i].n+'</button>';
+  head+='</div></div></div>';
+  if(!insHasAny(m))return head+'<div class="panel">'+insEmptyBox('还没有回填任何指标数据。等 GSC / GA4 / Semrush 的拉数据任务跑完，这里会出现趋势、逐层转化率和排名分档。')+'</div></div>';
+
+  var buckets=insBuckets(gran,today);
+  var labels=[];
+  for(i=0;i<buckets.length;i++)labels.push(buckets[i].label);
+  var evb=insEventsToBuckets(insGroupEventsByDay(events),buckets);
+
+  var impr=insAgg(m.gsc_impressions||[],buckets,'sum');
+  var clk=insAgg(m.gsc_clicks||[],buckets,'sum');
+  if(gran==='d90'){impr=insSmooth(impr,7);clk=insSmooth(clk,7)}
+  var kpi=insKpiCards(m,gran,today);
+
+  var main=head+'<div class="panel">'+insKpiHtml(kpi)+
+    insLegendHtml([{name:'曝光（右轴）',color:INS_COLOR.impr},{name:'点击（左轴）',color:INS_COLOR.clicks}],true)+
+    insChart({w:920,h:280,labels:labels,events:evb,
+      empty:'当前粒度下还没有 GSC 数据。',
+      series:[
+        {name:'曝光',color:INS_COLOR.impr,values:impr,axis:'r',width:1.8},
+        {name:'点击',color:INS_COLOR.clicks,values:clk,axis:'l',width:2.2}
+      ]})+
+    (gran==='d90'?'<div class="plan-meta" style="margin-top:6px">90 天视图走 7 日移动平均，抹掉周末锯齿看方向。</div>':'')+
+    '</div></div>';
+
+  /* 逐层转化率固定周粒度：日线噪声吃掉信号，月线又太少点 */
+  var wb=insBuckets('week',today),wl=[],j;
+  for(j=0;j<wb.length;j++)wl.push(wb[j].label);
+  var wev=insEventsToBuckets(insGroupEventsByDay(events),wb);
+  var r=insRateSeries(m,wb);
+  var rates='<div class="sec"><div class="sec-head"><div class="sec-title">逐层转化率</div>'+
+    '<span class="plan-meta">近 13 个完整自然周，分母为零的周跳过不画</span></div><div class="ins-rates">'+
+    insRateCardHtml({name:'CTR',sub:'点击 / 曝光',color:INS_COLOR.ctr,values:r.ctr,labels:wl,events:wev})+
+    insRateCardHtml({name:'点击到会话吻合率',sub:'自然会话 / 点击',color:INS_COLOR.fit,values:r.fit,labels:wl,events:wev})+
+    insRateCardHtml({name:'会话到线索 CVR',sub:'线索 / 自然会话',color:INS_COLOR.cvr,values:r.cvr,labels:wl,events:wev})+
+    '</div></div>';
+
+  var bottom='<div class="sec"><div class="ins-two">'+
+    '<div class="panel"><div class="sec-title" style="font-size:11px;margin-bottom:10px">排名分档</div>'+insRankHtml(m,buckets)+'</div>'+
+    '<div class="panel"><div class="sec-title" style="font-size:11px;margin-bottom:10px">品牌拆分</div>'+insBrandHtml(insBrandSplit(m,gran,today))+'</div>'+
+    '</div></div>';
+
+  return main+rates+bottom;
+}
+
+/* ---- Mock：种子固定，node 里跑出来和浏览器里一模一样 ---- */
+function insRng(seed){
+  var s=(seed>>>0)||1;
+  return function(){s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/4294967296};
+}
+function insMockEvents(opt){
+  opt=opt||{};
+  var today=opt.today||'2026-08-24',days=opt.days||180,rnd=insRng(opt.seed2||770077);
+  var kinds=['apply','publish','offpage','config','manual'],evs=[],i,d,k;
+  for(i=days-1;i>=0;i--){
+    if(rnd()>0.05)continue;
+    d=insShift(today,-i-1);
+    k=kinds[Math.floor(rnd()*kinds.length)%kinds.length];
+    evs.push({d:d,label:INS_EVENT_NAME[k]+'：第 '+(evs.length+1)+' 批上线',kind:k});
+    if(rnd()<0.25)evs.push({d:d,label:'同日第二条动作，测同日合并',kind:'config'});
+  }
+  return {ok:true,events:evs};
+}
+function insMockMetrics(opt){
+  opt=opt||{};
+  var today=opt.today||'2026-08-24',days=opt.days||180;
+  var rnd=insRng(opt.seed||20260824);
+  var noBrand=!!opt.noBrand;
+  var rankDays=opt.rankDays==null?12:opt.rankDays;
+  var holes=opt.holes==null?0.05:opt.holes;
+  var evd={},ev=insMockEvents({today:today,days:days}).events,i;
+  for(i=0;i<ev.length;i++)evd[ev[i].d]=1;
+  var out={gsc_impressions:[],gsc_clicks:[],gsc_impressions_brand:[],gsc_clicks_brand:[],
+    ga4_sessions_organic:[],ga4_leads:[],rank_top3:[],rank_top10:[],rank_top20:[],rank_tracked:[]};
+  var bump=0,d,t,dow,wk,noise,impr,ctr,clicks,sess,leads,p;
+  for(i=days-1;i>=0;i--){
+    d=insShift(today,-i-1);
+    t=(days-i)/days;
+    dow=new Date(insD(d)).getUTCDay();
+    wk=(dow===0||dow===6)?0.62:1;
+    if(evd[d])bump+=0.06;
+    bump*=0.985;
+    noise=0.85+rnd()*0.3;
+    impr=Math.round((900+2400*t)*wk*noise*(1+bump));
+    ctr=0.026+0.016*t+(rnd()-0.5)*0.006;
+    clicks=Math.max(0,Math.round(impr*ctr));
+    sess=Math.max(0,Math.round(clicks*(0.88+rnd()*0.22)));
+    leads=Math.max(0,Math.round(sess*(0.012+0.01*t)*(0.6+rnd()*0.9)));
+    if(i<rankDays){
+      p=(rankDays-i)/rankDays;
+      out.rank_top3.push({d:d,v:Math.round(3+6*p)});
+      out.rank_top10.push({d:d,v:Math.round(12+14*p)});
+      out.rank_top20.push({d:d,v:Math.round(28+20*p)});
+      out.rank_tracked.push({d:d,v:120});
+    }
+    if(rnd()<holes)continue; /* 缺日空洞，后端不补零 */
+    out.gsc_impressions.push({d:d,v:impr});
+    out.gsc_clicks.push({d:d,v:clicks});
+    out.ga4_sessions_organic.push({d:d,v:sess});
+    out.ga4_leads.push({d:d,v:leads});
+    if(!noBrand){
+      out.gsc_impressions_brand.push({d:d,v:Math.round(impr*(0.3-0.09*t))});
+      out.gsc_clicks_brand.push({d:d,v:Math.round(clicks*(0.42-0.13*t))});
+    }
+  }
+  if(noBrand){delete out.gsc_impressions_brand;delete out.gsc_clicks_brand}
+  return out;
+}
+/* INSIGHTS-PURE-END */
+
+/* ---- 以下是有状态的部分：取数、缓存、渲染挂载、悬停绑定 ---- */
+
+/* 调试开关。true = 用内置合成数据，不发任何请求；线上定稿走 false。 */
+var INS_USE_MOCK=false;
+var INS_DAYS=300;            /* 拉数窗口，够月粒度 6 个完整月加一个对比月 */
+var INS_REFRESH_MS=120000;   /* 洞察区自己的刷新节流，别跟着 15 秒轮询一起重拉 */
+var INS_METRIC_LIST='gsc_impressions,gsc_clicks,gsc_impressions_brand,gsc_clicks_brand,ga4_sessions_organic,ga4_leads,rank_top3,rank_top10,rank_top20,rank_tracked';
+
+/* 数据锚点：真实日期往回退 3 天。GSC 延迟 2 到 3 天、GA4 延迟 1 天，
+   尾部那几天后端还没回填，缺日补零会在曲线末尾砸出一个坑，看起来像流量崩了。
+   锚点回退之后补零逻辑不用动，「最近一个完整周期」也自然落在有数据的区间里。 */
+var INS_LAG_DAYS=3;
+function insToday(){
+  var d=new Date(Date.now()-INS_LAG_DAYS*86400000),m=d.getMonth()+1,q=d.getDate();
+  return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(q<10?'0':'')+q;
+}
+var insState={client:0,gran:'day',today:insToday(),metrics:null,events:[],loading:false,error:'',at:0,ver:0};
+/* 回填按下过就按客户记住，免得洞察区一重画按钮又活过来让人重复点 */
+var insBackfillQueued={};
+
+function insReset(){
+  insState.client=0;insState.metrics=null;insState.events=[];
+  insState.loading=false;insState.error='';insState.at=0;insState.ver++;
+}
+
+/* 回填历史数据：走现有 jobs 提交模式，排队后按钮就地置灰，不等 job 跑完 */
+async function fireBackfill(btn){
+  if(!curId)return;
+  btn.disabled=true;
+  const d=await api('/jobs','POST',{client_id:curId,type:'backfill_metrics',payload:{days:180}});
+  if(!d){btn.disabled=false;return}
+  if(d._status===409){
+    toast('已有回填任务在跑（job #'+(d.job_id||'?')+'），等它跑完再触发。',true);
+    btn.disabled=false;
+    return;
+  }
+  if(fail(d,'回填任务创建失败')){btn.disabled=false;return}
+  insBackfillQueued[curId]=true;
+  btn.disabled=true;
+  btn.textContent='已入队，稍后刷新';
+  toast('已排队 job #'+d.id+'（回填历史数据）');
+}
+window.fireBackfill=fireBackfill;
+
+function setInsGran(g){
+  var ok=false,i;
+  for(i=0;i<INS_GRAN.length;i++){if(INS_GRAN[i].k===g)ok=true}
+  if(!ok)return;
+  insState.gran=g;
+  renderInsights();
+}
+window.setInsGran=setInsGran;
+
+async function loadInsights(force){
+  if(!curId)return;
+  if(insState.loading)return;
+  if(insState.client&&insState.client!==curId)insReset();
+  if(!force&&insState.metrics&&insState.client===curId&&(Date.now()-insState.at)<INS_REFRESH_MS)return;
+  insState.loading=true;
+  insState.ver++;
+  renderInsights();
+  var today=insToday(),from=insShift(today,-INS_DAYS),to=today;
+  try{
+    if(INS_USE_MOCK){
+      insState.metrics=insMockMetrics({today:today,days:180});
+      insState.events=insMockEvents({today:today,days:180}).events;
+      insState.error='';
+    }else{
+      var q='client_id='+curId+'&from='+from+'&to='+to;
+      var both=await Promise.all([
+        api('/metrics?'+q+'&metrics='+encodeURIComponent(INS_METRIC_LIST)),
+        api('/events?'+q)
+      ]);
+      var md=both[0],ed=both[1];
+      if(!md||md._status>=400){
+        insState.error=(md&&md.error)||'指标载入失败';
+        if(!insState.metrics)insState.metrics={};
+      }else{
+        insState.metrics=md.metrics||{};
+        insState.error='';
+      }
+      insState.events=(ed&&ed._status<400&&ed.events)?ed.events:[];
+    }
+  }catch(e){
+    insState.error='指标载入失败';
+    if(!insState.metrics)insState.metrics={};
+  }
+  insState.client=curId;
+  insState.today=today;
+  insState.loading=false;
+  insState.at=Date.now();
+  insState.ver++;
+  renderInsights();
+}
+
+function renderInsights(){
+  var box=document.getElementById('insWrap');
+  if(!box)return;
+  var sig=curId+'|'+insState.gran+'|'+insState.ver;
+  if(box.getAttribute('data-sig')===sig)return;
+  box.setAttribute('data-sig',sig);
+  if(!insState.metrics){
+    /* 还没拉到数据先给「载入中」，别先闪一下空态文案再闪回来 */
+    box.innerHTML='<div class="sec"><div class="sec-head"><div class="sec-title">数据洞察</div></div><div class="panel">'+insEmptyBox('载入中...')+'</div></div>';
+    return;
+  }
+  var note=insState.error
+    ? insState.error
+    : ('数据截至 '+insState.today+(INS_USE_MOCK?'（演示数据）':''));
+  box.innerHTML=insBody(insState.metrics,insState.events,insState.gran,insState.today,note,!!insBackfillQueued[curId]);
+  insBind(box);
+}
+
+/* 悬停十字线与 tooltip。图是每次重画的新节点，所以这里每次重新绑，不做去重。 */
+function insBind(root){
+  var boxes=(root||document).querySelectorAll('.ins-chart[data-ins]'),bi;
+  for(bi=0;bi<boxes.length;bi++)insBindOne(boxes[bi]);
+}
+function insBindOne(box){
+  var pay=null;
+  try{pay=JSON.parse(box.getAttribute('data-ins'))}catch(e){return}
+  if(!pay||!pay.n)return;
+  var svg=box.querySelector('svg'),tip=box.querySelector('.ins-tip'),hov=box.querySelector('.ins-hover');
+  if(!svg||!tip||!hov)return;
+  var cross=hov.querySelector('.ins-cross'),dots=hov.querySelectorAll('.ins-dot');
+  box.addEventListener('mousemove',function(e){
+    var r=svg.getBoundingClientRect();
+    if(!r.width)return;
+    var sx=(e.clientX-r.left)/r.width*pay.w,i=0;
+    if(pay.n>1){
+      i=Math.round((sx-pay.pl)/(pay.iw/(pay.n-1)));
+      if(i<0)i=0;
+      if(i>pay.n-1)i=pay.n-1;
+    }
+    var x=pay.xs[i],k,ser,y,rows='';
+    hov.style.display='';
+    cross.setAttribute('x1',x);cross.setAttribute('x2',x);
+    for(k=0;k<pay.s.length;k++){
+      ser=pay.s[k];y=ser.y[i];
+      if(dots[k]){
+        if(y==null)dots[k].style.display='none';
+        else{dots[k].style.display='';dots[k].setAttribute('cx',x);dots[k].setAttribute('cy',y)}
+      }
+      rows+='<div class="tr"><span class="sw" style="background:'+ser.color+'"></span><span>'+insEsc(ser.name)+
+        '</span><b style="margin-left:auto">'+(ser.t[i]==null?'--':ser.t[i])+'</b></div>';
+    }
+    var items=pay.e[i]||pay.e[String(i)],evh='';
+    if(items&&items.length){
+      evh='<div class="te">';
+      for(k=0;k<items.length;k++){
+        evh+='<div><span class="sw" style="background:'+(INS_EVENT_COLOR[items[k].kind]||'#94a3b8')+'"></span> '+
+          insEsc(items[k].d)+' '+insEsc(items[k].label)+'</div>';
+      }
+      evh+='</div>';
+    }
+    tip.innerHTML='<div class="tl">'+insEsc(pay.labels[i]||'')+'</div>'+rows+evh;
+    tip.style.display='block';
+    var bw=box.clientWidth||r.width,px=(x/pay.w)*bw,tw=tip.offsetWidth;
+    tip.style.left=Math.max(0,Math.min(Math.max(0,bw-tw),px-tw/2))+'px';
+    tip.style.top='2px';
+  });
+  box.addEventListener('mouseleave',function(){hov.style.display='none';tip.style.display='none'});
 }
 
 /* ================= 决策收件箱 ================= */
@@ -1013,7 +1830,15 @@ async function resolveDigest(id){
 }
 
 /* ================= 档案 ================= */
+function setBrandErr(msg){
+  const el=document.getElementById('pfBrandErr');
+  if(!el)return;
+  el.textContent=msg||'';
+  el.classList.toggle('hidden',!msg);
+}
+
 async function loadProfile(){
+  setBrandErr('');
   const d=await api('/profile?client_id='+curId);
   if(fail(d,'档案载入失败'))return;
   const p=d.profile||{};
@@ -1029,11 +1854,14 @@ async function loadProfile(){
 async function saveProfile(){
   const btn=document.getElementById('pfSaveBtn');
   btn.disabled=true;
+  setBrandErr('');
   const body={client_id:curId,target_keywords:document.getElementById('pf_target_keywords').value,
     report_lang:document.getElementById('pf_report_lang').value};
   PROFILE_FIELDS.forEach(f=>{const el=document.getElementById('pf_'+f);if(el)body[f]=el.value});
   const d=await api('/profile','PUT',body);
   btn.disabled=false;
+  /* 坏正则后端回 400，错误信息贴到 brand_regex 字段下面，光弹 toast 看不出是哪一行的问题 */
+  if(d&&d._status===400)setBrandErr(d.error||'保存失败');
   if(fail(d,'保存失败'))return;
   const hint=document.getElementById('pfSaved');
   hint.classList.remove('hidden');

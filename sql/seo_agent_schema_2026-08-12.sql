@@ -239,3 +239,36 @@ ON DUPLICATE KEY UPDATE
 -- database built from this file alone still catches up.
 -- ---------------------------------------------------------------
 -- ALTER TABLE seo_snapshots MODIFY source ENUM('ga4','gsc','semrush','discovery','content_registry') NOT NULL;
+
+-- ---------------------------------------------------------------
+-- Migration 2026-08-24: 日粒度时序（数据洞察一期）。
+-- seo_snapshots 存的是 28 天窗口的一大坨 JSON，能看当期总量看不了连续趋势。
+-- seo_metrics_daily 把同样的数据摊成 (客户, 日期, 指标名) 三元组，一行一个点，
+-- Dashboard 的趋势图、逐层转化率曲线、排名分档、品牌词拆分全部读它。
+-- seo-api.php 的 ensure_metrics_schema() 在首次访问 /metrics /events /profile
+-- /context 时惰性建表并补 seo_profiles.brand_regex，所以下面这些是文档和
+-- 手工补课路径，不是必须先跑的步骤。
+--
+-- 幂等的全部依据是 UNIQUE KEY (client_id,d,m)：worker 重跑同一窗口只覆盖
+-- 同名同日的值，不堆重复行，所以 backfill_metrics job 可以随便重跑。
+-- ---------------------------------------------------------------
+-- CREATE TABLE IF NOT EXISTS seo_metrics_daily (
+--   id INT AUTO_INCREMENT PRIMARY KEY,
+--   client_id INT NOT NULL,
+--   d DATE NOT NULL,
+--   m VARCHAR(40) NOT NULL,
+--   v DOUBLE NOT NULL DEFAULT 0,
+--   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+--   UNIQUE KEY uq_seo_metrics_daily (client_id, d, m),
+--   KEY idx_seo_metrics_daily_read (client_id, m, d)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+--
+-- 品牌词拆分要一条正则区分品牌搜索和非品牌搜索。人工填优先，
+-- 留空由 worker 从客户名（有词边界，最准）或域名主体确定性推导。
+-- ALTER TABLE seo_profiles ADD COLUMN brand_regex TEXT DEFAULT NULL AFTER target_keywords;
+--
+-- 回填 job。ensure_job_types() 逐值检查，所以任何中间状态一次 ALTER 就能追上。
+-- ALTER TABLE agent_jobs MODIFY type ENUM('discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics') NOT NULL;
+--
+-- m 列的取值范围见 seo-api.php 的 METRIC_NAMES，那是唯一权威清单。
+-- 不做成 ENUM 是有意的：指标会持续增加，VARCHAR 加一个名字不用 ALTER 全表。

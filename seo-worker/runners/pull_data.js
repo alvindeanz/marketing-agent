@@ -6,6 +6,7 @@ const { googlePost } = require('../lib/google');
 const { seoq, rootDomain } = require('../lib/seoq');
 const { reportWindow, safeJson } = require('../lib/util');
 const registry = require('../lib/registry');
+const metrics = require('../lib/metrics');
 
 const GSC_SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly'];
 const GA4_SCOPES = ['https://www.googleapis.com/auth/analytics.readonly'];
@@ -143,7 +144,7 @@ async function gscQuery(cfg, property, body) {
   return googlePost(cfg.ga4KeyFile, GSC_SCOPES, gscUrl(property), body, cfg.httpTimeoutMs);
 }
 
-async function pullGsc(ctx, profile, win) {
+async function pullGsc(ctx, profile, win, clientName) {
   const { cfg, log, api, job } = ctx;
   const property = profile && (profile.gsc_property || profile.gsc_site);
   if (!property) {
@@ -196,6 +197,27 @@ async function pullGsc(ctx, profile, win) {
     log('gsc: query x page dimension FAILED, cannibalisation signal will be unavailable :: ' + e.message);
   }
 
+  // 品牌词按日拆分。date x query 两维 GSC 一次就能给，逐行判品牌再按日汇总。
+  // 拿不到品牌正则（客户名和域名都推不出来）时整段跳过，不写一个假的 0。
+  // 失败只降级：品牌拆分没了趋势图少一条线，基线三块数据一点不受影响。
+  let datesBrand = null;
+  const brand = metrics.deriveBrandRegex({
+    brandRegex: profile && profile.brand_regex,
+    clientName,
+    domain: profile && profile.domain,
+  });
+  if (brand.error) log('gsc: ' + brand.error + '，改用推导');
+  if (brand.regex) {
+    log('gsc: 品牌正则 /' + brand.pattern + '/i，来源 ' + brand.source);
+    try {
+      datesBrand = await metrics.pullGscDailyBrand(ctx, property, win, regex, brand.regex);
+    } catch (e) {
+      log('gsc: 品牌拆分 FAILED，趋势图会少一条品牌线 :: ' + e.message);
+    }
+  } else {
+    log('gsc: 推不出品牌正则（profile.brand_regex 为空且客户名/域名不可用），跳过品牌拆分');
+  }
+
   const queries = gscRows(byQuery, ['query']);
   const pages = gscRows(byPage, ['page']);
   const dates = gscRows(byDate, ['date']);
@@ -223,6 +245,11 @@ async function pullGsc(ctx, profile, win) {
     pages,
     query_pages: queryPages,
     dates,
+    // 本期新增，供 seo_metrics_daily 的品牌拆分用。老快照没有这几个字段，
+    // metricsFromSnapshots 读不到就跳过，不会炸。
+    dates_brand: datesBrand,
+    brand_regex: brand.pattern || null,
+    brand_regex_source: brand.source,
   };
 
   await api.postSnapshot({
@@ -312,6 +339,21 @@ async function pullGa4(ctx, profile, win) {
   const channels = ga4Rows(byChannel.res);
   log('ga4: channel rows ' + channels.length);
 
+  // 按日的自然会话和 lead 事件，供 seo_metrics_daily 用。上面那两块是窗口汇总，
+  // 画不了逐层转化率曲线，这两块才是按天的。任一失败只降级，基线快照照存。
+  let datesOrganic = null;
+  let datesLeads = null;
+  try {
+    datesOrganic = await metrics.pullGa4OrganicDaily(ctx, propertyId, win);
+  } catch (e) {
+    log('ga4: 按日自然会话 FAILED :: ' + e.message);
+  }
+  try {
+    datesLeads = await metrics.pullGa4LeadsDaily(ctx, propertyId, win);
+  } catch (e) {
+    log('ga4: 按日 lead 事件 FAILED :: ' + e.message);
+  }
+
   const totals = dates.reduce(
     (acc, r) => {
       acc.sessions += Number(r.sessions) || 0;
@@ -330,6 +372,11 @@ async function pullGa4(ctx, profile, win) {
     totals,
     dates,
     channels,
+    // 本期新增。dates_organic 是 Organic Search 渠道的按日会话，
+    // dates_leads 是 form_submit + generate_lead + click_to_call 的按日之和。
+    dates_organic: datesOrganic,
+    dates_leads: datesLeads,
+    lead_events: metrics.LEAD_EVENTS,
   };
 
   await api.postSnapshot({
@@ -340,7 +387,7 @@ async function pullGa4(ctx, profile, win) {
     data,
   });
   log('ga4: snapshot posted, ' + totals.sessions + ' sessions, ' + totals.totalUsers + ' users');
-  return totals;
+  return { totals, data };
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +454,7 @@ async function pullSemrush(ctx, profile, win) {
       Object.keys(parts).join(' and ') +
       (errors.length ? ', degraded, ' + errors.length + ' subcommand failed' : '')
   );
-  return { status: errors.length ? 'partial' : 'ok', errors };
+  return { status: errors.length ? 'partial' : 'ok', errors, data };
 }
 
 // ---------------------------------------------------------------------------
@@ -526,12 +573,17 @@ async function refreshSources(ctx, opts = {}) {
 
   // Kept so the registry step can compute the cannibalisation signal from the
   // rows this run actually pulled, without a second read of the API.
+  // ga4Data / semrushData 是同样的道理，供后面的时序指标写入用：缓存命中时
+  // 直接读 /context 已经解好的旧快照，不为了写指标再拉一次外部接口。
   let gscData = null;
+  let ga4Data = null;
+  let semrushData = null;
+  const clientName = (context && context.client && context.client.name) || '';
 
   skipped.gsc = cacheCheck(cacheCtx, latest, 'gsc').skip;
   if (!skipped.gsc) {
     try {
-      const res = await pullGsc(ctx, profile, win);
+      const res = await pullGsc(ctx, profile, win, clientName);
       gscData = (res && res.data) || null;
     } catch (e) {
       log('gsc: FAILED :: ' + e.message);
@@ -547,11 +599,15 @@ async function refreshSources(ctx, opts = {}) {
   skipped.ga4 = cacheCheck(cacheCtx, latest, 'ga4').skip;
   if (!skipped.ga4) {
     try {
-      await pullGa4(ctx, profile, win);
+      const res = await pullGa4(ctx, profile, win);
+      ga4Data = (res && res.data) || null;
     } catch (e) {
       log('ga4: FAILED :: ' + e.message);
       errors.push('ga4: ' + e.message);
     }
+  } else {
+    const cachedGa4 = snapshotFor(latest, 'ga4');
+    ga4Data = cachedGa4 ? safeJson(cachedGa4.data, null) : null;
   }
 
   // SEMrush never fails the job. Worst case the section is degraded and the
@@ -559,10 +615,25 @@ async function refreshSources(ctx, opts = {}) {
   skipped.semrush = cacheCheck(cacheCtx, latest, 'semrush').skip;
   if (!skipped.semrush) {
     try {
-      await pullSemrush(ctx, profile, win);
+      const res = await pullSemrush(ctx, profile, win);
+      semrushData = (res && res.data) || null;
     } catch (e) {
       log('semrush: degraded, unexpected error :: ' + (e.stack || e.message));
     }
+  } else {
+    const cachedSem = snapshotFor(latest, 'semrush');
+    semrushData = cachedSem ? safeJson(cachedSem.data, null) : null;
+  }
+
+  // 时序写入。跑在三个源之后，读的全是刚才存下（或缓存里读回）的快照数据，
+  // 不再额外打任何外部接口。幂等：同一窗口重跑只覆盖同名同日的值。
+  // 和 semrush 一样绝不拖垮 job：写指标失败只是趋势图少一段，快照已经落地了。
+  try {
+    const { rows, notes } = metrics.metricsFromSnapshots({ gscData, ga4Data, semrushData });
+    for (const n of notes) log('metrics: ' + n);
+    await metrics.postMetricRows(ctx.api, job.client_id, rows, log);
+  } catch (e) {
+    log('metrics: 写入失败，降级，快照不受影响 :: ' + (e.stack || e.message));
   }
 
   // The content registry runs last, because it wants the GSC rows this pass

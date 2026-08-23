@@ -15,6 +15,9 @@ const { Api } = require('./lib/api');
 const llm = require('./lib/llm');
 const { ts, safeJson } = require('./lib/util');
 
+// 新增 runner 必须同时登记在这里和 seo-api.php 的 ensure_job_types()。
+// 漏一边的后果：worker 领到活以后直接抛 unknown job type，job 全红。
+// 2026-08 apply_task 就是漏了这里炸的。
 const KNOWN_TYPES = [
   'pull_data',
   'discover',
@@ -25,6 +28,7 @@ const KNOWN_TYPES = [
   'feedback',
   'triage',
   'ruling',
+  'backfill_metrics',
 ];
 
 function send(msg) {

@@ -146,6 +146,15 @@ class Api {
   }
 
   /**
+   * POST /metrics body { client_id, rows: [{ d, m, v }] } -> { ok, rows }
+   * 日粒度时序的批量 upsert，幂等：服务端靠 UNIQUE(client_id,d,m) 覆盖同名同日的值，
+   * 所以同一窗口重跑多少次结果都一样。服务端单批上限 2000 行，调用方自己分块。
+   */
+  async postMetrics(clientId, rows) {
+    return this.req('POST', '/metrics', { client_id: clientId, rows });
+  }
+
+  /**
    * GET /snapshots?client_id=&source=&limit= -> history list without the full
    * data blob. Use getSnapshot for the body of one row.
    */
