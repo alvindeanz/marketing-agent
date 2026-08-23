@@ -12,9 +12,15 @@
 
 const { generateDraft, OUTPUT_DIRNAME } = require('../lib/draft');
 const { snapshotBlock } = require('../lib/brief');
+const { extractTrailingJson } = require('../lib/mdjson');
 const { truncate, summarize } = require('../lib/util');
 
 const ALLOWED_TOOLS = 'Read';
+
+// The four buckets section three already sorts blockers into. The digest card
+// reuses them so a person reading the inbox sees the same vocabulary as the
+// report.
+const DIGEST_KINDS = ['基础设施', '方案', '等外部依赖', '需人决策'];
 
 // Rough prompt budget. Claude takes the prompt as a CLI argument, so a runaway
 // materials block is a real failure mode, not just a cost one.
@@ -248,7 +254,127 @@ function buildPrompt(materials) {
     '  除非你真的不确定，那就写清楚不确定在哪、需要什么信息才能确定。',
     '- 你的最终回复就是这份文档本身，从第一段标题开始，别写开场白，别写"以上"。',
     '- 材料已经全部内联在上面了，不需要你去翻工作目录里的文件。',
+    '',
+    '最后一件事：决策卡片',
+    '五段加极简版写完之后，再追加一个 json 代码块，作为整份文档的结尾，块后面一个字都不要有。',
+    '这个块是给决策收件箱用的：把上面第三段和第五段里**真正需要人拍板或者需要人动手**的事，',
+    '一条一张卡片列出来。已经在顺利推进、不需要人插手的东西不要列。',
+    '```json',
+    '{"digest":[{"kind":"需人决策","title":"一句话说清是什么事","tasks":[12,13],' +
+      '"evidence":"一句话证据，引材料里真实存在的东西","options":["A. 这样做","B. 那样做"],' +
+      '"recommend":"B。一句话理由"}],"tldr":"极简版那段的原文"}',
+    '```',
+    '',
+    '卡片的规矩',
+    '- kind 只能是这四个之一：基础设施、方案、等外部依赖、需人决策。',
+    '- tasks 写这条事情涉及的任务 id 数组，必须是材料里真实存在的 id。',
+    '  确实不涉及具体任务的写空数组 []。**不许编 id**，编出来的 id 会让人在错的任务上做决定。',
+    '- evidence 一句话，写清楚你凭什么这么说，引材料里的真实内容。',
+    '- options 写人可以选的路，两到三条，每条一句话。只有一条路可走时写一条。',
+    '- recommend 写你推荐哪条以及一句话理由。这条会在界面上高亮给人看，别和稀泥。',
+    '- 一次最多 8 张卡片，挑最要紧的。没有任何需要人拍板的事时，digest 写空数组 []。',
+    '- 全中文，不用 emoji，不用破折号。json 必须能被机器解析，字符串里不许有英文双引号和换行。',
   ].join('\n');
+}
+
+/**
+ * The json tail turned into the Chinese markdown body of one inbox card.
+ * The console renders this line by line: a line starting with ### opens an
+ * item, a line starting with 推荐： is highlighted. Keep both prefixes.
+ */
+function buildDigestBody(items, tldr) {
+  const rows = [];
+  items.forEach((it, n) => {
+    rows.push('### ' + (n + 1) + '. [' + it.kind + '] ' + it.title);
+    if (it.taskLabels && it.taskLabels.length) rows.push('涉及任务：' + it.taskLabels.join('、'));
+    else rows.push('涉及任务：无具体任务');
+    if (it.evidence) rows.push('证据：' + it.evidence);
+    if (it.options && it.options.length) {
+      rows.push('可选项：');
+      it.options.forEach((o) => rows.push('  ' + o));
+    }
+    if (it.recommend) rows.push('推荐：' + it.recommend);
+    rows.push('');
+  });
+  if (tldr) rows.push('极简版：' + tldr);
+  return rows.join('\n').trim();
+}
+
+/**
+ * Read the digest block out of the report.
+ * Anything without a title is dropped, and a task id that is not on this
+ * client's board is dropped with a log line: the ids become the refs, and refs
+ * are what later bounds what a ruling is allowed to touch.
+ */
+function cleanDigest(json, tasks, log) {
+  const raw = json && Array.isArray(json.digest) ? json.digest : [];
+  const known = {};
+  for (const t of tasks || []) known[Number(t.id)] = t.title || '';
+  const out = [];
+  for (const item of raw) {
+    if (out.length >= 8) {
+      log('巡检：决策卡片超过 8 条，多出来的没有入库');
+      break;
+    }
+    const d = item || {};
+    const title = summarize(d.title, 200);
+    if (!title) {
+      log('巡检：丢弃一条没有标题的决策项');
+      continue;
+    }
+    const kind = DIGEST_KINDS.indexOf(String(d.kind || '').trim()) >= 0 ? String(d.kind).trim() : '需人决策';
+    const ids = [];
+    const labels = [];
+    for (const x of Array.isArray(d.tasks) ? d.tasks : []) {
+      const n = Number(x) || 0;
+      if (!n || ids.indexOf(n) >= 0) continue;
+      if (!(n in known)) {
+        log('巡检：决策项「' + truncate(title, 40) + '」引用了不存在的任务 #' + n + '，已丢弃');
+        continue;
+      }
+      ids.push(n);
+      labels.push('#' + n + ' ' + summarize(known[n], 60));
+    }
+    out.push({
+      kind,
+      title,
+      tasks: ids,
+      taskLabels: labels,
+      evidence: summarize(d.evidence, 400),
+      options: (Array.isArray(d.options) ? d.options : []).map((o) => summarize(o, 200)).filter((o) => o !== '').slice(0, 4),
+      recommend: summarize(d.recommend, 300),
+    });
+  }
+  return out;
+}
+
+/**
+ * Fallback when the model did not give a parseable digest block. The report
+ * itself is still good, so the card carries its tail instead of nothing, and
+ * the task ids it names are recovered from the prose so a ruling still has
+ * something in scope to act on.
+ */
+function fallbackDigest(text, tasks, log, reason) {
+  const known = {};
+  for (const t of tasks || []) known[Number(t.id)] = t.title || '';
+  const ids = [];
+  const re = /#(\d+)/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const n = Number(m[1]);
+    if (n && ids.indexOf(n) === -1 && n in known) ids.push(n);
+    if (ids.length >= 30) break;
+  }
+  log('巡检：决策卡片没有结构化输出（' + reason + '），退回用报告正文，识别到任务 ' + ids.length + ' 个');
+  const tail = String(text || '').trim();
+  const body = [
+    '### 1. [需人决策] 本次巡检没有给出结构化的决策项',
+    '涉及任务：' + (ids.length ? ids.map((n) => '#' + n + ' ' + summarize(known[n], 60)).join('、') : '无具体任务'),
+    '证据：' + reason + '。下面是巡检报告正文，请人自己读一遍再裁决。',
+    '',
+    truncate(tail, 6000),
+  ].join('\n');
+  return { body, refs: { tasks: ids, jobs: [] } };
 }
 
 async function run(ctx) {
@@ -330,11 +456,59 @@ async function run(ctx) {
   });
   log('巡检报告已存盘：' + out.file + '，输出目录 ' + OUTPUT_DIRNAME);
 
+  // The report keeps every one of its old destinations, file and job log
+  // included. The card is an extra reader, not a replacement: the inbox wants
+  // the decisions, the report keeps the reasoning behind them.
+  await postDigest(ctx, out.text, tasks);
+
   return { tokenUsage: 0 };
+}
+
+/**
+ * File the decision card. Best effort on purpose: the triage run has already
+ * produced its report by this point, and losing the card is a smaller failure
+ * than throwing away a run that cost a fable pass. It shouts in the log instead.
+ */
+async function postDigest(ctx, text, tasks) {
+  const { job, api, log } = ctx;
+  const parsed = extractTrailingJson(text);
+  let body;
+  let refs;
+  if (parsed.error || !parsed.json || typeof parsed.json !== 'object') {
+    const fb = fallbackDigest(parsed.body || text, tasks, log, parsed.error || 'json 块不是对象');
+    body = fb.body;
+    refs = fb.refs;
+  } else {
+    const items = cleanDigest(parsed.json, tasks, log);
+    if (!items.length) {
+      log('巡检：本次没有需要人拍板的事项，不写决策卡片');
+      return;
+    }
+    const ids = [];
+    for (const it of items) for (const n of it.tasks) if (ids.indexOf(n) === -1) ids.push(n);
+    body = buildDigestBody(items, summarize(parsed.json.tldr, 600));
+    refs = { tasks: ids, jobs: [] };
+    log('巡检：决策卡片 ' + items.length + ' 条，涉及任务 ' + ids.length + ' 个');
+  }
+  try {
+    const r = await api.postInbox({
+      client_id: job.client_id,
+      kind: 'digest',
+      body,
+      refs,
+    });
+    log('巡检：决策卡片已写入收件箱，inbox #' + ((r && r.id) || '?'));
+  } catch (e) {
+    log('警告：决策卡片写入收件箱失败，报告本身不受影响 :: ' + e.message);
+  }
 }
 
 module.exports = {
   run,
+  postDigest,
+  buildDigestBody,
+  cleanDigest,
+  fallbackDigest,
   buildPrompt,
   buildMaterials,
   profileBlock,
@@ -346,4 +520,5 @@ module.exports = {
   ALLOWED_TOOLS,
   MAX_PROMPT_CHARS,
   BUDGET_LADDER,
+  DIGEST_KINDS,
 };

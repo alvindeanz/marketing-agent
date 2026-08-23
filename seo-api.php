@@ -30,6 +30,14 @@ $FEEDBACK_MAX_IMAGES=5;
    dropping a value here would make the ALTER truncate existing rows. */
 define('SNAPSHOT_SOURCES',['ga4','gsc','semrush','discovery','content_registry']);
 
+/* Every action a ruling may turn into. Hard coded here, on the server, because
+   this list is the whole safety boundary of the decision inbox: the model that
+   reads a human ruling proposes actions, it never executes them. Anything not
+   on this list is refused and reported back in the ack.
+   Deliberately absent: anything irreversible, anything that spends money, and
+   anything that publishes to the outside world. Those keep their own gates. */
+define('INBOX_ACTIONS',['approve_task','reject_task','set_priority','set_sprint','kill_task','release_tasks','answer_fact','redispatch','noop']);
+
 function db() {
     global $DB_HOST,$DB_USER,$DB_PASS,$DB_NAME;
     static $p=null;
@@ -163,7 +171,7 @@ function ensure_job_types(){
     static $done=false;
     if($done)return;
     $done=true;
-    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage'];
+    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling'];
     $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='type'");
     $q->execute();
     $col=$q->fetch();
@@ -175,6 +183,105 @@ function ensure_job_types(){
     if(!$missing)return;
     $list=implode(',',array_map(function($w){return "'".$w."'";},$want));
     db()->exec("ALTER TABLE agent_jobs MODIFY type ENUM($list) NOT NULL");
+}
+
+/* seo_inbox: the decision inbox behind the console's chat tab.
+   Three kinds of row and nothing else:
+     digest, a triage summary card written by the worker, open until settled;
+     ruling, one human's answer to a digest, in their own words;
+     ack,    what the runner actually did about that ruling, in plain Chinese.
+   The board stays the single source of truth. This table is a conversation
+   record over the board, never a second place where state lives.
+   status only means anything on a digest. ruling and ack rows are written
+   resolved on arrival so that ?status=open returns exactly the cards that
+   still want a human.
+   Created lazily on first use, same pattern as seo_feedback. */
+function ensure_inbox_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_inbox (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT DEFAULT NULL,
+        kind ENUM('digest','ruling','ack') NOT NULL,
+        body TEXT,
+        refs TEXT DEFAULT NULL,
+        reply_to INT DEFAULT NULL,
+        status ENUM('open','resolved') NOT NULL DEFAULT 'open',
+        created_by VARCHAR(64) NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_seo_inbox_stream (id),
+        KEY idx_seo_inbox_client (client_id, id),
+        KEY idx_seo_inbox_open (kind, status, id),
+        KEY idx_seo_inbox_reply (reply_to)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/* refs is stored as a JSON string in a TEXT column, serialised by hand:
+   production is MariaDB 10.3 and every other JSON-ish column in this schema is
+   handled the same way.
+   Canonical shape { "tasks": [int], "jobs": [int] }. A bare array is read as a
+   list of task ids, which is what callers usually have to hand. */
+function inbox_refs_norm($v){
+    $out=['tasks'=>[],'jobs'=>[]];
+    if($v===null||$v==='')return $out;
+    if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
+    if(!is_array($v))return $out;
+    if($v&&array_keys($v)===range(0,count($v)-1))$v=['tasks'=>$v];
+    foreach(['tasks','jobs'] as $k){
+        $list=(isset($v[$k])&&is_array($v[$k]))?$v[$k]:[];
+        $seen=[];
+        foreach($list as $x){
+            $n=(int)$x;
+            if($n>0&&!isset($seen[$n])){$seen[$n]=true;$out[$k][]=$n;}
+        }
+        if(count($out[$k])>200)$out[$k]=array_slice($out[$k],0,200);
+    }
+    return $out;
+}
+
+/* Drop task ids that do not exist, and on a card that belongs to one client,
+   ids that belong to somebody else. refs is what later bounds a ruling: an
+   action may only touch a task the digest already named, so a junk ref here
+   would become a way to reach an unrelated client's board. */
+function inbox_refs_filter($refs,$clientId){
+    if(!$refs['tasks'])return $refs;
+    $in=implode(',',array_fill(0,count($refs['tasks']),'?'));
+    $q=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id IN ($in)");
+    $q->execute($refs['tasks']);
+    $ok=[];
+    foreach($q->fetchAll() as $r){
+        if($clientId&&(int)$r['client_id']!==(int)$clientId)continue;
+        $ok[(int)$r['id']]=true;
+    }
+    $refs['tasks']=array_values(array_filter($refs['tasks'],function($x)use($ok){return isset($ok[$x]);}));
+    return $refs;
+}
+
+function inbox_row_out($r){
+    $r['id']=(int)$r['id'];
+    $r['client_id']=($r['client_id']===null)?null:(int)$r['client_id'];
+    $r['reply_to']=($r['reply_to']===null)?null:(int)$r['reply_to'];
+    $r['refs']=inbox_refs_norm($r['refs']);
+    return $r;
+}
+
+/* One inbox row's task refs, with the fields a ruling actually needs to decide
+   anything. Used both by GET /inbox/{id} and by the console. */
+function inbox_ref_tasks($refs){
+    if(!$refs['tasks'])return [];
+    $in=implode(',',array_fill(0,count($refs['tasks']),'?'));
+    $q=db()->prepare("SELECT id,client_id,title,status,owner_type,priority,module,sprint,attention,ops,output_url,result_note
+        FROM seo_tasks WHERE id IN ($in) ORDER BY FIELD(priority,'P0','P1','P2','P3'),id");
+    $q->execute($refs['tasks']);
+    $rows=$q->fetchAll();
+    foreach($rows as &$r){
+        $r['id']=(int)$r['id'];
+        $r['client_id']=(int)$r['client_id'];
+        $r['attention']=(int)$r['attention'];
+    }
+    unset($r);
+    return $rows;
 }
 
 /* Feedback screenshots.
@@ -717,12 +824,470 @@ if($m==='PATCH'&&preg_match('#^/facts/(\d+)$#',$ROUTE,$mm)){
 }
 
 /* =========================================================
+   Decision inbox
+   The console's chat tab. Exactly three kinds of message go through here:
+   a digest the worker writes, a ruling a human writes in their own words, and
+   an ack saying what was done about it. Nothing else is a message.
+   The board is still the only source of truth; this is the operating surface.
+   ========================================================= */
+
+// POST /inbox -> worker writes a digest card or an ack.
+// A ruling is never written here: only a person may issue one, through the
+// admin endpoint below. body.resolve closes the named digest in the same call,
+// which is how a successful ruling run settles the card it answered.
+if($m==='POST'&&$ROUTE==='/inbox'){
+    auth_worker();
+    ensure_inbox_schema();
+    $i=input();
+    $kind=(string)($i['kind']??'');
+    if(!in_array($kind,['digest','ack'],true))res(400,['error'=>'kind must be digest or ack']);
+    $body=trim((string)($i['body']??''));
+    if($body==='')res(400,['error'=>'body required']);
+    if(mb_strlen($body,'UTF-8')>20000)res(400,['error'=>'body over 20000 chars']);
+    $cid=(int)($i['client_id']??0);
+    if($cid){
+        $c=db()->prepare("SELECT id FROM clients WHERE id=?");
+        $c->execute([$cid]);
+        if(!$c->fetch())res(404,['error'=>'Client not found']);
+    }
+    $reply=(int)($i['reply_to']??0);
+    if($reply){
+        $r=db()->prepare("SELECT id FROM seo_inbox WHERE id=?");
+        $r->execute([$reply]);
+        if(!$r->fetch())res(404,['error'=>'reply_to row not found']);
+    }
+    $refs=inbox_refs_filter(inbox_refs_norm($i['refs']??null),$cid);
+    /* A digest is the only thing that can want a human, so it is the only thing
+       that lands open. */
+    $status=($kind==='digest')?'open':'resolved';
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,?,?,?,?,?,'seo-worker')")
+        ->execute([$cid?:null,$kind,$body,json_encode($refs,JSON_UNESCAPED_UNICODE),$reply?:null,$status]);
+    $id=(int)db()->lastInsertId();
+    $resolved=0;
+    if(!empty($i['resolve'])){
+        $rid=(int)$i['resolve'];
+        $q=db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE id=? AND kind='digest'");
+        $q->execute([$rid]);
+        $resolved=$q->rowCount();
+    }
+    audit('seo-worker','seo_inbox_write',(string)$id,[
+        'kind'=>$kind,'client_id'=>$cid?:null,'reply_to'=>$reply?:null,
+        'tasks'=>count($refs['tasks']),'resolved'=>$resolved
+    ]);
+    res(200,['ok'=>true,'id'=>$id,'resolved'=>$resolved]);
+}
+
+// POST /inbox/{id}/actions -> the ruling runner submits what it read out of one
+// human ruling, and the server is what executes it.
+// The split is the point. The model never touches a task: it proposes a list,
+// and every item is checked here against a fixed whitelist and against the
+// digest's own refs, so a ruling can only ever move something the card it
+// answers already named. An unknown action type, or an id outside that scope,
+// is refused and reported back so the ack can tell the human it was refused.
+// One failed action does not abort the batch; each one reports for itself.
+if($m==='POST'&&preg_match('#^/inbox/(\d+)/actions$#',$ROUTE,$mm)){
+    auth_worker();
+    ensure_inbox_schema();
+    $did=(int)$mm[1];
+    $i=input();
+    $g=db()->prepare("SELECT * FROM seo_inbox WHERE id=?");
+    $g->execute([$did]);
+    $dg=$g->fetch();
+    if(!$dg)res(404,['error'=>'Inbox item not found']);
+    if($dg['kind']!=='digest')res(400,['error'=>'Not a digest']);
+    $rid=(int)($i['ruling_id']??0);
+    if(!$rid)res(400,['error'=>'ruling_id required']);
+    $rq=db()->prepare("SELECT id,kind,reply_to,created_by FROM seo_inbox WHERE id=?");
+    $rq->execute([$rid]);
+    $rr=$rq->fetch();
+    if(!$rr||$rr['kind']!=='ruling'||(int)$rr['reply_to']!==$did){
+        res(400,['error'=>'ruling_id does not belong to this digest']);
+    }
+    /* Everything below is attributed to whoever wrote the ruling, not to the
+       worker that carried it. A fact filed this way came out of a person's
+       sentence, and the board should say so. */
+    $by=(string)($rr['created_by']?:'seo-worker');
+    $acts=$i['actions']??null;
+    if(!is_array($acts))res(400,['error'=>'actions required']);
+    if(count($acts)>20)res(400,['error'=>'too many actions, max 20']);
+
+    $refs=inbox_refs_norm($dg['refs']);
+    $scope=[];
+    foreach($refs['tasks'] as $t)$scope[$t]=true;
+    $digestClient=($dg['client_id']===null)?0:(int)$dg['client_id'];
+
+    /* Every task an action names has to be inside the digest's refs and has to
+       exist. Both checks live here, never in the runner. */
+    $pick=function($tid)use($scope){
+        $tid=(int)$tid;
+        if(!$tid)return ['err'=>'没有给出 task_id'];
+        if(!isset($scope[$tid]))return ['err'=>'任务 #'.$tid.' 不在这张卡片涉及的任务范围内，已拒绝'];
+        $q=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");
+        $q->execute([$tid]);
+        $t=$q->fetch();
+        if(!$t)return ['err'=>'任务 #'.$tid.' 已经不存在'];
+        return ['task'=>$t];
+    };
+    /* Same for a batch, plus the rule that one batch is one client's work. */
+    $pickMany=function($ids)use($pick){
+        if(!is_array($ids)||!$ids)return ['err'=>'没有给出 task_ids'];
+        if(count($ids)>50)return ['err'=>'一次最多 50 个任务'];
+        $tasks=[];$cid=0;
+        foreach($ids as $x){
+            $r=$pick($x);
+            if(isset($r['err']))return ['err'=>$r['err']];
+            $t=$r['task'];
+            if(!$cid)$cid=(int)$t['client_id'];
+            elseif($cid!==(int)$t['client_id'])return ['err'=>'这一批任务不属于同一个客户，已拒绝'];
+            $tasks[]=$t;
+        }
+        return ['tasks'=>$tasks,'client_id'=>$cid];
+    };
+    $appendNote=function($tid,$note){
+        $note=trim((string)$note);
+        if($note==='')return;
+        db()->prepare("UPDATE seo_tasks SET result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
+            ->execute([mb_substr($note,0,1000,'UTF-8'),$tid]);
+    };
+
+    $results=[];
+    $okCount=0;
+    foreach(array_values($acts) as $n=>$a){
+        $type=is_array($a)?(string)($a['type']??''):'';
+        $out=['n'=>$n+1,'type'=>$type,'ok'=>false,'message'=>''];
+        if(!in_array($type,INBOX_ACTIONS,true)){
+            $out['message']='不认识的动作类型「'.mb_substr($type===''?'(空)':$type,0,40,'UTF-8').'」，白名单外，未执行';
+            $results[]=$out;
+            continue;
+        }
+        if($type==='noop'){
+            $note=trim((string)($a['note']??''));
+            $out['ok']=true;
+            $out['message']='仅知悉，没有改动任何东西'.($note!==''?('：'.mb_substr($note,0,200,'UTF-8')):'');
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='approve_task'){
+            $r=$pick($a['task_id']??0);
+            if(isset($r['err'])){$out['message']=$r['err'];$results[]=$out;continue;}
+            $t=$r['task'];
+            db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=?")->execute([(int)$t['id']]);
+            $out['ok']=true;
+            $out['message']='任务 #'.$t['id'].'「'.$t['title'].'」已从 '.$t['status'].' 置为 approved';
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='reject_task'){
+            $r=$pick($a['task_id']??0);
+            if(isset($r['err'])){$out['message']=$r['err'];$results[]=$out;continue;}
+            $t=$r['task'];
+            $mode=(string)($a['mode']??'blocked');
+            if(!in_array($mode,['blocked','proposed'],true)){
+                $out['message']='reject_task 的 mode 只能是 blocked 或 proposed，收到「'.mb_substr($mode,0,20,'UTF-8').'」，未执行';
+                $results[]=$out;continue;
+            }
+            db()->prepare("UPDATE seo_tasks SET status=? WHERE id=?")->execute([$mode,(int)$t['id']]);
+            $note=trim((string)($a['note']??''));
+            if($note!=='')$appendNote((int)$t['id'],'[裁决] 打回：'.$note);
+            $out['ok']=true;
+            $out['message']='任务 #'.$t['id'].'「'.$t['title'].'」已打回为 '.$mode.($note!==''?('，理由已记进结果备注'):'');
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='set_priority'){
+            $r=$pick($a['task_id']??0);
+            if(isset($r['err'])){$out['message']=$r['err'];$results[]=$out;continue;}
+            $t=$r['task'];
+            $pri=(string)($a['priority']??'');
+            if(!in_array($pri,['P0','P1','P2','P3'],true)){
+                $out['message']='优先级只能是 P0 到 P3，收到「'.mb_substr($pri,0,20,'UTF-8').'」，未执行';
+                $results[]=$out;continue;
+            }
+            db()->prepare("UPDATE seo_tasks SET priority=? WHERE id=?")->execute([$pri,(int)$t['id']]);
+            $out['ok']=true;
+            $out['message']='任务 #'.$t['id'].' 优先级从 '.$t['priority'].' 改成 '.$pri;
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='set_sprint'){
+            $r=$pick($a['task_id']??0);
+            if(isset($r['err'])){$out['message']=$r['err'];$results[]=$out;continue;}
+            $t=$r['task'];
+            $sp=trim((string)($a['sprint']??''));
+            if(mb_strlen($sp,'UTF-8')>10){
+                $out['message']='sprint 最多 10 个字符，未执行';
+                $results[]=$out;continue;
+            }
+            db()->prepare("UPDATE seo_tasks SET sprint=? WHERE id=?")->execute([$sp,(int)$t['id']]);
+            $out['ok']=true;
+            $out['message']='任务 #'.$t['id'].' 的 sprint 从「'.($t['sprint']?:'空').'」改成「'.($sp?:'空').'」';
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='kill_task'){
+            $r=$pick($a['task_id']??0);
+            if(isset($r['err'])){$out['message']=$r['err'];$results[]=$out;continue;}
+            $t=$r['task'];
+            $reason=trim((string)($a['reason']??''));
+            if($reason===''){
+                $out['message']='kill_task 必须写清为什么不做了，没有理由，未执行';
+                $results[]=$out;continue;
+            }
+            db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([(int)$t['id']]);
+            $appendNote((int)$t['id'],'[killed] 人工裁决不再做：'.$reason);
+            $out['ok']=true;
+            $out['message']='任务 #'.$t['id'].'「'.$t['title'].'」已按不做处理，置 done 并在结果备注写明原因';
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='release_tasks'){
+            $r=$pickMany($a['task_ids']??null);
+            if(isset($r['err'])){$out['message']=$r['err'];$results[]=$out;continue;}
+            $bad=null;
+            foreach($r['tasks'] as $t){if($t['status']!=='review'){$bad=$t;break;}}
+            if($bad){
+                $out['message']='任务 #'.$bad['id'].' 现在是 '.$bad['status'].'，不在 review，整批未放行';
+                $results[]=$out;continue;
+            }
+            $cid=(int)$r['client_id'];
+            $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status IN('queued','running') LIMIT 1");
+            $dup->execute([$cid]);
+            $d=$dup->fetch();
+            if($d){
+                $out['message']='该客户已经有一个落地 job（#'.$d['id'].'）在跑，这次没有重复排队，等它跑完再放行';
+                $results[]=$out;continue;
+            }
+            $ids=array_map(function($t){return (int)$t['id'];},$r['tasks']);
+            db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'apply_task',?,'queued',?)")
+                ->execute([$cid,json_encode(['task_ids'=>$ids],JSON_UNESCAPED_UNICODE),$by]);
+            $jid=(int)db()->lastInsertId();
+            fire_wake($jid);
+            $out['ok']=true;
+            $out['message']='已放行 '.count($ids).' 个任务（#'.implode('、#',$ids).'），排了落地 job #'.$jid;
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='redispatch'){
+            $r=$pickMany($a['task_ids']??null);
+            if(isset($r['err'])){$out['message']=$r['err'];$results[]=$out;continue;}
+            $reason=trim((string)($a['reason']??''));
+            if($reason===''){
+                $out['message']='redispatch 必须带上新指令，没有指令等于重跑一遍，未执行';
+                $results[]=$out;continue;
+            }
+            $cid=(int)$r['client_id'];
+            $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='execute_task' AND status IN('queued','running') LIMIT 1");
+            $dup->execute([$cid]);
+            $d=$dup->fetch();
+            if($d){
+                $out['message']='该客户已经有一个执行 job（#'.$d['id'].'）在跑，这次没有重复排队';
+                $results[]=$out;continue;
+            }
+            $ids=array_map(function($t){return (int)$t['id'];},$r['tasks']);
+            $payload=json_encode(['task_ids'=>$ids,'reason'=>mb_substr($reason,0,500,'UTF-8')],JSON_UNESCAPED_UNICODE);
+            db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'execute_task',?,'queued',?)")
+                ->execute([$cid,$payload,$by]);
+            $jid=(int)db()->lastInsertId();
+            fire_wake($jid);
+            $out['ok']=true;
+            $out['message']='已带新指令重派 '.count($ids).' 个任务（#'.implode('、#',$ids).'），排了执行 job #'.$jid;
+            $results[]=$out;$okCount++;
+            continue;
+        }
+        if($type==='answer_fact'){
+            $key=trim((string)($a['fact_key']??''));
+            $val=trim((string)($a['value']??''));
+            if($key===''||mb_strlen($key,'UTF-8')>100){
+                $out['message']='fact_key 为空或超过 100 字符，未执行';
+                $results[]=$out;continue;
+            }
+            if($val===''){
+                $out['message']='fact「'.$key.'」没有值，未执行';
+                $results[]=$out;continue;
+            }
+            /* A cross client card has no client of its own, so the fact is
+               filed against the client its refs point at, and only when they
+               all point at the same one. */
+            $cid=$digestClient;
+            if(!$cid){
+                $tasks=inbox_ref_tasks($refs);
+                foreach($tasks as $t){
+                    if(!$cid)$cid=(int)$t['client_id'];
+                    elseif($cid!==(int)$t['client_id']){$cid=-1;break;}
+                }
+            }
+            if($cid<=0){
+                $out['message']='这张卡片跨了多个客户，说不清这条 fact 该记给谁，未执行，请到档案页手工添加';
+                $results[]=$out;continue;
+            }
+            $look=db()->prepare("SELECT id FROM seo_facts WHERE client_id=? AND fact_key=?");
+            $look->execute([$cid,$key]);
+            $ex=$look->fetch();
+            $look->closeCursor();
+            if($ex){
+                db()->prepare("UPDATE seo_facts SET value=?,source='manual',status='confirmed',updated_by=? WHERE id=?")
+                    ->execute([$val,$by,(int)$ex['id']]);
+                $out['message']='fact「'.$key.'」已更新为「'.mb_substr($val,0,120,'UTF-8').'」（人工确认）';
+            }else{
+                db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)VALUES(?,?,?,'manual','confirmed',?)")
+                    ->execute([$cid,$key,$val,$by]);
+                $out['message']='fact「'.$key.'」已新建为「'.mb_substr($val,0,120,'UTF-8').'」（人工确认）';
+            }
+            $out['ok']=true;
+            $results[]=$out;$okCount++;
+            continue;
+        }
+    }
+    audit('seo-worker','seo_inbox_actions',(string)$did,[
+        'ruling_id'=>$rid,'count'=>count($results),'ok'=>$okCount,
+        'types'=>array_map(function($r){return $r['type'].($r['ok']?'':'(拒绝)');},$results)
+    ]);
+    res(200,['ok'=>true,'results'=>$results,'ok_count'=>$okCount]);
+}
+
+// GET /inbox/{id} -> one row, its replies, and the task rows its refs point at.
+// Either auth layer: the console reads it for a permalink, and the ruling
+// runner reads exactly the two rows plus the task states it is allowed to
+// reason about, instead of being handed a cross client read.
+if($m==='GET'&&preg_match('#^/inbox/(\d+)$#',$ROUTE,$mm)){
+    auth_any();
+    ensure_inbox_schema();
+    $id=(int)$mm[1];
+    $s=db()->prepare("SELECT i.*,c.name AS client_name FROM seo_inbox i LEFT JOIN clients c ON c.id=i.client_id WHERE i.id=?");
+    $s->execute([$id]);
+    $row=$s->fetch();
+    if(!$row)res(404,['error'=>'Inbox item not found']);
+    $item=inbox_row_out($row);
+    $rp=db()->prepare("SELECT * FROM seo_inbox WHERE reply_to=? ORDER BY id");
+    $rp->execute([$id]);
+    $replies=[];
+    foreach($rp->fetchAll() as $r)$replies[]=inbox_row_out($r);
+    res(200,['item'=>$item,'replies'=>$replies,'ref_tasks'=>inbox_ref_tasks($item['refs'])]);
+}
+
+// GET /inbox?client_id=&status=&limit= -> the stream, newest first.
+// client_id narrows to one client and always keeps the cross client cards:
+// a card filed against nobody in particular can still be about this client's
+// tasks, and hiding it would hide a decision somebody has to make.
+if($m==='GET'&&$ROUTE==='/inbox'){
+    auth_admin();
+    ensure_inbox_schema();
+    $lim=(int)($_GET['limit']??60);
+    if($lim<1)$lim=60;
+    if($lim>200)$lim=200;
+    $where=[];$args=[];
+    if(isset($_GET['client_id'])&&$_GET['client_id']!==''){
+        $cid=(int)$_GET['client_id'];
+        if($cid>0){$where[]='(i.client_id=? OR i.client_id IS NULL)';$args[]=$cid;}
+    }
+    if(isset($_GET['status'])&&$_GET['status']!==''){
+        $st=(string)$_GET['status'];
+        if(!in_array($st,['open','resolved'],true))res(400,['error'=>'bad status']);
+        $where[]='i.status=?';$args[]=$st;
+    }
+    $sql="SELECT i.*,c.name AS client_name FROM seo_inbox i LEFT JOIN clients c ON c.id=i.client_id"
+        .($where?(' WHERE '.implode(' AND ',$where)):'')
+        ." ORDER BY i.id DESC LIMIT $lim";
+    $s=db()->prepare($sql);
+    $s->execute($args);
+    $items=[];
+    foreach($s->fetchAll() as $r)$items[]=inbox_row_out($r);
+    $oc=db()->query("SELECT COUNT(*) AS n FROM seo_inbox WHERE kind='digest' AND status='open'")->fetch();
+    res(200,['items'=>$items,'open_count'=>(int)$oc['n']]);
+}
+
+// POST /inbox/{id}/ruling -> a human answers one digest in their own words.
+// The text is stored verbatim and a ruling job is queued to read it. Nothing is
+// parsed here: the whole design is that a person writes a sentence and the
+// runner is what turns it into board actions, under the whitelist above.
+// A ruling on an already settled digest reopens it, so a correction does not
+// need a fresh card to land on.
+if($m==='POST'&&preg_match('#^/inbox/(\d+)/ruling$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_inbox_schema();
+    ensure_job_types();
+    $did=(int)$mm[1];
+    $i=input();
+    $g=db()->prepare("SELECT * FROM seo_inbox WHERE id=?");
+    $g->execute([$did]);
+    $dg=$g->fetch();
+    if(!$dg)res(404,['error'=>'Inbox item not found']);
+    if($dg['kind']!=='digest')res(400,['error'=>'Only a digest can be ruled on']);
+    $text=trim((string)($i['text']??''));
+    if($text==='')res(400,['error'=>'text required']);
+    if(mb_strlen($text,'UTF-8')>5000)res(400,['error'=>'text over 5000 chars']);
+    /* Guard against a double submit landing two runs on one card. Payload shape
+       is written right below and never changes, so the needle is stable. */
+    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE type='ruling' AND status IN('queued','running') AND payload LIKE ? LIMIT 1");
+    $dup->execute(['%"inbox_id":'.$did.',%']);
+    $d=$dup->fetch();
+    if($d)res(409,['error'=>'这张卡片已经有一条裁决在处理中','job_id'=>(int)$d['id']]);
+
+    $refs=inbox_refs_norm($dg['refs']);
+    $cid=($dg['client_id']===null)?0:(int)$dg['client_id'];
+    /* agent_jobs.client_id is NOT NULL with a foreign key, so a cross client
+       card has to borrow a client to queue under. The refs are the only honest
+       source for that, and they have to agree. */
+    if(!$cid){
+        foreach(inbox_ref_tasks($refs) as $t){
+            if(!$cid)$cid=(int)$t['client_id'];
+            elseif($cid!==(int)$t['client_id']){$cid=-1;break;}
+        }
+        if($cid<=0){
+            res(400,['error'=>'这张卡片跨了多个客户，裁决 job 没法归属，请直接手动关卡或到对应客户的看板处理']);
+        }
+    }
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'ruling',?,?,?,'resolved',?)")
+        ->execute([($dg['client_id']===null)?null:(int)$dg['client_id'],$text,json_encode($refs,JSON_UNESCAPED_UNICODE),$did,$u['username']]);
+    $rid=(int)db()->lastInsertId();
+    if($dg['status']!=='open'){
+        db()->prepare("UPDATE seo_inbox SET status='open' WHERE id=?")->execute([$did]);
+    }
+    $payload=json_encode(['inbox_id'=>$did,'ruling_id'=>$rid],JSON_UNESCAPED_UNICODE);
+    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'ruling',?,'queued',?)")
+        ->execute([$cid,$payload,$u['username']]);
+    $jid=(int)db()->lastInsertId();
+    audit($u['username'],'seo_inbox_ruling',(string)$did,[
+        'ruling_id'=>$rid,'job_id'=>$jid,'client_id'=>$cid,'chars'=>mb_strlen($text,'UTF-8')
+    ]);
+    fire_wake($jid);
+    res(200,['ok'=>true,'ruling_id'=>$rid,'job_id'=>$jid]);
+}
+
+// POST /inbox/{id}/resolve -> close a digest by hand.
+// The fallback for a card nobody needs to act on, or one the runner could not
+// make sense of. Writes an ack so the thread still reads in order.
+if($m==='POST'&&preg_match('#^/inbox/(\d+)/resolve$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_inbox_schema();
+    $did=(int)$mm[1];
+    $i=input();
+    $g=db()->prepare("SELECT id,kind,client_id,status FROM seo_inbox WHERE id=?");
+    $g->execute([$did]);
+    $dg=$g->fetch();
+    if(!$dg)res(404,['error'=>'Inbox item not found']);
+    if($dg['kind']!=='digest')res(400,['error'=>'Only a digest can be resolved']);
+    $note=trim((string)($i['note']??''));
+    if(mb_strlen($note,'UTF-8')>2000)res(400,['error'=>'note over 2000 chars']);
+    db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE id=?")->execute([$did]);
+    $body='人工关卡：'.$u['username'].' 直接把这张卡片标记为已处理，没有派任何动作。'.($note!==''?('备注：'.$note):'');
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'ack',?,NULL,?,'resolved',?)")
+        ->execute([($dg['client_id']===null)?null:(int)$dg['client_id'],$body,$did,$u['username']]);
+    audit($u['username'],'seo_inbox_resolve',(string)$did,['note'=>$note]);
+    res(200,['ok'=>true]);
+}
+
+/* =========================================================
    Dashboard endpoints (admin JWT)
    ========================================================= */
 
 // GET /clients -> console sidebar: every onboarded client plus its counters
 if($m==='GET'&&$ROUTE==='/clients'){
     auth_admin();
+    /* The sidebar carries the decision inbox badge, so the table has to exist
+       before the counts below are read. CREATE TABLE IF NOT EXISTS on an
+       already migrated database is a no-op. */
+    ensure_inbox_schema();
     $s=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id ORDER BY FIELD(p.status,'active','archived'),c.name");
     $rows=$s->fetchAll();
     $tasks=[];
@@ -733,16 +1298,22 @@ if($m==='GET'&&$ROUTE==='/clients'){
     foreach(db()->query("SELECT client_id,MAX(version) AS v FROM seo_plans WHERE status='active' GROUP BY client_id")->fetchAll() as $r)$plans[$r['client_id']]=(int)$r['v'];
     $jobs=[];
     foreach(db()->query("SELECT client_id,MAX(created_at) AS t FROM agent_jobs GROUP BY client_id")->fetchAll() as $r)$jobs[$r['client_id']]=$r['t'];
+    $inbox=[];
+    foreach(db()->query("SELECT client_id,COUNT(*) AS n FROM seo_inbox WHERE kind='digest' AND status='open' AND client_id IS NOT NULL GROUP BY client_id")->fetchAll() as $r)$inbox[$r['client_id']]=(int)$r['n'];
+    /* Total, not the sum of the per client counts: a cross client card belongs
+       to no row in the list but still wants somebody. */
+    $inboxTotal=(int)db()->query("SELECT COUNT(*) AS n FROM seo_inbox WHERE kind='digest' AND status='open'")->fetch()['n'];
     foreach($rows as &$r){
         $id=$r['client_id'];
         $r['client_id']=(int)$id;
         $r['tasks_open']=$tasks[$id]??0;
         $r['facts_pending']=$facts[$id]??0;
+        $r['inbox_open']=$inbox[$id]??0;
         $r['active_plan_version']=isset($plans[$id])?$plans[$id]:null;
         $r['last_job_at']=$jobs[$id]??null;
     }
     unset($r);
-    res(200,['clients'=>$rows]);
+    res(200,['clients'=>$rows,'inbox_open_total'=>$inboxTotal]);
 }
 
 // GET /clients/available -> ops-tracker clients not yet onboarded here

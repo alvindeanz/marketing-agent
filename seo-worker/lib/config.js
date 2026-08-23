@@ -29,6 +29,10 @@ const DEFAULTS = {
   imageModel: 'sonnet',
   // Triage reads the whole pipeline and judges it, so it gets the big model.
   triageModel: 'fable',
+  // Reading a human ruling and turning it into board actions. Small job by
+  // token count, but a misread here moves the board the wrong way, so it gets
+  // the same model that wrote the digest it is answering.
+  rulingModel: 'fable',
   jobTimeoutMin: 30,
   // WebForger API base and the blog language the runners write in. Empty lang
   // means the site's default language.
@@ -101,6 +105,7 @@ function load() {
   cfg.feedbackModel = String(cfg.feedbackModel || DEFAULTS.feedbackModel);
   cfg.imageModel = String(cfg.imageModel || DEFAULTS.imageModel);
   cfg.triageModel = String(cfg.triageModel || DEFAULTS.triageModel);
+  cfg.rulingModel = String(cfg.rulingModel || DEFAULTS.rulingModel);
   cfg.webforgerApi = String(cfg.webforgerApi || DEFAULTS.webforgerApi).replace(/\/+$/, '');
   cfg.blogLang = String(cfg.blogLang || '');
   cfg.blogReviewEnabled = cfg.blogReviewEnabled !== false;

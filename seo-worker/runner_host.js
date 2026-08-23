@@ -24,6 +24,7 @@ const KNOWN_TYPES = [
   'report',
   'feedback',
   'triage',
+  'ruling',
 ];
 
 function send(msg) {

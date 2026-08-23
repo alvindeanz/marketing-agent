@@ -189,6 +189,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fb-note{color:#cbd5e1;white-space:pre-wrap;word-break:break-word}
 .fb-text{color:#64748b;white-space:pre-wrap;word-break:break-word;margin-top:2px}
 
+/* 决策收件箱 */
+.ib-thread{margin-bottom:14px}
+.ib-card{background:#1e2433;border:1px solid #2d3748;border-radius:10px;padding:13px 15px}
+.ib-card.open{border-color:#78350f}
+.ib-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.ib-body{font-size:13px;line-height:1.7}
+.ib-item-h{font-size:13px;font-weight:600;color:#f1f5f9;margin:11px 0 4px}
+.ib-line{color:#cbd5e1;word-break:break-word;white-space:pre-wrap}
+.ib-rec{background:#1a1408;border-left:3px solid #b45309;border-radius:0 6px 6px 0;padding:6px 10px;margin:6px 0;color:#fbbf24;font-weight:600;word-break:break-word}
+.ib-reply{margin:10px 0 0 16px;border-left:2px solid #2d3748;padding:8px 0 2px 12px}
+.ib-msg{font-size:12.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.ib-ruling{color:#e2e8f0}
+.ib-ack{color:#94a3b8}
+.ib-form{margin-top:11px;border-top:1px solid #2d3748;padding-top:11px}
+.ib-empty{font-size:12.5px;color:#3d4f63;font-style:italic;padding:14px 0}
+.badge.ruling{background:#1e3a5f;color:#60a5fa}
+.badge.ack{background:#1e2433;color:#94a3b8;border:1px solid #334155}
+.sb-pill.inbox{background:#3b1f6e;color:#c084fc}
+.sb-inbox{display:flex;align-items:center;gap:6px;padding:8px 9px;border-radius:8px;cursor:pointer;margin-bottom:10px;border:1px solid #2d3748;background:#0f1117}
+.sb-inbox:hover{border-color:#475569}
+.sb-inbox.on{border-color:#3b82f6;background:#1e2433}
+.sb-inbox .t{flex:1;font-size:12.5px;color:#cbd5e1}
+
 /* 批方案弹窗 */
 .appr-list{max-height:320px;overflow-y:auto;margin:8px 0 4px}
 .appr-item{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid #1e293b}
@@ -275,6 +298,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 <div class="console hidden" id="appView">
 
   <aside class="sidebar">
+    <div id="sbInbox"></div>
     <div class="sb-head">
       <span class="sb-title">客户</span>
       <button class="sb-add" onclick="openAddClient()">+ 添加</button>
@@ -297,6 +321,26 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
     <!-- Dashboard -->
     <div id="v_dash"></div>
+
+    <!-- 决策收件箱 -->
+    <div id="v_inbox" class="hidden">
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">决策收件箱</div>
+          <div class="tb-group">
+            <span class="plan-meta" id="ibMeta"></span>
+            <select class="tb-select" id="ibClient" onchange="setInboxClient(this.value)"></select>
+            <button class="btn ghost" id="ibOpenBtn" onclick="toggleInboxOpen()">只看待裁决</button>
+            <button class="btn ghost" onclick="loadInbox()">刷新</button>
+          </div>
+        </div>
+        <div class="plan-meta" style="margin-bottom:10px">
+          这条流里只有三种消息：巡检写的决策卡片、你用人话下的裁决、以及裁决执行结果的回执。
+          看板才是唯一事实源，这里只是操作界面。裁决只能动卡片自己涉及的任务，超范围的一律拒绝并写进回执。
+        </div>
+        <div id="ibStream"></div>
+      </div>
+    </div>
 
     <!-- 方案 -->
     <div id="v_plan" class="hidden">
@@ -494,7 +538,8 @@ const FB_MAX_BYTES=5*1024*1024;
 const FB_MIME=['image/png','image/jpeg','image/webp'];
 const PRIORITIES=['P0','P1','P2','P3'];
 const SNAP_SOURCES=['discovery','ga4','gsc','semrush','content_registry'];
-const VIEWS=[{key:'dash',name:'Dashboard'},{key:'plan',name:'方案'},{key:'tasks',name:'任务'},{key:'jobs',name:'Jobs'},{key:'profile',name:'档案'}];
+const VIEWS=[{key:'dash',name:'Dashboard'},{key:'inbox',name:'收件箱'},{key:'plan',name:'方案'},{key:'tasks',name:'任务'},{key:'jobs',name:'Jobs'},{key:'profile',name:'档案'}];
+const IB_KIND={digest:'决策卡片',ruling:'裁决',ack:'回执'};
 
 let token=localStorage.getItem('ops_token');
 let clientsData=[];
@@ -510,6 +555,9 @@ let blogSocial={};
 let showDone=false,taskDays=0;
 let lastOverview=null,lastAttention=null,excOpen={};
 let apprPlanId=0,apprTasks=[],apprPick={};
+/* 决策收件箱：全局跨客户流，客户过滤只是个筛子。裁决草稿按卡片 id 存内存，
+   刷新会重画卡片，草稿从这里补回去，不会被自动刷新吃掉。 */
+let inboxData=[],inboxOpenTotal=0,inboxClient=0,inboxOnlyOpen=false,inboxDraft={};
 
 function priIdx(p){const n=PRIORITIES.indexOf(p||'P2');return n<0?2:n}
 function getRole(){
@@ -609,6 +657,7 @@ function render(){
 
 function loadView(){
   if(curView==='dash')loadOverview();
+  else if(curView==='inbox')loadInbox();
   else if(curView==='plan')loadPlans();
   else if(curView==='tasks')loadTasks();
   else if(curView==='jobs'){loadJobs();renderPickHint()}
@@ -620,6 +669,7 @@ async function loadClients(keepView){
   const d=await api('/clients');
   if(fail(d,'客户列表载入失败'))return;
   clientsData=d.clients||[];
+  inboxOpenTotal=d.inbox_open_total||0;
   if(keepView)renderSidebar();
   else router();
 }
@@ -628,6 +678,7 @@ function sbRow(c){
   const on=c.client_id===curId;
   const arch=c.status==='archived';
   let pills='';
+  if(c.inbox_open)pills+='<span class="sb-pill inbox" title="待裁决的决策卡片">'+c.inbox_open+'</span>';
   if(c.tasks_open)pills+='<span class="sb-pill tasks" title="待办任务">'+c.tasks_open+'</span>';
   if(c.facts_pending)pills+='<span class="sb-pill facts" title="待确认 facts">'+c.facts_pending+'</span>';
   const act=arch
@@ -638,6 +689,13 @@ function sbRow(c){
 }
 
 function renderSidebar(){
+  /* 收件箱是跨客户的，所以它坐在客户列表上面，不属于任何一行。
+     徽标是全局待裁决卡片数，含没有归属客户的那些。 */
+  document.getElementById('sbInbox').innerHTML=
+    '<div class="sb-inbox'+(curView==='inbox'?' on':'')+'" onclick="gotoInbox()">'+
+    '<span class="t">决策收件箱</span>'+
+    (inboxOpenTotal?'<span class="sb-pill inbox">'+inboxOpenTotal+'</span>':'<span class="muted" style="font-size:11px">无待办</span>')+
+    '</div>';
   const act=clientsData.filter(c=>c.status!=='archived');
   const arch=clientsData.filter(c=>c.status==='archived');
   document.getElementById('sbList').innerHTML=act.length?act.map(sbRow).join(''):'<div class="sb-empty">还没有客户。</div>';
@@ -793,6 +851,152 @@ function renderDash(){
       '</tbody></table>'):'<span class="lane-empty">还没有 job 记录。</span>')+'</div></div>';
 
   document.getElementById('v_dash').innerHTML=html;
+}
+
+/* ================= 决策收件箱 ================= */
+/* 流是全局的，客户过滤只是个筛子，默认「全部客户」。
+   卡片正文是 runner 写的中文 markdown，这里按行渲染而不是走 mdRender：
+   ### 开头是一条决策项的标题，推荐： 开头的那行要高亮，这两件事逐行处理最稳。 */
+function gotoInbox(){
+  const first=clientsData.filter(c=>c.status==='active')[0]||clientsData[0];
+  const id=curId||(first?first.client_id:0);
+  if(!id){toast('还没有客户，先添加一个',true);return}
+  inboxClient=0;
+  navTo(id,'inbox');
+}
+function setInboxClient(v){inboxClient=parseInt(v,10)||0;loadInbox()}
+function toggleInboxOpen(){inboxOnlyOpen=!inboxOnlyOpen;loadInbox()}
+function setInboxDraft(id,v){inboxDraft[id]=v}
+
+async function loadInbox(){
+  let q='/inbox?limit=60';
+  if(inboxClient)q+='&client_id='+inboxClient;
+  if(inboxOnlyOpen)q+='&status=open';
+  const d=await api(q);
+  if(fail(d,'收件箱载入失败'))return;
+  inboxData=d.items||[];
+  inboxOpenTotal=d.open_count||0;
+  renderInbox();
+  renderSidebar();
+}
+
+function ibClientLabel(r){
+  return r.client_id?(r.client_name||('客户 #'+r.client_id)):'跨客户';
+}
+
+function ibDigestBody(s){
+  const lines=String(s==null?'':s).split('\n');
+  let html='';
+  for(let k=0;k<lines.length;k++){
+    const t=lines[k].replace(/\s+$/,'');
+    if(t.trim()==='')continue;
+    if(/^###\s+/.test(t)){html+='<div class="ib-item-h">'+esc(t.replace(/^###\s+/,''))+'</div>';continue}
+    if(/^推荐：/.test(t)){html+='<div class="ib-rec">'+esc(t)+'</div>';continue}
+    html+='<div class="ib-line">'+esc(t)+'</div>';
+  }
+  return html||'<span class="muted">这张卡片没有正文。</span>';
+}
+
+function ibMsg(r){
+  return '<div class="ib-head">'+
+    '<span class="badge '+r.kind+'">'+(IB_KIND[r.kind]||r.kind)+'</span>'+
+    '<span class="muted">'+esc(r.created_by||'')+'</span>'+
+    '<span class="muted">'+esc(r.created_at||'')+'</span></div>'+
+    '<div class="ib-msg '+(r.kind==='ruling'?'ib-ruling':'ib-ack')+'">'+esc(r.body||'')+'</div>';
+}
+
+function ibReplies(id,kids){
+  const list=(kids[id]||[]).slice().sort((a,b)=>a.id-b.id);
+  return list.map(r=>'<div class="ib-reply">'+ibMsg(r)+ibReplies(r.id,kids)+'</div>').join('');
+}
+
+function ibDigestCard(r,kids){
+  const open=r.status==='open';
+  const refs=(r.refs&&r.refs.tasks)||[];
+  const head='<div class="ib-head">'+
+    '<span class="badge '+(open?'proposed':'done')+'">'+(open?'待裁决':'已处理')+'</span>'+
+    '<span class="badge mod">'+esc(ibClientLabel(r))+'</span>'+
+    '<span class="muted">卡片 #'+r.id+'</span>'+
+    '<span class="muted">'+esc(r.created_at||'')+'</span>'+
+    '<span class="muted">'+(refs.length?('涉及任务 '+refs.length+' 个：#'+refs.join('、#')):'未关联任务')+'</span>'+
+    '</div>';
+  let form='';
+  if(open){
+    form='<div class="ib-form">'+
+      '<div class="fld"><textarea id="ib_text_'+r.id+'" oninput="setInboxDraft('+r.id+',this.value)" '+
+        'placeholder="用人话写，例如：#12 批了；#13 先卡住，等客户回话；#15 提到 P0。写完提交，fable 会翻译成看板动作再回执给你。">'+
+        esc(inboxDraft[r.id]||'')+'</textarea></div>'+
+      '<div class="fb-row">'+
+        '<button class="btn tiny" id="ib_btn_'+r.id+'" onclick="submitRuling('+r.id+')">提交裁决</button>'+
+        '<button class="btn tiny ghost" onclick="resolveDigest('+r.id+')">手动关卡</button>'+
+        '<span class="plan-meta">发邮件、上线部署、对外发布这类操作不在裁决范围内，会被拒绝并写进回执。</span>'+
+      '</div></div>';
+  }
+  return '<div class="ib-thread"><div class="ib-card'+(open?' open':'')+'">'+head+
+    '<div class="ib-body">'+ibDigestBody(r.body)+'</div>'+
+    ibReplies(r.id,kids)+form+'</div></div>';
+}
+
+function renderInbox(){
+  const sel=document.getElementById('ibClient');
+  if(sel){
+    sel.innerHTML='<option value="0">全部客户</option>'+
+      clientsData.map(c=>'<option value="'+c.client_id+'"'+(c.client_id===inboxClient?' selected':'')+'>'+esc(c.name)+'</option>').join('');
+  }
+  const btn=document.getElementById('ibOpenBtn');
+  if(btn)btn.className=inboxOnlyOpen?'btn':'btn ghost';
+  const meta=document.getElementById('ibMeta');
+  if(meta){
+    const openHere=inboxData.filter(r=>r.kind==='digest'&&r.status==='open').length;
+    meta.textContent='本页 '+inboxData.length+' 条消息，待裁决 '+openHere+' 张，全局待裁决 '+inboxOpenTotal+' 张';
+  }
+  const box=document.getElementById('ibStream');
+  if(!box)return;
+  if(!inboxData.length){
+    box.innerHTML='<div class="panel"><span class="ib-empty">还没有消息。去 Jobs 控制台跑一次 Fable 巡检，它会把需要人拍板的事写成卡片送到这里。</span></div>';
+    return;
+  }
+  const byId={},kids={};
+  inboxData.forEach(r=>{byId[r.id]=r});
+  inboxData.forEach(r=>{
+    if(r.reply_to&&byId[r.reply_to]){
+      if(!kids[r.reply_to])kids[r.reply_to]=[];
+      kids[r.reply_to].push(r);
+    }
+  });
+  /* 挂不上父卡片的（父卡片被 limit 截掉了）单独成条，别把它们吞掉 */
+  const roots=inboxData.filter(r=>!r.reply_to||!byId[r.reply_to]);
+  box.innerHTML=roots.map(r=>r.kind==='digest'
+    ? ibDigestCard(r,kids)
+    : ('<div class="ib-thread"><div class="ib-card">'+ibMsg(r)+ibReplies(r.id,kids)+'</div></div>')).join('');
+}
+
+async function submitRuling(id){
+  const el=document.getElementById('ib_text_'+id);
+  const text=(el?el.value:(inboxDraft[id]||'')).trim();
+  if(!text){toast('先写一句裁决',true);return}
+  if(text.length>5000){toast('裁决最多 5000 字',true);return}
+  const btn=document.getElementById('ib_btn_'+id);
+  if(btn)btn.disabled=true;
+  const d=await api('/inbox/'+id+'/ruling','POST',{text});
+  if(btn)btn.disabled=false;
+  if(!d)return;
+  if(d._status===409){toast('这张卡片已经有一条裁决在处理中（job #'+(d.job_id||'?')+'），等回执出来再补',true);return}
+  if(fail(d,'裁决提交失败'))return;
+  inboxDraft[id]='';
+  toast('裁决已提交，job #'+d.job_id+' 正在解析，回执会出现在卡片下面');
+  loadInbox();
+  loadClients(true);
+}
+
+async function resolveDigest(id){
+  const note=prompt('直接把这张卡片标记为已处理，不会派任何动作。可以留一句备注，空着也行：','');
+  if(note===null)return;
+  const d=await api('/inbox/'+id+'/resolve','POST',{note:note});
+  if(fail(d,'关卡失败'))return;
+  toast('卡片已关闭');
+  loadInbox();
+  loadClients(true);
 }
 
 /* ================= 档案 ================= */
@@ -1518,6 +1722,7 @@ function boot(){
     if(document.getElementById('apprBg').classList.contains('show'))return;
     if(curView==='jobs')loadJobs();
     else if(curView==='dash')loadOverview();
+    else if(curView==='inbox')loadInbox();
   },15000);
 }
 boot();

@@ -178,6 +178,36 @@ class Api {
   async requestRevise(taskId, reason) {
     return this.req('POST', '/tasks/' + encodeURIComponent(taskId) + '/revise', { reason: reason || '' });
   }
+
+  /**
+   * GET /inbox/{id} -> { item, replies, ref_tasks }
+   * One decision inbox row plus the task rows its refs point at. This is the
+   * only read the ruling runner needs: it never enumerates the board.
+   */
+  async getInboxItem(id) {
+    return this.req('GET', '/inbox/' + encodeURIComponent(id));
+  }
+
+  /**
+   * POST /inbox body { client_id, kind: 'digest'|'ack', body, refs, reply_to, resolve }
+   * The worker may only write a digest or an ack. A ruling is a human's own
+   * words and can only be created through the admin endpoint.
+   * resolve carries a digest id to settle in the same call.
+   */
+  async postInbox(body) {
+    return this.req('POST', '/inbox', body);
+  }
+
+  /**
+   * POST /inbox/{id}/actions body { ruling_id, actions: [...] } -> { results }
+   * Hands the server the action list read out of one ruling. The server owns
+   * the whitelist and the refs scope check; nothing is executed on this side.
+   * Individual actions may be refused, which is reported per action rather
+   * than as a request failure.
+   */
+  async postInboxActions(digestId, body) {
+    return this.req('POST', '/inbox/' + encodeURIComponent(digestId) + '/actions', body);
+  }
 }
 
 module.exports = { Api };
