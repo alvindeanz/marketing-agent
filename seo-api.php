@@ -23,6 +23,12 @@ $WAKE_SECRET='seo-wake-2f8c1b7e';
 $FEEDBACK_DIR='/www/wwwroot/always-uploads/feedback';
 $FEEDBACK_MAX_BYTES=5*1024*1024;
 $FEEDBACK_MAX_IMAGES=5;
+/* Task deliverables. Same sibling-of-webroot arrangement as the feedback
+   screenshots, same open_basedir dependency. These are files a human has to
+   hand carry into an external system (a disavow txt into GSC, for example),
+   so the worker writes them here and the board hands them back on click. */
+$DELIVERABLE_DIR='/www/wwwroot/always-uploads/deliverables';
+$DELIVERABLE_MAX_BYTES=5*1024*1024;
 
 /* Every value seo_snapshots.source is allowed to take. One list, used by the
    routes for validation and by ensure_snapshot_sources() for the ENUM widen,
@@ -138,6 +144,31 @@ function ensure_feedback_schema(){
         db()->exec("ALTER TABLE seo_feedback ADD COLUMN images TEXT DEFAULT NULL AFTER `text`");
     }
     ensure_job_types();
+}
+
+/* Deliverables schema, created lazily on the first deliverable request, same
+   pattern as seo_feedback. One row per file the worker handed up, one physical
+   file per row under $DELIVERABLE_DIR.
+   No foreign key to seo_tasks on purpose: the rest of this schema does not use
+   them either, and a delivered file outliving a deleted task is a leak we can
+   see, not a 500 in the middle of a job. */
+function ensure_deliverables_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_deliverables (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_id INT NOT NULL,
+        client_id INT NOT NULL,
+        orig_name VARCHAR(200) NOT NULL DEFAULT '',
+        stored_name VARCHAR(64) NOT NULL,
+        bytes INT NOT NULL DEFAULT 0,
+        mime VARCHAR(128) NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_seo_deliverables_stored (stored_name),
+        KEY idx_seo_deliverables_task (task_id, id),
+        KEY idx_seo_deliverables_client (client_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 
 /* seo_snapshots.source is an ENUM too, and content_registry was added to it
@@ -309,6 +340,85 @@ function fb_upload_error($code){
         case UPLOAD_ERR_EXTENSION: return 'A PHP extension blocked the upload';
     }
     return 'Upload failed with code '.(int)$code;
+}
+
+/* Task deliverables.
+   Same storage discipline as the screenshots above: outside the webroot,
+   random hex on disk, the uploaded name kept only as a label in the database.
+   The difference is that these come back out as downloads, not as thumbnails,
+   so the original name matters and travels in Content-Disposition. */
+define('DELIVERABLE_EXTS',['txt','csv','md','pdf','json']);
+function dl_dir(){global $DELIVERABLE_DIR;return rtrim($DELIVERABLE_DIR,'/');}
+function dl_dir_ready(){
+    $d=dl_dir();
+    if(!is_dir($d))@mkdir($d,0750,true);
+    return is_dir($d)&&is_writable($d);
+}
+function dl_name_ok($n){return (bool)preg_match('#^[a-f0-9]{32}\.(txt|csv|md|pdf|json)$#',(string)$n);}
+function dl_path($n){return dl_dir().'/'.$n;}
+
+/* The uploaded name, reduced to something safe to store and to echo back in a
+   header. Path separators and control characters go, the extension is kept,
+   the base is capped so a pathological name can not fill the column. */
+function dl_clean_name($n,$fallbackExt){
+    $n=basename(str_replace('\\','/',(string)$n));
+    $n=preg_replace('#[\x00-\x1f\x7f"\'\\\\/]+#','_',$n);
+    $n=trim($n,". \t");
+    $ext=strtolower(pathinfo($n,PATHINFO_EXTENSION));
+    $base=pathinfo($n,PATHINFO_FILENAME);
+    if(!in_array($ext,DELIVERABLE_EXTS,true)){$ext=$fallbackExt;}
+    if($base===''||$base===null)$base='deliverable';
+    if(mb_strlen($base,'UTF-8')>100)$base=mb_substr($base,0,100,'UTF-8');
+    return $base.'.'.$ext;
+}
+
+/* finfo is a veto here, not a match.
+   A pdf must really be a pdf. For the text formats the sniffed type is only
+   used to keep binaries out: finfo happily calls a markdown file with html in
+   it text/html and a txt starting with <?php text/x-php, and rejecting those
+   would only produce false alarms. Nothing serves these bytes as html anyway,
+   the download route forces octet-stream plus nosniff plus attachment. */
+function dl_mime_ok($ext,$mime){
+    $mime=strtolower((string)$mime);
+    if($ext==='pdf')return $mime==='application/pdf';
+    if(strpos($mime,'text/')===0)return true;
+    return in_array($mime,['application/json','application/csv','application/x-empty','inode/x-empty'],true);
+}
+
+/* The deliverable rows for a set of task ids, keyed by task id.
+   One query for the whole board, so the task list does not fan out per card. */
+function deliverables_by_task($ids){
+    $ids=array_values(array_unique(array_map('intval',$ids)));
+    if(!$ids)return [];
+    ensure_deliverables_schema();
+    $in=implode(',',array_fill(0,count($ids),'?'));
+    $q=db()->prepare("SELECT id,task_id,orig_name,stored_name,bytes,mime,created_at
+        FROM seo_deliverables WHERE task_id IN ($in) ORDER BY task_id,id");
+    $q->execute($ids);
+    $by=[];
+    foreach($q->fetchAll() as $r){
+        $tid=(int)$r['task_id'];
+        $r['id']=(int)$r['id'];
+        $r['task_id']=$tid;
+        $r['bytes']=(int)$r['bytes'];
+        if(!isset($by[$tid]))$by[$tid]=[];
+        $by[$tid][]=$r;
+    }
+    return $by;
+}
+/* Hang a deliverables array on every task row, empty array when there are none,
+   so the front end never has to test for the key's existence. */
+function attach_deliverables($tasks){
+    if(!$tasks)return $tasks;
+    $ids=[];
+    foreach($tasks as $t){$ids[]=(int)$t['id'];}
+    $by=deliverables_by_task($ids);
+    foreach($tasks as &$t){
+        $tid=(int)$t['id'];
+        $t['deliverables']=isset($by[$tid])?$by[$tid]:[];
+    }
+    unset($t);
+    return $tasks;
 }
 
 $m=$_SERVER['REQUEST_METHOD'];
@@ -486,6 +596,144 @@ if($m==='GET'&&preg_match('#^/feedback_file/([A-Za-z0-9._-]+)$#',$ROUTE,$mm)){
     header('Cache-Control: private, max-age=300');
     header('X-Content-Type-Options: nosniff');
     header('Content-Disposition: inline; filename="'.$name.'"');
+    readfile($p);
+    exit;
+}
+
+// POST /tasks/{id}/deliverables -> one finished file the worker wants a human
+// to collect, multipart form field "file", optional form field "name" carrying
+// the original filename when the multipart filename is not trustworthy.
+// Worker only: this is the tail of a job, never a browser action.
+// Idempotent on (task_id, orig_name): re-running a task replaces the previous
+// copy instead of stacking another one on the card. Replacement is "write the
+// new file under a new random name, then drop the old row", because the files
+// belong to the www user and this API can not always unlink them. A physical
+// file we failed to remove is reported back and logged, never retried.
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
+    auth_worker();
+    ensure_deliverables_schema();
+    $tid=(int)$mm[1];
+    $tq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
+    $tq->execute([$tid]);
+    $task=$tq->fetch();
+    if(!$task)res(404,['error'=>'Task not found']);
+    $cid=(int)$task['client_id'];
+
+    if(!isset($_FILES['file'])){
+        /* Same blind spot as /feedback_upload: an oversized POST is thrown away
+           before this script runs and leaves $_FILES and $_POST both empty. */
+        $clen=(int)($_SERVER['CONTENT_LENGTH']??0);
+        if($clen>0&&!$_POST)res(400,['error'=>'Upload rejected before PHP saw it, larger than post_max_size']);
+        res(400,['error'=>'file field required']);
+    }
+    $f=$_FILES['file'];
+    if(is_array($f['name']))res(400,['error'=>'one file per request']);
+    if((int)$f['error']!==UPLOAD_ERR_OK)res(400,['error'=>fb_upload_error((int)$f['error'])]);
+    $size=(int)$f['size'];
+    if($size<=0)res(400,['error'=>'empty file']);
+    if($size>$DELIVERABLE_MAX_BYTES)res(400,['error'=>'File over 5MB']);
+    $tmp=(string)$f['tmp_name'];
+    if(!is_uploaded_file($tmp))res(400,['error'=>'not an uploaded file']);
+
+    /* The extension decides the type, and it may only come from a name we
+       whitelisted. finfo then vetoes anything whose bytes disagree. */
+    $claimed=(string)($_POST['name']??$f['name']);
+    $ext=strtolower(pathinfo(basename(str_replace('\\','/',$claimed)),PATHINFO_EXTENSION));
+    if(!in_array($ext,DELIVERABLE_EXTS,true)){
+        res(400,['error'=>'Only '.implode(', ',DELIVERABLE_EXTS).' files are accepted, got '.($ext!==''?$ext:'no extension')]);
+    }
+    $orig=dl_clean_name($claimed,$ext);
+    $mime='';
+    if(function_exists('finfo_open')){
+        $fi=finfo_open(FILEINFO_MIME_TYPE);
+        $mime=(string)finfo_file($fi,$tmp);
+        finfo_close($fi);
+    }
+    if($mime===''){
+        /* No finfo means no veto, and an unvetted upload is not worth having. */
+        res(500,['error'=>'fileinfo extension is unavailable, refusing to store an unverified upload']);
+    }
+    if(!dl_mime_ok($ext,$mime))res(400,['error'=>'File contents do not look like '.$ext.', sniffed '.$mime]);
+    if(!dl_dir_ready())res(500,['error'=>'Deliverable directory is missing or not writable: '.dl_dir()]);
+
+    $stored=bin2hex(random_bytes(16)).'.'.$ext;
+    if(!@move_uploaded_file($tmp,dl_path($stored)))res(500,['error'=>'Could not store the upload in '.dl_dir()]);
+    @chmod(dl_path($stored),0640);
+
+    /* New row first, old rows second. A crash between the two shows a duplicate
+       on the card, which a human can see and clean up; the other order would
+       show nothing at all. */
+    db()->prepare("INSERT INTO seo_deliverables(task_id,client_id,orig_name,stored_name,bytes,mime)VALUES(?,?,?,?,?,?)")
+        ->execute([$tid,$cid,$orig,$stored,$size,$mime]);
+    $did=(int)db()->lastInsertId();
+
+    $old=db()->prepare("SELECT id,stored_name FROM seo_deliverables WHERE task_id=? AND orig_name=? AND id<>?");
+    $old->execute([$tid,$orig,$did]);
+    $stale=$old->fetchAll();
+    $old->closeCursor();
+    $orphans=[];
+    foreach($stale as $s){
+        db()->prepare("DELETE FROM seo_deliverables WHERE id=?")->execute([(int)$s['id']]);
+        $sp=dl_path($s['stored_name']);
+        if(is_file($sp)&&!@unlink($sp))$orphans[]=$s['stored_name'];
+    }
+    audit('seo-worker','seo_deliverable_upload',(string)$tid,[
+        'client_id'=>$cid,'deliverable_id'=>$did,'orig_name'=>$orig,'stored_name'=>$stored,
+        'bytes'=>$size,'mime'=>$mime,'replaced'=>count($stale),'orphan_files'=>$orphans
+    ]);
+    res(200,[
+        'ok'=>true,'id'=>$did,'task_id'=>$tid,'orig_name'=>$orig,'stored_name'=>$stored,
+        'bytes'=>$size,'mime'=>$mime,'replaced'=>count($stale),'orphan_files'=>$orphans
+    ]);
+}
+
+// GET /tasks/{id}/deliverables -> the file list for one task, oldest first.
+// Either layer: the card reads it, and a runner may want to know what it
+// already handed up before it uploads again.
+if($m==='GET'&&preg_match('#^/tasks/(\d+)/deliverables$#',$ROUTE,$mm)){
+    auth_any();
+    ensure_deliverables_schema();
+    $tid=(int)$mm[1];
+    $s=db()->prepare("SELECT id,task_id,client_id,orig_name,stored_name,bytes,mime,created_at
+        FROM seo_deliverables WHERE task_id=? ORDER BY id");
+    $s->execute([$tid]);
+    $rows=$s->fetchAll();
+    foreach($rows as &$r){
+        $r['id']=(int)$r['id'];
+        $r['task_id']=(int)$r['task_id'];
+        $r['client_id']=(int)$r['client_id'];
+        $r['bytes']=(int)$r['bytes'];
+    }
+    unset($r);
+    res(200,['deliverables'=>$rows]);
+}
+
+// GET /deliverable_file/{stored_name} -> the file itself, as a download.
+// Same defence as /feedback_file: the name pattern is checked before it ever
+// touches a path, and the row has to exist. Always octet-stream and always an
+// attachment, so nothing here can be talked into rendering in the browser.
+if($m==='GET'&&preg_match('#^/deliverable_file/([A-Za-z0-9._-]+)$#',$ROUTE,$mm)){
+    auth_any();
+    ensure_deliverables_schema();
+    $name=$mm[1];
+    if(!dl_name_ok($name))res(400,['error'=>'bad file name']);
+    $q=db()->prepare("SELECT orig_name FROM seo_deliverables WHERE stored_name=? LIMIT 1");
+    $q->execute([$name]);
+    $row=$q->fetch();
+    $q->closeCursor();
+    if(!$row)res(404,['error'=>'File not found']);
+    $p=dl_path($name);
+    if(!is_file($p))res(404,['error'=>'File not found on disk']);
+    $orig=(string)$row['orig_name'];
+    /* Two filenames on purpose: an ascii fallback old clients understand, and
+       the RFC 5987 form for anything with non ascii in it. */
+    $ascii=preg_replace('#[^A-Za-z0-9._-]+#','_',$orig);
+    if($ascii==='')$ascii=$name;
+    header('Content-Type: application/octet-stream');
+    header('Content-Length: '.filesize($p));
+    header('Cache-Control: private, max-age=60');
+    header('X-Content-Type-Options: nosniff');
+    header('Content-Disposition: attachment; filename="'.$ascii.'"; filename*=UTF-8\'\''.rawurlencode($orig));
     readfile($p);
     exit;
 }
@@ -1744,12 +1992,14 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/reject$#',$ROUTE,$mm)){
 }
 
 // GET /tasks?client_id=
+// Every row carries its deliverables array, so the board can draw the download
+// list without a second request per card.
 if($m==='GET'&&$ROUTE==='/tasks'){
     auth_admin();
     $cid=need_client();
     $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
     $s->execute([$cid]);
-    res(200,['tasks'=>$s->fetchAll()]);
+    res(200,['tasks'=>attach_deliverables($s->fetchAll())]);
 }
 
 // POST /tasks

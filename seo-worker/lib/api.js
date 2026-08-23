@@ -1,7 +1,7 @@
 'use strict';
 // Thin client for the ops-tracker SEO agent API (seo-api.php).
 
-const { requestJson, downloadTo } = require('./http');
+const { requestJson, downloadTo, postMultipart } = require('./http');
 
 class Api {
   constructor(cfg) {
@@ -108,6 +108,36 @@ class Api {
         Accept: 'image/*',
       },
     });
+  }
+
+  /**
+   * POST /tasks/{id}/deliverables -> upload one finished file for a human to
+   * collect off the board. multipart, field "file", plus a "name" field so the
+   * server does not have to trust the multipart filename.
+   * The server replaces an earlier upload with the same name on the same task,
+   * so re-running a task does not stack copies on the card.
+   * Returns { ok, id, orig_name, stored_name, bytes, mime, replaced, orphan_files }.
+   */
+  async uploadTaskDeliverable(taskId, opts) {
+    return postMultipart(this.base + '/tasks/' + encodeURIComponent(taskId) + '/deliverables', {
+      timeoutMs: this.timeoutMs,
+      headers: {
+        Authorization: 'Bearer ' + this.token,
+        Accept: 'application/json',
+      },
+      fields: { name: opts.filename },
+      file: {
+        field: 'file',
+        filename: opts.filename,
+        contentType: opts.contentType || 'application/octet-stream',
+        buffer: opts.buffer,
+      },
+    });
+  }
+
+  /** GET /tasks/{id}/deliverables -> { deliverables: [...] } oldest first. */
+  async listTaskDeliverables(taskId) {
+    return this.req('GET', '/tasks/' + encodeURIComponent(taskId) + '/deliverables');
   }
 
   /** POST /snapshots body { client_id, source, period_start, period_end, data } */

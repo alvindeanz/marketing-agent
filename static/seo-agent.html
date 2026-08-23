@@ -169,6 +169,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .blog-social{font-size:12px;color:#cbd5e1;line-height:1.6;white-space:pre-wrap;word-break:break-word;background:#0f1117;border:1px solid #2d3748;border-radius:7px;padding:8px 10px;margin-bottom:5px}
 .blog-gist{font-size:11.5px;color:#64748b;line-height:1.55;word-break:break-word}
 
+/* 交付文件 */
+.dl-box{margin-top:8px;border:1px solid #26324a;border-radius:8px;background:#141a26;padding:9px 11px}
+.dl-title{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.dl-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:#cbd5e1;padding:3px 0}
+.dl-name{flex:1;min-width:0;word-break:break-all}
+.dl-size{font-size:10.5px;color:#64748b;flex-shrink:0}
+.dl-hint{font-size:10.5px;color:#64748b;margin-top:5px;line-height:1.5}
+
 /* 反馈框 */
 .fb-box{margin-top:8px;border-top:1px solid #1e293b;padding-top:9px}
 .fb-title{font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
@@ -1266,7 +1274,60 @@ function taskCard(t,lane){
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+
     '<span class="badge '+t.status+'">'+t.status+'</span>'+link+acts+'</div>'+
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
+    fileDeliverables(t)+
     (fbOpen[t.id]?feedbackBox(t):'')+'</div>';
+}
+
+/* ---- 交付文件 ---- */
+/* worker 收尾时把任务输出目录里的文件传到看板，这里列出来给人下载。
+   典型场景是 disavow txt 这种必须人工上传到外部系统、没有 API 的交付物。
+   没有文件就整块不渲染，卡片保持干净。 */
+function fmtBytes(n){
+  n=Number(n)||0;
+  if(n<1024)return n+' B';
+  if(n<1024*1024)return (n/1024).toFixed(n<10240?1:0)+' KB';
+  return (n/1048576).toFixed(1)+' MB';
+}
+function fileDeliverables(t){
+  const list=(t.deliverables||[]).filter(d=>d&&/^[a-f0-9]{32}\.(txt|csv|md|pdf|json)$/.test(String(d.stored_name||'')));
+  if(!list.length)return '';
+  const rows=list.map(d=>
+    '<div class="dl-row">'+
+      '<span class="dl-name">'+esc(d.orig_name||d.stored_name)+'</span>'+
+      '<span class="dl-size">'+fmtBytes(d.bytes)+'</span>'+
+      '<button class="btn tiny ghost" onclick="downloadDeliverable(\''+esc(d.stored_name)+'\',this)">下载</button>'+
+    '</div>').join('');
+  return '<div class="dl-box"><div class="dl-title">交付文件 '+list.length+' 个</div>'+rows+
+    '<div class="dl-hint">这些文件需要人工拿去外部系统操作，下载后按任务备注里的说明处理。</div></div>';
+}
+
+/* 下载端点要带 JWT，<a href> 带不上头，所以先 fetch 成 blob 再用临时链接落盘。
+   文件名由服务端的 Content-Disposition 给，这里只在拿不到时兜底。 */
+async function downloadDeliverable(name,btn){
+  if(btn)btn.disabled=true;
+  let url=null;
+  try{
+    const r=await fetch(API+'/deliverable_file/'+encodeURIComponent(name),{headers:{'Authorization':'Bearer '+token}});
+    if(r.status===401){doLogout();return}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const cd=String(r.headers.get('Content-Disposition')||'');
+    let fn='';
+    const star=cd.match(/filename\*=UTF-8''([^;]+)/i);
+    if(star){try{fn=decodeURIComponent(star[1])}catch(e){fn=''}}
+    if(!fn){const plain=cd.match(/filename="([^"]+)"/i);if(plain)fn=plain[1]}
+    if(!fn)fn=name;
+    url=URL.createObjectURL(await r.blob());
+    const a=document.createElement('a');
+    a.href=url;a.download=fn;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }catch(e){
+    toast('交付文件下载失败：'+e.message,true);
+  }
+  /* 撤销要等浏览器把下载接过去，立刻 revoke 会让下载空掉 */
+  if(url)setTimeout(()=>{try{URL.revokeObjectURL(url)}catch(e){}},60000);
+  if(btn)btn.disabled=false;
 }
 
 /* ---- 博客交付三件套 ---- */

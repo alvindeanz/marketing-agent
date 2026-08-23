@@ -18,6 +18,7 @@ const { runClaude } = require('../lib/llm');
 const capabilities = require('../lib/capabilities');
 const wf = require('../lib/webforger');
 const { extractTrailingJson } = require('../lib/mdjson');
+const deliverables = require('../lib/deliverables');
 const { ensureClientWorkspace, summarize, truncate, localYmd } = require('../lib/util');
 
 const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*)';
@@ -218,6 +219,10 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
     'utf8'
   );
 
+  // Before either branch: a run that half worked can still have produced a file
+  // a human needs, so the upload is not conditional on the outcome.
+  await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
+
   if (problems.length) {
     const note =
       '发布后验证未通过，任务保持 review，需要人核对线上状态：' + problems.join('；') +
@@ -302,6 +307,11 @@ async function runOne(ctx, context, workspace, taskId) {
   log('task ' + taskId + ': execution record saved to ' + logFile);
 
   const outcome = readOutcome(output, log);
+
+  // Before the branch on purpose: an aborted apply may still have written the
+  // file a human has to carry somewhere by hand, and that is exactly when they
+  // need to be able to download it.
+  await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
 
   if (outcome.status === 'success') {
     await api.completeTask(taskId, {

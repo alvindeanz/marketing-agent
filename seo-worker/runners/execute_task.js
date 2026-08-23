@@ -23,6 +23,7 @@ const blogcheck = require('../lib/blogcheck');
 const blogimages = require('../lib/blogimages');
 const wf = require('../lib/webforger');
 const contentRegistry = require('../lib/registry');
+const deliverables = require('../lib/deliverables');
 const { ensureClientWorkspace, summarize, truncate, safeJson } = require('../lib/util');
 
 const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*)';
@@ -1112,6 +1113,9 @@ async function runBlogTask(ctx, context, workspace, task) {
     '要点：' + summarize(summary, 200),
   ].join('\n');
 
+  // Anything the pass left in the task's deliverable directory goes up before
+  // the result, so the card and its downloads appear together.
+  await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
   await api.postTaskResult(taskId, { output_url: previewUrl, note });
   log('task ' + taskId + '：已交付，任务进 review 等人转发客户');
   return draftFile;
@@ -1315,6 +1319,9 @@ async function runOne(ctx, context, workspace, taskId) {
       '。摘要：' +
       summarize(output, 400)
     : summarize(output, 500);
+  // Deliverables before the result: by the time the card shows up on the board
+  // its downloads are already attached to it.
+  await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
   await api.postTaskResult(taskId, { output_url: '', note });
   log(
     'task ' +
