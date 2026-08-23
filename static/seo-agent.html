@@ -248,6 +248,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .tcard-meta a:hover{text-decoration:underline}
 .tcard input[type=checkbox]{margin-top:3px;width:14px;height:14px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0}
 .lane-empty{font-size:12px;color:#3d4f63;font-style:italic;padding:8px 0}
+.lane-more{font-size:11.5px;color:#4a5b70;padding:9px 0 2px;margin-top:6px;border-top:1px dashed #1e293b;cursor:pointer;user-select:none}
+.lane-more:hover{color:#94a3b8}
 
 /* Tables (jobs + facts) */
 .job-btns{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
@@ -388,6 +390,9 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           <div class="sec-title">任务泳道</div>
           <div class="tb-group">
             <span class="plan-meta" id="taskFilterHint"></span>
+            <button class="btn" id="sc_current" onclick="setSprintScope('current')">本期</button>
+            <button class="btn ghost" id="sc_near" onclick="setSprintScope('near')">30 天</button>
+            <button class="btn ghost" id="sc_all" onclick="setSprintScope('all')">全部</button>
             <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已完成</button>
             <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
               <option value="0">全部时间</option>
@@ -560,7 +565,7 @@ let fbImgs={},fbUploading={},fbBlobs={},fbBlobBusy={};
 /* 博客任务的客户话术，按任务 id 存一份纯文本供复制按钮取用 */
 let blogSocial={};
 /* 任务视图筛选：默认藏起已完成，时间窗默认全部。只存内存，刷新即重置 */
-let showDone=false,taskDays=0;
+let showDone=false,taskDays=0,sprintScope='current';
 let lastOverview=null,lastAttention=null,excOpen={};
 let apprPlanId=0,apprTasks=[],apprPick={};
 /* 决策收件箱：全局跨客户流，客户过滤只是个筛子。裁决草稿按卡片 id 存内存，
@@ -1206,8 +1211,17 @@ async function loadTasks(){
 }
 
 /* ---- 任务视图过滤 ----
-   一条铁律：只有 done 的卡会被藏起来。任何还没办完的任务，不管多老，
-   永远显示，时间筛选只用来压历史噪音，不许把需要人处理的东西挡住。 */
+   两个互不干涉的维度，分工写死在这里，改之前先读完：
+
+   往回看（showDone 加 taskDays）：只作用于 done 的卡。没办完的任务不管多老，
+   这个维度永远不会藏它。
+
+   往前看（sprintScope）：只作用于排在未来 sprint 的卡。规划一次给六个双周
+   sprint，十几张卡一次铺开没法看，所以默认只看到当前 sprint 为止。被它藏起来的
+   卡一定是"还没到做的时候"，而且泳道底部永远有一行提示说还剩几个、点一下就放宽，
+   不会出现"有活但看不见也不知道"的情况。
+
+   两个维度合起来的效果：默认视图 = 当前 sprint 及之前、且没办完的任务。 */
 function taskTime(t){return String((t&&(t.updated_at||t.created_at))||'')}
 function withinWindow(t){
   if(!taskDays)return true;
@@ -1222,13 +1236,81 @@ function taskVisible(t){
 function toggleShowDone(){showDone=!showDone;renderLanes()}
 function setTaskDays(v){taskDays=parseInt(v,10)||0;renderLanes()}
 
+/* ---- 当前 sprint 的判定 ----
+   规则：未完成（非 done）任务里最小的 sprint 号就是当前 sprint。
+
+   为什么是这条，而不是按日期推：
+   后端没有任何 sprint 日期。seo_plans 只有 id/version/body/status/created_at，
+   没有 sprint 起始日期也没有"当前 sprint"字段；seo_tasks.sprint 是个
+   VARCHAR(10) 自由文本；方案正文是 Markdown，S1 到 S6 的分节只存在于散文里，
+   解析它既不稳也会随模型措辞变。唯一能当锚点的日期是 seo_plans.created_at，
+   而按"每 sprint 14 天"从它往后推，在真实数据上会直接把看板推空：
+   client 15 的方案 2026-08-13 生成，至今十天，推出来是 S1，而 S1 的三个任务
+   早就全 done 了，默认视图会一张卡都不剩。一个用来"看现在该干什么"的筛选器，
+   最不能接受的失败模式就是把该干的活藏光。
+
+   最小未完成 sprint 这条规则则是自校正的：它永远指向真正还欠着的那批活，
+   不依赖时钟（同一份数据永远给同一个答案，刷新、换时区、隔天打开都一样），
+   也不需要任何新后端字段。代价是如果有一个老 sprint 的任务被永久搁置，
+   当前 sprint 就会一直卡在那里；这种情况下底部提示行会一直显示"另有 N 个
+   任务在后续排期"，正好把这个搁置暴露出来，是想要的行为。
+
+   将来 seo_plans 真加了 sprint 起始日期或当前 sprint 字段，就在这个函数里
+   优先采信它，调用方不用改。 */
+function sprintNum(t){
+  /* 只认 S1 到 S9 这种 agent 排期用的标号。人工新增任务的 sprint 框
+     placeholder 是 W33 那种周号，跟 S 系不同量纲，排不出先后，一律当没有标签，
+     也就永远归到本期，不许被藏。空标签同理。 */
+  const m=String((t&&t.sprint)||'').trim().toUpperCase().match(/^S(\d+)$/);
+  return m?parseInt(m[1],10):null;
+}
+function currentSprint(tasks){
+  const open=[],all=[];
+  (tasks||[]).forEach(t=>{
+    const n=sprintNum(t);
+    if(n===null)return;
+    all.push(n);
+    if(t.status!=='done')open.push(n);
+  });
+  if(open.length)return Math.min.apply(null,open);
+  /* 全都做完了：停在最后一个 sprint，而不是跳到一个不存在的下一期，
+     这样开着"显示已完成"的人还能看到刚收尾的那批。 */
+  if(all.length)return Math.max.apply(null,all);
+  return 1;
+}
+/* 三档往前看的范围。current 只到当前 sprint 为止，near 再往后放两个 sprint
+   （near = 当前加下一个 sprint，两个双周约 28 天，「30 天」标签才名实相符），
+   all 不做任何 sprint 限制。 */
+function scopeHorizon(cur){
+  if(sprintScope==='all')return Infinity;
+  if(sprintScope==='near')return cur+1;
+  return cur;
+}
+function withinScope(t,cur){
+  if(sprintScope==='all')return true;
+  const n=sprintNum(t);
+  if(n===null)return true; // 没有 S 标签的任务永远算本期
+  return n<=scopeHorizon(cur);
+}
+function setSprintScope(v){sprintScope=v;renderLanes()}
+function widenSprintScope(){
+  sprintScope=sprintScope==='current'?'near':'all';
+  renderLanes();
+}
+
 function renderLanes(){
-  let hiddenTotal=0;
+  let doneHiddenTotal=0,laterTotal=0;
+  const cur=currentSprint(tasksData);
   document.getElementById('lanes').innerHTML=LANES.map(lane=>{
     const rows=tasksData.filter(t=>t.owner_type===lane.key);
-    const vis=rows.filter(taskVisible);
-    const hidden=rows.length-vis.length;
-    hiddenTotal+=hidden;
+    /* 两级过滤分开算，两个提示各说各的：先滤掉按"往回看"该藏的已完成任务，
+       剩下的再按"往前看"滤掉排在未来 sprint 的。 */
+    const afterDone=rows.filter(taskVisible);
+    const vis=afterDone.filter(t=>withinScope(t,cur));
+    const doneHidden=rows.length-afterDone.length;
+    const later=afterDone.length-vis.length;
+    doneHiddenTotal+=doneHidden;
+    laterTotal+=later;
     let body='';
     TASK_STATUSES.forEach(st=>{
       const grp=vis.filter(t=>t.status===st).sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
@@ -1236,19 +1318,36 @@ function renderLanes(){
       body+='<div class="grp-label">'+st+' ('+grp.length+')</div>';
       body+=grp.map(t=>taskCard(t,lane.key)).join('');
     });
-    if(!body)body='<div class="lane-empty">'+(hidden?'只有已完成任务，已按当前筛选隐藏。':'暂无任务。')+'</div>';
+    if(!body){
+      body='<div class="lane-empty">'+
+        (later?'本期没有任务，都排在后面的 sprint。'
+             :(doneHidden?'只有已完成任务，已按当前筛选隐藏。':'暂无任务。'))+
+        '</div>';
+    }
+    /* 被"往前看"藏起来的活必须留个明面上的出口，点一下就放宽一档。 */
+    if(later){
+      body+='<div class="lane-more" onclick="widenSprintScope()" title="点击放宽到下一档">'+
+        '另有 '+later+' 个任务在后续排期，点击查看</div>';
+    }
     return '<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
       '<span class="lane-count">'+vis.length+
-      (hidden?' <span class="lane-hidden">(+'+hidden+' 已完成)</span>':'')+
+      (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' 已完成)</span>':'')+
+      (later?' <span class="lane-hidden">(+'+later+' 后续)</span>':'')+
       '</span></div><div class="lane-body">'+body+'</div></div>';
   }).join('');
   const tg=document.getElementById('doneToggle');
   if(tg)tg.className=showDone?'btn':'btn ghost';
+  ['current','near','all'].forEach(k=>{
+    const b=document.getElementById('sc_'+k);
+    if(b)b.className=(sprintScope===k)?'btn':'btn ghost';
+  });
   const hint=document.getElementById('taskFilterHint');
   if(hint){
-    hint.textContent=hiddenTotal
-      ?('已隐藏 '+hiddenTotal+' 个已完成任务，未办完的不受筛选影响')
-      :'未办完的任务永远显示，筛选只作用于已完成';
+    const bits=[];
+    bits.push(sprintScope==='all'?'全部排期':('当前 S'+cur+(sprintScope==='near'?' 加后两个 sprint':'')));
+    if(laterTotal)bits.push('另有 '+laterTotal+' 个排在后面');
+    if(doneHiddenTotal)bits.push('已隐藏 '+doneHiddenTotal+' 个已完成');
+    hint.textContent=bits.join('，');
   }
   renderRelease();
   renderPickHint();
@@ -1670,6 +1769,8 @@ function opsTags(t){
 }
 
 /* ---- 待放行 ---- */
+/* 故意不套 sprint 档位，也不套已完成筛选：这里列的是已经跑完、正等人放行的任务，
+   排期在哪个 sprint 无所谓，藏掉一条就是把一件等着人处理的事情弄丢。 */
 function renderRelease(){
   const rev=tasksData.filter(t=>t.status==='review');
   const sec=document.getElementById('releaseSec');
@@ -1732,8 +1833,16 @@ function pickedIds(){return Object.keys(picked).filter(k=>picked[k]).map(k=>pars
 function renderPickHint(){
   const el=document.getElementById('pickHint');
   if(!el)return;
-  const n=pickedIds().length;
-  el.textContent=n?('已选 '+n+' 个 agent 任务，「执行选中任务」会把它们塞进 payload。'):'在「任务」视图勾选已批准的 agent 任务，再回来点「执行选中任务」。';
+  const ids=pickedIds();
+  const n=ids.length;
+  if(!n){el.textContent='在「任务」视图勾选已批准的 agent 任务，再回来点「执行选中任务」。';return}
+  /* 勾选是按 id 记的，跟渲染无关：先在「全部」档勾了后面 sprint 的任务，再切回
+     「本期」，那张卡会从泳道上消失但仍然在 payload 里。这里点名说破，免得有人
+     以为看不见就等于没选。 */
+  const cur=currentSprint(tasksData);
+  const hidden=tasksData.filter(t=>ids.indexOf(t.id)>=0&&!withinScope(t,cur)).length;
+  el.textContent='已选 '+n+' 个 agent 任务，「执行选中任务」会把它们塞进 payload。'+
+    (hidden?('其中 '+hidden+' 个排在后续 sprint，当前档位看不到但仍会被执行。'):'');
 }
 
 async function cyclePriority(id,cur){
