@@ -121,6 +121,24 @@ async function uploadTaskDeliverables(ctx, taskId, workspace) {
     const dir = taskDeliverableDir(workspace, taskId);
     result.dir = dir;
     const found = listDeliverables(dir);
+    // 顶层的方案与分析产物也算交付物：prepare 落 change-plan-task-{id}.md，
+    // analysis 落 task-{id}-{stamp}.md，都在 seo-agent-output 顶层而非 task-{id}/
+    // 子目录。不改 runner 落点（apply_task 按老路径找方案文件），扫描侧兼容。
+    const topDir = path.join(workspace, OUTPUT_DIRNAME);
+    const tid = String(taskId);
+    try {
+      fs.readdirSync(topDir, { withFileTypes: true }).forEach((ent) => {
+        if (!ent.isFile()) return;
+        const n = ent.name;
+        const isPlan = n === 'change-plan-task-' + tid + '.md';
+        const isAnalysis = n.indexOf('task-' + tid + '-') === 0 && n.slice(-3) === '.md';
+        if (!isPlan && !isAnalysis) return;
+        const full = path.join(topDir, n);
+        const st = fs.statSync(full);
+        if (st.size === 0 || st.size > MAX_BYTES) return;
+        found.files.push({ name: n, full, bytes: st.size });
+      });
+    } catch (e) { /* 顶层目录读不到就只用子目录结果 */ }
     result.skipped = found.skipped;
     found.skipped.forEach((s) => log('task ' + taskId + '：交付文件忽略 ' + s));
     if (!found.files.length) return result;
