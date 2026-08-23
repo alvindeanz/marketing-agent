@@ -1158,8 +1158,9 @@ if($m==='GET'&&preg_match('#^/inbox/(\d+)$#',$ROUTE,$mm)){
     $row=$s->fetch();
     if(!$row)res(404,['error'=>'Inbox item not found']);
     $item=inbox_row_out($row);
-    $rp=db()->prepare("SELECT * FROM seo_inbox WHERE reply_to=? ORDER BY id");
-    $rp->execute([$id]);
+    /* 线程取两层：挂在 digest 下的 ruling，加挂在这些 ruling 下的 ack */
+    $rp=db()->prepare("SELECT * FROM seo_inbox WHERE reply_to=? OR reply_to IN (SELECT id FROM (SELECT id FROM seo_inbox WHERE reply_to=?) x) ORDER BY id");
+    $rp->execute([$id,$id]);
     $replies=[];
     foreach($rp->fetchAll() as $r)$replies[]=inbox_row_out($r);
     res(200,['item'=>$item,'replies'=>$replies,'ref_tasks'=>inbox_ref_tasks($item['refs'])]);
