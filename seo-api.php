@@ -2561,16 +2561,22 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     }
     $vals['brand_regex']=$br;
 
-    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+    /* workspace_dir 是执行机目录名，字符集从严：小写字母数字和 . _ -，防路径注入。 */
+    $wd=trim($vals['workspace_dir']);
+    if($wd!==''&&!preg_match('/^[a-z0-9._-]{1,64}$/',$wd))res(400,['error'=>'workspace_dir 只允许小写字母数字和 . _ -']);
+    $sdb=trim($vals['semrush_db']);
+    if($sdb!==''&&!preg_match('/^[a-z]{2,8}$/',$sdb))res(400,['error'=>'semrush_db 应为 nz / au / us 这类小写库代号']);
+    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,semrush_db,workspace_dir,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON DUPLICATE KEY UPDATE platform=VALUES(platform),domain=VALUES(domain),ga4_property=VALUES(ga4_property),
-            gsc_property=VALUES(gsc_property),semrush_project=VALUES(semrush_project),target_keywords=VALUES(target_keywords),
+            gsc_property=VALUES(gsc_property),semrush_project=VALUES(semrush_project),
+            semrush_db=VALUES(semrush_db),workspace_dir=VALUES(workspace_dir),target_keywords=VALUES(target_keywords),
             brand_regex=VALUES(brand_regex),
             business_goals=VALUES(business_goals),conversion_goals=VALUES(conversion_goals),notes=VALUES(notes),
             status=VALUES(status),report_lang=VALUES(report_lang)";
     db()->prepare($sql)->execute([
         $cid,$vals['platform'],$vals['domain'],$vals['ga4_property'],$vals['gsc_property'],
-        $vals['semrush_project'],$kwJson,$vals['brand_regex'],
+        $vals['semrush_project'],$sdb,$wd,$kwJson,$vals['brand_regex'],
         $vals['business_goals'],$vals['conversion_goals'],$vals['notes'],$st,$lang
     ]);
     audit($u['username'],'seo_profile_save',(string)$cid,['domain'=>$vals['domain'],'status'=>$st,'report_lang'=>$lang]);
