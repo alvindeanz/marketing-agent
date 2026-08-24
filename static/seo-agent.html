@@ -769,7 +769,7 @@ function router(){
 function render(){
   renderSidebar();
   const c=clientsData.filter(x=>x.client_id===curId)[0];
-  document.getElementById('clientName').textContent=c?c.name:(curId?('客户 #'+curId):'未选择客户');
+  document.getElementById('clientName').textContent=c?('#'+c.client_id+' '+c.name):(curId?('客户 #'+curId):'未选择客户');
   document.getElementById('clientDomain').textContent=c?(c.domain||'未填写域名'):'';
   document.getElementById('viewTabs').innerHTML=curId?VIEWS.map(v=>
     '<button class="view-tab'+(v.key===curView?' on':'')+'" onclick="navTo('+curId+',\''+v.key+'\')">'+v.name+'</button>').join(''):'';
@@ -817,7 +817,7 @@ function sbRow(c){
     ? '<span class="sb-act" title="恢复" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'active\')">恢复</span>'
     : '<span class="sb-act" title="归档" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'archived\')">归档</span>';
   return '<div class="sb-row'+(on?' on':'')+(arch?' arch':'')+'" onclick="navTo('+c.client_id+',\''+curView+'\')">'+
-    '<span class="sb-name" title="'+esc(c.name)+'">'+esc(c.name)+'</span>'+pills+act+'</div>';
+    '<span class="sb-name" title="#'+c.client_id+' '+esc(c.name)+'"><span class="muted">#'+c.client_id+'</span> '+esc(c.name)+'</span>'+pills+act+'</div>';
 }
 
 function renderSidebar(){
@@ -858,7 +858,7 @@ async function openAddClient(){
   if(fail(d,'可选客户载入失败')){sel.innerHTML='<option value="">载入失败</option>';return}
   const list=d.clients||[];
   sel.innerHTML='<option value="">-- 不选，用下面的新名字 --</option>'+
-    list.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('');
+    list.map(c=>'<option value="'+c.id+'">#'+c.id+' '+esc(c.name)+'</option>').join('');
 }
 function closeAddClient(){document.getElementById('addBg').classList.remove('show')}
 document.getElementById('addBg').addEventListener('click',e=>{if(e.target.id==='addBg')closeAddClient()});
@@ -1833,7 +1833,7 @@ function renderInbox(){
   const sel=document.getElementById('ibClient');
   if(sel){
     sel.innerHTML='<option value="0">全部客户</option>'+
-      clientsData.map(c=>'<option value="'+c.client_id+'"'+(c.client_id===inboxClient?' selected':'')+'>'+esc(c.name)+'</option>').join('');
+      clientsData.map(c=>'<option value="'+c.client_id+'"'+(c.client_id===inboxClient?' selected':'')+'>#'+c.client_id+' '+esc(c.name)+'</option>').join('');
   }
   const btn=document.getElementById('ibOpenBtn');
   if(btn)btn.className=inboxOnlyOpen?'btn':'btn ghost';
