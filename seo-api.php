@@ -1283,6 +1283,36 @@ function ev_task_kind($ops,$outputUrl){
 // 日期取值优先级：audit_log 里那条把任务置为 done 的记录（唯一真实的完成时刻）
 //   > 对应 apply_task job 的 finished_at > seo_tasks.updated_at（会被后续编辑
 //   带偏，所以排最后）。
+/* 历史大事记批量导入。幂等：fact_key 由日期加标签哈希决定，同一条重复导入
+   走 upsert 覆盖不新增。只收大刀，规范见导入手册，垃圾进垃圾出。 */
+if($m==='POST'&&$ROUTE==='/facts_history'){
+    $u=auth_admin();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $list=$i['events']??null;
+    if(!is_array($list)||!$list)res(400,['error'=>'events 数组必填']);
+    if(count($list)>30)res(400,['error'=>'一次最多 30 条，大事记不是流水账']);
+    $hkinds=['apply','publish','offpage','config','manual'];
+    $ins=db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)
+                        VALUES(?,?,?,'manual','confirmed',?)
+                        ON DUPLICATE KEY UPDATE value=VALUES(value),updated_by=VALUES(updated_by)");
+    $done=[];
+    foreach($list as $n=>$e){
+        $d=trim((string)($e['d']??''));
+        $kind=trim((string)($e['kind']??'manual'));
+        $label=trim((string)($e['label']??''));
+        if(!ymd_ok($d))res(400,['error'=>'第 '.($n+1).' 条日期不是 YYYY-MM-DD']);
+        if(!in_array($kind,$hkinds,true))res(400,['error'=>'第 '.($n+1).' 条 kind 不在 '.implode('/',$hkinds)]);
+        if($label===''||mb_strlen($label,'UTF-8')>200)res(400,['error'=>'第 '.($n+1).' 条说明必填且不超 200 字']);
+        $key='history.event.'.str_replace('-','',$d).'.'.substr(md5($label),0,6);
+        $ins->execute([$cid,$key,$d.'|'.$kind.'|'.$label,$u['username']]);
+        $done[]=$key;
+    }
+    audit($u['username'],'seo_facts_history_import',(string)$cid,['count'=>count($done)]);
+    res(200,['ok'=>true,'imported'=>count($done),'keys'=>$done]);
+}
+
 if($m==='GET'&&$ROUTE==='/events'){
     auth_admin();
     $cid=need_client();
@@ -1379,6 +1409,30 @@ if($m==='GET'&&$ROUTE==='/events'){
         /* 开头那个日期已经变成 d 了，标签里不用再重复一遍。 */
         $first=preg_replace('/^\s*\d{4}-\d{2}-\d{2}\s*/','',$first);
         $events[]=['d'=>$d,'label'=>ev_label('',$first),'kind'=>'offpage'];
+    }
+
+    /* ---- 历史大事记：fact_key history.event.* ----
+       客户导入时补录的接手前操作史（迁移、改版、外链活动、被注入等）。
+       value 约定格式 "YYYY-MM-DD|kind|说明"，kind 超出白名单一律归 manual；
+       不合格式的行退化为 ev_pick_date 捞日期加整段当标签，捞不到日期就丢弃，
+       宁缺勿滥，绝不用 updated_at 冒充历史日期。 */
+    $hq=db()->prepare("SELECT value FROM seo_facts
+                       WHERE client_id=? AND fact_key LIKE 'history.event.%' ORDER BY fact_key");
+    $hq->execute([$cid]);
+    $hkinds=['apply','publish','offpage','config','manual'];
+    foreach($hq->fetchAll() as $h){
+        $val=trim((string)$h['value']);
+        if($val==='')continue;
+        $parts=explode('|',$val,3);
+        if(count($parts)===3&&ymd_ok(trim($parts[0]))){
+            $kind=in_array(trim($parts[1]),$hkinds,true)?trim($parts[1]):'manual';
+            $events[]=['d'=>trim($parts[0]),'label'=>ev_label('',trim($parts[2])),'kind'=>$kind];
+        }else{
+            $d=ev_pick_date($val);
+            if(!$d)continue;
+            $lbl=preg_replace('/^\s*\d{4}-\d{2}-\d{2}\s*/','',$val);
+            $events[]=['d'=>$d,'label'=>ev_label('',$lbl),'kind'=>'manual'];
+        }
     }
 
     /* 区间过滤 + 去重 + 排序。去重按 (日期, 类型, 标签)：同一件事从两条路径
