@@ -25,7 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 - 干了什么：Alvin 要求看板客户名前显示 #id 方便定位。跨 Aiden 认领的 static/seo-agent.html，按规矩先登记后动手，改动四处纯展示：侧栏客户行、主标题、收件箱客户下拉、新增客户下拉，均加 "#<client_id> " 前缀（侧栏 id 用 .muted 淡色）。不涉及后端与数据。测试：node tests/ 两套 29+76 全过（前端无单测），php -l 不适用。
 - 坑：无。
-- 下一步/认领：**待部署**（api 模式只传前端文件即可，deploy.sh 单点归 Aiden）。改动仅此四行，Aiden 若有前端重构直接覆盖无妨。
+- 下一步/认领：**已部署**（Alvin 指示，2026-08-25 用 deploy.sh api 模式跑的，seo-api.php 未改哈希一致，DEPLOYED-seo 记 rev a3be9b4，线上已验证）。部署单点仍归 Aiden，此次是老板点名的例外。改动仅此四行，Aiden 若有前端重构直接覆盖无妨。
 
 ### 2026-08-25 AIRA (c)
 
