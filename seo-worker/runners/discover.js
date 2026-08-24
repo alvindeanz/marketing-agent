@@ -108,7 +108,7 @@ async function collect(ctx, profile, context, workspace) {
   const { cfg, log } = ctx;
   const root = rootDomain(profile);
   if (!root) throw new Error('cannot derive a root domain from the client profile');
-  const db = cfg.semrushDb;
+  const db = ((profile && profile.semrush_db) || '').trim() || cfg.semrushDb;
   // Local date, so the snapshot period matches the day the board is showing.
   const today = localYmd();
   const rawDir = path.join(workspace, 'temp', 'discover-' + today);

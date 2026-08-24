@@ -570,6 +570,11 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <div class="fld"><label>GA4 Property</label><input id="pf_ga4_property" placeholder="363223275"></div>
             <div class="fld"><label>GSC Property</label><input id="pf_gsc_property" placeholder="URL 前缀或 sc-domain:"></div>
             <div class="fld"><label>Semrush Project</label><input id="pf_semrush_project" placeholder="项目 ID 或名称"></div>
+            <div class="fld"><label>Semrush DB（按客户市场）</label><input id="pf_semrush_db" placeholder="nz / au / us，留空用全局默认 nz"></div>
+            <div class="fld"><label>Workspace 目录名</label>
+              <input id="pf_workspace_dir" placeholder="如 benscurtains，留空从域名自动推导">
+              <div class="fld-hint">worker 在执行机上的客户工作目录名，只允许小写字母数字和 . _ -。</div>
+            </div>
             <div class="fld"><label>Brand Regex（品牌词正则）</label>
               <input id="pf_brand_regex" placeholder="留空由后端从客户名和域名自动推导">
               <div class="fld-hint">用来把 GSC 点击拆成品牌与非品牌。写坏了保存会被后端挡下并在这里报错。</div>
@@ -645,7 +650,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
 <script>
 const API='/seo-api.php';
-const PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','brand_regex','business_goals','conversion_goals','notes'];
+const PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','brand_regex','business_goals','conversion_goals','notes'];
 const TASK_STATUSES=['proposed','approved','in_progress','review','blocked','done'];
 const OWNERS=['agency','client','agent'];
 const LANES=[{key:'agency',name:'Agency 团队'},{key:'client',name:'Client 客户'},{key:'agent',name:'Agent 机器'}];

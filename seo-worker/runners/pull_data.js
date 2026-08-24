@@ -406,8 +406,9 @@ async function pullSemrush(ctx, profile, win) {
     log('semrush: profile has no domain, skipped');
     return { status: 'skipped' };
   }
-  const db = cfg.semrushDb;
-  log('semrush: domain ' + domain + ', db ' + db);
+  // profile 优先：AU 客户填 au，不填才落 config 全局默认（nz）。
+  const db = ((profile && profile.semrush_db) || '').trim() || cfg.semrushDb;
+  log('semrush: domain ' + domain + ', db ' + db + (profile && profile.semrush_db ? '（来自 profile）' : '（config 默认）'));
 
   const wanted = [
     { key: 'domain_overview', cmd: 'domain-overview --domain ' + domain + ' --db ' + db },

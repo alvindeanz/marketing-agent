@@ -306,6 +306,13 @@ function ensure_metrics_schema(){
     if(!$has){
         db()->exec("ALTER TABLE seo_profiles ADD COLUMN brand_regex TEXT DEFAULT NULL AFTER target_keywords");
     }
+    foreach(['semrush_db'=>"VARCHAR(16) DEFAULT NULL",'workspace_dir'=>"VARCHAR(64) DEFAULT NULL"] as $col=>$ddl){
+        $c=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_profiles' AND COLUMN_NAME=?");
+        $c->execute([$col]);
+        $hit=$c->fetch();
+        $c->closeCursor();
+        if(!$hit)db()->exec("ALTER TABLE seo_profiles ADD COLUMN $col $ddl AFTER semrush_project");
+    }
 }
 
 /* 日期入参校验。时序端点全部按 DATE 比较，格式不对直接 400，
@@ -726,7 +733,7 @@ if($ROUTE==='')$ROUTE='/';
 
 /* brand_regex 排在最后，是后加的列（见 ensure_metrics_schema）。留空表示
    "让 worker 自己从客户名或域名推"，不是"这个客户没有品牌词"。 */
-$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','business_goals','conversion_goals','notes','brand_regex'];
+$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','business_goals','conversion_goals','notes','brand_regex'];
 
 /* =========================================================
    Worker endpoints (service token)

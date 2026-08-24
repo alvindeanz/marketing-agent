@@ -47,10 +47,19 @@ function reportWindow(days, lagDays) {
 
 /** Directory name for a client inside workspaceRoot. */
 function clientDirName(profile, cfg) {
-  const raw =
-    (profile && (profile.workspace_dir || profile.slug || profile.dir)) ||
-    cfg.defaultClientDir ||
-    'client';
+  // 显式字段优先；都没有时从域名主机名推导（每个客户天然唯一），
+  // 绝不回落 cfg.defaultClientDir：那个回落曾让所有缺配置的客户
+  // 静默写进 powerdekorfloors 的目录，跨客户数据污染比报错严重得多。
+  let raw = profile && (profile.workspace_dir || profile.slug || profile.dir);
+  if (!raw && profile && profile.domain) {
+    raw = String(profile.domain)
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/.*$/, '');
+  }
+  if (!raw) {
+    throw new Error('客户 profile 缺 workspace_dir 且无 domain 可推导工作目录，拒绝回落共享目录，请在档案里补 workspace_dir');
+  }
   return String(raw)
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
