@@ -33,6 +33,9 @@ const DEFAULTS = {
   // token count, but a misread here moves the board the wrong way, so it gets
   // the same model that wrote the digest it is answering.
   rulingModel: 'fable',
+  // 收件箱对话。人在工作台按客户跟它聊数据、聊博客规划，只读加提议，
+  // 唯一的产物是任务草案，人点立项才落账。谈的是策略，所以给大模型。
+  chatModel: 'opus',
   jobTimeoutMin: 30,
   // WebForger API base and the blog language the runners write in. Empty lang
   // means the site's default language.
@@ -106,6 +109,7 @@ function load() {
   cfg.imageModel = String(cfg.imageModel || DEFAULTS.imageModel);
   cfg.triageModel = String(cfg.triageModel || DEFAULTS.triageModel);
   cfg.rulingModel = String(cfg.rulingModel || DEFAULTS.rulingModel);
+  cfg.chatModel = String(cfg.chatModel || DEFAULTS.chatModel);
   cfg.webforgerApi = String(cfg.webforgerApi || DEFAULTS.webforgerApi).replace(/\/+$/, '');
   cfg.blogLang = String(cfg.blogLang || '');
   cfg.blogReviewEnabled = cfg.blogReviewEnabled !== false;

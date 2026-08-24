@@ -70,6 +70,20 @@ define('METRIC_NAMES',[
    anything that publishes to the outside world. Those keep their own gates. */
 define('INBOX_ACTIONS',['approve_task','reject_task','set_priority','set_sprint','kill_task','release_tasks','answer_fact','redispatch','noop']);
 
+/* 收件箱对话用的三种消息类型，和原来的 digest/ruling/ack 同住 seo_inbox。
+   chat_root  一次会话的根，body 存会话标题，client_id 必填（chat job 要归属客户）
+   chat_user  人在会话里说的话，reply_to 指向根
+   chat_agent opus 的回复，或者服务端写的系统行（已立项、会话归档），reply_to 指向根
+   会话状态就是根行的 status：open 在聊，resolved 已归档。
+   铁律：对话是任务编译器不是执行器。这三种消息本身不改看板任何一格，
+   唯一的落账口子是 POST /inbox/{root}/spawn_task，那是人点了「立项」才走的。 */
+define('CHAT_KINDS',['chat_root','chat_user','chat_agent']);
+/* seo_inbox.kind ENUM 的完整取值，只增不改：删一个值等于让老行读不出来。 */
+define('INBOX_KINDS',['digest','ruling','ack','chat_root','chat_user','chat_agent']);
+/* 一条 chat_agent 回复最多挂几个任务草案，以及每个草案的字段上限。
+   草案只是 refs 里的 JSON，不是任务，人点立项才变成任务。 */
+define('CHAT_MAX_DRAFTS',5);
+
 function db() {
     global $DB_HOST,$DB_USER,$DB_PASS,$DB_NAME;
     static $p=null;
@@ -243,7 +257,7 @@ function ensure_job_types(){
     $done=true;
     /* backfill_metrics 加在这里的同时必须加进 seo-worker/runner_host.js 的
        KNOWN_TYPES，两边漏一边 worker 领到活直接崩。2026-08 apply_task 就是这么炸的。 */
-    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics'];
+    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics','chat'];
     $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='type'");
     $q->execute();
     $col=$q->fetch();
@@ -348,15 +362,176 @@ function ensure_inbox_schema(){
         KEY idx_seo_inbox_open (kind, status, id),
         KEY idx_seo_inbox_reply (reply_to)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    /* kind 后来加了三个对话值。和 ensure_job_types() 一个套路：值对值地查，
+       库停在任何中间状态都能一次 ALTER 补齐，MariaDB 10.3 没有
+       MODIFY ... IF NOT EXISTS，所以 information_schema 那一读才是幂等的依据。
+       ALTER 必须带上原来的 digest/ruling/ack，漏一个老行就废了。 */
+    $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_inbox' AND COLUMN_NAME='kind'");
+    $q->execute();
+    $col=$q->fetch();
+    $q->closeCursor();
+    if(!$col)return;
+    $cur=(string)$col['COLUMN_TYPE'];
+    $missing=[];
+    foreach(INBOX_KINDS as $w){if(strpos($cur,"'".$w."'")===false)$missing[]=$w;}
+    if(!$missing)return;
+    $list=implode(',',array_map(function($w){return "'".$w."'";},INBOX_KINDS));
+    db()->exec("ALTER TABLE seo_inbox MODIFY kind ENUM($list) NOT NULL");
+}
+
+/* CHAT-PURE-START
+   纯函数区：不碰 db()，不调 res()，可以被 tests/chatapi.test.php 抠出来单测。
+   改这两个标记的文字要同步改测试里的正则。 */
+
+/* 一条任务的字段校验，POST /tasks 和 POST /inbox/{root}/spawn_task 共用。
+   抽出来的唯一理由：立项走的必须是和人工建任务一模一样的那套校验，
+   两份拷贝迟早会分叉，分叉的那天草案就能绕过看板的字段约束。
+   返回 [$clean, null] 或 [null, '错误说明']。$clean 的键就是 seo_tasks 的列名。
+   $opts:
+     status_default  没给 status 时用哪个（人工建任务是 proposed，立项是 approved）
+     status_force    非空则无视入参强制这个状态 */
+function task_fields_clean($i,$opts=[]){
+    if(!is_array($i))return [null,'body 不是一个对象'];
+    $title=trim((string)($i['title']??''));
+    if($title==='')return [null,'title required'];
+    if(mb_strlen($title,'UTF-8')>255)return [null,'title over 255 chars'];
+    $mod=(string)($i['module']??'technical');
+    if($mod==='')$mod='technical';
+    if(!in_array($mod,['technical','onpage','content','local','offpage'],true))return [null,'bad module'];
+    $own=(string)($i['owner_type']??'agency');
+    if($own==='')$own='agency';
+    if(!in_array($own,['agency','client','agent'],true))return [null,'bad owner_type'];
+    $force=(string)($opts['status_force']??'');
+    $st=$force!==''?$force:(string)($i['status']??($opts['status_default']??'proposed'));
+    if($st==='')$st='proposed';
+    if(!in_array($st,['proposed','approved','in_progress','review','done','blocked'],true))return [null,'bad status'];
+    $pri=(string)($i['priority']??'P2');
+    if($pri==='')$pri='P2';
+    if(!in_array($pri,['P0','P1','P2','P3'],true))return [null,'bad priority'];
+    $ops=(string)($i['ops']??'');
+    if(mb_strlen($ops,'UTF-8')>255)return [null,'ops over 255 chars'];
+    $sprint=(string)($i['sprint']??'');
+    if(mb_strlen($sprint,'UTF-8')>10)return [null,'sprint over 10 chars'];
+    $detail=(string)($i['detail']??'');
+    if(mb_strlen($detail,'UTF-8')>20000)return [null,'detail over 20000 chars'];
+    return [[
+        'title'=>$title,
+        'detail'=>$detail,
+        'module'=>$mod,
+        'owner_type'=>$own,
+        'status'=>$st,
+        'priority'=>$pri,
+        'ops'=>$ops,
+        'sprint'=>$sprint,
+        'attention'=>empty($i['attention'])?0:1,
+        'output_url'=>(string)($i['output_url']??''),
+        'plan_id'=>($i['plan_id']??null)?(int)$i['plan_id']:null,
+    ],null];
+}
+
+/* 模型提的任务草案，存进 chat_agent 行的 refs.drafts。
+   宽进严出：字段缺了给默认值，字段坏了整条草案丢掉，绝不半条落进去。
+   丢掉一条草案的后果只是人少看见一张卡，写进去一条脏草案的后果是人点了
+   立项才发现建不了，那更难查。这里不报错，报错会把整条回复毙掉，
+   而正文本身是有价值的。 */
+function inbox_drafts_norm($v){
+    if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
+    if(!is_array($v))return [];
+    $out=[];
+    foreach($v as $d){
+        if(count($out)>=CHAT_MAX_DRAFTS)break;
+        if(!is_array($d))continue;
+        list($clean,$err)=task_fields_clean($d,['status_default'=>'approved']);
+        if($err)continue;
+        $out[]=[
+            'title'=>$clean['title'],
+            'detail'=>mb_substr($clean['detail'],0,4000,'UTF-8'),
+            'module'=>$clean['module'],
+            'owner_type'=>$clean['owner_type'],
+            'priority'=>$clean['priority'],
+            'ops'=>$clean['ops'],
+            'sprint'=>$clean['sprint'],
+        ];
+    }
+    return $out;
+}
+
+/* CHAT-PURE-END */
+
+/* 一行任务落库，入参是 task_fields_clean() 出来的干净数组。
+   POST /tasks 和 POST /inbox/{root}/spawn_task 共用，写的列必须一致：
+   立项出来的任务和人工建的任务在看板上不该有任何区别。 */
+function task_insert($cid,$t,$by){
+    db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        ->execute([
+            (int)$cid,$t['plan_id'],$t['sprint'],$t['module'],$t['title'],$t['detail'],
+            $t['owner_type'],$t['priority'],$t['attention'],$t['ops'],$t['status'],$t['output_url'],$by
+        ]);
+    return (int)db()->lastInsertId();
+}
+
+/* 这个会话是不是正有一个 chat job 在排队或者在跑。
+   payload 形状是 {"inbox_id":N,"message_id":M}，写死在下面的两个入队处，
+   所以这个 LIKE 的针是稳定的（同 ruling 的去重）。返回 job id，没有就是 0。 */
+function chat_job_inflight($rootId){
+    $q=db()->prepare("SELECT id FROM agent_jobs WHERE type='chat' AND status IN('queued','running') AND payload LIKE ? LIMIT 1");
+    $q->execute(['%"inbox_id":'.(int)$rootId.',%']);
+    $r=$q->fetch();
+    $q->closeCursor();
+    return $r?(int)$r['id']:0;
+}
+
+/* 取一个会话根，顺带把「必须是 chat_root」和「必须还开着」两条前置条件查掉。
+   $needOpen 为 true 时归档过的会话不接新消息：归档就是归档，
+   要接着聊开一个新会话，别把已经结账的账本重新打开。
+   返回根行数组，不合格直接 res() 掉。 */
+function chat_root_or_die($id,$needOpen){
+    $g=db()->prepare("SELECT * FROM seo_inbox WHERE id=?");
+    $g->execute([(int)$id]);
+    $r=$g->fetch();
+    if(!$r)res(404,['error'=>'会话不存在']);
+    if($r['kind']!=='chat_root')res(400,['error'=>'这条消息不是一个会话根']);
+    if($needOpen&&$r['status']!=='open')res(400,['error'=>'这个会话已经归档了，开一个新会话继续聊']);
+    if(!$r['client_id'])res(400,['error'=>'这个会话没有客户归属，无法继续']);
+    return $r;
+}
+
+/* 往会话里写一行。人写的是 chat_user，opus 和服务端写的系统行是 chat_agent。
+   全部 reply_to 指根，会话就是一层，没有回复的回复。
+   status 一律 resolved：会话是否待办看根行，子行的 status 没有意义，
+   写成 open 会让收件箱的待办计数虚高。 */
+function chat_msg_insert($root,$kind,$body,$by,$refs=null){
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,?,?,?,?,'resolved',?)")
+        ->execute([
+            ($root['client_id']===null)?null:(int)$root['client_id'],
+            $kind,$body,
+            $refs===null?null:json_encode(inbox_refs_norm($refs),JSON_UNESCAPED_UNICODE),
+            (int)$root['id'],$by
+        ]);
+    return (int)db()->lastInsertId();
+}
+
+/* 一条人消息进来以后排一个 chat job。会话的 client_id 就是 job 的 client_id，
+   这也是 chat_root 强制要 client_id 的唯一原因：agent_jobs.client_id NOT NULL。 */
+function chat_job_queue($root,$messageId,$by){
+    $payload=json_encode(['inbox_id'=>(int)$root['id'],'message_id'=>(int)$messageId],JSON_UNESCAPED_UNICODE);
+    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'chat',?,'queued',?)")
+        ->execute([(int)$root['client_id'],$payload,$by]);
+    $jid=(int)db()->lastInsertId();
+    fire_wake($jid);
+    return $jid;
 }
 
 /* refs is stored as a JSON string in a TEXT column, serialised by hand:
    production is MariaDB 10.3 and every other JSON-ish column in this schema is
    handled the same way.
-   Canonical shape { "tasks": [int], "jobs": [int] }. A bare array is read as a
-   list of task ids, which is what callers usually have to hand. */
+   Canonical shape { "tasks": [int], "jobs": [int], "drafts": [ {...} ] }.
+   A bare array is read as a list of task ids, which is what callers usually
+   have to hand. drafts only ever appear on a chat_agent row: they are the task
+   drafts the model proposed, stored verbatim so the board can draw a card with
+   a 立项 button. A draft is not a task and never becomes one on its own. */
 function inbox_refs_norm($v){
-    $out=['tasks'=>[],'jobs'=>[]];
+    $out=['tasks'=>[],'jobs'=>[],'drafts'=>[]];
     if($v===null||$v==='')return $out;
     if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
     if(!is_array($v))return $out;
@@ -370,6 +545,7 @@ function inbox_refs_norm($v){
         }
         if(count($out[$k])>200)$out[$k]=array_slice($out[$k],0,200);
     }
+    $out['drafts']=inbox_drafts_norm($v['drafts']??null);
     return $out;
 }
 
@@ -1792,12 +1968,18 @@ if($m==='GET'&&preg_match('#^/inbox/(\d+)$#',$ROUTE,$mm)){
     $row=$s->fetch();
     if(!$row)res(404,['error'=>'Inbox item not found']);
     $item=inbox_row_out($row);
-    /* 线程取两层：挂在 digest 下的 ruling，加挂在这些 ruling 下的 ack */
+    /* 线程取两层：挂在 digest 下的 ruling，加挂在这些 ruling 下的 ack。
+       对话只有一层（chat_user / chat_agent 全部 reply_to 指根），被这条查询
+       的第一层完全覆盖，按 id 升序出来就是聊天记录的原始顺序。 */
     $rp=db()->prepare("SELECT * FROM seo_inbox WHERE reply_to=? OR reply_to IN (SELECT id FROM (SELECT id FROM seo_inbox WHERE reply_to=?) x) ORDER BY id");
     $rp->execute([$id,$id]);
     $replies=[];
     foreach($rp->fetchAll() as $r)$replies[]=inbox_row_out($r);
-    res(200,['item'=>$item,'replies'=>$replies,'ref_tasks'=>inbox_ref_tasks($item['refs'])]);
+    $out=['item'=>$item,'replies'=>$replies,'ref_tasks'=>inbox_ref_tasks($item['refs'])];
+    /* 会话根多带一个「有没有 chat job 在跑」，前端拿它显示「思考中」，
+       省掉一次 /jobs 轮询。 */
+    if($item['kind']==='chat_root')$out['chat_pending']=chat_job_inflight($id);
+    res(200,$out);
 }
 
 // GET /inbox?client_id=&status=&limit= -> the stream, newest first.
@@ -1810,7 +1992,11 @@ if($m==='GET'&&$ROUTE==='/inbox'){
     $lim=(int)($_GET['limit']??60);
     if($lim<1)$lim=60;
     if($lim>200)$lim=200;
-    $where=[];$args=[];
+    /* 决策流里不掺对话消息。对话是另一条线（GET /inbox/chats），而且
+       chat_user / chat_agent 的父行很容易被 limit 截掉，混进来就是一堆
+       挂不上线程的碎片。 */
+    $chatIn=implode(',',array_map(function($k){return "'".$k."'";},CHAT_KINDS));
+    $where=["i.kind NOT IN ($chatIn)"];$args=[];
     if(isset($_GET['client_id'])&&$_GET['client_id']!==''){
         $cid=(int)$_GET['client_id'];
         if($cid>0){$where[]='(i.client_id=? OR i.client_id IS NULL)';$args[]=$cid;}
@@ -1821,7 +2007,7 @@ if($m==='GET'&&$ROUTE==='/inbox'){
         $where[]='i.status=?';$args[]=$st;
     }
     $sql="SELECT i.*,c.name AS client_name FROM seo_inbox i LEFT JOIN clients c ON c.id=i.client_id"
-        .($where?(' WHERE '.implode(' AND ',$where)):'')
+        .' WHERE '.implode(' AND ',$where)
         ." ORDER BY i.id DESC LIMIT $lim";
     $s=db()->prepare($sql);
     $s->execute($args);
@@ -1889,9 +2075,11 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/ruling$#',$ROUTE,$mm)){
     res(200,['ok'=>true,'ruling_id'=>$rid,'job_id'=>$jid]);
 }
 
-// POST /inbox/{id}/resolve -> close a digest by hand.
+// POST /inbox/{id}/resolve -> close a digest by hand, or archive a chat session.
 // The fallback for a card nobody needs to act on, or one the runner could not
 // make sense of. Writes an ack so the thread still reads in order.
+// A chat_root takes the same route: archiving a session is the same act, close
+// the thread and leave a line saying who closed it.
 if($m==='POST'&&preg_match('#^/inbox/(\d+)/resolve$#',$ROUTE,$mm)){
     $u=auth_admin();
     ensure_inbox_schema();
@@ -1901,15 +2089,207 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/resolve$#',$ROUTE,$mm)){
     $g->execute([$did]);
     $dg=$g->fetch();
     if(!$dg)res(404,['error'=>'Inbox item not found']);
-    if($dg['kind']!=='digest')res(400,['error'=>'Only a digest can be resolved']);
+    if(!in_array($dg['kind'],['digest','chat_root'],true))res(400,['error'=>'Only a digest or a chat session can be resolved']);
     $note=trim((string)($i['note']??''));
     if(mb_strlen($note,'UTF-8')>2000)res(400,['error'=>'note over 2000 chars']);
+    if($dg['kind']==='chat_root'){
+        db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE id=?")->execute([$did]);
+        $body='会话已归档，归档人 '.$u['username'].'。'.($note!==''?('备注：'.$note):'');
+        chat_msg_insert($dg,'chat_agent',$body,$u['username']);
+        audit($u['username'],'seo_chat_archive',(string)$did,['note'=>$note]);
+        res(200,['ok'=>true]);
+    }
     db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE id=?")->execute([$did]);
     $body='人工关卡：'.$u['username'].' 直接把这张卡片标记为已处理，没有派任何动作。'.($note!==''?('备注：'.$note):'');
     db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'ack',?,NULL,?,'resolved',?)")
         ->execute([($dg['client_id']===null)?null:(int)$dg['client_id'],$body,$did,$u['username']]);
     audit($u['username'],'seo_inbox_resolve',(string)$did,['note'=>$note]);
     res(200,['ok'=>true]);
+}
+
+/* =========================================================
+   收件箱对话
+   人在工作台按客户跟 opus 聊：问数据、聊博客规划、讨论素材怎么更新。
+   聊天是界面，看板是账本。
+
+   铁律，这一段所有路由都在守它：对话是任务编译器，不是执行器。
+   模型在会话里只读加提议，它的输出只有两样东西可以落下来，
+   一是 chat_agent 行的正文，二是存在那行 refs.drafts 里的任务草案。
+   草案不是任务。唯一把东西写进看板的口子是 POST /inbox/{root}/spawn_task，
+   那是人看完草案点了「立项」才会走的一次 admin 请求，字段校验和人工建任务
+   完全同一个函数。放行闸门一个都没绕开，也不许绕。
+   ========================================================= */
+
+// GET /inbox/chats?client_id=&status=&limit= -> 会话列表，最近的在前。
+// 每行是一个会话根，带上消息条数、最后一条消息的时间和摘要，够画列表了。
+// 放在 GET /inbox/{id} 前面无所谓，那条是 (\d+)，chats 落不进去，
+// 但顺序上摆在一起更好读。
+if($m==='GET'&&$ROUTE==='/inbox/chats'){
+    auth_admin();
+    ensure_inbox_schema();
+    $lim=(int)($_GET['limit']??50);
+    if($lim<1)$lim=50;
+    if($lim>200)$lim=200;
+    $where=["i.kind='chat_root'"];$args=[];
+    if(isset($_GET['client_id'])&&$_GET['client_id']!==''){
+        $cid=(int)$_GET['client_id'];
+        if($cid>0){$where[]='i.client_id=?';$args[]=$cid;}
+    }
+    if(isset($_GET['status'])&&$_GET['status']!==''){
+        $st=(string)$_GET['status'];
+        if(!in_array($st,['open','resolved'],true))res(400,['error'=>'bad status']);
+        $where[]='i.status=?';$args[]=$st;
+    }
+    $sql="SELECT i.*,c.name AS client_name FROM seo_inbox i LEFT JOIN clients c ON c.id=i.client_id"
+        .' WHERE '.implode(' AND ',$where)
+        ." ORDER BY i.id DESC LIMIT $lim";
+    $s=db()->prepare($sql);
+    $s->execute($args);
+    $rows=$s->fetchAll();
+    $ids=[];
+    foreach($rows as $r)$ids[]=(int)$r['id'];
+    /* 一次查完所有会话的消息统计，别按会话逐条打点。 */
+    $stat=[];
+    if($ids){
+        $in=implode(',',array_fill(0,count($ids),'?'));
+        $q=db()->prepare("SELECT reply_to,COUNT(*) AS n,MAX(created_at) AS t,MAX(id) AS last_id FROM seo_inbox WHERE reply_to IN ($in) GROUP BY reply_to");
+        $q->execute($ids);
+        foreach($q->fetchAll() as $r)$stat[(int)$r['reply_to']]=$r;
+        $lastIds=[];
+        foreach($stat as $r)$lastIds[]=(int)$r['last_id'];
+        if($lastIds){
+            $in2=implode(',',array_fill(0,count($lastIds),'?'));
+            $q2=db()->prepare("SELECT id,reply_to,kind,body FROM seo_inbox WHERE id IN ($in2)");
+            $q2->execute($lastIds);
+            foreach($q2->fetchAll() as $r){
+                $rid=(int)$r['reply_to'];
+                if(isset($stat[$rid])){
+                    $stat[$rid]['last_kind']=$r['kind'];
+                    $stat[$rid]['last_body']=mb_substr(trim((string)$r['body']),0,120,'UTF-8');
+                }
+            }
+        }
+    }
+    $items=[];
+    foreach($rows as $r){
+        $row=inbox_row_out($r);
+        $id=$row['id'];
+        $row['msg_count']=isset($stat[$id])?(int)$stat[$id]['n']:0;
+        $row['last_at']=isset($stat[$id])?$stat[$id]['t']:$row['created_at'];
+        $row['last_kind']=isset($stat[$id]['last_kind'])?$stat[$id]['last_kind']:null;
+        $row['last_body']=isset($stat[$id]['last_body'])?$stat[$id]['last_body']:'';
+        $items[]=$row;
+    }
+    res(200,['items'=>$items]);
+}
+
+// POST /inbox/chat -> 开一个新会话。
+// body { client_id, title?, text }，一次请求做三件事：建根、写第一条人消息、
+// 排 chat job。标题不给就从第一句话截一段，人懒得起名是常态。
+if($m==='POST'&&$ROUTE==='/inbox/chat'){
+    $u=auth_admin();
+    ensure_inbox_schema();
+    ensure_job_types();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $c=db()->prepare("SELECT id,name FROM clients WHERE id=?");
+    $c->execute([$cid]);
+    $client=$c->fetch();
+    if(!$client)res(404,['error'=>'Client not found']);
+    $text=trim((string)($i['text']??''));
+    if($text==='')res(400,['error'=>'text required']);
+    if(mb_strlen($text,'UTF-8')>5000)res(400,['error'=>'text over 5000 chars']);
+    $title=trim((string)($i['title']??''));
+    if($title==='')$title=mb_substr($text,0,60,'UTF-8');
+    if(mb_strlen($title,'UTF-8')>200)$title=mb_substr($title,0,200,'UTF-8');
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'chat_root',?,NULL,NULL,'open',?)")
+        ->execute([$cid,$title,$u['username']]);
+    $rootId=(int)db()->lastInsertId();
+    $root=['id'=>$rootId,'client_id'=>$cid];
+    $msgId=chat_msg_insert($root,'chat_user',$text,$u['username']);
+    $jid=chat_job_queue($root,$msgId,$u['username']);
+    audit($u['username'],'seo_chat_open',(string)$rootId,[
+        'client_id'=>$cid,'job_id'=>$jid,'message_id'=>$msgId,'chars'=>mb_strlen($text,'UTF-8')
+    ]);
+    res(200,['ok'=>true,'root_id'=>$rootId,'message_id'=>$msgId,'job_id'=>$jid,'title'=>$title]);
+}
+
+// POST /inbox/{root_id}/chat -> 在已有会话里再说一句。
+// 同一个会话已经有 job 在跑时直接 409：一次一轮，人等回复再说下一句，
+// 两句并发进来模型看到的历史是半截的，回复只会更差。
+if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_inbox_schema();
+    ensure_job_types();
+    $rootId=(int)$mm[1];
+    $root=chat_root_or_die($rootId,true);
+    $i=input();
+    $text=trim((string)($i['text']??''));
+    if($text==='')res(400,['error'=>'text required']);
+    if(mb_strlen($text,'UTF-8')>5000)res(400,['error'=>'text over 5000 chars']);
+    $busy=chat_job_inflight($rootId);
+    if($busy)res(409,['error'=>'这个会话还在等上一条回复','job_id'=>$busy]);
+    $msgId=chat_msg_insert($root,'chat_user',$text,$u['username']);
+    $jid=chat_job_queue($root,$msgId,$u['username']);
+    audit($u['username'],'seo_chat_say',(string)$rootId,[
+        'job_id'=>$jid,'message_id'=>$msgId,'chars'=>mb_strlen($text,'UTF-8')
+    ]);
+    res(200,['ok'=>true,'message_id'=>$msgId,'job_id'=>$jid]);
+}
+
+// POST /inbox/{root_id}/chat_reply -> chat runner 回写一条 opus 回复。
+// worker 层，唯一能写 chat_agent 正文的入口。
+// body { body, drafts?[] }。drafts 是任务草案，原样存进这一行的 refs.drafts，
+// 服务端只做字段规整，不建任何任务：草案是给人看的卡片，不是账本上的一行。
+if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
+    auth_worker();
+    ensure_inbox_schema();
+    $rootId=(int)$mm[1];
+    /* 归档过的会话也允许回写：人可能在 job 跑的时候顺手归档了，
+       把已经算完的回复丢掉比留着更糟。 */
+    $root=chat_root_or_die($rootId,false);
+    $i=input();
+    $body=trim((string)($i['body']??''));
+    if($body==='')res(400,['error'=>'body required']);
+    if(mb_strlen($body,'UTF-8')>20000)res(400,['error'=>'body over 20000 chars']);
+    $drafts=inbox_drafts_norm($i['drafts']??null);
+    $raw=is_array($i['drafts']??null)?count($i['drafts']):0;
+    $msgId=chat_msg_insert($root,'chat_agent',$body,'seo-worker',['drafts'=>$drafts]);
+    audit('seo-worker','seo_chat_reply',(string)$rootId,[
+        'message_id'=>$msgId,'chars'=>mb_strlen($body,'UTF-8'),
+        'drafts'=>count($drafts),'drafts_dropped'=>max(0,$raw-count($drafts))
+    ]);
+    res(200,['ok'=>true,'message_id'=>$msgId,'drafts'=>count($drafts)]);
+}
+
+// POST /inbox/{root_id}/spawn_task -> 人点了「立项」。
+// 这是整条对话链路上唯一一次写看板，而且是 admin 手点的一次请求。
+// 字段校验用的就是 POST /tasks 的那个函数，一个字都不放宽。
+// 客户归属取会话根，不取入参：草案卡片是从这个会话里长出来的，
+// 让入参决定 client_id 等于开了一条跨客户建任务的路。
+// 任务落 approved：人已经在对话里看过并点了头，再走一遍 proposed 是多余的一道。
+if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_inbox_schema();
+    $rootId=(int)$mm[1];
+    $root=chat_root_or_die($rootId,false);
+    $i=input();
+    list($t,$err)=task_fields_clean($i,['status_force'=>'approved']);
+    if($err)res(400,['error'=>$err]);
+    /* 来源行钉在 detail 末尾：三个月后看见这条任务，得能一眼查回它是从
+       哪次对话里长出来的。 */
+    $src='来源：收件箱对话 #'.$rootId;
+    $t['detail']=trim($t['detail']);
+    $t['detail']=($t['detail']===''?$src:($t['detail']."\n\n".$src));
+    $cid=(int)$root['client_id'];
+    $tid=task_insert($cid,$t,$u['username']);
+    $note='已立项 #'.$tid.'「'.$t['title'].'」，状态 approved，已经在看板上了。';
+    $msgId=chat_msg_insert($root,'chat_agent',$note,$u['username'],['tasks'=>[$tid]]);
+    audit($u['username'],'seo_chat_spawn_task',(string)$tid,[
+        'root_id'=>$rootId,'client_id'=>$cid,'title'=>$t['title'],'module'=>$t['module'],'message_id'=>$msgId
+    ]);
+    res(200,['ok'=>true,'task_id'=>$tid,'message_id'=>$msgId]);
 }
 
 /* =========================================================
@@ -2408,35 +2788,12 @@ if($m==='POST'&&$ROUTE==='/tasks'){
     $u=auth_admin();
     $i=input();
     $cid=(int)($i['client_id']??0);
-    $title=trim((string)($i['title']??''));
     if(!$cid)res(400,['error'=>'client_id required']);
-    if($title==='')res(400,['error'=>'title required']);
-    $mod=(string)($i['module']??'technical');
-    if(!in_array($mod,['technical','onpage','content','local','offpage'],true))res(400,['error'=>'bad module']);
-    $own=(string)($i['owner_type']??'agency');
-    if(!in_array($own,['agency','client','agent'],true))res(400,['error'=>'bad owner_type']);
-    $st=(string)($i['status']??'proposed');
-    if(!in_array($st,['proposed','approved','in_progress','review','done','blocked'],true))res(400,['error'=>'bad status']);
-    $pri=(string)($i['priority']??'P2');
-    if($pri==='')$pri='P2';
-    if(!in_array($pri,['P0','P1','P2','P3'],true))res(400,['error'=>'bad priority']);
-    $ops=(string)($i['ops']??'');
-    if(mb_strlen($ops,'UTF-8')>255)res(400,['error'=>'ops over 255 chars']);
-    $s=db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    $s->execute([
-        $cid,
-        ($i['plan_id']??null)?(int)$i['plan_id']:null,
-        (string)($i['sprint']??''),
-        $mod,$title,
-        (string)($i['detail']??''),
-        $own,$pri,
-        empty($i['attention'])?0:1,
-        $ops,$st,
-        (string)($i['output_url']??''),
-        $u['username']
-    ]);
-    $id=(int)db()->lastInsertId();
-    audit($u['username'],'seo_task_add',(string)$id,['client_id'=>$cid,'title'=>$title,'owner_type'=>$own]);
+    /* 字段校验走 task_fields_clean()，收件箱对话的立项按钮走的是同一个函数。 */
+    list($t,$err)=task_fields_clean($i);
+    if($err)res(400,['error'=>$err]);
+    $id=task_insert($cid,$t,$u['username']);
+    audit($u['username'],'seo_task_add',(string)$id,['client_id'=>$cid,'title'=>$t['title'],'owner_type'=>$t['owner_type']]);
     res(200,['ok'=>true,'id'=>$id]);
 }
 

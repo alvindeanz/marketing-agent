@@ -29,6 +29,7 @@ const KNOWN_TYPES = [
   'triage',
   'ruling',
   'backfill_metrics',
+  'chat',
 ];
 
 function send(msg) {

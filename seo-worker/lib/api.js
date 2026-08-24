@@ -247,6 +247,16 @@ class Api {
   async postInboxActions(digestId, body) {
     return this.req('POST', '/inbox/' + encodeURIComponent(digestId) + '/actions', body);
   }
+
+  /**
+   * POST /inbox/{root_id}/chat_reply body { body, drafts? } -> { message_id, drafts }
+   * 收件箱对话里 opus 的一条回复。drafts 是任务草案，服务端原样规整后存进
+   * 这一行的 refs.drafts，不会建任何任务：草案要人在界面上点「立项」才落账。
+   * 这是 chat runner 唯一的写操作，除此之外整条链路只读。
+   */
+  async postChatReply(rootId, body) {
+    return this.req('POST', '/inbox/' + encodeURIComponent(rootId) + '/chat_reply', body);
+  }
 }
 
 module.exports = { Api };

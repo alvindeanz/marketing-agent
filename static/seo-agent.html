@@ -214,6 +214,35 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ib-ack{color:#94a3b8}
 .ib-form{margin-top:11px;border-top:1px solid #2d3748;padding-top:11px}
 .ib-empty{font-size:12.5px;color:#3d4f63;font-style:italic;padding:14px 0}
+/* 收件箱对话：左边会话列表，右边气泡流。样式全部复用现有暗色体系 */
+.ch-wrap{display:flex;gap:12px;align-items:flex-start}
+.ch-list{width:230px;flex:0 0 230px;max-height:560px;overflow-y:auto}
+.ch-row{border:1px solid #2d3748;background:#0f1117;border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer}
+.ch-row:hover{border-color:#475569}
+.ch-row.on{border-color:#3b82f6;background:#1e2433}
+.ch-row.arch{opacity:.55}
+.ch-row .t{font-size:12.5px;color:#e2e8f0;word-break:break-word;line-height:1.5}
+.ch-row .m{font-size:11px;color:#64748b;margin-top:3px}
+.ch-main{flex:1;min-width:0;border:1px solid #2d3748;background:#1e2433;border-radius:10px;padding:13px 15px}
+.ch-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;border-bottom:1px solid #2d3748;padding-bottom:9px}
+.ch-title{font-size:13px;font-weight:600;color:#f1f5f9;flex:1;word-break:break-word}
+.ch-stream{max-height:460px;overflow-y:auto;padding-right:4px}
+.ch-turn{margin-bottom:12px;display:flex;flex-direction:column}
+.ch-turn.me{align-items:flex-end}
+.ch-bubble{max-width:82%;border-radius:10px;padding:8px 11px;font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.ch-turn.me .ch-bubble{background:#1d3557;color:#e2e8f0}
+.ch-turn.bot .ch-bubble{background:#0f1117;border:1px solid #2d3748;color:#cbd5e1}
+.ch-turn.sys .ch-bubble{background:#131a12;border:1px solid #2f4a2c;color:#86b586;font-size:12px}
+.ch-by{font-size:10.5px;color:#64748b;margin-bottom:3px}
+.ch-draft{border:1px solid #78350f;background:#1a1408;border-radius:8px;padding:9px 11px;margin-top:8px;max-width:82%}
+.ch-draft .dt{font-size:12.5px;font-weight:600;color:#fbbf24;word-break:break-word}
+.ch-draft .dd{font-size:11.5px;color:#cbd5e1;line-height:1.6;margin-top:5px;white-space:pre-wrap;word-break:break-word}
+.ch-draft .df{font-size:11px;color:#94a3b8;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap}
+.ch-draft .da{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ch-form{margin-top:11px;border-top:1px solid #2d3748;padding-top:11px}
+.ch-form textarea{width:100%;min-height:64px}
+.ch-wait{font-size:12px;color:#fbbf24}
+.ch-empty{font-size:12.5px;color:#3d4f63;font-style:italic;padding:14px 0;display:block}
 .badge.ruling{background:#1e3a5f;color:#60a5fa}
 .badge.ack{background:#1e2433;color:#94a3b8;border:1px solid #334155}
 .sb-pill.inbox{background:#3b1f6e;color:#c084fc}
@@ -386,6 +415,26 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
     <!-- 决策收件箱 -->
     <div id="v_inbox" class="hidden">
+      <!-- 对话：按客户跟 opus 聊，聊出来的活变成任务草案，人点立项才落看板 -->
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">对话</div>
+          <div class="tb-group">
+            <span class="plan-meta" id="chMeta"></span>
+            <button class="btn" onclick="newChat()">新会话</button>
+            <button class="btn ghost" onclick="loadChats()">刷新</button>
+          </div>
+        </div>
+        <div class="plan-meta" style="margin-bottom:10px">
+          跟 opus 聊这个客户的事：问数据、聊博客规划、讨论素材要不要更新。它只读，改不了看板任何一格。
+          聊到有具体的活可以派时它会附任务草案，你点「立项」才会真的建任务，建完照常走看板的标准流程。
+        </div>
+        <div class="ch-wrap">
+          <div class="ch-list" id="chList"></div>
+          <div class="ch-main" id="chMain"></div>
+        </div>
+      </div>
+
       <div class="sec">
         <div class="sec-head">
           <div class="sec-title">决策收件箱</div>
@@ -628,6 +677,10 @@ let apprPlanId=0,apprTasks=[],apprPick={};
 /* 决策收件箱：全局跨客户流，客户过滤只是个筛子。裁决草稿按卡片 id 存内存，
    刷新会重画卡片，草稿从这里补回去，不会被自动刷新吃掉。 */
 let inboxData=[],inboxOpenTotal=0,inboxClient=0,inboxOnlyOpen=false,inboxDraft={};
+/* 收件箱对话：会话按当前客户过滤，会话详情 5 秒轮询一次等 opus 回复，
+   会话关掉或者离开这个视图就把轮询停掉，别让它在后台空转。
+   chatSpawned 记这一轮点过立项的草案（key 是 消息id:序号），刷新后靠系统行补回来。 */
+let chatList=[],chatRootId=0,chatItem=null,chatMsgs=[],chatPending=0,chatTimer=null,chatSending=false,chatSpawned={};
 
 function priIdx(p){const n=PRIORITIES.indexOf(p||'P2');return n<0?2:n}
 function getRole(){
@@ -702,6 +755,7 @@ function router(){
     fbOpen={};fbDraft={};fbSource={};fbComplete={};fbHist={};fbImgs={};fbUploading={};
     releaseFbBlobs();
     tasksData=[];jobsData=[];factsData=[];lastOverview=null;lastAttention=null;
+    chReset();
     insReset();
   }
   render();
@@ -727,6 +781,8 @@ function render(){
 }
 
 function loadView(){
+  /* 会话轮询只在收件箱视图里跑，切走就停 */
+  if(curView!=='inbox')chStop();
   if(curView==='dash')loadOverview();
   else if(curView==='inbox')loadInbox();
   else if(curView==='plan')loadPlans();
@@ -1708,6 +1764,7 @@ async function loadInbox(){
   inboxOpenTotal=d.open_count||0;
   renderInbox();
   renderSidebar();
+  loadChats();
 }
 
 function ibClientLabel(r){
@@ -1826,6 +1883,250 @@ async function resolveDigest(id){
   if(fail(d,'关卡失败'))return;
   toast('卡片已关闭');
   loadInbox();
+  loadClients(true);
+}
+
+/* ================= 收件箱对话 =================
+   聊天是界面，看板是账本。这一段里没有任何直接改看板的调用：
+   唯一写看板的按钮是「立项」，它打 POST /inbox/{root}/spawn_task，
+   服务端用和人工建任务同一套校验建任务。别在这里加第二个写口子。 */
+
+function chStop(){if(chatTimer){clearInterval(chatTimer);chatTimer=null}}
+function chStart(){
+  chStop();
+  chatTimer=setInterval(()=>{
+    if(!token||curView!=='inbox'||!chatRootId||document.visibilityState!=='visible')return;
+    loadChatThread(true);
+  },5000);
+}
+function chReset(){
+  chStop();
+  chatList=[];chatRootId=0;chatItem=null;chatMsgs=[];chatPending=0;chatSending=false;chatSpawned={};
+  /* 换客户时把上一位客户的会话从 DOM 上抹掉，别让旧线程在那儿挂着 */
+  ['chMain','chList'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
+}
+
+async function loadChats(){
+  if(!curId)return;
+  const d=await api('/inbox/chats?limit=50&client_id='+curId);
+  if(fail(d,'会话列表载入失败'))return;
+  chatList=d.items||[];
+  renderChatList();
+  const meta=document.getElementById('chMeta');
+  if(meta){
+    const open=chatList.filter(c=>c.status==='open').length;
+    meta.textContent='这个客户 '+chatList.length+' 个会话，进行中 '+open+' 个';
+  }
+  /* 会话被别处归档或者刚打开视图时，右边该显示什么由这里兜底 */
+  if(chatRootId&&!chatList.some(c=>c.id===chatRootId)){chatRootId=0;chatItem=null;chatMsgs=[];chStop()}
+  if(!chatRootId&&!document.getElementById('chStream')&&!document.getElementById('chNewText'))renderChatMain();
+}
+
+function renderChatList(){
+  const box=document.getElementById('chList');
+  if(!box)return;
+  if(!chatList.length){
+    box.innerHTML='<span class="ch-empty">还没有会话。点「新会话」问它第一句。</span>';
+    return;
+  }
+  box.innerHTML=chatList.map(c=>
+    '<div class="ch-row'+(c.id===chatRootId?' on':'')+(c.status==='resolved'?' arch':'')+'" onclick="openChat('+c.id+')">'+
+      '<div class="t">'+esc(c.body||('会话 #'+c.id))+'</div>'+
+      '<div class="m">'+(c.status==='open'?'进行中':'已归档')+' · '+(c.msg_count||0)+' 条 · '+esc(String(c.last_at||'').slice(5,16))+'</div>'+
+    '</div>').join('');
+}
+
+function openChat(id){
+  if(chatRootId===id)return;
+  chatRootId=id;chatItem=null;chatMsgs=[];chatPending=0;chatSpawned={};
+  renderChatList();
+  renderChatMain();
+  loadChatThread(false);
+  chStart();
+}
+
+function newChat(){
+  chatRootId=0;chatItem=null;chatMsgs=[];chatPending=0;
+  chStop();
+  renderChatList();
+  renderChatMain();
+  const el=document.getElementById('chNewText');
+  if(el)el.focus();
+}
+
+async function loadChatThread(silent){
+  if(!chatRootId)return;
+  const d=await api('/inbox/'+chatRootId);
+  if(!d)return;
+  if(d._status>=400){if(!silent)fail(d,'会话载入失败');return}
+  chatItem=d.item||null;
+  chatPending=d.chat_pending||0;
+  chatMsgs=(d.replies||[]).filter(r=>r.kind==='chat_user'||r.kind==='chat_agent').sort((a,b)=>a.id-b.id);
+  if(!document.getElementById('chStream'))renderChatMain();
+  renderChatStream();
+  renderChatStatus();
+}
+
+/* 已经立过项的草案：服务端在会话里写了一条系统行「已立项 #12「标题」」，
+   刷新以后靠标题把草案卡对回去，按钮就不会回到可点状态。 */
+function chSpawnedTitles(){
+  const map={};
+  chatMsgs.forEach(m=>{
+    if(m.kind!=='chat_agent'||m.created_by==='seo-worker')return;
+    const mm=String(m.body||'').match(/^已立项 #(\d+)「([\s\S]+?)」/);
+    if(mm)map[mm[2]]=parseInt(mm[1],10);
+  });
+  return map;
+}
+
+function chDraftCard(msgId,idx,d,doneId){
+  const key=msgId+':'+idx;
+  const rows=['module '+esc(d.module||''),'owner '+esc(d.owner_type||'agency'),esc(d.priority||'P2')];
+  if(d.sprint)rows.push('sprint '+esc(d.sprint));
+  if(d.ops)rows.push('ops '+esc(d.ops));
+  const act=doneId
+    ? '<span class="badge done">已立项 #'+doneId+'</span>'+
+      '<span class="sb-act" onclick="navTo('+curId+',\'tasks\')">去任务看板</span>'
+    : '<button class="btn tiny" id="ch_sp_'+key.replace(':','_')+'" onclick="spawnTask('+msgId+','+idx+')">立项</button>'+
+      '<span class="plan-meta">立项后建成 approved 任务，detail 末尾会带上来源行。</span>';
+  return '<div class="ch-draft">'+
+    '<div class="dt">任务草案：'+esc(d.title||'')+'</div>'+
+    (d.detail?'<div class="dd">'+esc(d.detail)+'</div>':'')+
+    '<div class="df">'+rows.map(r=>'<span>'+r+'</span>').join('')+'</div>'+
+    '<div class="da">'+act+'</div>'+
+  '</div>';
+}
+
+function renderChatStream(){
+  const box=document.getElementById('chStream');
+  if(!box)return;
+  if(!chatMsgs.length){
+    box.innerHTML='<span class="ch-empty">这个会话还没有消息。</span>';
+    return;
+  }
+  const spawned=chSpawnedTitles();
+  const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
+  box.innerHTML=chatMsgs.map(m=>{
+    const isMe=m.kind==='chat_user';
+    const isSys=m.kind==='chat_agent'&&m.created_by!=='seo-worker';
+    const cls=isMe?'me':(isSys?'sys':'bot');
+    const who=isMe?esc(m.created_by||'我'):(isSys?'系统':'opus');
+    let html='<div class="ch-turn '+cls+'">'+
+      '<div class="ch-by">'+who+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
+      '<div class="ch-bubble">'+esc(m.body||'')+'</div>';
+    const drafts=(m.refs&&m.refs.drafts)||[];
+    drafts.forEach((d,i)=>{
+      const key=m.id+':'+i;
+      const doneId=chatSpawned[key]||spawned[d.title]||0;
+      html+=chDraftCard(m.id,i,d,doneId);
+    });
+    return html+'</div>';
+  }).join('');
+  if(atBottom)box.scrollTop=box.scrollHeight;
+}
+
+function renderChatStatus(){
+  const el=document.getElementById('chStatus');
+  if(el)el.innerHTML=chatPending?'<span class="ch-wait">opus 思考中，job #'+chatPending+'，回复出来会自动刷新</span>':'';
+  const btn=document.getElementById('chSend');
+  if(btn)btn.disabled=!!chatPending||chatSending;
+  const arch=chatItem&&chatItem.status==='resolved';
+  const form=document.getElementById('chForm');
+  if(form)form.classList.toggle('hidden',!!arch);
+  const note=document.getElementById('chArch');
+  if(note)note.classList.toggle('hidden',!arch);
+}
+
+function renderChatMain(){
+  const box=document.getElementById('chMain');
+  if(!box)return;
+  if(!chatRootId){
+    box.innerHTML='<div class="ch-head"><span class="ch-title">新会话</span></div>'+
+      '<div class="fld"><label>标题（可以留空，默认取第一句话）</label>'+
+        '<input id="chNewTitle" placeholder="例如：9 月博客排期"></div>'+
+      '<div class="fld"><label>第一句话</label>'+
+        '<textarea id="chNewText" placeholder="例如：这个客户最近自然流量掉了，先看看是哪几个页面掉的，再聊要不要动内容。"></textarea></div>'+
+      '<div class="fb-row"><button class="btn" id="chStart" onclick="startChat()">开始会话</button>'+
+      '<span class="plan-meta">它只会读这个客户的档案、facts、内容注册表、任务清单和最近的数据，不会动任何东西。</span></div>';
+    return;
+  }
+  const title=chatItem?(chatItem.body||('会话 #'+chatRootId)):('会话 #'+chatRootId);
+  box.innerHTML='<div class="ch-head">'+
+      '<span class="ch-title">'+esc(title)+'</span>'+
+      '<span class="muted">#'+chatRootId+'</span>'+
+      '<button class="btn tiny ghost" onclick="archiveChat()">归档会话</button>'+
+    '</div>'+
+    '<div class="ch-stream" id="chStream"></div>'+
+    '<div id="chStatus" style="margin-top:8px"></div>'+
+    '<div class="ch-form hidden" id="chArch"><span class="plan-meta">这个会话已经归档，不再接新消息。要接着聊就开一个新会话。</span></div>'+
+    '<div class="ch-form" id="chForm">'+
+      '<div class="fld"><textarea id="chText" placeholder="继续说。它答不上来的会直说不知道，不会编数字。"></textarea></div>'+
+      '<div class="fb-row"><button class="btn tiny" id="chSend" onclick="sendChat()">发送</button>'+
+      '<span class="plan-meta">一次一轮，等它回完再说下一句。</span></div>'+
+    '</div>';
+}
+
+async function startChat(){
+  const t=document.getElementById('chNewText');
+  const text=(t?t.value:'').trim();
+  if(!text){toast('先写第一句话',true);return}
+  if(text.length>5000){toast('单条消息最多 5000 字',true);return}
+  const titleEl=document.getElementById('chNewTitle');
+  const btn=document.getElementById('chStart');
+  if(btn)btn.disabled=true;
+  const d=await api('/inbox/chat','POST',{client_id:curId,title:(titleEl?titleEl.value.trim():''),text:text});
+  if(btn)btn.disabled=false;
+  if(fail(d,'会话创建失败'))return;
+  toast('会话已开，job #'+d.job_id+' 正在想，回复出来会自动出现');
+  chatRootId=0;
+  await loadChats();
+  openChat(d.root_id);
+}
+
+async function sendChat(){
+  if(!chatRootId||chatSending)return;
+  const el=document.getElementById('chText');
+  const text=(el?el.value:'').trim();
+  if(!text){toast('先写点什么',true);return}
+  if(text.length>5000){toast('单条消息最多 5000 字',true);return}
+  chatSending=true;renderChatStatus();
+  const d=await api('/inbox/'+chatRootId+'/chat','POST',{text});
+  chatSending=false;
+  if(!d){renderChatStatus();return}
+  if(d._status===409){toast('这个会话还在等上一条回复（job #'+(d.job_id||'?')+'）',true);renderChatStatus();return}
+  if(fail(d,'发送失败')){renderChatStatus();return}
+  if(el)el.value='';
+  await loadChatThread(false);
+  loadChats();
+}
+
+async function archiveChat(){
+  if(!chatRootId)return;
+  const note=prompt('归档这个会话，之后不再接新消息。可以留一句备注，空着也行：','');
+  if(note===null)return;
+  const d=await api('/inbox/'+chatRootId+'/resolve','POST',{note:note});
+  if(fail(d,'归档失败'))return;
+  toast('会话已归档');
+  await loadChatThread(false);
+  loadChats();
+}
+
+async function spawnTask(msgId,idx){
+  const msg=chatMsgs.filter(m=>m.id===msgId)[0];
+  const d0=msg&&msg.refs&&msg.refs.drafts?msg.refs.drafts[idx]:null;
+  if(!d0){toast('找不到这个草案，刷新一下',true);return}
+  if(!confirm('把「'+d0.title+'」建成任务？会直接落成 approved 状态进看板。'))return;
+  const btn=document.getElementById('ch_sp_'+msgId+'_'+idx);
+  if(btn)btn.disabled=true;
+  const d=await api('/inbox/'+chatRootId+'/spawn_task','POST',{
+    title:d0.title,detail:d0.detail||'',module:d0.module,owner_type:d0.owner_type||'agency',
+    priority:d0.priority||'P2',sprint:d0.sprint||'',ops:d0.ops||''
+  });
+  if(btn)btn.disabled=false;
+  if(fail(d,'立项失败'))return;
+  chatSpawned[msgId+':'+idx]=d.task_id;
+  toast('已立项 #'+d.task_id+'，任务已经在看板上');
+  await loadChatThread(false);
   loadClients(true);
 }
 
