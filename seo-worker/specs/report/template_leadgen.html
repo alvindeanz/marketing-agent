@@ -355,6 +355,13 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
   <div class="stag">Section {{sec_work_num}}</div>
   <div class="sec-head"><span class="sec-num">{{sec_work_num}}</span><h2 class="stitle">本月工作内容</h2></div>
   <p class="sdesc">{{{work_sdesc}}}</p>
+  <div class="card" style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px">
+    <div><div style="font-size:24px;font-weight:700;color:#16a34a">{{work_total}}</div><div style="font-size:12px;color:var(--muted)">本月完成工作项</div></div>
+    <div><div style="font-size:24px;font-weight:700">{{work_pages}}</div><div style="font-size:12px;color:var(--muted)">页面优化</div></div>
+    <div><div style="font-size:24px;font-weight:700">{{work_blogs}}</div><div style="font-size:12px;color:var(--muted)">内容发布</div></div>
+    <div><div style="font-size:24px;font-weight:700">{{work_tech}}</div><div style="font-size:12px;color:var(--muted)">技术修复</div></div>
+    <div><div style="font-size:24px;font-weight:700">{{work_report}}</div><div style="font-size:12px;color:var(--muted)">分析与交付</div></div>
+  </div>
   <div class="card">
     <!-- row:work_item ×N（来自 ops tracker 当月已完成任务，分组顺序 On-Page → 内容 → 外链 → Technical → 报告）
          cat_class 取值：cat-onpage / cat-content / cat-link / cat-tech / cat-report -->

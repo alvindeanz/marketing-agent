@@ -760,6 +760,12 @@ function renderReport(pack, narrative, opts = {}) {
     pages_callouts: calloutList(n && n.pages_callouts, ['green', 'yellow']),
 
     work_sdesc: paragraphs(sdesc('work_sdesc', '本期完成的工作按分类汇总如下。')),
+    // 工作量数字条：客户要看到我方做了多少，数字直出不经模型。
+    work_total: String(((pack.work && pack.work.items) || []).length),
+    work_pages: String(Number(pack.work && pack.work.pages_optimised) || 0),
+    work_blogs: String(Number(pack.work && pack.work.blogs_published) || 0),
+    work_tech: String(Number(pack.work && pack.work.counts && pack.work.counts.tech) || 0),
+    work_report: String(Number(pack.work && pack.work.counts && pack.work.counts.report) || 0),
     work_items: buildWorkItems(pack, n),
 
     next_sdesc: paragraphs(sdesc('next_sdesc', '下期按以下五项推进，优先级从上到下。')),

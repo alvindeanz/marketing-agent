@@ -52,10 +52,11 @@ function headerBlock(pack) {
     '7. 反向指标不藏、不淡化、不甩外因，每个坏消息紧跟一条下月可执行的抓手。',
     '8. 工作内容写成果不写过程：写「优化了 N 个页面」，不写任务编号、脚本、模型。',
     '9. 统一用「询盘」不用「线索」；语言按 ' + meta.report_lang + '（zh 写中文，en 写英文）。',
+    '10. 这份报告是向客户汇报工作的：本月做了什么要写足写具体，数据变化要与我方动作对应起来说，让客户看到投入和成果。',
   ];
   if (meta.period.partial) {
     lines.push(
-      '10. 本期是月中出报，全文必须写明「截至 ' + meta.period.through_day + ' 日，本月尚未结束」，环比只与上月同一时段比，不做同比。'
+      '11. 本期是月中出报，全文必须写明「截至 ' + meta.period.through_day + ' 日，本月尚未结束」，环比只与上月同一时段比，不做同比。'
     );
   }
   return lines.join('\n');
@@ -98,7 +99,7 @@ function schemaBlock() {
     '  "self_check": {"numbers_all_from_pack": true, "no_banned_words": true, "callouts_paired": true}',
     '}',
     '```',
-    'work_items 按分类把 DATA PACK 的 work.items 合并成 3 至 6 条，分类只能取 onpage、content、link、tech、report，内部速记要改写成客户面表达。',
+    'work_items 是这份报告的重点：客户要看到我方本月做了什么。把 DATA PACK 的 work.items 按分类整理成 3 至 8 条，每一条原始动作都要有归宿不得漏项，每条写清对象与数量（改了哪些页、发了几篇、修了什么、交付了什么），成果与投入并列。分类只能取 onpage、content、link、tech、report，内部速记要改写成客户面表达。',
     '成对 callout 必须两条都给。排名亮点里的「旧位次 → 新位次（差值，曝光数）」只能取 narrative_inputs.ranking_highlights 里的行。',
     'next_items 第一槽的 urls 只能取 DATA PACK 里出现过的路径。',
   ].join('\n');
