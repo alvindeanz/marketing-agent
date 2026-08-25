@@ -533,9 +533,10 @@ const CAT_META = {
   content: { cat_class: 'cat-content', cat_label: '内容' },
   link: { cat_class: 'cat-link', cat_label: '外链' },
   tech: { cat_class: 'cat-tech', cat_label: 'Technical' },
+  ads: { cat_class: 'cat-report', cat_label: '广告账户' },
   report: { cat_class: 'cat-report', cat_label: '报告' },
 };
-const CAT_ORDER = ['onpage', 'content', 'link', 'tech', 'report'];
+const CAT_ORDER = ['onpage', 'content', 'link', 'tech', 'ads', 'report'];
 
 function buildWorkItems(pack, narrative) {
   const fromModel = narrative && Array.isArray(narrative.work_items) ? narrative.work_items : null;
@@ -684,9 +685,15 @@ function renderReport(pack, narrative, opts = {}) {
     prev_period_short: meta.compare.short,
     next_period_short: nextMonthShort(meta.period.start),
     site_domain: meta.domain,
-    market: meta.market || '待更新',
-    platform: meta.platform || '待更新',
-    vertical: meta.vertical || '待更新',
+    market: meta.market || '',
+    platform: meta.platform || '',
+    vertical: meta.vertical || '',
+    // 页眉信息条只列有值的项，空字段不显示「待更新」，客户面不该看到占位。
+    hdr_chips: [meta.domain, meta.market, meta.platform, meta.vertical]
+      .map((s) => String(s || '').trim())
+      .filter((s) => s)
+      .map((s) => escapeHtml(s))
+      .join(' &nbsp;·&nbsp; '),
     hero_headline: (n && n.hero_headline) || '本期搜索表现与工作进展汇总',
     hero_kpis: buildHeroKpis(pack, n),
     nav_items: [
@@ -762,9 +769,10 @@ function renderReport(pack, narrative, opts = {}) {
     work_sdesc: paragraphs(sdesc('work_sdesc', '本期完成的工作按分类汇总如下。')),
     // 工作量数字条：客户要看到我方做了多少，数字直出不经模型。
     work_total: String(((pack.work && pack.work.items) || []).length),
-    work_pages: String(Number(pack.work && pack.work.pages_optimised) || 0),
-    work_blogs: String(Number(pack.work && pack.work.blogs_published) || 0),
+    work_pages: String(Number(pack.work && pack.work.counts && pack.work.counts.onpage) || 0),
+    work_blogs: String(Number(pack.work && pack.work.counts && pack.work.counts.content) || 0),
     work_tech: String(Number(pack.work && pack.work.counts && pack.work.counts.tech) || 0),
+    work_ads: String(Number(pack.work && pack.work.counts && pack.work.counts.ads) || 0),
     work_report: String(Number(pack.work && pack.work.counts && pack.work.counts.report) || 0),
     work_items: buildWorkItems(pack, n),
 

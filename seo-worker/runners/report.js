@@ -99,7 +99,7 @@ function schemaBlock() {
     '  "self_check": {"numbers_all_from_pack": true, "no_banned_words": true, "callouts_paired": true}',
     '}',
     '```',
-    'work_items 是这份报告的重点：客户要看到我方本月做了什么。把 DATA PACK 的 work.items 按分类整理成 3 至 8 条，每一条原始动作都要有归宿不得漏项，每条写清对象与数量（改了哪些页、发了几篇、修了什么、交付了什么），成果与投入并列。分类只能取 onpage、content、link、tech、report，内部速记要改写成客户面表达。',
+    'work_items 是这份报告的重点：客户要看到我方本月做了什么。把 DATA PACK 的 work.items 按分类整理成 3 至 8 条，每一条原始动作都要有归宿不得漏项，每条写清对象与数量（改了哪些页、发了几篇、修了什么、交付了什么），成果与投入并列。分类只能取 onpage、content、link、tech、ads（广告账户操作）、report，内部速记要改写成客户面表达。',
     '成对 callout 必须两条都给。排名亮点里的「旧位次 → 新位次（差值，曝光数）」只能取 narrative_inputs.ranking_highlights 里的行。',
     'next_items 第一槽的 urls 只能取 DATA PACK 里出现过的路径。',
   ].join('\n');

@@ -127,7 +127,7 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
       <span class="hdr-badge">{{period_label}}</span>
     </div>
     <h1>SEO Monthly Report<br><em>{{hero_headline}}</em></h1>
-    <p class="hdr-desc">{{site_domain}} &nbsp;·&nbsp; {{market}} &nbsp;·&nbsp; {{platform}} &nbsp;·&nbsp; {{vertical}} &nbsp;·&nbsp; 数据周期：{{period_label}}&nbsp;·&nbsp; 环比对比 {{prev_period_label}}</p>
+    <p class="hdr-desc">{{{hdr_chips}}} &nbsp;·&nbsp; 数据周期：{{period_label}}&nbsp;·&nbsp; 环比对比 {{prev_period_label}}</p>
     <div class="hkpis">
       <!-- row:hero_kpi ×4，正向指标优先，rank 类的 note 写「提升 N 位」 -->
       {{#hero_kpis}}
@@ -358,8 +358,9 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
   <div class="card" style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px">
     <div><div style="font-size:24px;font-weight:700;color:#16a34a">{{work_total}}</div><div style="font-size:12px;color:var(--muted)">本月完成工作项</div></div>
     <div><div style="font-size:24px;font-weight:700">{{work_pages}}</div><div style="font-size:12px;color:var(--muted)">页面优化</div></div>
-    <div><div style="font-size:24px;font-weight:700">{{work_blogs}}</div><div style="font-size:12px;color:var(--muted)">内容发布</div></div>
-    <div><div style="font-size:24px;font-weight:700">{{work_tech}}</div><div style="font-size:12px;color:var(--muted)">技术修复</div></div>
+    <div><div style="font-size:24px;font-weight:700">{{work_blogs}}</div><div style="font-size:12px;color:var(--muted)">内容</div></div>
+    <div><div style="font-size:24px;font-weight:700">{{work_tech}}</div><div style="font-size:12px;color:var(--muted)">技术</div></div>
+    <div><div style="font-size:24px;font-weight:700">{{work_ads}}</div><div style="font-size:12px;color:var(--muted)">广告账户</div></div>
     <div><div style="font-size:24px;font-weight:700">{{work_report}}</div><div style="font-size:12px;color:var(--muted)">分析与交付</div></div>
   </div>
   <div class="card">

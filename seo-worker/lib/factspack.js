@@ -49,6 +49,7 @@ const MERGEABLE_CHANNEL_WORDS = ['social', 'email', 'referral', 'unassigned', 'd
 const WORK_CATEGORIES = [
   ['tech', ['301', 'sitemap', 'schema', '收录', '审计', 'redirect', '索引', '抓取', 'audit', 'canonical', '重定向', '结构化数据']],
   ['link', ['外链', 'backlink', 'disavow', '引荐域', '布点', 'outreach']],
+  ['ads', ['广告', '否定词', '否定关键词', 'campaign', 'brand search', 'pmax', 'performance max', '出价', '投放', 'negative keyword', 'google ads']],
   ['content', ['博客', '文章', '选题', 'blog', 'article', '改写', 'refresh']],
   ['onpage', ['title', 'meta', '内链', '页面优化', '精校', '重写', 'page', '标题', '描述', '集合页', '产品页', 'pageopt']],
   ['report', ['报告', '分析', '数据', '清单', '月报', '交付']],
@@ -151,7 +152,10 @@ function computePeriod(opts) {
   const today = o.today || new Date().toISOString().slice(0, 10);
   const lagged = addDays(today, -lag);
 
-  let end = o.end ? String(o.end) : lagged < mEnd ? lagged : mEnd;
+  // 不管有没有显式给 end，都要夹到「今天减延迟天数」：GSC 最近几天没数据，
+  // 传月末进来照拉会把 22 天当 31 天比，环比全是假下滑（2026-08-25 v1 踩过）。
+  let end = o.end ? String(o.end) : mEnd;
+  if (end > lagged) end = lagged;
   if (end > mEnd) end = mEnd;
   if (end < start) end = start;
 
@@ -757,7 +761,7 @@ function buildWork(opts) {
 
   items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
-  const counts = { onpage: 0, content: 0, tech: 0, link: 0, report: 0 };
+  const counts = { onpage: 0, content: 0, tech: 0, link: 0, ads: 0, report: 0 };
   for (const it of items) {
     if (counts[it.category] === undefined) counts[it.category] = 0;
     counts[it.category] += 1;
@@ -1170,12 +1174,22 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   const pack = {
     meta: {
       client_id: clientId,
-      client_name: String((profile && profile.name) || (profile && profile.client_name) || ('客户 ' + clientId)),
+      client_name: String(
+        (profile && profile.name) ||
+          (profile && profile.client_name) ||
+          (context && context.client && context.client.name) ||
+          domain ||
+          ('客户 ' + clientId)
+      ),
       domain,
       slug: String(opts.slug || ''),
       report_lang: String((profile && profile.report_lang) || 'zh'),
       biz_type: bizType,
-      market: String((profile && (profile.market || profile.country)) || ''),
+      // 市场优先取档案字段，没有就按域名后缀推：.com.au 澳洲、.co.nz 新西兰，其余留空不猜。
+      market: String(
+        (profile && (profile.market || profile.country)) ||
+          (/\.com\.au(\/|$)/i.test(String(domain)) ? 'AU' : /\.co\.nz(\/|$)/i.test(String(domain)) ? 'NZ' : '')
+      ),
       platform: String((profile && (profile.platform || profile.cms)) || ''),
       vertical: String((profile && (profile.vertical || profile.industry)) || ''),
       period: {

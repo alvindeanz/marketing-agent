@@ -1588,7 +1588,17 @@ if($m==='GET'&&$ROUTE==='/context'){
     $pf=db()->prepare("SELECT * FROM seo_profiles WHERE client_id=?");
     $pf->execute([$cid]);
     $profile=$pf->fetch();
-    if($profile)$profile['target_keywords']=jdec($profile['target_keywords']);
+    if($profile){
+        $profile['target_keywords']=jdec($profile['target_keywords']);
+        /* 客户名在 clients 表不在 seo_profiles，报告页眉要用，补进 profile.name（已有则不覆盖） */
+        if(empty($profile['name'])){
+            $cn=db()->prepare("SELECT name FROM clients WHERE id=?");
+            $cn->execute([$cid]);
+            $cr=$cn->fetch();
+            $cn->closeCursor();
+            if($cr&&!empty($cr['name']))$profile['name']=$cr['name'];
+        }
+    }
 
     $pl=db()->prepare("SELECT * FROM seo_plans WHERE client_id=? AND status='active' ORDER BY version DESC,id DESC LIMIT 1");
     $pl->execute([$cid]);
