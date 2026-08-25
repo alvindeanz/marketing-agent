@@ -25,7 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 - 干了什么：sales 一键出报模块 P1 全套。后端 seo-api.php：ensure_reports_schema（seo_reports，无外键）、POST /reports/generate（admin，校验 workspace_dir，同类 job 409）、POST /reports（worker，version 服务端算）、GET /reports、GET /reports/{id}/pack、PATCH /reports/{id}（note/status）；**跨认领改动两处：GET /metrics 与 GET /events 由 auth_admin 改 auth_any**（worker 数据层复用，回传只有指标与事件标签）。worker：lib/factspack.js（零 LLM 数据层）、lib/reportlint.js（copy_rules D 段全部规则加数字校验）、lib/reporthtml.js（零 LLM 渲染）、lib/publish.js（ssh 别名 blogpreview 上 250）、runners/report.js 重写（一次 LLM 加一次纠错，仍坏降级纯数据版 job 不失败）、specs/report/ 契约与 leadgen 模板；lib/config.js 加 reportModel/reportSsh/reportRemoteRoot/reportUrlBase/reportTimeoutMin（DEFAULTS 兜底，config.json 不用改）；lib/api.js 加四方法；lib/distill.js factLines 加 excludePrefixes（filter 在 slice 前，默认不变）；lib/metrics.js 只加导出；listener.js 超时按 type=report 取 reportTimeoutMin。前端 seo-agent.html 加「报告」tab（区间指标、生成月报、版本列表带备注与已发送标记），新增 rep* 纯函数在 INSIGHTS-PURE 区间。测试：node tests/ chat 29、insights 83（含新增 7 条）、report 88（新）全过；php -l 与 chatapi.test.php 16 条在 250 上过；全部 js node --check 加 require 加载过。
 - 坑：1) **execute_task 多任务串行会顶 30 分钟超时**（benscurtains job 52 三任务只跑完两个即被杀，61 补排 job 53），建议一任务一 job 或按任务数放宽 jobTimeoutMin，归 Aiden。2) GA4 默认渠道分组有 "AI Assistant" 标签，成品 lint 对裸 AI 字样只查叙事不查全文，否则永远过不了闸。3) 报告 HTML 不走 deliverables 通道（无 html 扩展名且强制下载），走 250 静态托管。
-- 下一步/认领：**待部署 api 与 worker**（Alvin 点名后 Aira 部署）。试点 benscurtains 2026-08 月报 v1，人工过目后再开放其他客户。P2 周报季报，P3 /client 门户读 sent 版本。
+- 下一步/认领：**已部署 api 与 worker**（Alvin 指示，2026-08-25 Aira 执行，rev 8bc511d，含工作量数字条那次提交；部署前 active job 为 0）。试点 benscurtains 2026-08 月报 v1 已排 job 55，人工过目后再开放其他客户。P2 周报季报，P3 /client 门户读 sent 版本。
 
 ### 2026-08-25 AIRA (f) 认领扩围登记：报告模块整块
 
