@@ -19,7 +19,8 @@ const capabilities = require('../lib/capabilities');
 const wf = require('../lib/webforger');
 const { extractTrailingJson } = require('../lib/mdjson');
 const deliverables = require('../lib/deliverables');
-const { ensureClientWorkspace, summarize, truncate, localYmd } = require('../lib/util');
+const { publishFile } = require('../lib/publish');
+const { ensureClientWorkspace, clientDirName, summarize, truncate, localYmd } = require('../lib/util');
 
 const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*)';
 const OUTPUT_DIRNAME = 'seo-agent-output';
@@ -82,7 +83,9 @@ function buildPrompt(opts) {
     '2. 按顺序执行。每一步执行后先比对响应，符合预期才走下一步。',
     '3. 方案里写了拍快照或 GET 留档的前置步骤，必须先做，不许跳过。',
     '4. 全部步骤完成后，执行方案里"执行后验证"一节的每一条，逐条给出实际结果。',
-    '5. 任何一条验证不通过，整体判为失败，并说明是否需要回滚、回滚到哪一步。',
+    '5. 当场可验的验证项任何一条不通过，整体判为失败，并说明是否需要回滚、回滚到哪一步。',
+    '   当场无法验证的项（需要浏览器交互的官方工具、要等 N 天的收录跟进这类）不算失败，',
+    '   照实标成待人工，不许为了让结果好看把没跑的写成通过。',
     '',
     '输出：中文执行记录，按下面结构写',
     '',
@@ -98,11 +101,31 @@ function buildPrompt(opts) {
     '',
     '最后附一个 json 块，后面不要有任何内容：',
     '```json',
-    '{"status":"success","steps_done":3,"steps_total":3,"verification_passed":true,"note":"中文一句话结论"}',
+    '{"status":"success","steps_done":3,"steps_total":3,"verification_passed":true,',
+    ' "affected_urls":["https://example.co.nz/some-page/"],',
+    ' "snapshot_label":"task-61-mtm-rewrite-pre",',
+    ' "before_archive":"/data/aira/clients/example/backups/2026-08-25-task-61/before-rendered.html",',
+    ' "checks":[{"name":"V1 接口返回 ok","passed":true,"deferred":false,"note":"ok=true"},',
+    '  {"name":"V12 Rich Results Test","passed":false,"deferred":true,"note":"需浏览器交互，本环境跑不了，待人工补跑"}],',
+    ' "note":"中文一句话结论"}',
     '```',
-    'status 取值：success 表示全部步骤执行且全部验证通过；aborted 表示因为响应不符或方案有问题',
-    '主动中止；failed 表示执行了但验证没过。三者只能选一个，不许自行发明。',
-    'verification_passed 只有每一条验证都通过才写 true。',
+    'status 取值：success 表示全部步骤执行且当场可验的验证全过；aborted 表示因为响应不符或方案有问题',
+    '主动中止；failed 表示执行了但当场可验的验证没过。三者只能选一个，不许自行发明。',
+    '',
+    'json 各字段的硬要求',
+    '- affected_urls：本次**实际**改动到的页面完整 URL 列表，写规范域、零跳转的那一个',
+    '  （拿不准就 curl -L -w "%{num_redirects}" 验一下，必须是 0）。没有页面被改动就写空数组。',
+    '  不许把只读过没改过的页面写进来，也不许写接口地址或本地路径。',
+    '- snapshot_label：方案里那一步拍的平台快照 label 原文，方案没有拍快照就写空字符串。',
+    '- before_archive：方案步骤里落到本地的改前渲染 HTML 的绝对路径（整页覆盖类必有这一步），',
+    '  没有就写空字符串。写路径本身，不要写目录，不要写多个。',
+    '- checks：方案"执行后验证"一节的每一条各一项，顺序照方案。',
+    '  name 用方案里的编号加标题，例如 "V3 禁区词清零"；',
+    '  passed 是这一条实际过没过；',
+    '  deferred=true 表示这一条当场根本无法验证（需要浏览器的官方工具、要等 N 天的收录跟进这类），',
+    '  deferred 项不计入成败，但 passed 仍要照实写（没跑就写 false）；',
+    '  当场跑了但没过的项写 passed=false 且 deferred=false，这种项只要有一条，整体就是失败。',
+    '- verification_passed：老字段，保留兼容，按当场可验的项是否全过来写。',
     '',
     '文风：中文，不用 emoji，不用破折号。不许编造响应内容，没跑过的步骤不许写成跑过了。',
   ]
@@ -110,29 +133,233 @@ function buildPrompt(opts) {
     .join('\n');
 }
 
+/* =========================================================
+   outcome 契约的解析、判定与 note 头部
+   下面五个函数都是纯函数：只吃参数吐值，不碰网络不碰磁盘，单测直接调。
+   ========================================================= */
+
+/** checks 数组归一化。脏数据一律丢掉，剩下的字段类型强制成 bool 与 string。 */
+function normalizeChecks(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((c) => c && typeof c === 'object')
+    .map((c) => ({
+      name: truncate(String(c.name || '').trim(), 120) || '未命名检查项',
+      passed: c.passed === true,
+      deferred: c.deferred === true,
+      note: truncate(String(c.note || '').trim(), 200),
+    }));
+}
+
+/** affected_urls 归一化：只留 http(s) 开头的完整地址，去重，最多 20 条。 */
+function normalizeUrls(raw) {
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const out = [];
+  for (const item of list) {
+    const u = String(item || '').trim();
+    if (!/^https?:\/\/\S+$/.test(u)) continue;
+    if (out.indexOf(u) === -1) out.push(u);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+/**
+ * 成败判定。
+ * 有 checks 就以 checks 为准：只有 deferred=false 且 passed=false 的项算失败，
+ * deferred 项只记录不计成败（task 61 的教训：V12 要浏览器、V13 要等 14 天，
+ * 这两条把一次全绿的落地判成了失败）。
+ * 没有 checks 才回落老字段 verification_passed，行为与从前一致。
+ * 返回 { mode, ok, failed, deferred, passedCount }
+ */
+function judgeChecks(json) {
+  const checks = normalizeChecks(json && json.checks);
+  if (checks.length) {
+    const failed = checks.filter((c) => !c.deferred && !c.passed);
+    const deferred = checks.filter((c) => c.deferred);
+    const passedCount = checks.filter((c) => !c.deferred && c.passed).length;
+    return { mode: 'checks', ok: failed.length === 0, failed, deferred, passedCount, checks };
+  }
+  const legacyOk = json && json.verification_passed === true;
+  return {
+    mode: 'legacy',
+    ok: !!legacyOk,
+    failed: [],
+    deferred: [],
+    passedCount: 0,
+    checks: [],
+  };
+}
+
+/** 「检查:」那一行。没有 checks 的老方案回落成一句话，格式仍然可 grep。 */
+function checkSummary(judge) {
+  if (!judge || judge.mode !== 'checks') {
+    return judge && judge.ok ? '旧格式，模型声明全部通过' : '旧格式，模型未声明全部通过';
+  }
+  const parts = ['通过 ' + judge.passedCount + ' 项'];
+  if (judge.failed.length) {
+    parts.push('未通过 ' + judge.failed.length + ' 项（' + judge.failed.map((c) => c.name).join('、') + '）');
+  }
+  parts.push(
+    '待人工 ' +
+      judge.deferred.length +
+      ' 项' +
+      (judge.deferred.length ? '（' + judge.deferred.map((c) => c.name).join('、') + '）' : '')
+  );
+  return parts.join('，');
+}
+
+/**
+ * result_note 的固定头部，apply 成功与失败都写，人一眼看到改了哪页，机器能 grep。
+ * 缺的字段整行不写，唯独「受影响页面」与「检查」两行永远在。
+ */
+function buildNoteHeader(o) {
+  const opts = o || {};
+  const urls = normalizeUrls(opts.affectedUrls);
+  const lines = ['受影响页面: ' + (urls.length ? urls.join(' , ') : '未提供')];
+  if (opts.archiveUrl) lines.push('改前存档: ' + opts.archiveUrl);
+  if (opts.snapshotLabel) lines.push('快照: ' + String(opts.snapshotLabel).trim());
+  lines.push('检查: ' + checkSummary(opts.judge));
+  return lines.join('\n') + '\n---\n';
+}
+
 /** Read the machine block. A missing or unparseable block is treated as failed. */
 function readOutcome(output, log) {
   const parsed = extractTrailingJson(output);
+  const say = log || function () {};
+  // 解析不出来的情况没有任何可信字段，判定字段一律给空值。
+  const empty = { judge: judgeChecks(null), affectedUrls: [], snapshotLabel: '', beforeArchive: '' };
   if (parsed.error || !parsed.json || typeof parsed.json !== 'object') {
-    log('outcome block: ' + (parsed.error || 'not an object') + ', treating this task as failed');
-    return { status: 'failed', note: '执行结果无法解析，未确认是否成功，需人工核对站点状态', raw: null };
+    say('outcome block: ' + (parsed.error || 'not an object') + ', treating this task as failed');
+    return Object.assign(
+      { status: 'failed', note: '执行结果无法解析，未确认是否成功，需人工核对站点状态', raw: null },
+      empty
+    );
   }
   const json = parsed.json;
+  const extra = {
+    judge: judgeChecks(json),
+    affectedUrls: normalizeUrls(json.affected_urls),
+    snapshotLabel: truncate(String(json.snapshot_label || '').trim(), 120),
+    beforeArchive: String(json.before_archive || '').trim(),
+  };
   const status = String(json.status || '').trim().toLowerCase();
   if (!STATUSES.includes(status)) {
-    log('outcome block: status "' + json.status + '" is not one of ' + STATUSES.join('/') + ', treating as failed');
-    return { status: 'failed', note: '执行结果状态值非法，需人工核对站点状态', raw: json };
+    say('outcome block: status "' + json.status + '" is not one of ' + STATUSES.join('/') + ', treating as failed');
+    return Object.assign(
+      { status: 'failed', note: '执行结果状态值非法，需人工核对站点状态', raw: json },
+      extra
+    );
   }
-  // Success requires the model to also say every verification passed.
-  if (status === 'success' && json.verification_passed !== true) {
-    log('outcome block: status success but verification_passed is not true, treating as failed');
-    return {
-      status: 'failed',
-      note: '执行声称成功但验证未全部通过：' + truncate(String(json.note || ''), 300),
-      raw: json,
-    };
+  // 声称成功但判定不过才降级。判定口径见 judgeChecks：有 checks 就只看
+  // deferred=false 的项，没有 checks 才回落老字段 verification_passed。
+  if (status === 'success' && !extra.judge.ok) {
+    const why =
+      extra.judge.mode === 'checks'
+        ? '当场可验的检查项有 ' + extra.judge.failed.length + ' 条没过：' +
+          extra.judge.failed.map((c) => c.name).join('、')
+        : '验证未全部通过';
+    say('outcome block: status success but ' + why + ', treating as failed');
+    return Object.assign(
+      {
+        status: 'failed',
+        note: '执行声称成功但' + why + '：' + truncate(String(json.note || ''), 300),
+        raw: json,
+      },
+      extra
+    );
   }
-  return { status, note: truncate(String(json.note || ''), 500), raw: json };
+  if (status === 'success' && extra.judge.deferred.length) {
+    say(
+      'outcome block: ' +
+        extra.judge.deferred.length +
+        ' deferred check(s) recorded, not counted as failure :: ' +
+        extra.judge.deferred.map((c) => c.name).join('、')
+    );
+  }
+  return Object.assign({ status, note: truncate(String(json.note || ''), 500), raw: json }, extra);
+}
+
+/* =========================================================
+   改前存档上传与快照回滚
+   ========================================================= */
+
+const ARCHIVE_SUBDIR = 'qa';
+const ARCHIVE_MAX_BYTES = 20 * 1024 * 1024;
+
+/**
+ * 把方案里落的改前渲染 HTML 传到 250 的 reports/{slug}/qa/，返回对外链接。
+ * 传不上去只记日志不炸任务：存档是给人看的旁证，不是交付物本身，
+ * 为它挂掉一次已经落地的变更不划算。失败返回空字符串，调用方写「存档上传失败」。
+ */
+async function publishBeforeArchive(ctx, workspace, profile, taskId, localPath) {
+  const { cfg, log } = ctx;
+  const p = String(localPath || '').trim();
+  if (!p) return '';
+  try {
+    const abs = path.resolve(p);
+    // 只允许工作区里的文件出去。模型给的路径不可全信，越界一律不传。
+    const root = path.resolve(workspace) + path.sep;
+    if (abs !== path.resolve(workspace) && abs.indexOf(root) !== 0) {
+      log('task ' + taskId + '：改前存档 ' + abs + ' 不在工作区内，不上传');
+      return '';
+    }
+    const st = fs.statSync(abs);
+    if (!st.isFile()) {
+      log('task ' + taskId + '：改前存档 ' + abs + ' 不是文件，不上传');
+      return '';
+    }
+    if (st.size > ARCHIVE_MAX_BYTES) {
+      log('task ' + taskId + '：改前存档 ' + abs + ' 超过 20MB，不上传');
+      return '';
+    }
+    const slug = clientDirName(profile, cfg);
+    const filename = 'task-' + taskId + '-before.html';
+    const res = await publishFile(cfg, slug, ARCHIVE_SUBDIR, filename, abs, log);
+    log('task ' + taskId + '：改前存档已上传 ' + res.url);
+    return res.url;
+  } catch (e) {
+    log('task ' + taskId + '：改前存档上传失败，只记日志不影响任务 :: ' + e.message);
+    return '';
+  }
+}
+
+/**
+ * 判失败时的兜底回滚：用方案里那一步拍的快照做一次平台还原。
+ * 走的是与方案第 4 节同一个接口 POST /api/content/{siteId}/snapshots/{label}/restore，
+ * 凭据与登录方式与其他 runner 完全一致（notes/{platform}_credentials.md 加 shadow bot 登录）。
+ * 返回一句中文，直接放进 note 开头，人看一眼就知道站点现在是什么状态。
+ */
+async function rollbackSnapshot(ctx, workspace, profile, taskId, label) {
+  const { cfg, log } = ctx;
+  const name = String(label || '').trim();
+  if (!name) return '';
+  try {
+    const credPath = path.join(
+      workspace,
+      'notes',
+      capabilities.slugPlatform(profile.platform || 'platform') + '_credentials.md'
+    );
+    const cred = wf.readCredentials(credPath);
+    const client = new wf.WebForger({ base: cfg.webforgerApi, timeoutMs: cfg.httpTimeoutMs });
+    const who = await client.login(cred.email, cred.password);
+    log('task ' + taskId + '：准备回滚，siteId ' + who.siteId + '，快照 ' + name);
+    const res = await client.req(
+      'POST',
+      '/api/content/' + encodeURIComponent(who.siteId) + '/snapshots/' + encodeURIComponent(name) + '/restore',
+      {}
+    );
+    if (!res || res.ok !== true) {
+      throw new Error('restore 响应 ok 不为 true：' + truncate(JSON.stringify(res || {}), 200));
+    }
+    const restored = res.restored == null ? '未知' : res.restored;
+    const pre = res.preRestoreLabel ? '，还原前平台自动快照 ' + res.preRestoreLabel : '';
+    log('task ' + taskId + '：回滚成功，restored ' + restored);
+    return '已自动回滚：快照 ' + name + ' 已还原，restored ' + restored + pre + '。';
+  } catch (e) {
+    log('task ' + taskId + '：回滚失败 :: ' + e.message);
+    return '回滚失败需人工：快照 ' + name + ' 还原没成功（' + truncate(e.message, 200) + '），站点可能停在半改状态。';
+  }
 }
 
 /**
@@ -223,8 +450,26 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   // a human needs, so the upload is not conditional on the outcome.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
 
+  // 发布路径的验证是写死的三条，没有延后项，照样按同一套 checks 口径写头部，
+  // 让看板上两条路径的 result_note 长一个样。
+  const publishChecks = [
+    { name: '平台状态 published', passed: statusAfter === 'published', deferred: false, note: '' },
+    { name: '线上回读 200', passed: !!live && live.status === 200, deferred: false, note: '' },
+    {
+      name: '无 noindex 且无草稿横幅',
+      passed: !problems.some((p) => /noindex|Preview draft/i.test(p)),
+      deferred: false,
+      note: '',
+    },
+  ];
+  const header = buildNoteHeader({
+    affectedUrls: [publicUrl],
+    judge: judgeChecks({ checks: publishChecks }),
+  });
+
   if (problems.length) {
     const note =
+      header +
       '发布后验证未通过，任务保持 review，需要人核对线上状态：' + problems.join('；') +
       ' 执行记录 ' + path.basename(logFile);
     try {
@@ -237,7 +482,9 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   }
 
   await api.completeTask(taskId, {
-    note: '博文已发布并验证：' + publicUrl + '（平台状态 published，线上 200，无 noindex）。执行记录 ' + path.basename(logFile),
+    note:
+      header +
+      '博文已发布并验证：' + publicUrl + '（平台状态 published，线上 200，无 noindex）。执行记录 ' + path.basename(logFile),
   });
   log('task ' + taskId + '：博文已发布并验证通过，标记完成');
   return { taskId, status: 'success', logFile };
@@ -313,9 +560,22 @@ async function runOne(ctx, context, workspace, taskId) {
   // need to be able to download it.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
 
+  // 改前存档先上传，成功与失败两条路都要在头部给出这条链接。
+  const archiveUrl = outcome.beforeArchive
+    ? (await publishBeforeArchive(ctx, workspace, profile, taskId, outcome.beforeArchive)) || '存档上传失败'
+    : '';
+
   if (outcome.status === 'success') {
+    const header = buildNoteHeader({
+      affectedUrls: outcome.affectedUrls,
+      archiveUrl,
+      snapshotLabel: outcome.snapshotLabel,
+      judge: outcome.judge,
+    });
     await api.completeTask(taskId, {
-      note: '已按批准方案执行并自验通过。' + (outcome.note || '') + ' 执行记录 ' + path.basename(logFile),
+      note:
+        header +
+        '已按批准方案执行并自验通过。' + (outcome.note || '') + ' 执行记录 ' + path.basename(logFile),
     });
     log('task ' + taskId + ': applied and verified, marked done');
     return { taskId, status: 'success', logFile };
@@ -323,15 +583,30 @@ async function runOne(ctx, context, workspace, taskId) {
 
   // Not a success. The task stays in review with the reason on it, and nothing
   // is retried. A half applied change needs a human, not another attempt.
+  // 判失败且方案里拍过快照的，先当场兜底回滚一次，把结果写进 note 开头，
+  // 人接手时第一眼看到的是站点现在到底回没回去，而不是要自己去查。
+  const rollbackLine =
+    outcome.status === 'failed' && outcome.snapshotLabel
+      ? await rollbackSnapshot(ctx, workspace, profile, taskId, outcome.snapshotLabel)
+      : '';
   const label = outcome.status === 'aborted' ? '执行中止' : '执行失败';
+  const header = buildNoteHeader({
+    affectedUrls: outcome.affectedUrls,
+    archiveUrl,
+    snapshotLabel: outcome.snapshotLabel,
+    judge: outcome.judge,
+  });
   const note =
+    header +
+    (rollbackLine ? rollbackLine + ' ' : '') +
     label +
     '：' +
     (outcome.note || summarize(output, 300)) +
     ' 任务保持 review，未标记完成。执行记录 ' +
     path.basename(logFile);
   try {
-    await api.postTaskResult(taskId, { output_url: '', note });
+    // attention 打上：落地没成的任务必须自己浮到人眼前，不能只靠 job 挂掉。
+    await api.postTaskResult(taskId, { output_url: '', note, attention: true });
   } catch (e) {
     log('task ' + taskId + ': could not write the failure note :: ' + e.message);
   }
@@ -380,6 +655,14 @@ module.exports = {
   changePlanPath,
   runBlogPublish,
   taskOps,
+  normalizeChecks,
+  normalizeUrls,
+  judgeChecks,
+  checkSummary,
+  buildNoteHeader,
+  publishBeforeArchive,
+  rollbackSnapshot,
   ALLOWED_TOOLS,
   BLOG_OPS,
+  ARCHIVE_SUBDIR,
 };

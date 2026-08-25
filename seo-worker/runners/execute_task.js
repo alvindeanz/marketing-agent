@@ -201,13 +201,22 @@ function buildPreparePrompt(opts) {
     '- 不许编造数字或接口字段。清单里没有的端点不许出现在方案里。',
     '- **你的最终回复本身就是方案文档**。runner 会把你最终回复的全文原样存为 ' + planFile + '，',
     '  apply 阶段只认这份文件。你没有 Write 权限，不要尝试自己写文件，也不要在最终回复里写',
-    '  工作总结或"方案已保存"之类的话，最终回复从方案标题开始，到摘要结束，别的一个字不要有。',
+    '  工作总结或"方案已保存"之类的话，最终回复从方案标题开始，到摘要后面那个 json 块结束，',
+    '  别的一个字不要有。',
     '  方案必须自洽完整，不能依赖你脑子里没写出来的上下文。',
     '- 五个章节一个都不能少，章节标题原样保留。就算你调研后推翻了任务原设，只要你提出任何',
     '  要执行的变更，也必须把它写满五段结构；你的调研结论和对原设的修正写进第 1 节。',
     '  确实没有任何变更可做时，第 2 节写"本方案无 API 调用"，其余章节照样保留并说明原因。',
     '- 缺章节的方案会被机械校验直接打回，等于这次 prepare 白跑。',
     '- 最后附一段不超过 200 字的中文摘要，写清这次改什么、风险在哪、需要人重点看哪一点。',
+    '- 摘要之后再附一个 json 块收尾，后面不要有任何内容：',
+    '```json',
+    '{"target_urls":["https://example.co.nz/some-page/"]}',
+    '```',
+    '  target_urls 是本方案**将会改动**的页面完整 URL 列表，写规范域、零跳转的那一个',
+    '  （拿不准就 curl -L -w "%{num_redirects}" 验一下，必须是 0）。放行的人先看这几个地址',
+    '  再决定放不放，所以只写真的会被改的页面，读过没改的不许写，接口地址与本地路径也不许写。',
+    '  本方案不改任何页面（例如只加重定向或只拍快照）就写空数组。',
   ]
     .filter((s) => s !== '')
     .join('\n');
@@ -220,6 +229,33 @@ const REQUIRED_PLAN_SECTIONS = ['变更目标与现状', 'API 调用序列', '�
 
 function missingPlanSections(text) {
   return REQUIRED_PLAN_SECTIONS.filter((s) => text.indexOf(s) === -1);
+}
+
+/**
+ * 方案末尾 json 块里的 target_urls。纯函数，解析不出来就返回空数组：
+ * 这一行只是给放行的人看的路标，缺了不该把一份合格方案打回。
+ */
+function readTargetUrls(output) {
+  const parsed = extractTrailingJson(output);
+  const raw = parsed && parsed.json && parsed.json.target_urls;
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const out = [];
+  for (const item of list) {
+    const u = String(item || '').trim();
+    if (!/^https?:\/\/\S+$/.test(u)) continue;
+    if (out.indexOf(u) === -1) out.push(u);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+/**
+ * 待放行 note 的头部一行。与 apply 的头部同一套写法（一行一个键，--- 收尾），
+ * 人在放行面板上先看目标页面，再决定放不放。
+ */
+function buildTargetHeader(urls) {
+  const list = Array.isArray(urls) ? urls.filter(Boolean) : [];
+  return '目标页面: ' + (list.length ? list.join(' , ') : '未提供') + '\n---\n';
 }
 
 /* =========================================================
@@ -1314,7 +1350,8 @@ async function runOne(ctx, context, workspace, taskId) {
   }
 
   const note = prepare
-    ? '变更方案已生成，待人工放行后由 apply_task 执行。方案文件 ' +
+    ? buildTargetHeader(readTargetUrls(output)) +
+      '变更方案已生成，待人工放行后由 apply_task 执行。方案文件 ' +
       path.basename(file) +
       '。摘要：' +
       summarize(output, 400)
@@ -1375,6 +1412,8 @@ module.exports = {
   buildPreparePrompt,
   taskOps,
   credentialsPath,
+  readTargetUrls,
+  buildTargetHeader,
   extractFacts,
   recordFacts,
   ALLOWED_TOOLS,

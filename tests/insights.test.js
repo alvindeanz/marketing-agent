@@ -27,7 +27,7 @@ const EXPORTS = [
   'insDeltaHtml', 'insKpiHtml', 'insLegendHtml', 'insRateCardHtml', 'insRankHtml',
   'insBrandHtml', 'insHasAny', 'insBody', 'insRng', 'insMockEvents', 'insMockMetrics',
   'INS_COLOR', 'INS_EVENT_COLOR', 'INS_EVENT_NAME', 'INS_GRAN',
-  'repGran', 'repBuckets', 'repKpiPeriod'
+  'repGran', 'repBuckets', 'repKpiPeriod', 'linkifyText'
 ];
 const P = new Function(m[1] + '\nreturn {' + EXPORTS.join(',') + '};')();
 
@@ -714,6 +714,33 @@ t('repKpiPeriod 非完整月退回等长上一段，紧邻不重叠', () => {
   assert.deepStrictEqual(P.repKpiPeriod('2026-07-02', '2026-07-31').prev, { from: '2026-06-02', to: '2026-07-01' });
   // 单日跨月回退
   assert.deepStrictEqual(P.repKpiPeriod('2026-03-02', '2026-03-02').prev, { from: '2026-03-01', to: '2026-03-01' });
+});
+
+/* ---------- result_note 里的链接 ---------- */
+section('result_note 链接化');
+t('linkifyText 先转义再替换，标签与引号进不来', () => {
+  const out = P.linkifyText('<script>alert("x")</script> 见 https://a.co/p/');
+  assert.ok(out.indexOf('<script') === -1, '原文里的标签必须已经被转义');
+  assert.ok(out.indexOf('&lt;script&gt;') > -1);
+  assert.ok(out.indexOf('&quot;x&quot;') > -1);
+  // 唯一允许出现的标签是我们自己插的 a
+  assert.strictEqual(out.match(/<(?!\/?a[ >])/g), null);
+  assert.ok(out.indexOf('<a href="https://a.co/p/" target="_blank" rel="noopener">https://a.co/p/</a>') > -1);
+});
+t('linkifyText 逗号分隔的多个地址各成一条链接', () => {
+  const out = P.linkifyText('受影响页面: https://a.co/x/ , https://b.co/y/。');
+  assert.strictEqual((out.match(/<a href=/g) || []).length, 2);
+  assert.ok(out.indexOf('>https://a.co/x/</a>') > -1);
+  assert.ok(out.indexOf('>https://b.co/y/</a>') > -1, '结尾句号不算进 URL');
+  assert.ok(out.slice(-1) === '。');
+  // 逗号本身留在正文里，不被吞进链接
+  assert.ok(out.indexOf('</a> , <a href=') > -1);
+});
+t('linkifyText 没有链接就只做转义，原样返回', () => {
+  assert.strictEqual(P.linkifyText('检查: 通过 11 项，待人工 2 项'), '检查: 通过 11 项，待人工 2 项');
+  assert.strictEqual(P.linkifyText(''), '');
+  assert.strictEqual(P.linkifyText(null), '');
+  assert.strictEqual(P.linkifyText('a & b'), 'a &amp; b');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

@@ -1067,6 +1067,21 @@ var INS_GRAN=[{k:'day',n:'日'},{k:'week',n:'周'},{k:'month',n:'月'},{k:'d90',
 
 function insEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 
+/* result_note 里 runner 写的 http(s) 地址变成可点链接。
+   顺序是先转义再替换：转义之后文本里不可能再有裸的 < 与 "，插进去的标签才安全。
+   逗号不算 URL 的一部分（头部的多个地址就是用逗号分隔的），
+   结尾的中英文标点和转义后的引号也摘出来放回链接后面，免得点进去多带一个句号。 */
+function linkifyText(s){
+  return insEsc(s).replace(/https?:\/\/[^\s<>"',，、]+/g,function(u){
+    var tail='',m;
+    while((m=u.match(/(&quot;|&gt;|&lt;|[.;:!?)）】。])$/))){
+      tail=m[1]+tail;u=u.slice(0,u.length-m[1].length);
+    }
+    if(!u)return tail;
+    return '<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>'+tail;
+  });
+}
+
 /* ---- 日期：全程 UTC 毫秒算，避开本地时区把 YYYY-MM-DD 挪一天 ---- */
 function insD(s){var p=String(s||'').split('-');return Date.UTC(+p[0],(+p[1])-1,+p[2])}
 function insDs(ms){var d=new Date(ms),m=d.getUTCMonth()+1,q=d.getUTCDate();
@@ -3384,7 +3399,21 @@ function renderRelease(){
   document.getElementById('releaseList').innerHTML=rev.map(t=>{
     const note=String(t.result_note||'');
     const blog=isBlogTask(t);
-    const short=note.length>150?(note.slice(0,150)+'...'):note;
+    /* result_note 是历次追加拼起来的，这里只渲染最后一段：
+       runner 写的机器头部（目标页面 / 受影响页面、改前存档、快照、检查，--- 收尾）整段保留，
+       只截断头部后面的自由文字。头部被截掉就等于把"改了哪页"这件事弄丢了。 */
+    const sep=note.lastIndexOf('\n---\n');
+    let head='',rest=note,dropped=false;
+    if(sep>=0){
+      const before=note.slice(0,sep).split('\n');
+      const hk=/^(\[applied\] )?(目标页面|受影响页面|改前存档|快照|检查): /;
+      let i=before.length;
+      while(i>0&&hk.test(before[i-1]))i--;
+      head=before.slice(i).join('\n')+'\n';
+      rest=note.slice(sep+5);
+      dropped=i>0;
+    }
+    const short=(dropped?'...\n':'')+head+(rest.length>150?(rest.slice(0,150)+'...'):rest);
     const link=t.output_url?'<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出链接</a>':'';
     /* 编号 pill 和交付文件区与泳道卡一致：在这里放行的人要能报出任务号，
        也要能拿到这个任务的交付文件，不必再回泳道里找同一张卡。 */
@@ -3392,7 +3421,7 @@ function renderRelease(){
       '<input type="checkbox"'+(relPick[t.id]?' checked':'')+' onchange="setRelPick('+t.id+',this.checked)">'+
       '<div class="rel-main"><div class="tcard-title">'+
         '<span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div>'+
-      (blog?blogDeliverable(t):(short?'<div class="rel-note">'+esc(short)+'</div>':''))+
+      (blog?blogDeliverable(t):(short?'<div class="rel-note">'+linkifyText(short)+'</div>':''))+
       fileDeliverables(t)+
       '<div class="tcard-meta">'+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+link+
       '<button class="btn tiny ghost" onclick="setTaskStatus('+t.id+',\'done\')">直接置完成</button>'+

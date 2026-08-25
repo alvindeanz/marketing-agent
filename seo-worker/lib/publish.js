@@ -38,22 +38,27 @@ function assertSafeName(name, what) {
 }
 
 /**
- * 把一个本地报告文件传到 250 并返回对外链接。
+ * 把一个本地文件传到 250 的 {reportRemoteRoot}/{slug}[/{subdir}]/ 下并返回对外链接。
+ * 报告走 subdir 为空，apply 的改前存档走 subdir='qa'，通道与权限完全一样。
  * cfg       需要 reportSsh、reportRemoteRoot、reportUrlBase
  * slug      客户目录名，与工作区目录同源（clientDirName）
+ * subdir    客户目录下的子目录名，空字符串表示直接落在客户目录里
  * filename  远端文件名，例如 seo_report_2026-08_v1.html
  * localPath 本地文件绝对路径
  * log       ctx.log
  * 返回 { url, remotePath, remoteDir }
  */
-async function publishReport(cfg, slug, filename, localPath, log) {
+async function publishFile(cfg, slug, subdir, filename, localPath, log) {
   const say = log || function () {};
   const dirName = assertSafeName(slug, 'slug');
-  const fileName = assertSafeName(filename, '报告文件名');
+  const fileName = assertSafeName(filename, '文件名');
+  const sub = String(subdir || '').trim();
+  const subName = sub ? assertSafeName(sub, '子目录名') : '';
   const host = String(cfg.reportSsh || 'blogpreview');
-  const remoteDir = String(cfg.reportRemoteRoot || '').replace(/\/+$/, '') + '/' + dirName;
+  const rel = dirName + (subName ? '/' + subName : '');
+  const remoteDir = String(cfg.reportRemoteRoot || '').replace(/\/+$/, '') + '/' + rel;
   const remotePath = remoteDir + '/' + fileName;
-  const url = String(cfg.reportUrlBase || '').replace(/\/+$/, '') + '/' + dirName + '/' + fileName;
+  const url = String(cfg.reportUrlBase || '').replace(/\/+$/, '') + '/' + rel + '/' + fileName;
 
   say('publish: 建目录 ' + remoteDir);
   await run('ssh', ['-o', 'BatchMode=yes', host, 'mkdir -p ' + remoteDir + ' && chmod 755 ' + remoteDir]);
@@ -67,4 +72,12 @@ async function publishReport(cfg, slug, filename, localPath, log) {
   return { url, remotePath, remoteDir };
 }
 
-module.exports = { publishReport, assertSafeName };
+/**
+ * 把一个本地报告文件传到 250 并返回对外链接。
+ * 参数与返回值不变，内部改走 publishFile（subdir 为空），行为逐字一致。
+ */
+async function publishReport(cfg, slug, filename, localPath, log) {
+  return publishFile(cfg, slug, '', filename, localPath, log);
+}
+
+module.exports = { publishReport, publishFile, assertSafeName };
