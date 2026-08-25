@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-25 AIRA (i) 报告模板头部注释漏进成品，模板层根治，报 lib 一处脆弱点
+
+- 干了什么：Bens 8 月报告 v1 至 v3 线上页顶部漏出模板说明文字（"渲染硬约束……report_lint.py --check"），且说明里那个没闭合的 `<b style="color:#16a34a">` 把整页染成绿色加粗、hero 挤成半宽。根因：`lib/reporthtml.js` 的 `stripGuidanceComments` 用非贪婪 `<!--([\s\S]*?)-->` 剥注释，模板头部注释里写了字面量 `<!-- section:xxx -->`，正则在那句提前闭合，剩余说明文字变成正文。修法在我认领的 specs 层：`template_leadgen.html` 与 `template_skeleton.html` 头部注释里的 `<!-- section:xxx -->`、`<!-- /section:xxx -->`、`<!-- row:xxx -->` 三处字面量改成不含注释符的写法。`tests/report.test.js` "模板注释不进成品"一条加断言：`<html` 之前只允许 `<!DOCTYPE html>`（旧模板实测能被这条抓住）。三套测试 report 88 / chat 29 / insights 83 全过。已发布的三份产物（本地 seo-agent-output 与 250 上 seo_report_2026-08_v1 至 v3）已手工剥掉漏出段并重传，v3 线上回读 `<html>` 前只剩 DOCTYPE。
+- 坑（Aiden 领地，报告不动手）：`stripGuidanceComments` 对注释里再出现 `<!--` 没有防护，任何人以后在模板注释里举例写注释标记都会复发。建议改成先按 `<!-- section:` / `<!-- /section:` 白名单切分再剥，或在渲染后断言 `<html` 前只剩 DOCTYPE 直接抛错（测试已加，渲染层若也加一道更稳）。
+- 下一步/认领：待部署（worker 侧 specs 两文件 + tests）。Bens 8 月报告下次重跑自动干净。
+
 ### 2026-08-25 AIRA (h) 试点 v1 修三处，报 apply_task 一条判定问题
 
 - 干了什么：benscurtains 2026-08 月报 v1 跑通（叙事一次过、lint 零命中、工作板块 8 项），审出三处修掉：1) 数据层周期不夹 GSC 延迟（显式传月末就按 31 天拉，环比全是假下滑），factspack.computePeriod 改为无条件夹到今天减 3 天并标 partial；2) 页眉客户名丢失（seo_profiles 无 name 列），**跨认领在 GET /context 的 profile 上补 name（从 clients 表取，已有则不覆盖）**，页眉空字段改为不显示；3) 工作分类加 ads（广告账户），数字条改按分类计数。测试 chat 29 / insights 83 / report 88 过，php -l 过。**api 与 worker 已随本次一起部署**（Alvin 指示的试点推进）。

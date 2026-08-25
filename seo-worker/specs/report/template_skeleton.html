@@ -10,8 +10,8 @@
     {{{name}}}          原样插入 HTML 片段（叙事段落，含 <b style="color:#16a34a"> 内联强调）
     {{#list}}...{{/list}}  行循环，块内字段取自数组元素
     {{^flag}}...{{/flag}}  反向条件块
-    <!-- section:xxx -->   section 边界，成对出现 <!-- /section:xxx -->
-    <!-- row:xxx -->       可重复行模板边界
+    section:xxx 注释标记   section 边界，成对出现 /section:xxx 闭合标记
+    row:xxx 注释标记       可重复行模板边界
 
   渲染硬约束
     1. callout 内联绿色强调一律 <b style="color:#16a34a">，绝不用 <strong>

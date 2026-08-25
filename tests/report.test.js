@@ -666,6 +666,8 @@ t('模板注释不进成品，section 标记保留', () => {
   const html = R.renderReport(fakePack(), null, {});
   assert.ok(html.indexOf('<!-- section:ga4 -->') > -1, 'section 标记要留着');
   assert.strictEqual(html.indexOf('row:callout'), -1, '内部注释不该出现在客户面成品里');
+  const beforeHtml = html.slice(0, html.indexOf('<html')).trim();
+  assert.strictEqual(beforeHtml, '<!DOCTYPE html>', '<html> 之前只能有 DOCTYPE，头部说明注释一个字都不能漏出来');
 });
 t('模板引擎的循环、条件与反向条件', () => {
   const out = R.renderTemplate('{{#list}}[{{v}}{{#f}}!{{/f}}{{^f}}?{{/f}}]{{/list}}', { list: [{ v: 'a', f: true }, { v: 'b', f: false }] });
