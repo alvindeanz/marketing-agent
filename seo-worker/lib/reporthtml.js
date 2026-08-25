@@ -677,6 +677,11 @@ function renderReport(pack, narrative, opts = {}) {
     return s ? s : fallback;
   };
 
+  // 工作条目先渲染出来，数字条按渲染后的条目统计，保证数字条与正文一致
+  // （v1 时数字条按原始条目算出 3 项，正文却列了 5 条）。
+  const workItems = buildWorkItems(pack, n);
+  const workCount = (label) => String(workItems.filter((w) => w.cat_label === label).length);
+
   const data = {
     client_name: meta.client_name,
     period_label: meta.period.label,
@@ -768,13 +773,13 @@ function renderReport(pack, narrative, opts = {}) {
 
     work_sdesc: paragraphs(sdesc('work_sdesc', '本期完成的工作按分类汇总如下。')),
     // 工作量数字条：客户要看到我方做了多少，数字直出不经模型。
-    work_total: String(((pack.work && pack.work.items) || []).length),
-    work_pages: String(Number(pack.work && pack.work.counts && pack.work.counts.onpage) || 0),
-    work_blogs: String(Number(pack.work && pack.work.counts && pack.work.counts.content) || 0),
-    work_tech: String(Number(pack.work && pack.work.counts && pack.work.counts.tech) || 0),
-    work_ads: String(Number(pack.work && pack.work.counts && pack.work.counts.ads) || 0),
-    work_report: String(Number(pack.work && pack.work.counts && pack.work.counts.report) || 0),
-    work_items: buildWorkItems(pack, n),
+    work_total: String(workItems.length),
+    work_pages: workCount(CAT_META.onpage.cat_label),
+    work_blogs: workCount(CAT_META.content.cat_label),
+    work_tech: workCount(CAT_META.tech.cat_label),
+    work_ads: workCount(CAT_META.ads.cat_label),
+    work_report: workCount(CAT_META.report.cat_label),
+    work_items: workItems,
 
     next_sdesc: paragraphs(sdesc('next_sdesc', '下期按以下五项推进，优先级从上到下。')),
     next_items: buildNextItems(pack, n),

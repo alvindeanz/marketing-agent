@@ -317,6 +317,12 @@ function round4(n) {
   return Number.isFinite(v) ? Math.round(v * 10000) / 10000 : null;
 }
 
+/** 环比比例统一保留三位小数（即百分数一位小数），叙事与 KPI 卡才不会一个写 11.69% 一个写 11.7%。 */
+function round3(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null;
+}
+
 // ---------------------------------------------------------------------------
 // 纯函数：工作量分类
 // ---------------------------------------------------------------------------
@@ -743,7 +749,8 @@ function buildWork(opts) {
     const d = String((ev && ev.d) || '').slice(0, 10);
     if (!inRange(d, period)) continue;
     const kind = String(ev.kind || '').toLowerCase();
-    if (['apply', 'publish', 'config'].indexOf(kind) === -1) continue;
+    // manual 与 offpage 也算工作：报告交付、方案交付、disavow 提交都是客户该看到的投入。
+    if (['apply', 'publish', 'config', 'manual', 'offpage'].indexOf(kind) === -1) continue;
     const label = String(ev.label || '').trim();
     if (!label) continue;
     // 任务类事件与上面的任务条目是同一件事，标题一样就不重复计。
@@ -1113,13 +1120,13 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       name: '自然搜索点击',
       cur: gsc.cur.clicks,
       prev: gsc.prev.clicks,
-      delta_pct: round4(pctDelta(gsc.cur.clicks, gsc.prev.clicks)),
+      delta_pct: round3(pctDelta(gsc.cur.clicks, gsc.prev.clicks)),
     });
     kpiParts.push({
       name: '自然搜索曝光',
       cur: gsc.cur.impressions,
       prev: gsc.prev.impressions,
-      delta_pct: round4(pctDelta(gsc.cur.impressions, gsc.prev.impressions)),
+      delta_pct: round3(pctDelta(gsc.cur.impressions, gsc.prev.impressions)),
     });
     kpiParts.push({
       name: 'GSC 平均位次',
@@ -1133,19 +1140,19 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       name: '自然搜索访问',
       cur: org.cur.sessions,
       prev: org.prev.sessions,
-      delta_pct: round4(pctDelta(org.cur.sessions, org.prev.sessions)),
+      delta_pct: round3(pctDelta(org.cur.sessions, org.prev.sessions)),
     });
     kpiParts.push({
       name: '自然搜索新访客',
       cur: org.cur.new_users,
       prev: org.prev.new_users,
-      delta_pct: round4(pctDelta(org.cur.new_users, org.prev.new_users)),
+      delta_pct: round3(pctDelta(org.cur.new_users, org.prev.new_users)),
     });
     kpiParts.push({
       name: '询盘',
       cur: leadsOverride === null ? org.cur.leads : leadsOverride,
       prev: org.prev.leads,
-      delta_pct: leadsOverride === null ? round4(pctDelta(org.cur.leads, org.prev.leads)) : null,
+      delta_pct: leadsOverride === null ? round3(pctDelta(org.cur.leads, org.prev.leads)) : null,
     });
   }
 
