@@ -558,6 +558,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           </div>
         </div>
         <div class="panel">
+          <div id="repJobBanner" class="banner hidden" style="margin-bottom:10px"></div>
           <div class="plan-meta" style="margin-bottom:10px">
             默认上一个完整自然月。点下去只是排队，跑完要几分钟，链接会出现在下面的版本列表里。
             同一个月可以重复生成，每次叠一个新版本，旧链接不会失效。
@@ -1879,6 +1880,11 @@ function repReset(){
   repPreset='last_month';repNoteEdit={};repFetched='';
   var el=document.getElementById('repInstr');
   if(el)el.value='';
+  if(repJobTimer){clearTimeout(repJobTimer);repJobTimer=null}
+  var b=document.getElementById('repJobBanner');
+  if(b){b.classList.add('hidden');b.textContent=''}
+  var btn=document.getElementById('repGenBtn');
+  if(btn){btn.disabled=false;btn.textContent='生成月报'}
 }
 
 /* 上一个完整自然月，给 <input type="month"> 当默认值 */
@@ -2053,12 +2059,34 @@ async function fireReportJob(btn){
   if(fail(d,'生成月报失败')){btn.disabled=false;return}
   var jid=d.job_id||d.id||'?';
   btn.textContent='已排队 job #'+jid;
-  setTimeout(function(){btn.disabled=false;btn.textContent=label},12000);
   toast('已排队 job #'+jid+'（生成报告）');
-  /* 跑完要几分钟，这一次刷新只是把「已经落库的上一版」带出来，不是等这次的结果 */
-  setTimeout(function(){if(curId&&curView==='report')loadReportList()},15000);
+  /* 防呆：按钮不自行恢复，由 repCheckJob 盯着 job 状态，跑完才放开并刷新版本列表 */
+  setTimeout(repCheckJob,1500);
 }
 window.fireReportJob=fireReportJob;
+
+/* ---- 生成中状态：盯住本客户的 report job，横幅加按钮置灰，跑完自动刷新 ---- */
+var repJobTimer=null;
+async function repCheckJob(){
+  if(repJobTimer){clearTimeout(repJobTimer);repJobTimer=null}
+  if(!curId||curView!=='report')return;
+  var d=await api('/jobs?client_id='+curId+'&limit=10');
+  if(!d||d._status>=400)return;
+  var jobs=(d.jobs||[]).filter(function(j){return j.type==='report'&&(j.status==='queued'||j.status==='running')});
+  var b=document.getElementById('repJobBanner'),btn=document.getElementById('repGenBtn');
+  if(jobs.length){
+    var j=jobs[0];
+    var when=String(j.claimed_at||j.created_at||'').slice(11,16);
+    if(b){b.classList.remove('hidden');b.textContent='报告生成中：job #'+j.id+'（'+(j.status==='queued'?'排队中':'运行中')+(when?'，'+when+' 开始':'')+'，通常 5 到 8 分钟）。跑完这里会自动刷新，不用再点。'}
+    if(btn){btn.disabled=true;btn.textContent='生成中 job #'+j.id}
+    repJobTimer=setTimeout(repCheckJob,20000);
+  }else{
+    var was=b&&!b.classList.contains('hidden');
+    if(b){b.classList.add('hidden');b.textContent=''}
+    if(btn){btn.disabled=false;btn.textContent='生成月报'}
+    if(was){toast('报告生成完成，版本列表已刷新');loadReportList()}
+  }
+}
 
 /* ---- 版本列表 ---- */
 async function loadReportList(){
@@ -2183,6 +2211,7 @@ function loadReport(){
   }
   renderReportList();
   loadReportList();
+  repCheckJob();
 }
 
 /* ================= 决策收件箱 ================= */
