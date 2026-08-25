@@ -765,6 +765,120 @@ function attach_deliverables($tasks){
     return $tasks;
 }
 
+/* ---------------- 一任务一 job 的公共件 ----------------
+   第一性原理：任务是工作单位，每个任务独享一个 job，各自 30 分钟预算与各自成败，
+   worker 单飞按 job id 升序线性消化。POST /jobs、POST /tasks/release、
+   GET /jobs/queue、GET /tasks 共用下面这几个解析与去重件。 */
+
+/* payload 里的任务 id。execute_task 与 apply_task 现在一 job 一任务，取 task_ids[0]；
+   其他类型没有任务概念，回 null。payload 可能是 JSON 字符串也可能已经是数组，
+   历史行里 task_ids 可能有多个，取第一个即可（队列展示与匹配都只认头一个）。 */
+function job_task_id($type,$payload){
+    if($type!=='execute_task'&&$type!=='apply_task')return null;
+    $p=is_array($payload)?$payload:jdec($payload);
+    if(!is_array($p)||!isset($p['task_ids'])||!is_array($p['task_ids']))return null;
+    foreach($p['task_ids'] as $x){$x=(int)$x;if($x)return $x;}
+    return null;
+}
+
+/* 在飞任务表：某类型下所有 queued/running 的 job，解成 task_id => job_id。
+   同一任务撞上多条时留 id 最小的那条，也就是最早排的。
+   在飞集合本来就小（worker 单飞，队列以十计），一次全量取回在 PHP 里解，
+   免得跟 MariaDB 10.3 的 JSON 函数较劲，GET /events 那段已经是同一个取舍。 */
+function jobs_inflight_tasks($type){
+    $q=db()->prepare("SELECT id,payload FROM agent_jobs WHERE type=? AND status IN('queued','running') ORDER BY id");
+    $q->execute([$type]);
+    $by=[];
+    foreach($q->fetchAll() as $r){
+        $tid=job_task_id($type,$r['payload']);
+        if($tid&&!isset($by[$tid]))$by[$tid]=(int)$r['id'];
+    }
+    return $by;
+}
+
+/* 全局排队位次 job_id => 位次（从 1 起）。worker 是单飞按 id 升序消化，
+   所以位次只有全局口径有意义，不按客户分。 */
+function jobs_queue_positions($limit=500){
+    $limit=(int)$limit;
+    if($limit<1)$limit=500;
+    $q=db()->query("SELECT id FROM agent_jobs WHERE status='queued' ORDER BY id LIMIT $limit");
+    $pos=[];$n=0;
+    foreach($q->fetchAll() as $r){$n++;$pos[(int)$r['id']]=$n;}
+    return $pos;
+}
+
+/* 一任务一 job 的批量排队：按传入顺序逐个 INSERT，已在飞的任务跳过并记进 skipped，
+   每条都写 audit。fire_wake 只发一次，worker 醒来会连续 claim 到队空。
+   回 [新建 job id 数组, skipped 数组]。 */
+function queue_task_jobs($cid,$type,$ids,$user,$auditAction){
+    $inflight=jobs_inflight_tasks($type);
+    $s=db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,?,?,'queued',?)");
+    $jids=[];$skipped=[];
+    foreach($ids as $x){
+        $tid=(int)$x;
+        if(!$tid)continue;
+        if(isset($inflight[$tid])){$skipped[]=['task_id'=>$tid,'job_id'=>(int)$inflight[$tid]];continue;}
+        $payload=['task_ids'=>[$tid]];
+        $s->execute([$cid,$type,json_encode($payload,JSON_UNESCAPED_UNICODE),$user]);
+        $jid=(int)db()->lastInsertId();
+        $jids[]=$jid;
+        $inflight[$tid]=$jid;
+        audit($user,$auditAction,(string)$jid,['client_id'=>$cid,'type'=>$type,'task_id'=>$tid,'payload'=>$payload]);
+    }
+    if($jids)fire_wake($jids[0]);
+    return [$jids,$skipped];
+}
+
+/* 给任务卡挂 job_state，让看板不用自己对着 job 列表猜。
+   {status:'queued'|'running'|'failed'|null, job_id, position, claimed_at}
+   取该任务最新一条 execute_task / apply_task job：queued 与 running 优先（running 先），
+   都没有才看最近一条 failed，且只有失败时刻晚于任务 updated_at 才算数
+   （人已经把任务改过状态的，旧失败不再挂红）。
+   一次 SQL 拉该客户近 200 条相关 job 在 PHP 里匹配，不做每卡一查。 */
+function attach_job_state($tasks,$cid){
+    if(!$tasks)return $tasks;
+    $q=db()->prepare("SELECT id,type,status,payload,claimed_at,finished_at,created_at
+        FROM agent_jobs WHERE client_id=? AND type IN('execute_task','apply_task') ORDER BY id DESC LIMIT 200");
+    $q->execute([$cid]);
+    $run=[];$que=[];$fail=[];
+    foreach($q->fetchAll() as $r){
+        $tid=job_task_id($r['type'],$r['payload']);
+        if(!$tid)continue;
+        $st=(string)$r['status'];
+        /* 倒序遍历：running 与 queued 每次覆盖，留下的是 id 最小的那条，也就是最早排的；
+           failed 只认第一次见到的，也就是最近一条。 */
+        if($st==='running')$run[$tid]=$r;
+        elseif($st==='queued')$que[$tid]=$r;
+        elseif($st==='failed'&&!isset($fail[$tid]))$fail[$tid]=$r;
+    }
+    $pos=($que)?jobs_queue_positions():[];
+    foreach($tasks as &$t){
+        $tid=(int)$t['id'];
+        $state=['status'=>null,'job_id'=>null,'position'=>null,'claimed_at'=>null];
+        if(isset($run[$tid])){
+            $state['status']='running';
+            $state['job_id']=(int)$run[$tid]['id'];
+            $state['claimed_at']=$run[$tid]['claimed_at'];
+        }elseif(isset($que[$tid])){
+            $jid=(int)$que[$tid]['id'];
+            $state['status']='queued';
+            $state['job_id']=$jid;
+            $state['position']=isset($pos[$jid])?$pos[$jid]:null;
+        }elseif(isset($fail[$tid])){
+            $r=$fail[$tid];
+            $ts=(string)($r['finished_at']!==null&&$r['finished_at']!==''?$r['finished_at']:$r['created_at']);
+            $upd=(string)($t['updated_at']??'');
+            if($upd===''||strcmp($ts,$upd)>0){
+                $state['status']='failed';
+                $state['job_id']=(int)$r['id'];
+            }
+        }
+        $t['job_state']=$state;
+    }
+    unset($t);
+    return $tasks;
+}
+
 $m=$_SERVER['REQUEST_METHOD'];
 $uri=$_SERVER['REQUEST_URI'];
 $qp=strpos($uri,'?');
@@ -813,6 +927,40 @@ if($m==='POST'&&$ROUTE==='/jobs/claim'){
     $job=$g->fetch();
     if($job){$job['payload']=jdec($job['payload']);$job['token_usage']=(int)$job['token_usage'];}
     res(200,['job'=>$job?:null]);
+}
+
+/* GET /jobs/queue -> 全局队列一眼看清：现在在跑哪一条、后面排着谁、我排第几。
+   固定路径，声明在 /jobs/{id} 那批正则之前，同 /jobs/claim 的道理。
+   auth_any：看板要看，worker 侧排查也要看。running 与 queued 合计最多 100 条，
+   位次按 id 升序从 1 起，因为 worker 单飞就是按 id 顺序线性消化的。
+   elapsed_sec 走 TIMESTAMPDIFF 交给库算，不在 PHP 里跟时区较劲。 */
+if($m==='GET'&&$ROUTE==='/jobs/queue'){
+    auth_any();
+    $q=db()->query("SELECT j.id,j.client_id,j.type,j.payload,j.status,j.claimed_at,j.created_at,
+            TIMESTAMPDIFF(SECOND,j.claimed_at,NOW()) AS elapsed_sec,c.name AS client_name
+        FROM agent_jobs j LEFT JOIN clients c ON c.id=j.client_id
+        WHERE j.status IN('queued','running') ORDER BY j.id LIMIT 100");
+    $running=[];$queued=[];$n=0;
+    foreach($q->fetchAll() as $r){
+        $row=[
+            'id'=>(int)$r['id'],
+            'client_id'=>(int)$r['client_id'],
+            'client_name'=>$r['client_name']===null?'':(string)$r['client_name'],
+            'type'=>$r['type'],
+            'task_id'=>job_task_id($r['type'],$r['payload'])
+        ];
+        if($r['status']==='running'){
+            $row['claimed_at']=$r['claimed_at'];
+            $row['elapsed_sec']=$r['elapsed_sec']===null?null:(int)$r['elapsed_sec'];
+            $running[]=$row;
+        }else{
+            $n++;
+            $row['created_at']=$r['created_at'];
+            $row['position']=$n;
+            $queued[]=$row;
+        }
+    }
+    res(200,['ok'=>true,'running'=>$running,'queued'=>$queued]);
 }
 
 // PATCH /jobs/{id} -> worker progress: status / log_append / token_usage
@@ -2722,16 +2870,13 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
         if((int)$t['client_id']!==$cid)res(400,['error'=>'Task '.$t['id'].' belongs to another client']);
         if($t['status']!=='review')res(400,['error'=>'Task '.$t['id'].' is not in review']);
     }
-    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status IN('queued','running') LIMIT 1");
-    $dup->execute([$cid]);
-    $d=$dup->fetch();
-    if($d)res(409,['error'=>'Apply job already queued or running','job_id'=>(int)$d['id']]);
-    $s=db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'apply_task',?,'queued',?)");
-    $s->execute([$cid,json_encode(['task_ids'=>$ids],JSON_UNESCAPED_UNICODE),$u['username']]);
-    $jid=(int)db()->lastInsertId();
-    audit($u['username'],'seo_tasks_release',(string)$cid,['job_id'=>$jid,'task_ids'=>$ids]);
-    fire_wake($jid);
-    res(200,['ok'=>true,'job_id'=>$jid,'count'=>count($ids)]);
+    /* 一任务一 job：放行几个任务就建几个 apply_task job，各自 30 分钟预算与各自成败。
+       去重按任务，不再是「这个客户已有 apply 在跑就整批挡回去」。 */
+    list($jids,$skipped)=queue_task_jobs($cid,'apply_task',$ids,$u['username'],'seo_tasks_release');
+    /* 一条都没新建说明放行的任务全在飞，旧前端认 409 加 job_id 那套提示。 */
+    if(!$jids)res(409,['error'=>'Apply job already queued or running','job_id'=>$skipped?$skipped[0]['job_id']:0,'job_ids'=>[],'count'=>0,'skipped'=>$skipped]);
+    /* job_id 保留成第一个新建 job，旧前端的「job #」提示不至于变成 undefined。 */
+    res(200,['ok'=>true,'job_ids'=>$jids,'job_id'=>$jids[0],'count'=>count($jids),'skipped'=>$skipped]);
 }
 
 // POST /feedback_upload -> one screenshot, multipart form field "file".
@@ -2903,12 +3048,14 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/reject$#',$ROUTE,$mm)){
 // GET /tasks?client_id=
 // Every row carries its deliverables array, so the board can draw the download
 // list without a second request per card.
+// 每行还挂一个 job_state，任务卡上直接看得到「排队第几 / 在跑 / 上次失败」，
+// 不用前端拿 job 列表反查。两块都是一次 SQL 拉全量再在 PHP 里挂，不做每卡一查。
 if($m==='GET'&&$ROUTE==='/tasks'){
     auth_admin();
     $cid=need_client();
     $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
     $s->execute([$cid]);
-    res(200,['tasks'=>attach_deliverables($s->fetchAll())]);
+    res(200,['tasks'=>attach_job_state(attach_deliverables($s->fetchAll()),$cid)]);
 }
 
 // POST /tasks
@@ -2966,6 +3113,10 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
 }
 
 // POST /jobs -> queue one job, 409 if the same client+type is already in flight
+// 例外是 execute_task 带 task_ids 数组：任务是工作单位，勾几个任务就建几个 job，
+// 每个 job 的 payload 只装一个 task_id（runner 现有解析不变），各自吃满 30 分钟预算，
+// 各自成败互不牵连，worker 按 job id 顺序一条条消化。去重也随之改成按任务，
+// 不再是「同客户同类型只许一个」（那条对其他类型照旧）。
 if($m==='POST'&&$ROUTE==='/jobs'){
     $u=auth_admin();
     $i=input();
@@ -2982,11 +3133,24 @@ if($m==='POST'&&$ROUTE==='/jobs'){
     if($type==='report')ensure_reports_schema();
     if($type==='triage')ensure_job_types();
     if($type==='backfill_metrics'){ensure_job_types();ensure_metrics_schema();}
+    $payloadIn=$i['payload']??null;
+    if($type==='execute_task'&&is_array($payloadIn)&&isset($payloadIn['task_ids'])&&is_array($payloadIn['task_ids'])){
+        $ids=[];
+        foreach($payloadIn['task_ids'] as $x){$x=(int)$x;if($x&&!in_array($x,$ids,true))$ids[]=$x;}
+        if(!$ids)res(400,['error'=>'task_ids required']);
+        if(count($ids)>50)res(400,['error'=>'batch too large, max 50 tasks']);
+        list($jids,$skipped)=queue_task_jobs($cid,$type,$ids,$u['username'],'seo_job_create');
+        /* 一条都没新建说明勾的任务全在飞。旧前端认 409 加 job_id 那套提示，
+           这里照旧回 409，body 里同时带上 ids 与 skipped 给新前端用。 */
+        if(!$jids)res(409,['error'=>'Job already queued or running','job_id'=>$skipped?$skipped[0]['job_id']:0,'ids'=>[],'skipped'=>$skipped]);
+        /* id 保留成第一个新建 job，旧前端的「已排队 job #」提示不至于变成 undefined。 */
+        res(200,['ok'=>true,'ids'=>$jids,'id'=>$jids[0],'skipped'=>$skipped]);
+    }
     $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type=? AND status IN('queued','running') LIMIT 1");
     $dup->execute([$cid,$type]);
     $d=$dup->fetch();
     if($d)res(409,['error'=>'Job already queued or running','job_id'=>(int)$d['id']]);
-    $payload=$i['payload']??null;
+    $payload=$payloadIn;
     $s=db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,?,?,'queued',?)");
     $s->execute([$cid,$type,$payload===null?null:(is_string($payload)?$payload:json_encode($payload,JSON_UNESCAPED_UNICODE)),$u['username']]);
     $id=(int)db()->lastInsertId();

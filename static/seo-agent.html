@@ -486,6 +486,9 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           <div id="releaseList"></div>
         </div>
       </div>
+      <!-- 队列条：整台 worker 的队列，跨客户。看的人先知道现在有没有东西在跑，
+           再决定要不要点执行，免得同一批任务被排两遍。空队列时整条隐藏。 -->
+      <div id="queueStrip" class="banner hidden"></div>
       <div class="sec">
         <div class="sec-head">
           <div class="sec-title">任务泳道</div>
@@ -817,6 +820,7 @@ function router(){
     chReset();
     insReset();
     repReset();
+    qsReset();
   }
   render();
 }
@@ -846,7 +850,7 @@ function loadView(){
   if(curView==='dash')loadOverview();
   else if(curView==='inbox')loadInbox();
   else if(curView==='plan')loadPlans();
-  else if(curView==='tasks')loadTasks();
+  else if(curView==='tasks')loadTasksAndQueue();
   else if(curView==='report')loadReport();
   else if(curView==='jobs'){loadJobs();renderPickHint()}
   else if(curView==='profile'){loadProfile();loadFacts()}
@@ -1240,6 +1244,53 @@ function repKpiPeriod(from,to){
   return {cur:{from:from,to:to},prev:{from:pf,to:pt},
     name:from+' 至 '+to,
     cmp:'对比前 '+n+' 天（'+pf+' 至 '+pt+'）'};
+}
+
+/* ---- 任务队列防呆的两个纯函数 ----
+   看板上「点了执行按钮但什么都没变」是最容易让人重复点的一刻，所以任务卡要挂徽标、
+   任务页顶上要有一条队列条。时间算法和文案组装都收在这里，好被单测盯住。 ---- */
+
+/* 领取到现在跑了多少分钟。claimed_at 是服务端的 'YYYY-MM-DD HH:MM:SS'，
+   跟 fmtDur 一样把空格换成 T 交给 Date.parse，不额外贴时区。
+   nowIso 省略就取当前时刻（测试里传死值保证可重现）。
+   解析不出来回 null，让调用方自己决定是不显示时长还是显示占位。 */
+function qsElapsedMin(claimedAt,nowIso){
+  var a=Date.parse(String(claimedAt||'').replace(' ','T'));
+  var b=(nowIso==null||nowIso==='')?Date.now():Date.parse(String(nowIso).replace(' ','T'));
+  if(!isFinite(a)||!isFinite(b))return null;
+  var n=Math.floor((b-a)/60000);
+  return n>0?n:0;
+}
+
+var QS_TITLE_MAX=20;   /* 队列条是一行字，标题超了就截断，别把排队数挤出屏幕 */
+
+/* 队列条里一条 job 显示成什么：有 task_id 就找任务标题，找不到只显示任务号；
+   没有 task_id 的（拉数据、规划这类整客户的 job）显示类型名。 */
+function qsWhat(it,titleMap,typeMap){
+  var j=it||{},tid=(j.task_id==null||j.task_id==='')?'':String(j.task_id),s='';
+  if(tid)s=String((titleMap&&titleMap[tid])||('任务 #'+tid));
+  else s=String((typeMap&&typeMap[j.type])||j.type||'');
+  if(s.length>QS_TITLE_MAX)s=s.slice(0,QS_TITLE_MAX)+'…';
+  return s;
+}
+
+/* 队列条文案。queue 就是 GET /jobs/queue 的 {running,queued}，跨客户。
+   返回纯文本（调用方用 textContent 落地），空队列返回空串让调用方隐藏整条。
+   已跑时长优先信后端的 elapsed_sec，没有再拿 claimed_at 自己算。 */
+function qsStripText(queue,titleMap,typeMap,nowIso){
+  var q=queue||{},run=q.running||[],wait=q.queued||[],parts=[],i,it,who,what,min,dur;
+  for(i=0;i<run.length;i++){
+    it=run[i]||{};
+    who=String(it.client_name||('客户 #'+(it.client_id==null?'?':it.client_id)));
+    what=qsWhat(it,titleMap,typeMap);
+    min=(it.elapsed_sec!=null&&isFinite(Number(it.elapsed_sec)))
+      ?Math.max(0,Math.floor(Number(it.elapsed_sec)/60))
+      :qsElapsedMin(it.claimed_at,nowIso);
+    dur=(min==null)?'':('（'+(min>0?(min+' 分钟'):'不到 1 分钟')+'）');
+    parts.push('运行中 #'+(it.id==null?'?':it.id)+' '+who+(what?(' · '+what):'')+dur);
+  }
+  if(wait.length)parts.push('排队 '+wait.length+' 个');
+  return parts.length?('队列：'+parts.join(' · ')):'';
 }
 
 /* ---- 数字格式 ---- */
@@ -2829,6 +2880,71 @@ async function loadTasks(){
   renderLanes();
 }
 
+/* ---- 队列条 ----
+   GET /jobs/queue 是全局的（跨客户），所以这条状态不挂在 repState/insState 那种
+   按客户的结构里，单独一个变量，切客户时清掉重取。
+   取数失败不弹 toast：它跟着 15 秒轮询跑，端点一旦抽风会刷屏，静默隐藏就够了。 */
+var qsQueue=null;
+
+function qsReset(){
+  qsQueue=null;
+  renderQueueStrip();
+}
+
+async function loadQueue(){
+  const d=await api('/jobs/queue');
+  if(!d)return;
+  if(d._status>=400){qsQueue=null;renderQueueStrip();return}
+  qsQueue={running:d.running||[],queued:d.queued||[]};
+  renderQueueStrip();
+}
+
+/* 任务标题只在当前客户的 tasksData 里找，别的客户的 job 就只剩任务号，这是有意的：
+   看板一次只加载一个客户的任务，为了一行提示去拉别人的任务表不值得。 */
+function qsTitleMap(){
+  const m={};
+  (tasksData||[]).forEach(t=>{if(t&&t.id!=null)m[String(t.id)]=String(t.title||'')});
+  return m;
+}
+function renderQueueStrip(){
+  const el=document.getElementById('queueStrip');
+  if(!el)return;
+  /* textContent 落地：这条全是外部来的客户名与任务标题，不拼 HTML 就不存在注入面 */
+  const txt=qsQueue?qsStripText(qsQueue,qsTitleMap(),JOB_LABEL,null):'';
+  el.textContent=txt;
+  el.classList.toggle('hidden',!txt);
+}
+
+/* 任务视图的一次完整刷新：任务表加队列条。轮询、点完执行、点完放行都走它。 */
+function loadTasksAndQueue(){loadTasks();loadQueue()}
+
+/* 任务已经排进队列或正在跑：勾选框要禁掉，pickedIds 也要排除，
+   否则同一个任务会被排第二个 job。 */
+function qsTaskBusy(t){
+  const s=t&&t.job_state&&t.job_state.status;
+  return s==='queued'||s==='running';
+}
+/* 任务卡上的队列徽标。job_state 由 GET /tasks 带下来，没有就什么都不渲染。 */
+function qsJobBadge(t){
+  const js=(t&&t.job_state)||null;
+  if(!js||!js.status)return '';
+  if(js.status==='queued'){
+    const p=Number(js.position)||0;
+    return '<span class="badge queued" title="已排进队列，等 worker 领取">'+
+      esc('排队中'+(p?(' 第 '+p+' 位'):''))+'</span>';
+  }
+  if(js.status==='running'){
+    const m=qsElapsedMin(js.claimed_at,null);
+    return '<span class="badge running" title="worker 正在跑这个任务">'+
+      esc('运行中'+(m==null?'':(' '+(m>0?(m+' 分钟'):'不到 1 分钟'))))+'</span>';
+  }
+  if(js.status==='failed'){
+    return '<span class="badge attn" title="上一次执行失败，去 Jobs 视图看日志">'+
+      esc('上次失败 #'+(js.job_id||'?'))+'</span>';
+  }
+  return '';
+}
+
 /* ---- 任务视图过滤 ----
    两个互不干涉的维度，分工写死在这里，改之前先读完：
 
@@ -2970,12 +3086,17 @@ function renderLanes(){
   }
   renderRelease();
   renderPickHint();
+  /* 任务表变了，队列条里的标题也跟着重解析一次（新任务刚排上时标题才对得上） */
+  renderQueueStrip();
   hydrateFeedback();
 }
 
 function taskCard(t,lane){
   const pickable=(lane==='agent'&&t.status==='approved');
-  const cb=pickable?'<input type="checkbox" onchange="togglePick('+t.id+',this.checked)"'+(picked[t.id]?' checked':'')+'>':'';
+  /* 已在队列里的任务不许再勾：勾了也会被 pickedIds 滤掉，这里先把框禁掉说明原因。 */
+  const busy=qsTaskBusy(t);
+  const cbBusy=busy?(' disabled title="'+esc(t.job_state.status==='running'?'这个任务正在跑，等它跑完再选':'这个任务已经在队列里，不用重复排')+'"'):'';
+  const cb=pickable?'<input type="checkbox"'+cbBusy+' onchange="togglePick('+t.id+',this.checked)"'+(picked[t.id]&&!busy?' checked':'')+'>':'';
   let acts='';
   if(t.status==='proposed')acts+='<button class="btn tiny green" onclick="setTaskStatus('+t.id+',\'approved\')">批准</button>';
   if(lane==='client'&&t.status!=='done')acts+='<button class="btn tiny ghost" onclick="setTaskStatus('+t.id+',\'done\')">标记完成</button>';
@@ -2989,7 +3110,7 @@ function taskCard(t,lane){
   return '<div class="tcard">'+
     '<div class="tcard-top">'+cb+'<div class="tcard-title"><span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div></div>'+
     detail+
-    '<div class="tcard-meta">'+priBadge+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+
+    '<div class="tcard-meta">'+priBadge+qsJobBadge(t)+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+
     '<span class="badge '+t.status+'">'+t.status+'</span>'+link+acts+'</div>'+
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
@@ -3457,12 +3578,22 @@ async function releaseTasks(){
   if(!d)return;
   if(d._status===409){toast('已有 apply 任务在跑（job #'+(d.job_id||'?')+'），等它跑完再放行。',true);return}
   if(fail(d,'放行失败'))return;
-  toast('已放行 '+d.count+' 个任务，job #'+d.job_id);
-  loadTasks();
+  /* 放行也是一任务一 job：count 是放行的任务数，job_ids 是真排出去的 job。 */
+  const jids=d.job_ids||(d.job_id?[d.job_id]:[]);
+  const sk=d.skipped||[];
+  const n=(d.count==null)?jids.length:d.count;
+  toast('已放行 '+n+' 个任务，排队 '+jids.length+' 个 job'+(sk.length?('，跳过 '+sk.length+' 个已在队列'):''));
+  loadTasksAndQueue();
 }
 
 function togglePick(id,on){picked[id]=on;renderPickHint()}
-function pickedIds(){return Object.keys(picked).filter(k=>picked[k]).map(k=>parseInt(k,10))}
+/* 排除已在队列或正在跑的任务：勾选是按 id 记的，任务可能是在排队之前勾上的，
+   这里统一滤一道，执行按钮和提示行拿到的就都是干净的清单。 */
+function pickedIds(){
+  const busy={};
+  (tasksData||[]).forEach(t=>{if(qsTaskBusy(t))busy[String(t.id)]=1});
+  return Object.keys(picked).filter(k=>picked[k]&&!busy[k]).map(k=>parseInt(k,10));
+}
 function renderPickHint(){
   const el=document.getElementById('pickHint');
   if(!el)return;
@@ -3505,7 +3636,16 @@ async function fireJob(type,btn){
   if(!d)return;
   if(d._status===409){toast('已有同类任务在跑（job #'+(d.job_id||'?')+'），等它跑完再触发。',true);return}
   if(fail(d,'创建 job 失败'))return;
-  toast('已排队 job #'+d.id+'（'+(JOB_LABEL[type]||type)+'）');
+  if(type==='execute_task'){
+    /* 多任务一任务一 job，回的是 ids；已经在队列里的任务后端直接跳过，回 skipped。
+       点完立刻把任务表和队列条刷一遍，徽标当场出现，人就不会再点第二下。 */
+    const ids=d.ids||(d.id?[d.id]:[]);
+    const sk=d.skipped||[];
+    toast('已排队 '+ids.length+' 个任务'+(sk.length?('，跳过 '+sk.length+' 个已在队列'):''));
+    loadTasksAndQueue();
+  }else{
+    toast('已排队 job #'+d.id+'（'+(JOB_LABEL[type]||type)+'）');
+  }
   loadJobs();
 }
 
@@ -3587,6 +3727,9 @@ function boot(){
     if(curView==='jobs')loadJobs();
     else if(curView==='dash')loadOverview();
     else if(curView==='inbox')loadInbox();
+    /* 任务视图跟着轮询：排队中和运行中的徽标要自己动起来，队列条也要跟着走，
+       否则人盯着一张静止的卡不知道 worker 到底领没领。 */
+    else if(curView==='tasks')loadTasksAndQueue();
   },15000);
 }
 boot();

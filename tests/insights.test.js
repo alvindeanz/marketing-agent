@@ -27,7 +27,8 @@ const EXPORTS = [
   'insDeltaHtml', 'insKpiHtml', 'insLegendHtml', 'insRateCardHtml', 'insRankHtml',
   'insBrandHtml', 'insHasAny', 'insBody', 'insRng', 'insMockEvents', 'insMockMetrics',
   'INS_COLOR', 'INS_EVENT_COLOR', 'INS_EVENT_NAME', 'INS_GRAN',
-  'repGran', 'repBuckets', 'repKpiPeriod', 'linkifyText'
+  'repGran', 'repBuckets', 'repKpiPeriod', 'linkifyText',
+  'qsElapsedMin', 'qsStripText'
 ];
 const P = new Function(m[1] + '\nreturn {' + EXPORTS.join(',') + '};')();
 
@@ -741,6 +742,44 @@ t('linkifyText 没有链接就只做转义，原样返回', () => {
   assert.strictEqual(P.linkifyText(''), '');
   assert.strictEqual(P.linkifyText(null), '');
   assert.strictEqual(P.linkifyText('a & b'), 'a &amp; b');
+});
+
+/* ---------- 任务队列条 ---------- */
+section('任务队列条');
+t('qsElapsedMin 算整分钟，不足一分钟归 0，解析不了回 null', () => {
+  assert.strictEqual(P.qsElapsedMin('2026-08-25 10:00:00', '2026-08-25 10:08:30'), 8);
+  assert.strictEqual(P.qsElapsedMin('2026-08-25 10:00:00', '2026-08-25 10:00:40'), 0);
+  assert.strictEqual(P.qsElapsedMin('2026-08-25 10:05:00', '2026-08-25 10:00:00'), 0); // 时钟倒挂不给负数
+  assert.strictEqual(P.qsElapsedMin('', '2026-08-25 10:00:00'), null);
+  assert.strictEqual(P.qsElapsedMin(null, null), null);
+});
+t('qsStripText 拼出运行中加排队一整行，标题走 titleMap', () => {
+  const q = {
+    running: [{ id: 82, client_id: 7, client_name: 'Louvresky', type: 'execute_task', task_id: 91, elapsed_sec: 8 * 60 + 20 }],
+    queued: [{ id: 83 }, { id: 84 }, { id: 85 }],
+  };
+  assert.strictEqual(
+    P.qsStripText(q, { '91': '首页标题重写' }, {}, '2026-08-25 10:00:00'),
+    '队列：运行中 #82 Louvresky · 首页标题重写（8 分钟） · 排队 3 个'
+  );
+});
+t('qsStripText 找不到标题只显示任务号，超长截断，无 elapsed_sec 时用 claimed_at', () => {
+  const q = {
+    running: [{ id: 82, client_name: 'Bens', task_id: 404, claimed_at: '2026-08-25 09:58:00' }],
+    queued: [],
+  };
+  assert.strictEqual(P.qsStripText(q, {}, {}, '2026-08-25 10:00:30'),
+    '队列：运行中 #82 Bens · 任务 #404（2 分钟）');
+  const long = { running: [{ id: 5, client_name: 'A', task_id: 1 }], queued: [] };
+  const out = P.qsStripText(long, { '1': '一二三四五六七八九十一二三四五六七八九十一二' }, {}, null);
+  assert.ok(out.indexOf('一二三四五六七八九十一二三四五六七八九十…') > -1, '标题超 20 字要截断');
+});
+t('qsStripText 空队列回空串，没有 task_id 的 job 显示类型名', () => {
+  assert.strictEqual(P.qsStripText({ running: [], queued: [] }, {}, {}, null), '');
+  assert.strictEqual(P.qsStripText(null, {}, {}, null), '');
+  const q = { running: [{ id: 9, client_name: 'QK', type: 'pull_data', elapsed_sec: 30 }], queued: [] };
+  assert.strictEqual(P.qsStripText(q, {}, { pull_data: '拉数据' }, null),
+    '队列：运行中 #9 QK · 拉数据（不到 1 分钟）');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
