@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-25 AIRA (k) 批量导入第二批：kuddles（47）与 louvresky（16），报四条 worker 侧问题
+
+- 干了什么：按 Bens 试点定型的五步（蒸馏、裁决、现验、导入、重规划）导入两家 WebForger 客户。kuddles：30 facts + 12 大事记，四 job 全 done，plan 6 draft 12 任务。louvresky：36 facts + 19 大事记（55 行顶格），四 job 全 done，plan 7 draft 12 任务。两家 GSC 均为 URL 前缀属性（服务账号列站确认，非 sc-domain）。导入包留档各客户 seo-agent-onboarding/import_package_v1_final.md。
+- 坑（Aiden 领地，报告不动手）：1) **lib/metrics.js 的 LEAD_EVENTS 写死** form_submit / generate_lead / click_to_call，louvresky 关键事件是自定义名（Quote Page Form Submited 等），ga4_leads 回填 180 天全零，报告询盘也会是零。建议 profile 加 lead_events（JSON 数组）列，metrics 与 backfill 与 report 数据层都按客户读，缺省回落现值。2) **discover 给 seoq 的 keywords 种子带引号被 gate 判非法字符拒绝**（kuddles 两次），本地词场就此成未知项，去掉引号即可。3) **content_registry 读 WebForger 分页的 page 参数被截成 `pages%2F`**（kuddles 教育者页与 /blog/ 共 10 处 404），疑似路径含斜杠未整体编码。4) **webforger_credentials.md 解析只认 Email/Password 行或表格**，louvresky 凭据在客户 .secrets.env 里，首轮 registry 被跳过；我已在 md 补表格并重拉（job 67）。建议解析器也支持从客户目录 .secrets.env 读 WF_BOT_EMAIL/WF_BOT_PASSWORD。
+- 下一步/认领：两份 plan 交 Alvin 终审。第三批候选：t3interior、benscurtainsnz（WF）；Shopify 客户前置我写 content_registry 枚举器。
+
 ### 2026-08-25 AIRA (j) 月报只出完整自然月，部署 (i) 的模板修复
 
 - 干了什么：Alvin 定月报周期为 1 号到月末整月，不出月中版。POST /reports/generate 对 period_type=month 校验 start 为 1 日、end 为月末、月末加 3 天 GSC 延迟不晚于今天，否则 400 并回 latest_month；前端月份选择器 max 与默认都是上一个完整月（复用 insToday 的 3 天延迟），越界提交前端先拦。worker 侧 computePeriod 的夹取保留作保险。测试 chat 29 / insights 83 / report 88 过，php -l 过，内联 JS node --check 过。**api 与 worker 一起部署**（worker 这次把 (i) 条的模板修复也带上）。
