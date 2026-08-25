@@ -33,19 +33,10 @@ const DEFAULT_PRIORITY = 'P2';
 const MAX_TASKS = 12;
 const AUTHORED_BY = 'seo-worker';
 
-const CLIENT_BACKGROUND = [
-  'BACKGROUND YOU MUST FACTOR IN',
-  'This is a New Zealand flooring lead generation site. A conversion is a form',
-  'submission or a phone call, not an ecommerce sale, so plan for enquiry volume and',
-  'enquiry quality, not for transactions.',
-  'In July 2026 the site moved off a hacked WordPress install onto WebForger. Anything',
-  'in the history before that migration is unreliable.',
-  'The historical Search Console data was polluted by a jacktoto spam injection. The',
-  'Search Console numbers in this briefing already have that spam filtered out, so',
-  'treat them as the real baseline and do not explain away the low volume as spam.',
-  'The site carries a legacy of roughly 78,000 spam backlinks from the hack. Assume the',
-  'link profile is toxic until proven otherwise.',
-].join('\n');
+/* 客户背景一律来自 profile 与 facts 简报，不在这里写死。
+   2026-08-25 删除了试点客户 powerdekor 的硬编码 CLIENT_BACKGROUND（新西兰地板站、
+   jacktoto 注入、78,000 垃圾外链），此前它被无条件塞进每个客户的 plan 提示词，
+   benscurtains 两次 plan 都被串进该背景（见 COLLAB 2026-08-24 AIRA (b) bug 1）。 */
 
 /**
  * Pull the last ```json fenced block out of the model output.
@@ -165,8 +156,6 @@ function buildPrompt(briefing, extraInstructions, dossier, capability) {
     '你是一家新西兰数字营销公司的 SEO 策略负责人，为下面这个客户写 90 天方案。',
     '这份方案会交给人审批，通过的任务会变成真实工作。你在无人值守模式下运行，只有只读工具，',
     '没人能回答你的问题。自己做判断，讲清理由，一次写完。',
-    '',
-    CLIENT_BACKGROUND,
     '',
     'BRIEFING, this is distilled from the live data, treat it as the only facts you have',
     '-----',
