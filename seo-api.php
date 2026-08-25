@@ -3065,6 +3065,18 @@ if($m==='POST'&&$ROUTE==='/reports/generate'){
     $pe=(string)($i['period_end']??'');
     if(!ymd_ok($ps)||!ymd_ok($pe))res(400,['error'=>'period_start/period_end 必须是 YYYY-MM-DD']);
     if(strcmp($ps,$pe)>0)res(400,['error'=>'period_start 不能晚于 period_end']);
+    /* 月报只出完整自然月（Alvin 2026-08-25 定）：period_end 必须是该月最后一天，
+       且月末加 GSC 3 天延迟不晚于今天，否则拒绝并告知当前可出的最新月份。 */
+    if($ptype==='month'){
+        $lag=3;
+        if($ps!==date('Y-m-01',strtotime($ps)))res(400,['error'=>'月报的 period_start 必须是当月 1 日']);
+        if($pe!==date('Y-m-t',strtotime($ps)))res(400,['error'=>'月报的 period_end 必须是当月最后一天']);
+        $latest=date('Y-m-t',strtotime(date('Y-m-01').' -1 day'));
+        while(strtotime($latest)+$lag*86400>time()){
+            $latest=date('Y-m-t',strtotime(date('Y-m-01',strtotime($latest)).' -1 day'));
+        }
+        if(strtotime($pe)+$lag*86400>time())res(400,['error'=>'该月尚未结束或数据尚未齐全，当前可生成的最新月份是 '.substr($latest,0,7),'latest_month'=>substr($latest,0,7)]);
+    }
     /* 工作区目录是成品落地的地方，缺了 worker 领到活也只能抛错，
        与其让人去 job 日志里找原因，不如在这里就说清楚该补哪里。 */
     $pf=db()->prepare("SELECT workspace_dir FROM seo_profiles WHERE client_id=?");

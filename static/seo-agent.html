@@ -2034,6 +2034,7 @@ async function fireReportJob(btn){
   var el=document.getElementById('repMonth');
   var ym=el?String(el.value||''):'';
   if(!/^\d{4}-\d{2}$/.test(ym)){toast('先选一个月份',true);return}
+  if(ym>repDefaultMonth()){toast('月报只出完整自然月，当前可生成的最新月份是 '+repDefaultMonth(),true);return}
   var ps=ym+'-01',pe=insMonthEnd(ps);
   var box=document.getElementById('repInstr');
   var extra=box?String(box.value||'').trim():'';
@@ -2172,7 +2173,8 @@ function loadReport(){
   if(!curId)return;
   if(repState.client&&repState.client!==curId)repReset();
   var mel=document.getElementById('repMonth');
-  if(mel&&!mel.value)mel.value=repDefaultMonth();
+  /* 月报只出完整自然月：最晚可选的就是上一个完整月（含 3 天数据延迟），默认也是它 */
+  if(mel){mel.max=repDefaultMonth();if(!mel.value||mel.value>mel.max)mel.value=repDefaultMonth();}
   if(!repState.from||!repState.to){
     setRepPreset(repPreset==='custom'?'last_month':repPreset);
   }else{
