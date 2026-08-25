@@ -25,7 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 - 干了什么：Alvin 第一性原理定的闭环：机器改线上页后，人只需一眼看到改了哪页与确认没崩；崩没崩归机器当场兜底；不做回滚按钮（人工回滚走对话）。零 schema 改动。跨认领动了 runners/apply_task.js、runners/execute_task.js、lib/publish.js、static/seo-agent.html。apply outcome 契约加 affected_urls / snapshot_label / before_archive / checks[{name,passed,deferred,note}]；判定只看 deferred=false 的项，延后项（Rich Results、收录跟进）只记录，**修掉 (h) 条报的「未验项当失败」**；失败且有快照 label 时调平台 restore 自动回滚并写「已自动回滚」，aborted 不自动回滚；result_note 头部固定四行（受影响页面、改前存档传 250 的 reports/{slug}/qa/、快照、检查通过与待人工计数），旧 verification_passed 向后兼容。execute_task prepare 输出 target_urls 写「目标页面」一行供放行前看。前端任务卡 URL 自动可点（linkifyText 在 INSIGHTS-PURE 区间），截断改按最后一个分隔符保留机器头部。publish.js 抽 publishFile，publishReport 行为不变。测试：chat 29 / insights 86 / report 88 / apply 24（新）全过，node --check 与 require 全过，php 未动。
 - 坑：无新坑。快照 restore 是全站还原，会连带回退这期间其他写入，回滚前 note 里有 label，人工回滚也走同一接口。
-- 下一步/认领：**待部署 worker 与前端**（Alvin 点名后 Aira 部署）。
+- 下一步/认领：**已部署 worker 与前端**（2026-08-26 Aira 执行，rev edd9ccb，部署前 active job 为 0）。Bens S2 与 Kuddles S1 执行出的任务自带链接。
 
 ### 2026-08-25 AIRA (k) 批量导入第二批：kuddles（47）与 louvresky（16），报四条 worker 侧问题
 
