@@ -26,7 +26,8 @@ const EXPORTS = [
   'insPath', 'insIsolated', 'insEmptyBox', 'insChart', 'insStack',
   'insDeltaHtml', 'insKpiHtml', 'insLegendHtml', 'insRateCardHtml', 'insRankHtml',
   'insBrandHtml', 'insHasAny', 'insBody', 'insRng', 'insMockEvents', 'insMockMetrics',
-  'INS_COLOR', 'INS_EVENT_COLOR', 'INS_EVENT_NAME', 'INS_GRAN'
+  'INS_COLOR', 'INS_EVENT_COLOR', 'INS_EVENT_NAME', 'INS_GRAN',
+  'repGran', 'repBuckets', 'repKpiPeriod'
 ];
 const P = new Function(m[1] + '\nreturn {' + EXPORTS.join(',') + '};')();
 
@@ -654,6 +655,65 @@ t('档案表单有 pf_brand_regex 输入框和报错位', () => {
 t('回填 job 的 type 和 payload 跟后端约定一致', () => {
   assert.ok(/type:'backfill_metrics',payload:\{days:180\}/.test(src));
   assert.ok(/JOB_LABEL=\{[^}]*backfill_metrics:'回填历史数据'/.test(src), 'Jobs 表格要能显示中文名');
+});
+
+/* ---------- 报告 tab 的区间版分桶与对比期 ---------- */
+section('报告 tab：区间版纯函数');
+t('repGran 按区间长度自动选粒度，45 与 200 是边界', () => {
+  assert.strictEqual(P.repGran('2026-07-01', '2026-08-14'), 'day');   // 45 天
+  assert.strictEqual(P.repGran('2026-07-01', '2026-08-15'), 'week');  // 46 天
+  assert.strictEqual(P.repGran('2026-01-01', '2026-07-19'), 'week');  // 200 天
+  assert.strictEqual(P.repGran('2026-01-01', '2026-07-20'), 'month'); // 201 天
+  assert.strictEqual(P.repGran('2026-07-01', '2026-07-01'), 'day');
+});
+t('repBuckets 日粒度逐日铺满，端点闭区间', () => {
+  const b = P.repBuckets('2026-07-01', '2026-07-31', 'day');
+  assert.strictEqual(b.length, 31);
+  assert.strictEqual(b[0].from, '2026-07-01');
+  assert.strictEqual(b[30].to, '2026-07-31');
+  assert.ok(b.every(x => x.from === x.to), '日桶起止必须同日');
+});
+t('repBuckets 周粒度首尾桶被区间裁短，桶间首尾相接', () => {
+  const b = P.repBuckets('2026-07-01', '2026-08-31', 'week'); // 7-01 是周三
+  assert.strictEqual(b[0].from, '2026-07-01', '首桶从区间起点算，不回退到周一');
+  assert.strictEqual(b[0].to, '2026-07-05');
+  assert.strictEqual(b[b.length - 1].to, '2026-08-31', '末桶到区间终点为止');
+  for (let i = 1; i < b.length; i++) assert.strictEqual(P.insShift(b[i - 1].to, 1), b[i].from);
+});
+t('repBuckets 月粒度跨年，端点月是半个月也照样成桶', () => {
+  const b = P.repBuckets('2025-11-20', '2026-02-10', 'month');
+  assert.strictEqual(b.length, 4);
+  assert.deepStrictEqual([b[0].from, b[0].to], ['2025-11-20', '2025-11-30']);
+  assert.deepStrictEqual([b[1].from, b[1].to], ['2025-12-01', '2025-12-31']);
+  assert.deepStrictEqual([b[3].from, b[3].to], ['2026-02-01', '2026-02-10']);
+});
+t('repBuckets 单日成一桶，起晚于止返回空数组', () => {
+  assert.strictEqual(P.repBuckets('2026-07-01', '2026-07-01', 'day').length, 1);
+  assert.deepStrictEqual(P.repBuckets('2026-07-31', '2026-07-01', 'day'), []);
+  assert.deepStrictEqual(P.repBuckets('', '2026-07-01', 'day'), []);
+});
+t('repKpiPeriod 完整自然月走整月对整月，长短不同也不拉齐', () => {
+  const p = P.repKpiPeriod('2026-07-01', '2026-07-31');
+  assert.deepStrictEqual(p.cur, { from: '2026-07-01', to: '2026-07-31' });
+  assert.deepStrictEqual(p.prev, { from: '2026-06-01', to: '2026-06-30' });
+  assert.strictEqual(P.insShift(p.prev.to, 1), p.cur.from, '两段必须相邻不重叠');
+  assert.ok(p.cmp.indexOf('6 月') > -1 && p.cmp.indexOf('全月') > -1, 'cmp 要写明对比的是整月');
+  // 3 月对 2 月：28 天对 31 天，正是自然月口径与等长口径的分水岭
+  const mar = P.repKpiPeriod('2026-03-01', '2026-03-31');
+  assert.deepStrictEqual(mar.prev, { from: '2026-02-01', to: '2026-02-28' });
+  // 1 月回退跨年
+  assert.deepStrictEqual(P.repKpiPeriod('2026-01-01', '2026-01-31').prev, { from: '2025-12-01', to: '2025-12-31' });
+});
+t('repKpiPeriod 非完整月退回等长上一段，紧邻不重叠', () => {
+  const p = P.repKpiPeriod('2026-07-01', '2026-07-20'); // 缺月末，不算整月
+  assert.deepStrictEqual(p.prev, { from: '2026-06-11', to: '2026-06-30' });
+  assert.strictEqual(P.insDiff(p.prev.from, p.prev.to), P.insDiff(p.cur.from, p.cur.to));
+  assert.strictEqual(P.insShift(p.prev.to, 1), p.cur.from);
+  assert.ok(p.cmp.indexOf('前 20 天') > -1);
+  // 缺月初同样不算整月
+  assert.deepStrictEqual(P.repKpiPeriod('2026-07-02', '2026-07-31').prev, { from: '2026-06-02', to: '2026-07-01' });
+  // 单日跨月回退
+  assert.deepStrictEqual(P.repKpiPeriod('2026-03-02', '2026-03-02').prev, { from: '2026-03-01', to: '2026-03-01' });
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

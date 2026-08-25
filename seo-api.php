@@ -315,6 +315,52 @@ function ensure_metrics_schema(){
     }
 }
 
+/* 报告表，惰性建，同 seo_deliverables 的套路。一行一个版本：同一个客户同一个
+   周期反复生成就叠 v1 v2 v3，旧行永不覆盖，旧链接永久有效，
+   UNIQUE KEY (client_id,period_type,period_start,version) 就是这条规矩的兜底。
+
+   facts_pack 用 MEDIUMTEXT 存 JSON 字符串而不是 JSON 列：MariaDB 10.3 底下
+   JSON 列本来就是 LONGTEXT，用 JSON 列只会换来一层没用的校验，读出来照样 jdec()。
+   没有外键，和这批惰性建的表一致，删客户留下的孤儿行是看得见的垃圾，
+   不是跑一半的 500。
+
+   内部调 ensure_job_types()，因为报告的入口是排一个 type='report' 的 job，
+   表建好了 ENUM 没跟上等于白建，同 ensure_feedback_schema() 的处理。 */
+function ensure_reports_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_reports (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT NOT NULL,
+        period_type ENUM('month','quarter','week','custom') NOT NULL DEFAULT 'month',
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        version INT NOT NULL DEFAULT 1,
+        url VARCHAR(500) NOT NULL DEFAULT '',
+        html_path VARCHAR(500) NOT NULL DEFAULT '',
+        facts_pack MEDIUMTEXT DEFAULT NULL,
+        narrative_status ENUM('ok','fallback') NOT NULL DEFAULT 'ok',
+        created_by VARCHAR(64) NOT NULL DEFAULT '',
+        note TEXT DEFAULT NULL,
+        status ENUM('draft','sent') NOT NULL DEFAULT 'draft',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_seo_reports_client (client_id, period_start, id),
+        UNIQUE KEY uq_seo_reports_ver (client_id, period_type, period_start, version)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    /* narrative_status 比表晚落地：叙事层降级成纯数据版这件事是第三层防线，
+       表先上线的库里没有这一列。MariaDB 10.3 没有 ADD COLUMN IF NOT EXISTS，
+       靠 information_schema 逐值比对实现幂等，同 seo_deliverables.uploaded_by。 */
+    $ic=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_reports' AND COLUMN_NAME='narrative_status'");
+    $ic->execute();
+    $has=$ic->fetch();
+    $ic->closeCursor();
+    if(!$has){
+        db()->exec("ALTER TABLE seo_reports ADD COLUMN narrative_status ENUM('ok','fallback') NOT NULL DEFAULT 'ok' AFTER facts_pack");
+    }
+    ensure_job_types();
+}
+
 /* 日期入参校验。时序端点全部按 DATE 比较，格式不对直接 400，
    不做"猜一下用户想要哪天"这种事。 */
 function ymd_ok($s){return (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/',(string)$s);}
@@ -1208,8 +1254,11 @@ if($m==='POST'&&$ROUTE==='/metrics'){
 // 这两件事在趋势图上意思完全不同，交给前端决定怎么显示。
 // metrics 省略 = 全部指标；请求过的指标即使一行没有也会回一个空数组，
 // 前端拿到的 key 集合永远稳定，不用写 undefined 判断。
+/* auth_any 而不是 auth_admin：报告的零 LLM 数据层要按日指标，worker 拿服务令牌
+   直接读这里，不在 worker 侧另写一份 SQL。回传只有指标名与数字，没有人名、
+   没有客户原话，worker 收窄字段的理由在这里不成立。 */
 if($m==='GET'&&$ROUTE==='/metrics'){
-    auth_admin();
+    auth_any();
     ensure_metrics_schema();
     $cid=need_client();
     $to=(string)($_GET['to']??'');
@@ -1320,8 +1369,10 @@ if($m==='POST'&&$ROUTE==='/facts_history'){
     res(200,['ok'=>true,'imported'=>count($done),'keys'=>$done]);
 }
 
+/* 同 GET /metrics 改成 auth_any：报告要在趋势图上标动作，事件是数据层的一部分。
+   回传只有日期、一句中文标签和 kind 分类，都是本来就要写给客户看的东西。 */
 if($m==='GET'&&$ROUTE==='/events'){
-    auth_admin();
+    auth_any();
     $cid=need_client();
     $to=(string)($_GET['to']??'');
     $from=(string)($_GET['from']??'');
@@ -2918,6 +2969,7 @@ if($m==='POST'&&$ROUTE==='/jobs'){
        幂等可重跑，所以放开给控制台手动触发。 */
     if(!in_array($type,['discover','pull_data','plan','execute_task','report','feedback','triage','backfill_metrics'],true))res(400,['error'=>'bad type']);
     if($type==='feedback')ensure_feedback_schema();
+    if($type==='report')ensure_reports_schema();
     if($type==='triage')ensure_job_types();
     if($type==='backfill_metrics'){ensure_job_types();ensure_metrics_schema();}
     $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type=? AND status IN('queued','running') LIMIT 1");
@@ -2979,6 +3031,141 @@ if($m==='POST'&&preg_match('#^/jobs/(\d+)/retry$#',$ROUTE,$mm)){
     audit($u['username'],'seo_job_retry',(string)$id,['from_job'=>$jid,'type'=>$job['type']]);
     fire_wake($id);
     res(200,['ok'=>true,'id'=>$id]);
+}
+
+/* ---------------- 报告 ----------------
+   /reports/generate 是固定路径，必须写在 /reports/{id} 的正则之前，
+   否则 generate 会掉进 {id} 分支，同 /jobs/claim 与 /jobs/{id} 的关系。 */
+
+// POST /reports/generate -> 人在看板上点「生成月报」，排一个 type='report' 的 job。
+// 与 POST /jobs 同级，去重规矩也一样：同客户同类型在跑就 409，一个客户同一时刻
+// 只能有一份报告在生成。不改 POST /jobs 本体，那条路留给通用触发。
+if($m==='POST'&&$ROUTE==='/reports/generate'){
+    $u=auth_admin();
+    ensure_reports_schema();
+    /* workspace_dir 这一列是 ensure_metrics_schema() 惰性补上去的，
+       没跑过它的库里直接 SELECT 会抛异常变成 500，所以先调一次。 */
+    ensure_metrics_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $ptype=(string)($i['period_type']??'month');
+    if(!in_array($ptype,['month','quarter','week','custom'],true))res(400,['error'=>'bad period_type']);
+    $ps=(string)($i['period_start']??'');
+    $pe=(string)($i['period_end']??'');
+    if(!ymd_ok($ps)||!ymd_ok($pe))res(400,['error'=>'period_start/period_end 必须是 YYYY-MM-DD']);
+    if(strcmp($ps,$pe)>0)res(400,['error'=>'period_start 不能晚于 period_end']);
+    /* 工作区目录是成品落地的地方，缺了 worker 领到活也只能抛错，
+       与其让人去 job 日志里找原因，不如在这里就说清楚该补哪里。 */
+    $pf=db()->prepare("SELECT workspace_dir FROM seo_profiles WHERE client_id=?");
+    $pf->execute([$cid]);
+    $prof=$pf->fetch();
+    if(!$prof)res(400,['error'=>'该客户没有档案，先补档案']);
+    if(trim((string)($prof['workspace_dir']??''))==='')res(400,['error'=>'档案缺 workspace_dir，先补档案']);
+    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='report' AND status IN('queued','running') LIMIT 1");
+    $dup->execute([$cid]);
+    $d=$dup->fetch();
+    if($d)res(409,['error'=>'Job already queued or running','job_id'=>(int)$d['id']]);
+    $payload=['period_type'=>$ptype,'period_start'=>$ps,'period_end'=>$pe];
+    if(isset($i['instructions'])&&trim((string)$i['instructions'])!=='')$payload['instructions']=(string)$i['instructions'];
+    $s=db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'report',?,'queued',?)");
+    $s->execute([$cid,json_encode($payload,JSON_UNESCAPED_UNICODE),$u['username']]);
+    $id=(int)db()->lastInsertId();
+    audit($u['username'],'seo_report_generate',(string)$id,['client_id'=>$cid,'payload'=>$payload]);
+    fire_wake($id);
+    res(200,['ok'=>true,'id'=>$id]);
+}
+
+// POST /reports -> worker 把一版成品落库。version 由服务端算，不接受入参：
+// 版本号是这张表的唯一真相，让 worker 自己报会在重跑时撞号。
+if($m==='POST'&&$ROUTE==='/reports'){
+    auth_worker();
+    ensure_reports_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $ptype=(string)($i['period_type']??'month');
+    if(!in_array($ptype,['month','quarter','week','custom'],true))res(400,['error'=>'bad period_type']);
+    $ps=(string)($i['period_start']??'');
+    $pe=(string)($i['period_end']??'');
+    if(!ymd_ok($ps)||!ymd_ok($pe))res(400,['error'=>'period_start/period_end 必须是 YYYY-MM-DD']);
+    if(strcmp($ps,$pe)>0)res(400,['error'=>'period_start 不能晚于 period_end']);
+    $url=(string)($i['url']??'');
+    $hp=(string)($i['html_path']??'');
+    if(trim($url)==='')res(400,['error'=>'url required']);
+    if(trim($hp)==='')res(400,['error'=>'html_path required']);
+    $ns=(string)($i['narrative_status']??'ok');
+    if(!in_array($ns,['ok','fallback'],true))res(400,['error'=>'bad narrative_status']);
+    /* facts_pack 两种形态都收：worker 直接发对象最省事，发字符串的场合
+       （比如把已经写到盘上的那份原样上传）也不该被逼着解一遍再编一遍。 */
+    $pack=$i['facts_pack']??null;
+    if($pack!==null&&!is_string($pack))$pack=json_encode($pack,JSON_UNESCAPED_UNICODE);
+    $v=db()->prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM seo_reports WHERE client_id=? AND period_type=? AND period_start=?");
+    $v->execute([$cid,$ptype,$ps]);
+    $ver=(int)$v->fetch()['n'];
+    $s=db()->prepare("INSERT INTO seo_reports(client_id,period_type,period_start,period_end,version,url,html_path,facts_pack,narrative_status,created_by)VALUES(?,?,?,?,?,?,?,?,?,?)");
+    $s->execute([$cid,$ptype,$ps,$pe,$ver,$url,$hp,$pack,$ns,(string)($i['created_by']??'seo-worker')]);
+    $id=(int)db()->lastInsertId();
+    audit('seo-worker','seo_report_add',(string)$id,['client_id'=>$cid,'period_start'=>$ps,'version'=>$ver,'narrative_status'=>$ns]);
+    res(200,['ok'=>true,'id'=>$id,'version'=>$ver]);
+}
+
+// GET /reports?client_id= -> 列全部版本，新的周期在前、同周期新版本在前。
+// facts_pack 不回传，一份 pack 几十 KB，列表拉十个版本就是几百 KB 的无用负载；
+// 想看的走 GET /reports/{id}/pack，列表只回一个 has_pack 让前端知道有没有。
+if($m==='GET'&&$ROUTE==='/reports'){
+    auth_any();
+    ensure_reports_schema();
+    $cid=need_client();
+    $s=db()->prepare("SELECT id,period_type,period_start,period_end,version,url,html_path,narrative_status,created_by,note,status,created_at,
+                             (facts_pack IS NOT NULL AND facts_pack<>'') AS has_pack
+                      FROM seo_reports WHERE client_id=?
+                      ORDER BY period_start DESC, version DESC");
+    $s->execute([$cid]);
+    $rows=$s->fetchAll();
+    foreach($rows as &$r){
+        $r['id']=(int)$r['id'];
+        $r['version']=(int)$r['version'];
+        $r['has_pack']=(bool)$r['has_pack'];
+    }
+    unset($r);
+    res(200,['ok'=>true,'reports'=>$rows]);
+}
+
+// GET /reports/{id}/pack -> 单独取 facts pack。固定后缀 /pack 的正则写在
+// PATCH /reports/{id} 之前，方法本来就不同，顺序只是照这个文件的惯例来。
+if($m==='GET'&&preg_match('#^/reports/(\d+)/pack$#',$ROUTE,$mm)){
+    auth_any();
+    ensure_reports_schema();
+    $rid=(int)$mm[1];
+    $g=db()->prepare("SELECT id,facts_pack FROM seo_reports WHERE id=?");
+    $g->execute([$rid]);
+    $row=$g->fetch();
+    if(!$row)res(404,['error'=>'Report not found']);
+    res(200,['ok'=>true,'id'=>(int)$row['id'],'facts_pack'=>jdec($row['facts_pack'])]);
+}
+
+// PATCH /reports/{id} -> 人加一句备注、或标记已发送。只有这两个字段可改：
+// 周期、版本、链接都是生成时的事实，改它们等于伪造，要换内容就再生成一版。
+if($m==='PATCH'&&preg_match('#^/reports/(\d+)$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_reports_schema();
+    $rid=(int)$mm[1];
+    $i=input();
+    $chk=db()->prepare("SELECT id FROM seo_reports WHERE id=?");
+    $chk->execute([$rid]);
+    if(!$chk->fetch())res(404,['error'=>'Report not found']);
+    $sets=[];$args=[];
+    if(isset($i['status'])){
+        if(!in_array($i['status'],['draft','sent'],true))res(400,['error'=>'bad status']);
+        $sets[]='status=?';$args[]=$i['status'];
+    }
+    if(isset($i['note'])){$sets[]='note=?';$args[]=(string)$i['note'];}
+    if(!$sets)res(400,['error'=>'nothing to update']);
+    $args[]=$rid;
+    db()->prepare("UPDATE seo_reports SET ".implode(',',$sets)." WHERE id=?")->execute($args);
+    audit($u['username'],'seo_report_update',(string)$rid,$i);
+    res(200,['ok'=>true]);
 }
 
 res(404,['error'=>'Not found','route'=>$ROUTE]);

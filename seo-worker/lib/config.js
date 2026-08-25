@@ -36,6 +36,19 @@ const DEFAULTS = {
   // 收件箱对话。人在工作台按客户跟它聊数据、聊博客规划，只读加提议，
   // 唯一的产物是任务草案，人点立项才落账。谈的是策略，所以给大模型。
   chatModel: 'opus',
+  // 月报叙事层。数字由数据层算好，模型只写解读，但读者是客户老板，
+  // 一次写完无人答疑，所以给大模型。
+  reportModel: 'opus',
+  // 报告成品上传到 250 用的 ssh Host 别名（root 的 ~/.ssh/config 已配好免密）。
+  reportSsh: 'blogpreview',
+  // 250 上报告的物理根目录，报告落在 {reportRemoteRoot}/{slug}/ 下。
+  reportRemoteRoot: '/www/wwwroot/blogpreview.horntech-dev.com/reports',
+  // 对外交给客户的 URL 根。与 reportRemoteRoot 是同一份文件的两个门牌，
+  // 客户面一律用 agencyreport 这个域名。
+  reportUrlBase: 'https://agencyreport.horntech-dev.com/reports',
+  // 报告 job 单独的超时。三层里取数与渲染是快路径，LLM 一次加至多一次纠错，
+  // 叠起来会逼近 jobTimeoutMin 的 30 分，所以单独放宽。
+  reportTimeoutMin: 45,
   jobTimeoutMin: 30,
   // WebForger API base and the blog language the runners write in. Empty lang
   // means the site's default language.
@@ -110,6 +123,12 @@ function load() {
   cfg.triageModel = String(cfg.triageModel || DEFAULTS.triageModel);
   cfg.rulingModel = String(cfg.rulingModel || DEFAULTS.rulingModel);
   cfg.chatModel = String(cfg.chatModel || DEFAULTS.chatModel);
+  cfg.reportModel = String(cfg.reportModel || DEFAULTS.reportModel);
+  cfg.reportSsh = String(cfg.reportSsh || DEFAULTS.reportSsh);
+  // 两个路径都去掉结尾斜杠，拼接时统一自己补，避免出现双斜杠的 URL。
+  cfg.reportRemoteRoot = String(cfg.reportRemoteRoot || DEFAULTS.reportRemoteRoot).replace(/\/+$/, '');
+  cfg.reportUrlBase = String(cfg.reportUrlBase || DEFAULTS.reportUrlBase).replace(/\/+$/, '');
+  cfg.reportTimeoutMin = Number(cfg.reportTimeoutMin) || DEFAULTS.reportTimeoutMin;
   cfg.webforgerApi = String(cfg.webforgerApi || DEFAULTS.webforgerApi).replace(/\/+$/, '');
   cfg.blogLang = String(cfg.blogLang || '');
   cfg.blogReviewEnabled = cfg.blogReviewEnabled !== false;

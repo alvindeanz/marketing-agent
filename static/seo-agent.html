@@ -529,6 +529,59 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
       </div>
     </div>
 
+    <!-- 报告 -->
+    <!-- 用户是 sales：上半屏看区间指标确认这个月有没有货可讲，下半屏一键生成再取链接。
+         这块不进 15 秒轮询，指标只在区间变化时重拉，免得把 SVG 和 tooltip 绑定拆掉。 -->
+    <div id="v_report" class="hidden">
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">区间指标</div>
+          <div class="tb-group">
+            <span class="plan-meta" id="repRangeHint"></span>
+            <button class="btn" id="rep_last_month" onclick="setRepPreset('last_month')">上月</button>
+            <button class="btn ghost" id="rep_mtd" onclick="setRepPreset('mtd')">本月至今</button>
+            <button class="btn ghost" id="rep_d90" onclick="setRepPreset('d90')">近 90 天</button>
+            <button class="btn ghost" id="rep_custom" onclick="setRepPreset('custom')">自定义</button>
+            <input type="date" class="tb-select" id="repFrom" onchange="setRepDate()">
+            <input type="date" class="tb-select" id="repTo" onchange="setRepDate()">
+          </div>
+        </div>
+        <div id="repMetrics"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">生成月报</div>
+          <div class="tb-group">
+            <input type="month" class="tb-select" id="repMonth">
+            <button class="btn" id="repGenBtn" onclick="fireReportJob(this)">生成月报</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="plan-meta" style="margin-bottom:10px">
+            默认上一个完整自然月。点下去只是排队，跑完要几分钟，链接会出现在下面的版本列表里。
+            同一个月可以重复生成，每次叠一个新版本，旧链接不会失效。
+          </div>
+          <div class="fld">
+            <label>备注给生成器（可选）</label>
+            <input id="repInstr" placeholder="例如：询盘总数按后台实收 12 计">
+            <div class="fld-hint">这句会原样交给生成器当额外口径说明。留空就只按系统里已有的数据出。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">报告版本</div>
+          <div class="tb-group">
+            <span class="plan-meta" id="repVerMeta"></span>
+            <button class="btn ghost" onclick="loadReportList()">刷新</button>
+          </div>
+        </div>
+        <div class="panel"><div id="repVersions"></div></div>
+      </div>
+    </div>
+
     <!-- Jobs -->
     <div id="v_jobs" class="hidden">
       <div class="sec">
@@ -662,7 +715,7 @@ const FB_MAX_BYTES=5*1024*1024;
 const FB_MIME=['image/png','image/jpeg','image/webp'];
 const PRIORITIES=['P0','P1','P2','P3'];
 const SNAP_SOURCES=['discovery','ga4','gsc','semrush','content_registry'];
-const VIEWS=[{key:'dash',name:'Dashboard'},{key:'inbox',name:'收件箱'},{key:'plan',name:'方案'},{key:'tasks',name:'任务'},{key:'jobs',name:'Jobs'},{key:'profile',name:'档案'}];
+const VIEWS=[{key:'dash',name:'Dashboard'},{key:'inbox',name:'收件箱'},{key:'plan',name:'方案'},{key:'tasks',name:'任务'},{key:'report',name:'报告'},{key:'jobs',name:'Jobs'},{key:'profile',name:'档案'}];
 const IB_KIND={digest:'决策卡片',ruling:'裁决',ack:'回执'};
 
 let token=localStorage.getItem('ops_token');
@@ -762,6 +815,7 @@ function router(){
     tasksData=[];jobsData=[];factsData=[];lastOverview=null;lastAttention=null;
     chReset();
     insReset();
+    repReset();
   }
   render();
 }
@@ -792,6 +846,7 @@ function loadView(){
   else if(curView==='inbox')loadInbox();
   else if(curView==='plan')loadPlans();
   else if(curView==='tasks')loadTasks();
+  else if(curView==='report')loadReport();
   else if(curView==='jobs'){loadJobs();renderPickHint()}
   else if(curView==='profile'){loadProfile();loadFacts()}
 }
@@ -1112,6 +1167,63 @@ function insDeltaPP(cur,prev){
   if(cur==null||prev==null||!isFinite(cur)||!isFinite(prev))return {pp:null,dir:'na'};
   var d=(cur-prev)*100;
   return {pp:d,dir:Math.abs(d)<0.005?'flat':(d>0?'up':'down')};
+}
+
+/* ---- 报告 tab 的区间版：insBuckets 与 insKpiPeriod 把窗口长度写死了（6 个月 / 13 周 / 30 天），
+   报告要吃任意 from..to，所以另起一份，既有那两个一个字不动。
+   两端的桶允许被区间裁短（七月只选到 20 号就是一个 20 天的月桶），
+   对比期一律取「紧挨着区间前面的等长一段」，不去猜自然月对自然月。 ---- */
+function repGran(from,to){
+  var n=insDiff(from,to)+1;
+  if(!(n>0))return 'day';
+  if(n<=45)return 'day';
+  if(n<=200)return 'week';
+  return 'month';
+}
+function repBuckets(from,to,gran){
+  var out=[],i,s,e,f;
+  if(!from||!to||insDiff(from,to)<0)return out;
+  var g=gran||repGran(from,to);
+  if(g==='month'){
+    s=insMonthStart(from);
+    while(s<=to){
+      e=insMonthEnd(s);
+      f=s<from?from:s;
+      out.push({key:s,from:f,to:e>to?to:e,label:(+s.slice(5,7))+' 月'});
+      s=insMonthStart(insShift(e,1));
+    }
+    return out;
+  }
+  if(g==='week'){
+    s=insMonday(from);
+    while(s<=to){
+      e=insShift(s,6);
+      f=s<from?from:s;
+      out.push({key:s,from:f,to:e>to?to:e,label:insMD(f)});
+      s=insShift(s,7);
+    }
+    return out;
+  }
+  var days=insRange(from,to);
+  for(i=0;i<days.length;i++)out.push({key:days[i],from:days[i],to:days[i],label:insMD(days[i])});
+  return out;
+}
+function repKpiPeriod(from,to){
+  /* 自然月优先：整月对整月，跟报告成品里的环比口径对得上。
+     只要区间不是「1 日到同月月末」这个整月形状，就退回等长上一段。 */
+  var pf,pt;
+  if(from===insMonthStart(from)&&to===insMonthEnd(from)){
+    pf=insMonthStart(insShift(from,-1));
+    pt=insMonthEnd(pf);
+    return {cur:{from:from,to:to},prev:{from:pf,to:pt},
+      name:from+' 至 '+to,
+      cmp:'对比 '+(+pf.slice(5,7))+' 月（全月）'};
+  }
+  var n=insDiff(from,to)+1;
+  pt=insShift(from,-1);pf=insShift(pt,-(n-1));
+  return {cur:{from:from,to:to},prev:{from:pf,to:pt},
+    name:from+' 至 '+to,
+    cmp:'对比前 '+n+' 天（'+pf+' 至 '+pt+'）'};
 }
 
 /* ---- 数字格式 ---- */
@@ -1742,6 +1854,333 @@ function insBindOne(box){
     tip.style.top='2px';
   });
   box.addEventListener('mouseleave',function(){hov.style.display='none';tip.style.display='none'});
+}
+
+/* ================= 报告 =================
+   给 sales 用：先按区间看这段时间到底有没有东西可讲，再一键排一个月报 job，
+   跑完在版本列表里取链接转给客户。数字全部复用洞察区那套纯函数，
+   只有分桶和对比期换成区间版（repBuckets / repKpiPeriod）。
+
+   刻意不进 15 秒轮询：报告 job 要跑几分钟，轮询既救不了等待也会把图表交互拆掉。
+   排完队按钮自己置灰 12 秒，15 秒后单独刷一次版本列表就够了。 */
+
+var REP_METRIC_LIST='gsc_impressions,gsc_clicks,gsc_clicks_brand,ga4_sessions_organic,ga4_leads';
+var REP_PRESETS=['last_month','mtd','d90','custom'];
+var REP_GRAN_NAME={day:'按日汇总',week:'按周汇总',month:'按月汇总'};
+
+var repState={client:0,from:'',to:'',gran:'day',metrics:null,events:[],reports:[],loading:false,error:'',ver:0};
+/* 界面态另放：区间预设、正在行内编辑备注的行、以及已经取过数的区间签名 */
+var repPreset='last_month',repNoteEdit={},repFetched='';
+
+function repReset(){
+  repState.client=0;repState.from='';repState.to='';repState.gran='day';
+  repState.metrics=null;repState.events=[];repState.reports=[];
+  repState.loading=false;repState.error='';repState.ver++;
+  repPreset='last_month';repNoteEdit={};repFetched='';
+  var el=document.getElementById('repInstr');
+  if(el)el.value='';
+}
+
+/* 上一个完整自然月，给 <input type="month"> 当默认值 */
+function repDefaultMonth(){
+  var t=insToday();
+  return insMonthStart(insShift(insMonthStart(t),-1)).slice(0,7);
+}
+function repMonthTitle(ymd){
+  var s=String(ymd||'');
+  if(s.length<7)return s||'未标注周期';
+  return (+s.slice(0,4))+'年'+(+s.slice(5,7))+'月';
+}
+function repFileName(u){
+  var s=String(u||'').split('?')[0].split('#')[0];
+  var p=s.split('/');
+  return p[p.length-1]||s||'报告';
+}
+
+/* ---- 工具条 ---- */
+function repSyncToolbar(){
+  var i,el;
+  for(i=0;i<REP_PRESETS.length;i++){
+    el=document.getElementById('rep_'+REP_PRESETS[i]);
+    if(el)el.className='btn'+(REP_PRESETS[i]===repPreset?'':' ghost');
+  }
+  el=document.getElementById('repFrom');if(el)el.value=repState.from;
+  el=document.getElementById('repTo');if(el)el.value=repState.to;
+  el=document.getElementById('repRangeHint');
+  if(el)el.textContent=(repState.from&&repState.to)?(REP_GRAN_NAME[repState.gran]||''):'';
+}
+function repSetRange(f,to){
+  repState.from=f;repState.to=to;repState.gran=repGran(f,to);
+  repSyncToolbar();
+  loadReportMetrics(false);
+}
+function setRepPreset(k){
+  var t=insToday(),f,to;
+  if(k==='last_month'){f=insMonthStart(insShift(insMonthStart(t),-1));to=insMonthEnd(f)}
+  else if(k==='mtd'){f=insMonthStart(t);to=t}
+  else if(k==='d90'){to=t;f=insShift(t,-89)}
+  else{repPreset='custom';repSyncToolbar();return}
+  repPreset=k;
+  repSetRange(f,to);
+}
+function setRepDate(){
+  var a=document.getElementById('repFrom'),b=document.getElementById('repTo');
+  var f=a?String(a.value||''):'',to=b?String(b.value||''):'';
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(f)||!/^\d{4}-\d{2}-\d{2}$/.test(to))return;
+  if(insDiff(f,to)<0){toast('起始日不能晚于结束日',true);repSyncToolbar();return}
+  if(insDiff(f,to)>799){toast('区间上限 800 天，选窄一点',true);repSyncToolbar();return}
+  repPreset='custom';
+  repSetRange(f,to);
+}
+window.setRepPreset=setRepPreset;
+window.setRepDate=setRepDate;
+
+/* ---- 指标区 ---- */
+function repKpiCards(metrics,from,to){
+  var m=metrics||{},P=repKpiPeriod(from,to);
+  function g(k,r){return insSumRange(m[k]||[],r.from,r.to)}
+  var cm=g('gsc_clicks',P.cur),cp=g('gsc_clicks',P.prev);
+  var im=g('gsc_impressions',P.cur),ip=g('gsc_impressions',P.prev);
+  var sm=g('ga4_sessions_organic',P.cur),sp=g('ga4_sessions_organic',P.prev);
+  var lm=g('ga4_leads',P.cur),lp=g('ga4_leads',P.prev);
+  var bm=g('gsc_clicks_brand',P.cur),bp=g('gsc_clicks_brand',P.prev);
+  /* 品牌占比是率，环比走百分点；GSC 会匿名化长尾 query，占比只当趋势看，别当精确值 */
+  var shC=cm.sum>0?bm.sum/cm.sum:null,shP=cp.sum>0?bp.sum/cp.sum:null;
+  return {period:P,cards:[
+    {key:'clicks',name:'点击',has:cm.has,val:cm.sum,txt:insFmtNum(cm.sum),d:insDelta(cm.sum,cp.sum),pp:false},
+    {key:'impr',name:'曝光',has:im.has,val:im.sum,txt:insFmtNum(im.sum),d:insDelta(im.sum,ip.sum),pp:false},
+    {key:'sessions',name:'自然会话',has:sm.has,val:sm.sum,txt:insFmtNum(sm.sum),d:insDelta(sm.sum,sp.sum),pp:false},
+    {key:'leads',name:'线索',has:lm.has,val:lm.sum,txt:insFmtNum(lm.sum),d:insDelta(lm.sum,lp.sum),pp:false},
+    {key:'brand',name:'品牌点击占比',has:bm.has&&shC!=null,val:shC,txt:insFmtPct(shC,1),d:insDeltaPP(shC,shP),pp:true}
+  ]};
+}
+function repMetricsBody(metrics,events,from,to,gran,note){
+  var m=metrics||{},i;
+  if(!from||!to)return '<div class="panel">'+insEmptyBox('先选一个日期区间。')+'</div>';
+  if(!insHasAny(m)){
+    return '<div class="panel">'+insEmptyBox('这个客户还没有指标数据。先到 Jobs 里跑一次拉数据，或者用洞察区的「回填历史数据」补上。')+'</div>';
+  }
+  var buckets=repBuckets(from,to,gran),labels=[];
+  for(i=0;i<buckets.length;i++)labels.push(buckets[i].label);
+  var evb=insEventsToBuckets(insGroupEventsByDay(events),buckets);
+  var clk=insAgg(m.gsc_clicks||[],buckets,'sum');
+  var impr=insAgg(m.gsc_impressions||[],buckets,'sum');
+  return '<div class="panel">'+insKpiHtml(repKpiCards(m,from,to))+
+    insLegendHtml([{name:'曝光（右轴）',color:INS_COLOR.impr},{name:'点击（左轴）',color:INS_COLOR.clicks}],true)+
+    insChart({w:920,h:280,labels:labels,events:evb,
+      empty:'这个区间没有 GSC 数据。',
+      series:[
+        {name:'曝光',color:INS_COLOR.impr,values:impr,axis:'r',width:1.8},
+        {name:'点击',color:INS_COLOR.clicks,values:clk,axis:'l',width:2.2}
+      ]})+
+    '<div class="plan-meta" style="margin-top:6px">'+esc(note)+'</div>'+
+    '</div>';
+}
+function repNoteText(){
+  if(repState.error)return repState.error;
+  var P=repKpiPeriod(repState.from,repState.to);
+  return '区间 '+repState.from+' 至 '+repState.to+'，'+(REP_GRAN_NAME[repState.gran]||'')+
+    '。'+P.cmp+'。竖虚线是这段时间做过的动作。';
+}
+function renderReportMetrics(){
+  var box=document.getElementById('repMetrics');
+  if(!box)return;
+  if(!repState.metrics){
+    box.innerHTML='<div class="panel">'+insEmptyBox(repState.loading?'载入中...':'还没有载入指标。')+'</div>';
+    return;
+  }
+  box.innerHTML=repMetricsBody(repState.metrics,repState.events,repState.from,repState.to,repState.gran,repNoteText());
+  insBind(box);
+}
+
+async function loadReportMetrics(force){
+  if(!curId)return;
+  if(!repState.from||!repState.to)return;
+  if(repState.loading)return;
+  var sig=curId+'|'+repState.from+'|'+repState.to;
+  if(!force&&repState.metrics&&repFetched===sig)return;
+  repState.loading=true;repState.ver++;
+  renderReportMetrics();
+  /* 对比期在区间前面，取数窗口必须从 prev.from 起，否则环比全是「无对比基数」 */
+  var P=repKpiPeriod(repState.from,repState.to);
+  try{
+    var both=await Promise.all([
+      api('/metrics?client_id='+curId+'&from='+P.prev.from+'&to='+repState.to+'&metrics='+encodeURIComponent(REP_METRIC_LIST)),
+      api('/events?client_id='+curId+'&from='+repState.from+'&to='+repState.to)
+    ]);
+    var md=both[0],ed=both[1];
+    if(!md||md._status>=400){
+      repState.error=(md&&md.error)||'指标载入失败';
+      if(!repState.metrics)repState.metrics={};
+    }else{
+      repState.metrics=md.metrics||{};
+      repState.error='';
+    }
+    repState.events=(ed&&ed._status<400&&ed.events)?ed.events:[];
+  }catch(e){
+    repState.error='指标载入失败';
+    if(!repState.metrics)repState.metrics={};
+  }
+  repState.client=curId;
+  repState.loading=false;
+  repFetched=sig;
+  repState.ver++;
+  renderReportMetrics();
+}
+
+/* ---- 生成 ---- */
+async function fireReportJob(btn){
+  if(!curId)return;
+  var el=document.getElementById('repMonth');
+  var ym=el?String(el.value||''):'';
+  if(!/^\d{4}-\d{2}$/.test(ym)){toast('先选一个月份',true);return}
+  var ps=ym+'-01',pe=insMonthEnd(ps);
+  var box=document.getElementById('repInstr');
+  var extra=box?String(box.value||'').trim():'';
+  var body={client_id:curId,period_type:'month',period_start:ps,period_end:pe};
+  if(extra)body.instructions=extra;
+  var label=btn.textContent;
+  btn.disabled=true;
+  var d=await api('/reports/generate','POST',body);
+  if(!d){btn.disabled=false;return}
+  if(d._status===409){
+    toast('该客户已有报告在生成，等它跑完。',true);
+    btn.disabled=false;
+    return;
+  }
+  /* 400 原样回显后端的话，缺 workspace_dir 这类提示要让 sales 看见原文 */
+  if(fail(d,'生成月报失败')){btn.disabled=false;return}
+  var jid=d.job_id||d.id||'?';
+  btn.textContent='已排队 job #'+jid;
+  setTimeout(function(){btn.disabled=false;btn.textContent=label},12000);
+  toast('已排队 job #'+jid+'（生成报告）');
+  /* 跑完要几分钟，这一次刷新只是把「已经落库的上一版」带出来，不是等这次的结果 */
+  setTimeout(function(){if(curId&&curView==='report')loadReportList()},15000);
+}
+window.fireReportJob=fireReportJob;
+
+/* ---- 版本列表 ---- */
+async function loadReportList(){
+  if(!curId)return;
+  var d=await api('/reports?client_id='+curId);
+  if(!d)return;
+  if(fail(d,'报告版本载入失败'))return;
+  repState.reports=d.reports||[];
+  repState.client=curId;
+  renderReportList();
+}
+window.loadReportList=loadReportList;
+
+function repNoteHtml(r,id){
+  if(repNoteEdit[id]){
+    return '<span class="pr-main"><input class="tb-select" style="width:100%" id="repNote_'+id+'" '+
+      'value="'+esc(r.note||'')+'" placeholder="一句话备注，比如发给了谁"></span>'+
+      '<button class="btn tiny" onclick="saveRepNote('+id+',this)">保存</button>'+
+      '<button class="btn tiny ghost" onclick="cancelRepNote('+id+')">取消</button>';
+  }
+  var t=String(r.note||'').trim();
+  return '<span class="log-toggle" onclick="editRepNote('+id+')">'+(t?esc(t):'加备注')+'</span>';
+}
+function repRow(r){
+  var id=Number(r.id)||0;
+  var st=String(r.status||'draft')==='sent'?'sent':'draft';
+  var link=r.url
+    ? '<a class="log-toggle" href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(repFileName(r.url))+'</a>'
+    : '<span class="muted">还没有链接</span>';
+  var fb=String(r.narrative_status||'')==='fallback'
+    ? '<span class="badge attn" title="叙事没生成出来，这一版只有数据">纯数据版</span>' : '';
+  return '<div class="plan-row">'+
+    '<span class="badge mod">v'+(Number(r.version)||1)+'</span>'+
+    '<span class="badge '+(st==='sent'?'done':'draft')+'">'+(st==='sent'?'已发送':'草稿')+'</span>'+fb+
+    '<span class="pr-main">'+link+'</span>'+
+    '<span class="plan-meta">'+esc(r.created_at||'')+(r.created_by?('，'+esc(r.created_by)):'')+'</span>'+
+    repNoteHtml(r,id)+
+    '<button class="btn tiny ghost" onclick="toggleRepStatus('+id+',\''+st+'\',this)">'+
+      (st==='sent'?'撤回为草稿':'标记已发送')+'</button>'+
+    '</div>';
+}
+function renderReportList(){
+  var box=document.getElementById('repVersions');
+  if(!box)return;
+  var meta=document.getElementById('repVerMeta');
+  var rs=repState.reports||[],i,k,r;
+  if(meta)meta.textContent=rs.length?('共 '+rs.length+' 个版本'):'';
+  if(!rs.length){
+    box.innerHTML='<span class="lane-empty">还没有生成过报告。选好月份点「生成月报」。</span>';
+    return;
+  }
+  var groups={},order=[];
+  for(i=0;i<rs.length;i++){
+    r=rs[i];
+    k=String(r.period_start||'');
+    if(!groups[k]){groups[k]=[];order.push(k)}
+    groups[k].push(r);
+  }
+  order.sort(function(a,b){return a<b?1:(a>b?-1:0)});
+  var html='';
+  for(i=0;i<order.length;i++){
+    k=order[i];
+    groups[k].sort(function(a,b){return (Number(b.version)||0)-(Number(a.version)||0)});
+    html+='<div class="sec-title" style="font-size:11px;margin:'+(i?'16px':'0')+' 0 8px">'+esc(repMonthTitle(k))+'</div>'+
+      groups[k].map(repRow).join('');
+  }
+  box.innerHTML=html;
+}
+function repFindReport(id){
+  var rs=repState.reports||[],i;
+  for(i=0;i<rs.length;i++){if(Number(rs[i].id)===Number(id))return rs[i]}
+  return null;
+}
+function editRepNote(id){
+  repNoteEdit[id]=true;
+  renderReportList();
+  var el=document.getElementById('repNote_'+id);
+  if(el)el.focus();
+}
+function cancelRepNote(id){delete repNoteEdit[id];renderReportList()}
+async function saveRepNote(id,btn){
+  var el=document.getElementById('repNote_'+id);
+  if(!el)return;
+  var v=String(el.value||'').trim();
+  btn.disabled=true;
+  var d=await api('/reports/'+id,'PATCH',{note:v});
+  if(!d){btn.disabled=false;return}
+  if(fail(d,'备注保存失败')){btn.disabled=false;return}
+  var r=repFindReport(id);
+  if(r)r.note=v;
+  delete repNoteEdit[id];
+  renderReportList();
+  toast('备注已保存');
+}
+async function toggleRepStatus(id,cur,btn){
+  var next=cur==='sent'?'draft':'sent';
+  btn.disabled=true;
+  var d=await api('/reports/'+id,'PATCH',{status:next});
+  if(!d){btn.disabled=false;return}
+  if(fail(d,'状态更新失败')){btn.disabled=false;return}
+  var r=repFindReport(id);
+  if(r)r.status=next;
+  renderReportList();
+  toast(next==='sent'?'已标记为已发送':'已撤回为草稿');
+}
+window.editRepNote=editRepNote;
+window.cancelRepNote=cancelRepNote;
+window.saveRepNote=saveRepNote;
+window.toggleRepStatus=toggleRepStatus;
+
+function loadReport(){
+  if(!curId)return;
+  if(repState.client&&repState.client!==curId)repReset();
+  var mel=document.getElementById('repMonth');
+  if(mel&&!mel.value)mel.value=repDefaultMonth();
+  if(!repState.from||!repState.to){
+    setRepPreset(repPreset==='custom'?'last_month':repPreset);
+  }else{
+    repSyncToolbar();
+    loadReportMetrics(false);
+  }
+  renderReportList();
+  loadReportList();
 }
 
 /* ================= 决策收件箱 ================= */

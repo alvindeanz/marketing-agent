@@ -658,6 +658,11 @@ module.exports = {
   domainLabel,
   nameTokens,
   deriveBrandRegex,
+  // 报告数据层要按 query / page / channel 维度现拉本期与对比期，
+  // 走的是同一套凭据与翻页逻辑，所以把两个底层取数函数也导出来复用。
+  gscQuery,
+  ga4Report,
+  spamFilterGroups,
   pullGscDaily,
   pullGscDailyBrand,
   pullGa4OrganicDaily,

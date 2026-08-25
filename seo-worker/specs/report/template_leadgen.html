@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  HornTech SEO 月度报告 · leadgen（询盘型客户）渲染模板
+  由 template_skeleton.html 改出，差异只有两处：
+    1. 漏斗三步（自然搜索访问 → 开始填写表单 → 询盘），没有加购与成交
+    2. 渠道表四列（渠道 / 访问 / 询盘 / 询盘占比），没有收入列
+  电商专属的块用 if:ecommerce 注释包住，本期渲染层一律不输出。
+  CSS 原样保留（含已收窄的 .callout>strong:first-child 规则，勿改回 .callout strong）
+
+  占位符约定
+    {{name}}            单值替换（已按最终展示格式化，渲染层不再做千分位/百分号）
+    {{{name}}}          原样插入 HTML 片段（叙事段落，含 <b style="color:#16a34a"> 内联强调）
+    {{#list}}...{{/list}}  行循环，块内字段取自数组元素
+    {{^flag}}...{{/flag}}  反向条件块
+    <!-- section:xxx -->   section 边界，成对出现 <!-- /section:xxx -->
+    <!-- row:xxx -->       可重复行模板边界
+
+  渲染硬约束
+    1. callout 内联绿色强调一律 <b style="color:#16a34a">，绝不用 <strong>
+    2. callout 内不得放多条目列表（<ul>/<li>/多个以 <b> 开头的并列条目）
+    3. 数字块琥珀色用 class="v amb"，不要用 "v warn"
+    4. 产出后必须过 python3 /data/aira/clients/report/scripts/report_lint.py --check
+  ============================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{client_name}} · SEO 月度报告 {{period_label}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f0f4f8;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;--primary:#8b5cf6;--primary-bg:#f5f3ff;--green:#16a34a;--yellow:#d97706;--red:#dc2626;--text:#0f172a;--muted:#64748b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;font-size:14px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1060px;margin:0 auto;padding:0 36px}
+section{padding:52px 0;border-bottom:1px solid var(--border)}
+section:last-child{border-bottom:none;padding-bottom:48px}
+.hdr{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#4c1d95 100%);padding:52px 0 44px;position:relative;overflow:hidden}
+.hdr::before{content:'';position:absolute;top:-30%;right:-5%;width:500px;height:500px;background:radial-gradient(circle,rgba(139,92,246,.15) 0%,transparent 70%)}
+.hdr-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.5px;margin-right:8px;margin-bottom:18px;background:rgba(139,92,246,.2);color:#c4b5fd;border:1px solid rgba(139,92,246,.3)}
+.hdr-badge.agency{background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);border-color:rgba(255,255,255,.2)}
+.hdr h1{font-size:2.2rem;font-weight:900;letter-spacing:-.5px;margin-bottom:8px;line-height:1.2;color:#fff}
+.hdr h1 em{font-style:normal;color:#c4b5fd}
+.hdr-desc{color:rgba(255,255,255,.6);font-size:.875rem;margin-bottom:40px;max-width:640px;line-height:1.7}
+.hkpis{display:flex;gap:48px;flex-wrap:wrap}
+.hk-val{font-size:2rem;font-weight:900;line-height:1;color:#fff}
+.hk-lbl{font-size:11px;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:1px;margin-top:5px}
+.hk-note{font-size:11px;margin-top:3px;font-weight:600;color:rgba(255,255,255,.4)}
+.nav{display:flex;gap:8px;padding:16px 36px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap;position:sticky;top:0;z-index:100;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.pill{font-size:12px;font-weight:600;color:var(--muted);padding:5px 14px;border-radius:20px;border:1px solid var(--border);text-decoration:none;white-space:nowrap}
+.pill:hover{background:var(--primary-bg);color:var(--primary);border-color:#c4b5fd}
+.stag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--primary);margin-bottom:8px}
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.sec-num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--primary-bg);color:var(--primary);font-size:12px;font-weight:800;flex-shrink:0}
+.stitle{font-size:1.4rem;font-weight:800;letter-spacing:-.3px}
+.sdesc{color:var(--muted);font-size:.875rem;line-height:1.7;margin-bottom:24px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px 24px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.g2{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.g1{display:grid;grid-template-columns:1fr;gap:16px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.kv{font-size:1.9rem;font-weight:800;line-height:1;margin-bottom:5px}
+.kl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.kn{font-size:12px;margin-top:5px;font-weight:600;color:var(--muted)}
+.up{color:var(--green);font-weight:600}.down{color:var(--red);font-weight:600}.warn{color:var(--yellow);font-weight:600}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 24px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.chart-title{font-size:13px;font-weight:700;margin-bottom:3px}
+.chart-sub{font-size:11px;color:var(--muted);margin-bottom:16px}
+.chart-wrap{position:relative;height:220px}
+.callout{border-radius:12px;padding:16px 20px;font-size:13px;line-height:1.75;margin-bottom:12px}
+.callout>strong:first-child{display:block;margin-bottom:5px;font-size:13px}
+.callout strong{font-weight:700}
+.callout-green{background:#ecfdf5;border:1px solid #6ee7b7;color:#065f46}.callout-green strong{color:#047857}
+.callout-yellow{background:#fffbeb;border:1px solid #fcd34d;color:#92400e}.callout-yellow strong{color:#b45309}
+.callout-red{background:#fef2f2;border:1px solid #fca5a5;color:#7f1d1d}.callout-red strong{color:#991b1b}
+.callout-blue{background:#eff6ff;border:1px solid #93c5fd;color:#1e3a5f}.callout-blue strong{color:#1d4ed8}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;padding:9px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface2);font-weight:600}
+.tbl td{padding:9px 14px;border-bottom:1px solid var(--border);color:var(--text)}
+.tbl tr:last-child td{border-bottom:none}
+.pos-up{color:var(--green)}.pos-down{color:var(--red)}.pos-same{color:var(--muted)}
+.work-item{display:flex;gap:12px;padding:14px 0;border-bottom:1px solid var(--border)}
+.work-item:last-child{border-bottom:none}
+.work-cat{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 10px;border-radius:10px;white-space:nowrap;height:fit-content}
+.cat-tech{background:#ede9fe;color:#5b21b6}
+.cat-content{background:#dcfce7;color:#166534}
+.cat-link{background:#dbeafe;color:#1e40af}
+.cat-onpage{background:#fef3c7;color:#92400e}
+.cat-report{background:#f1f5f9;color:#334155}
+.cat-p0{background:#fee2e2;color:#991b1b}
+.cat-p1{background:#fef3c7;color:#92400e}
+.cat-p2{background:#dcfce7;color:#166534}
+
+/* Funnel */
+.funnel-wrap{display:flex;align-items:center;gap:0;margin:24px 0;flex-wrap:wrap}
+.funnel-step{flex:1;min-width:130px;position:relative}
+.funnel-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.funnel-val{font-size:1.5rem;font-weight:800;line-height:1;color:var(--primary)}
+.funnel-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.funnel-rate{font-size:12px;font-weight:700;margin-top:5px}
+.funnel-change{font-size:11px;font-weight:600;margin-top:3px}
+.funnel-arrow{flex:0 0 32px;text-align:center;color:var(--border);font-size:20px;font-weight:300;padding:0 4px;display:flex;align-items:center;justify-content:center}
+.funnel-step:nth-child(1) .funnel-box{border-top:3px solid #8b5cf6}
+.funnel-step:nth-child(3) .funnel-box{border-top:3px solid #06b6d4}
+.funnel-step:nth-child(5) .funnel-box{border-top:3px solid #10b981}
+.funnel-step:nth-child(7) .funnel-box{border-top:3px solid #f59e0b}
+
+.priority-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;margin-right:6px}
+.p0{background:#fee2e2;color:#991b1b}
+.p1{background:#fef3c7;color:#92400e}
+.p2{background:#dcfce7;color:#166534}
+
+footer{background:var(--surface2);border-top:1px solid var(--border);padding:24px 36px;text-align:center;font-size:12px;color:var(--muted)}
+@media(max-width:768px){.wrap,.nav{padding-left:16px;padding-right:16px}.g2,.g3{grid-template-columns:repeat(2,1fr)}.hkpis{gap:24px}.hk-val{font-size:1.5rem}.funnel-wrap{flex-direction:column}.funnel-arrow{transform:rotate(90deg)}}
+</style>
+</head>
+<body>
+
+<!-- section:header -->
+<div class="hdr">
+  <div class="wrap">
+    <div>
+      <span class="hdr-badge agency">HornTech Digital</span>
+      <span class="hdr-badge">SEO 月度报告</span>
+      <span class="hdr-badge">{{period_label}}</span>
+    </div>
+    <h1>SEO Monthly Report<br><em>{{hero_headline}}</em></h1>
+    <p class="hdr-desc">{{site_domain}} &nbsp;·&nbsp; {{market}} &nbsp;·&nbsp; {{platform}} &nbsp;·&nbsp; {{vertical}} &nbsp;·&nbsp; 数据周期：{{period_label}}&nbsp;·&nbsp; 环比对比 {{prev_period_label}}</p>
+    <div class="hkpis">
+      <!-- row:hero_kpi ×4，正向指标优先，rank 类的 note 写「提升 N 位」 -->
+      {{#hero_kpis}}
+      <div><div class="hk-val" style="color:#a78bfa">{{value}}</div><div class="hk-lbl">{{label}}</div><div class="hk-note">{{note}}</div></div>
+      {{/hero_kpis}}
+    </div>
+  </div>
+</div>
+<!-- /section:header -->
+
+<!-- section:nav -->
+<nav class="nav">
+  {{#nav_items}}
+  <a class="pill" href="#{{anchor}}">{{label}}</a>
+  {{/nav_items}}
+</nav>
+<!-- /section:nav -->
+
+<!-- section:ga4 -->
+<section id="ga4">
+<div class="wrap">
+  <div class="stag">Section {{sec_ga4_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_ga4_num}}</span><h2 class="stitle">GA4 Organic 流量概览</h2></div>
+  <p class="sdesc">{{{ga4_sdesc}}}</p>
+
+  <div class="g3">
+    <!-- row:kpi_card ×3（第一排） -->
+    {{#ga4_kpis_row1}}
+    <div class="card"><div class="kv">{{value}}</div><div class="kl">{{label}}</div><div class="kn"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> vs {{prev_period_short}}（{{prev_value}}）</div></div>
+    {{/ga4_kpis_row1}}
+  </div>
+  <div class="g3" style="margin-top:14px">
+    <!-- row:kpi_card ×3（第二排） -->
+    {{#ga4_kpis_row2}}
+    <div class="card"><div class="kv">{{value}}</div><div class="kl">{{label}}</div><div class="kn"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> vs {{prev_period_short}}（{{prev_value}}）</div></div>
+    {{/ga4_kpis_row2}}
+  </div>
+
+  <!-- row:callout ×N（0 至 3 条；green 正向 / yellow 需留意 / blue 中性解读 / red 风险） -->
+  {{#ga4_callouts}}
+  <div class="callout callout-{{tone}}" style="margin-top:{{margin_top}}">
+    <strong>{{title}}</strong>
+    {{{body_html}}}
+  </div>
+  {{/ga4_callouts}}
+
+  <!-- Trend Chart -->
+  <div style="margin-top:24px" class="chart-card">
+    <div class="chart-title">Organic Sessions 月度趋势（{{trend_range_label}}）</div>
+    <div class="chart-sub">{{trend_subtitle}}</div>
+    <div class="chart-wrap"><canvas id="sessionsChart"></canvas></div>
+  </div>
+</div>
+</section>
+<!-- /section:ga4 -->
+
+<!-- section:channels -->
+<section id="channels">
+<div class="wrap">
+  <div class="stag">Section {{sec_channels_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_channels_num}}</span><h2 class="stitle">全渠道流量与询盘（SEO 效果对照）</h2></div>
+  <p class="sdesc">{{{channels_sdesc}}}</p>
+
+  <div class="g3">
+    {{#channel_kpis}}
+    <div class="card"><div class="kv">{{value}}</div><div class="kl">{{label}}</div><div class="kn"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> {{note}}</div></div>
+    {{/channel_kpis}}
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;margin-top:16px">
+    <table class="tbl">
+      <thead><tr><th>渠道</th><th style="text-align:right">{{period_short}}访问</th><th style="text-align:right">{{period_short}}询盘</th><th style="text-align:right">询盘占比</th></tr></thead>
+      <tbody>
+        <!-- row:channel_row（按本期访问降序；organic 行 is_organic=true 高亮紫底；末行 is_muted=true 灰化聚合「其他」） -->
+        {{#channel_rows}}
+        <tr{{#is_organic}} style="background:#f5f3ff"{{/is_organic}}><td{{#is_muted}} style="color:var(--muted)"{{/is_muted}}>{{#is_organic}}<strong>{{channel}}</strong>{{/is_organic}}{{^is_organic}}{{channel}}{{/is_organic}}</td><td style="text-align:right{{#is_muted}};color:var(--muted){{/is_muted}}">{{sessions}}</td><td style="text-align:right{{#is_muted}};color:var(--muted){{/is_muted}}">{{#is_muted}}{{leads}}{{/is_muted}}{{^is_muted}}<strong>{{leads}}</strong>{{/is_muted}}</td><td style="text-align:right{{#is_muted}};color:var(--muted){{/is_muted}}">{{leads_share}}</td></tr>
+        {{/channel_rows}}
+      </tbody>
+      <tfoot>
+        <tr style="background:var(--surface2);font-weight:800;border-top:2px solid var(--border)"><td style="padding:10px 14px">全渠道合计</td><td style="text-align:right;padding:10px 14px">{{total_sessions}}</td><td style="text-align:right;padding:10px 14px">{{total_leads}}</td><td style="text-align:right;padding:10px 14px">100%</td></tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="callout callout-blue" style="margin-top:16px">
+    <strong>{{channels_callout_title}}</strong>
+    {{{channels_callout_body}}}
+  </div>
+</div>
+</section>
+<!-- /section:channels -->
+
+<!-- section:funnel -->
+<section id="funnel">
+<div class="wrap">
+  <div class="stag">Section {{sec_funnel_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_funnel_num}}</span><h2 class="stitle">询盘转化漏斗</h2></div>
+  <p class="sdesc">{{{funnel_sdesc}}}</p>
+
+  <div class="funnel-wrap">
+    <!-- row:funnel_step ×3（自然搜索访问 → 开始填写表单 → 询盘），步骤间插 funnel-arrow -->
+    {{#funnel_steps}}
+    <div class="funnel-step">
+      <div class="funnel-box">
+        <div class="funnel-val">{{value}}</div>
+        <div class="funnel-lbl">{{label}}</div>
+        <div class="funnel-rate" style="color:{{accent_color}}">{{rate_label}}</div>
+        <div class="funnel-change"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> vs {{prev_period_short}}{{#prev_value}}（{{prev_value}}）{{/prev_value}}</div>
+      </div>
+    </div>
+    {{^is_last}}<div class="funnel-arrow">&#8594;</div>{{/is_last}}
+    {{/funnel_steps}}
+  </div>
+
+  <div class="g2" style="margin-top:8px">
+    <!-- row:callout ×2（左 green 关键改善 / 右 yellow 需观察，成对出现保持两列对齐） -->
+    {{#funnel_callouts}}
+    <div class="callout callout-{{tone}}">
+      <strong>{{title}}</strong>
+      {{{body_html}}}
+    </div>
+    {{/funnel_callouts}}
+  </div>
+
+  <!-- Funnel comparison table -->
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="tbl">
+      <thead><tr><th>指标</th><th style="text-align:right">{{prev_period_short}}</th><th style="text-align:right">{{period_short}}</th><th style="text-align:right">环比变化</th><th>备注</th></tr></thead>
+      <tbody>
+        <!-- row:funnel_compare_row ×4（三步的绝对量加一行访问到询盘转化率） -->
+        {{#funnel_compare_rows}}
+        <tr><td>{{metric}}</td><td style="text-align:right">{{prev_value}}</td><td style="text-align:right">{{value}}</td><td style="text-align:right"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span></td><td>{{note}}</td></tr>
+        {{/funnel_compare_rows}}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- if:ecommerce 客单价 callout 只有电商客户才有，leadgen 渲染层不输出这一块 -->
+  {{#aov_callout}}
+  <div class="callout callout-blue" style="margin-top:12px">
+    <strong>{{title}}</strong>
+    {{{body_html}}}
+  </div>
+  {{/aov_callout}}
+  <!-- /if:ecommerce -->
+</div>
+</section>
+<!-- /section:funnel -->
+
+<!-- section:rankings -->
+<section id="rankings">
+<div class="wrap">
+  <div class="stag">Section {{sec_rankings_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_rankings_num}}</span><h2 class="stitle">目标关键词排名追踪</h2></div>
+  <p class="sdesc">{{{rankings_sdesc}}}</p>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="tbl">
+      <thead><tr><th>关键词</th><th style="text-align:right">上月排名</th><th style="text-align:right">本月排名</th><th style="text-align:right">变化</th><th style="text-align:right">本月曝光</th></tr></thead>
+      <tbody>
+        <!-- row:keyword_row ×N（目标词表固定顺序，品牌词置顶且 is_brand=true 高亮）
+             pos_color 分档：前10 #16a34a / 11至20 #2563eb / 20名以后 var(--muted)
+             delta_color：变好 #16a34a，变差 #dc2626；无排名时 delta_text 写「本月无曝光」或「新进榜」并用 class="pos-same" -->
+        {{#keyword_rows}}
+        <tr{{#is_brand}} style="background:#f5f3ff"{{/is_brand}}><td>{{#is_brand}}<strong>{{keyword}}</strong>{{/is_brand}}{{^is_brand}}{{keyword}}{{/is_brand}}</td><td style="text-align:right">{{prev_pos}}</td><td style="text-align:right;color:{{pos_color}}">{{pos}}</td><td style="text-align:right{{#delta_color}};color:{{delta_color}};font-weight:700{{/delta_color}}"{{^delta_color}} class="pos-same"{{/delta_color}}>{{delta_text}}</td><td style="text-align:right;color:var(--muted)">{{impressions}}</td></tr>
+        {{/keyword_rows}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="g2" style="margin-top:16px">
+    <!-- row:callout ×2（左 green 排名亮点 / 右 yellow 需关注） -->
+    {{#rankings_callouts}}
+    <div class="callout callout-{{tone}}">
+      <strong>{{title}}</strong>
+      {{{body_html}}}
+    </div>
+    {{/rankings_callouts}}
+  </div>
+</div>
+</section>
+<!-- /section:rankings -->
+
+<!-- section:pages -->
+<section id="pages">
+<div class="wrap">
+  <div class="stag">Section {{sec_pages_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_pages_num}}</span><h2 class="stitle">重点页面表现</h2></div>
+  <p class="sdesc">{{{pages_sdesc}}}</p>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <table class="tbl">
+      <thead><tr><th>#</th><th>页面</th><th style="text-align:right">{{period_short}} Sessions</th><th style="text-align:right">{{prev_period_short}} Sessions</th><th style="text-align:right">环比变化</th></tr></thead>
+      <tbody>
+        <!-- row:page_row ×10（按本月 Sessions 降序；上月无数据时 prev_sessions 写「新增」、delta 写「新进榜」） -->
+        {{#page_rows}}
+        <tr>
+          <td style="color:var(--muted);font-weight:700">{{rank}}</td>
+          <td>{{path}}</td>
+          <td style="text-align:right;font-weight:700">{{sessions}}</td>
+          <td style="text-align:right;color:var(--muted)">{{prev_sessions}}</td>
+          <td style="text-align:right;color:{{delta_color}};font-weight:700">{{delta}}</td>
+        </tr>
+        {{/page_rows}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="g2" style="margin-top:16px">
+    <!-- row:callout ×2（左 green 领涨页面 / 右 yellow 回落页面） -->
+    {{#pages_callouts}}
+    <div class="callout callout-{{tone}}">
+      <strong>{{title}}</strong>
+      {{{body_html}}}
+    </div>
+    {{/pages_callouts}}
+  </div>
+</div>
+</section>
+<!-- /section:pages -->
+
+<!-- section:work -->
+<section id="work">
+<div class="wrap">
+  <div class="stag">Section {{sec_work_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_work_num}}</span><h2 class="stitle">本月工作内容</h2></div>
+  <p class="sdesc">{{{work_sdesc}}}</p>
+  <div class="card">
+    <!-- row:work_item ×N（来自 ops tracker 当月已完成任务，分组顺序 On-Page → 内容 → 外链 → Technical → 报告）
+         cat_class 取值：cat-onpage / cat-content / cat-link / cat-tech / cat-report -->
+    {{#work_items}}
+    <div class="work-item">
+      <span class="work-cat {{cat_class}}">{{cat_label}}</span>
+      <div class="work-desc">
+        <strong style="font-size:13px">{{title}}</strong><br>
+        {{{body}}}
+      </div>
+    </div>
+    {{/work_items}}
+  </div>
+</div>
+</section>
+<!-- /section:work -->
+
+<!-- section:next -->
+<section id="next">
+<div class="wrap">
+  <div class="stag">Section {{sec_next_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_next_num}}</span><h2 class="stitle">{{next_period_short}} SEO 工作计划</h2></div>
+  <p class="sdesc">{{{next_sdesc}}}</p>
+  <div class="card">
+    <!-- row:next_item ×5（固定五槽：P1 基于本月数据的优化重点 / P2 外链 / P3 博客 / P4 Site Audit / P5 报告与监控）
+         cat_class 取值：cat-p0(P1) / cat-p1(P2至P4) / cat-link(P5) -->
+    {{#next_items}}
+    <div class="work-item">
+      <span class="work-cat {{cat_class}}">{{priority}}</span>
+      <div class="work-desc">
+        <strong style="font-size:13px">{{title}}</strong><br>
+        {{{body}}}
+      </div>
+    </div>
+    {{/next_items}}
+  </div>
+</div>
+</section>
+<!-- /section:next -->
+
+<!-- section:footer -->
+<footer>
+  <p>Confidential &nbsp;·&nbsp; {{client_name}} SEO Monthly Report &nbsp;·&nbsp; Prepared by HornTech Digital &nbsp;·&nbsp; {{period_label}}</p>
+</footer>
+<!-- /section:footer -->
+
+<!--
+  ============================================================================
+  section:chart_script
+  趋势图数据输入格式（渲染层注入两个等长数组，Chart.js 4.4.0 bar + 回归线）
+
+    trend_months  : string[]  月份标签，格式 "May'25"，按时间正序，
+                    长度 = 趋势窗口的月数（本模块固定 13 个月）
+    trend_values  : number[]  对应月的 Organic Sessions 原始整数（不带千分位）
+
+  规则
+    - 最后一个元素 = 本报告月，柱子自动加深（bar 颜色映射按 index === length-1）
+    - 趋势线由 linearRegression() 就地算出，不需外部传入
+    - 月中出到日报（partial month）时，最后一个点仍写实际值，但 chart-sub
+      必须注明「截至 N 日，本月未结束」
+    - 历史月一律保留全月值，绝不用同窗截断值覆盖历史点
+  ============================================================================
+-->
+<script>
+const monthsGG = {{{trend_months_json}}};
+const sessionsGG = {{{trend_values_json}}};
+
+// Linear trendline calculation
+function linearRegression(data) {
+  const n = data.length;
+  const xMean = (n - 1) / 2;
+  const yMean = data.reduce((a,b) => a+b, 0) / n;
+  let num = 0, den = 0;
+  data.forEach((y, x) => { num += (x - xMean) * (y - yMean); den += (x - xMean) ** 2; });
+  const slope = num / den;
+  const intercept = yMean - slope * xMean;
+  return data.map((_, x) => Math.round(intercept + slope * x));
+}
+
+const trendData = linearRegression(sessionsGG);
+
+new Chart(document.getElementById('sessionsChart'),{
+  type:'bar',
+  data:{
+    labels:monthsGG,
+    datasets:[
+      {
+        label:'Organic Sessions',
+        data:sessionsGG,
+        backgroundColor: sessionsGG.map((v,i) => i === sessionsGG.length-1 ? 'rgba(139,92,246,.9)' : 'rgba(139,92,246,.55)'),
+        borderColor: sessionsGG.map((v,i) => i === sessionsGG.length-1 ? '#7c3aed' : '#8b5cf6'),
+        borderWidth:1,
+        borderRadius:4,
+        order:2
+      },
+      {
+        label:'增长趋势线',
+        data:trendData,
+        type:'line',
+        borderColor:'#f59e0b',
+        borderWidth:2,
+        borderDash:[5,4],
+        pointRadius:0,
+        fill:false,
+        tension:0,
+        order:1
+      }
+    ]
+  },
+  options:{
+    responsive:true,
+    maintainAspectRatio:false,
+    plugins:{
+      legend:{display:true,position:'bottom',labels:{font:{size:11},boxWidth:12,padding:16}},
+      tooltip:{callbacks:{
+        label:(ctx) => ctx.dataset.label + ': ' + ctx.parsed.y.toLocaleString()
+      }}
+    },
+    scales:{
+      y:{beginAtZero:true,grid:{color:'#f1f5f9'},ticks:{font:{size:10},callback:(v) => v.toLocaleString()}},
+      x:{grid:{display:false},ticks:{font:{size:10}}}
+    }
+  }
+});
+</script>
+<!-- /section:chart_script -->
+</body>
+</html>

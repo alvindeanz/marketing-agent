@@ -364,8 +364,20 @@ function capabilitiesSection(profile) {
 
 const FACT_VALUE_CHARS = 400;
 
-function factLines(list, limit) {
+/**
+ * opts.excludePrefixes: 按 fact_key 前缀丢弃的条目，例如 ['internal.']。
+ * 过滤必须发生在 slice 之前：60 条是硬上限且按字典序静默截断，先截后滤
+ * 会让内部条目白占名额，客户面能看到的事实凭空变少。
+ * 不传 opts 时行为与从前逐字一致。
+ */
+function factLines(list, limit, opts) {
+  const skip = (opts && Array.isArray(opts.excludePrefixes) && opts.excludePrefixes) || [];
   return (list || [])
+    .filter((f) => {
+      if (!skip.length) return true;
+      const key = (f && (f.fact_key || f.key)) || '';
+      return !skip.some((p) => p && String(key).indexOf(p) === 0);
+    })
     .slice(0, limit || 60)
     .map((f) => {
       const key = (f && (f.fact_key || f.key)) || '(no key)';
@@ -380,7 +392,7 @@ function factLines(list, limit) {
  * The facts ledger. This section exists to stop the same question being asked
  * every quarter, so the wording is directive rather than descriptive.
  */
-function factsSection(context) {
+function factsSection(context, opts) {
   const facts = (context && context.facts) || null;
   const confirmed = (facts && Array.isArray(facts.confirmed) && facts.confirmed) || [];
   const pending = (facts && Array.isArray(facts.pending) && facts.pending) || [];
@@ -392,7 +404,7 @@ function factsSection(context) {
     blocks.push(
       'CONFIRMED, a human has verified these. They are settled. Do not ask for them again,' +
         '\ndo not list them as unknowns, and do not create a task to go and find them out.\n' +
-        factLines(confirmed)
+        factLines(confirmed, null, opts)
     );
   } else {
     blocks.push('CONFIRMED\nnone yet');
@@ -401,7 +413,7 @@ function factsSection(context) {
     blocks.push(
       'PENDING, an agent checked these and a human has not confirmed them yet. You may' +
         '\nrely on them, but say "pending confirmation" whenever you do.\n' +
-        factLines(pending)
+        factLines(pending, null, opts)
     );
   }
   return blocks.join('\n\n');
@@ -578,6 +590,7 @@ module.exports = {
   capabilitiesSection,
   contentRegistrySection,
   factsSection,
+  factLines,
   dossierMeta,
   dossierSection,
   weeklyTrend,

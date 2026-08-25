@@ -257,6 +257,64 @@ class Api {
   async postChatReply(rootId, body) {
     return this.req('POST', '/inbox/' + encodeURIComponent(rootId) + '/chat_reply', body);
   }
+
+  /**
+   * POST /reports body
+   * { client_id, period_type, period_start, period_end, url, html_path,
+   *   facts_pack, narrative_status } -> { ok, id, version }
+   * 版本号由服务端按 (client_id, period_type, period_start) 取 MAX+1，
+   * worker 自己算的版本号只用来先起个文件名，最终以这里返回的 version 为准。
+   */
+  async postReport(body) {
+    return this.req('POST', '/reports', body);
+  }
+
+  /**
+   * GET /reports?client_id= -> { reports: [...] }
+   * 按 period_start 降序、version 降序，不带 facts_pack 正文（只有 has_pack 标记）。
+   */
+  async listReports(clientId) {
+    return this.req('GET', '/reports?client_id=' + encodeURIComponent(clientId));
+  }
+
+  /**
+   * GET /metrics?client_id=&from=&to=&metrics= ->
+   * { ok, from, to, metrics: { <name>: [{ d, v }] } }
+   * 缺的日子不补零，请求过的指标即使无数据也回空数组。
+   * 端点在改成 auth_any 之前对 worker 回 403，调用方要自己兜住并把趋势块留空。
+   */
+  async getMetrics(clientId, from, to, metrics) {
+    const q = ['client_id=' + encodeURIComponent(clientId)];
+    if (from) q.push('from=' + encodeURIComponent(from));
+    if (to) q.push('to=' + encodeURIComponent(to));
+    if (metrics && metrics.length) {
+      q.push('metrics=' + encodeURIComponent(Array.isArray(metrics) ? metrics.join(',') : metrics));
+    }
+    return this.req('GET', '/metrics?' + q.join('&'));
+  }
+
+  /**
+   * GET /events?client_id=&from=&to= -> { ok, from, to, events: [{ d, label, kind }] }
+   * 动作标注，零新表，从任务、facts、job 完成时刻推导。
+   * 同 getMetrics，改成 auth_any 之前对 worker 回 403。
+   */
+  async getEvents(clientId, from, to) {
+    const q = ['client_id=' + encodeURIComponent(clientId)];
+    if (from) q.push('from=' + encodeURIComponent(from));
+    if (to) q.push('to=' + encodeURIComponent(to));
+    return this.req('GET', '/events?' + q.join('&'));
+  }
+
+  /**
+   * GET /tasks?client_id= -> { tasks: [...] } 每行带 deliverables。
+   * 注意：这个端点是 auth_admin，worker 的服务令牌拿不到，调用必然 403。
+   * worker 侧要任务列表请改用 getContext(clientId).tasks，那条支路是 auth_worker，
+   * 字段够用（id、title、status、module、priority、result_note、updated_at）。
+   * 这个方法留着只为将来端点放开权限时不用再补，现在别在 runner 里直接依赖它。
+   */
+  async getTasks(clientId) {
+    return this.req('GET', '/tasks?client_id=' + encodeURIComponent(clientId));
+  }
 }
 
 module.exports = { Api };

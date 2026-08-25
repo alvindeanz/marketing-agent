@@ -59,8 +59,11 @@ const state = {
 function runJob(job) {
   return new Promise((resolve) => {
     const jobTag = 'job#' + job.id + ' ' + job.type;
-    const timeoutMs = cfg.jobTimeoutMin * 60 * 1000;
-    log(jobTag + ': claimed (client_id=' + job.client_id + '), timeout ' + cfg.jobTimeoutMin + 'min');
+    // 报告 job 的三层（取数、叙事、渲染发布）叠起来会超过通用 30 分钟预算，
+    // 单独给它 cfg.reportTimeoutMin，其余类型口径不变。
+    const timeoutMin = job.type === 'report' ? cfg.reportTimeoutMin : cfg.jobTimeoutMin;
+    const timeoutMs = timeoutMin * 60 * 1000;
+    log(jobTag + ': claimed (client_id=' + job.client_id + '), timeout ' + timeoutMin + 'min');
 
     let buffer = [];
     let flushing = false;
@@ -109,7 +112,7 @@ function runJob(job) {
 
     const killTimer = setTimeout(() => {
       timedOut = true;
-      push('TIMEOUT after ' + cfg.jobTimeoutMin + ' min, terminating runner');
+      push('TIMEOUT after ' + timeoutMin + ' min, terminating runner');
       log(jobTag + ': timeout, SIGTERM');
       try {
         child.kill('SIGTERM');
@@ -140,7 +143,7 @@ function runJob(job) {
       let err = null;
       if (timedOut) {
         err = new Error(
-          'job timed out after ' + cfg.jobTimeoutMin + ' minutes and was killed (signal ' + signal + ')'
+          'job timed out after ' + timeoutMin + ' minutes and was killed (signal ' + signal + ')'
         );
       } else if (failure) {
         err = failure;
