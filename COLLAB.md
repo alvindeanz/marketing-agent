@@ -25,7 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 - 干了什么：Alvin 第一性原理定的：任务是工作单位，各自 30 分钟预算与成败，worker 单飞按 job id 线性消化，不做并发。seo-api.php：POST /jobs 的 execute_task 多 task_ids 拆成每任务一个 job（payload 仍是 task_ids 单元素，runner 不用改），去重改按任务（在飞的跳过并回 skipped，全部跳过回 409 兼容旧前端提示），补 50 个上限；POST /tasks/release 同样拆成逐任务 apply_task；新增 GET /jobs/queue（auth_any，全局 running 与 queued，含 client_name、task_id、elapsed_sec、position）；GET /tasks 每行附 job_state（queued/running/failed/null 加 job_id 与全局位次），一条 SQL 无 N+1。新增公共件 job_task_id / jobs_inflight_tasks / jobs_queue_positions / queue_task_jobs / attach_job_state。前端 seo-agent.html：任务卡徽标（排队中第 N 位 / 运行中 M 分钟 / 上次失败）、在飞任务勾选框禁用、任务页顶部全局队列条（跨客户）、执行与放行按钮按 ids 数量反馈并报跳过数、任务页加入 15 秒轮询（原白名单只有 jobs/dash/inbox）。纯函数 qsElapsedMin / qsStripText 在 INSIGHTS-PURE 区间。测试：chat 29 / insights 90（新 4）/ report 88 / apply 24 全过，php -l 与 chatapi.test.php 16 条在 250 过，内联 JS node --check 过。**修掉 (g) 条报的「execute_task 多任务顶超时」**。
 - 坑：去重没用 JSON_CONTAINS 或 LIKE（10.3 上 payload 是 LONGTEXT 别名，非法 JSON 行为不稳，LIKE 误命中），改成拉该类型全部在飞 payload 在 PHP 里解，在飞集合以十计代价可忽略。
-- 下一步/认领：**待部署 api**（PHP 加前端；worker 无改动）。
+- 下一步/认领：**已部署 api**（2026-08-26 Aira 执行，PHP 即时生效，worker 无改动）。Kuddles S1 四个可一次全勾。
 
 ### 2026-08-26 AIRA (l) 跨认领登记：页面改动任务可抽查（受影响页面链接、机器检查、失败自动回滚）
 
