@@ -258,7 +258,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .appr-item .t{flex:1;min-width:0;font-size:12.5px;color:#cbd5e1;word-break:break-word}
 
 /* Swimlanes */
-.lanes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start}
+.lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start}
+@media(max-width:1400px){.lanes{grid-template-columns:repeat(2,1fr)}}
+.lane.wait_me{border-color:#78350f}.lane.wait_me .lane-head{background:#1a1408}
+.st{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px;margin-top:5px;color:#94a3b8}
+.st .st-tag{font-weight:700;padding:1px 8px;border-radius:5px;font-size:11px}
+.st.wait_me .st-tag{background:#422006;color:#fbbf24}.st.running .st-tag{background:#1e3a5f;color:#60a5fa}
+.st.wait_ext .st-tag{background:#1e2433;color:#94a3b8;border:1px solid #334155}.st.closed .st-tag{background:#052e16;color:#22c55e}
+.st.closed.dropped .st-tag,.st.closed.killed .st-tag{background:#450a0a;color:#f87171}.st.closed.merged .st-tag{background:#3b1f6e;color:#c084fc}
+.st .st-fail{color:#f87171}
+.lane-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tcard-detail.clip{max-height:66px;overflow:hidden;position:relative;cursor:pointer}
+.tcard-detail.clip:after{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;background:linear-gradient(transparent,#0f1117)}
 @media(max-width:900px){.lanes{grid-template-columns:1fr}}
 .lane{background:#1e2433;border:1px solid #2d3748;border-radius:10px;overflow:hidden}
 .lane-head{padding:10px 14px;border-bottom:1px solid #2d3748;display:flex;align-items:center;justify-content:space-between}
@@ -485,29 +496,12 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
     <!-- 任务 -->
     <div id="v_tasks" class="hidden">
-      <div class="sec hidden" id="releaseSec">
-        <div class="sec-head">
-          <div class="sec-title">待放行</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <span class="plan-meta" id="relCount"></span>
-            <button class="btn ghost" onclick="toggleAllRelease()">全选 / 全不选</button>
-            <!-- 待放行的判定：fable 读方案正文判「该不该落地」，判决显示在每行上，按推荐执行时 do 即放行 -->
-            <button class="btn ghost" id="rvRelBtn" onclick="reviewTasks(this,'review')" title="Fable 读每份方案，判该不该落地">判定方案</button>
-            <button class="btn" id="rvRelApplyBtn" onclick="applyVerdicts(this,'review')" style="display:none">按推荐处理</button>
-            <button class="btn green" id="relBtn" onclick="releaseTasks()">批量放行</button>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="plan-meta" style="margin-bottom:10px">这些任务 agent 已经准备好改动，放行后会排一个 apply 任务真正落地。取消勾选的保持待放行。</div>
-          <div id="releaseList"></div>
-        </div>
-      </div>
       <!-- 队列条：整台 worker 的队列，跨客户。看的人先知道现在有没有东西在跑，
            再决定要不要点执行，免得同一批任务被排两遍。空队列时整条隐藏。 -->
       <div id="queueStrip" class="banner hidden"></div>
       <div class="sec">
         <div class="sec-head">
-          <div class="sec-title">任务泳道</div>
+          <div class="sec-title">任务</div>
           <!-- 工具栏分三段：范围（本期/30天/全部）、显示偏好（折进「显示」里）、动作。
                动作三颗：新增、快速判定、执行。执行按钮在有判决时变成「按推荐执行」。 -->
           <div class="tb-group">
@@ -517,8 +511,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn ghost" id="sc_all" onclick="setSprintScope('all')">全部</button>
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
-              <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已完成</button>
-              <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="Agency 与 Client 泳道常年为空，隐藏后 Agent 泳道撑满宽度">隐藏空泳道</button>
+              <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
               <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
                 <option value="0">全部时间</option>
                 <option value="7">近 7 天</option>
@@ -527,8 +520,6 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
               </select>
             </span>
             <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
-            <button class="btn ghost" id="rvBtn" onclick="reviewTasks(this)" title="Fable 按第一性原理判这批任务该不该做，判决显示在每张卡上">快速判定</button>
-            <button class="btn" id="rvApplyBtn" onclick="applyVerdicts(this)" style="display:none" title="按每张卡上的有效判决批量处理：做的排队，砍的关掉，延后的挂起，并入的合并">按推荐执行</button>
             <!-- 执行按钮就放在勾选框旁边，不用切到 Jobs 页找（Jobs 页那颗保留） -->
             <button class="btn green" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
           </div>
@@ -2998,7 +2989,7 @@ function withinWindow(t){
   return (Date.now()-ms)<=taskDays*86400000;
 }
 function taskVisible(t){
-  if(t.status!=='done')return true;
+  if((t.human_state||(t.status==='done'?'closed':'wait_me'))!=='closed')return true;
   return showDone&&withinWindow(t);
 }
 function toggleShowDone(){showDone=!showDone;renderLanes()}
@@ -3076,60 +3067,32 @@ function toggleHideEmptyLanes(){
 }
 window.toggleHideEmptyLanes=toggleHideEmptyLanes;
 
+/* 四列，按「谁在等谁」分：等我 / 机器在跑 / 等外部 / 结束。human_state 由服务端派生。
+   等我列混排按优先级；结束列默认藏，「显示已结束」打开，受时间档约束。 */
+const HSTATES=[
+  {key:'wait_me',name:'等我'},
+  {key:'running',name:'机器在跑'},
+  {key:'wait_ext',name:'等外部'},
+  {key:'closed',name:'结束'},
+];
 function renderLanes(){
-  let doneHiddenTotal=0,laterTotal=0;
   const cur=currentSprint(tasksData);
-  const laneHtml=[];const hiddenNames=[];
-  LANES.forEach(lane=>{
-    const rows=tasksData.filter(t=>t.owner_type===lane.key);
-    /* 两级过滤分开算，两个提示各说各的：先滤掉按"往回看"该藏的已完成任务，
-       剩下的再按"往前看"滤掉排在未来 sprint 的。 */
-    const afterDone=rows.filter(taskVisible);
-    const vis=afterDone.filter(t=>withinScope(t,cur));
-    const doneHidden=rows.length-afterDone.length;
+  let laterTotal=0,doneHiddenTotal=0;
+  const html=HSTATES.map(col=>{
+    const all=tasksData.filter(t=>(t.human_state||'wait_me')===col.key);
+    const afterDone=all.filter(taskVisible);
+    const vis=afterDone.filter(t=>withinScope(t,cur)).sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
     const later=afterDone.length-vis.length;
-    doneHiddenTotal+=doneHidden;
-    laterTotal+=later;
-    let body='';
-    TASK_STATUSES.forEach(st=>{
-      const grp=vis.filter(t=>t.status===st).sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
-      if(!grp.length)return;
-      body+='<div class="grp-label">'+st+' ('+grp.length+')</div>';
-      body+=grp.map(t=>taskCard(t,lane.key)).join('');
-    });
-    if(!body){
-      body='<div class="lane-empty">'+
-        (later?'本期没有任务，都排在后面的 sprint。'
-             :(doneHidden?'只有已完成任务，已按当前筛选隐藏。':'暂无任务。'))+
-        '</div>';
-    }
-    /* 被"往前看"藏起来的活必须留个明面上的出口，点一下就放宽一档。 */
-    if(later){
-      body+='<div class="lane-more" onclick="widenSprintScope()" title="点击放宽到下一档">'+
-        '另有 '+later+' 个任务在后续排期，点击查看</div>';
-    }
-    const html='<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
-      '<span class="lane-count">'+vis.length+
-      (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' 已完成)</span>':'')+
-      (later?' <span class="lane-hidden">(+'+later+' 后续)</span>':'')+
-      '</span></div><div class="lane-body">'+body+'</div></div>';
-    /* 本期无可见任务且后面也没排的，才算空；有后续任务的泳道要留着那个「点击查看」出口 */
-    const empty=!vis.length&&!later;
-    if(hideEmptyLanes&&empty)hiddenNames.push(lane.name);
-    else laneHtml.push(html);
+    laterTotal+=later;doneHiddenTotal+=all.length-afterDone.length;
+    let body=vis.map(t=>taskCard(t,col.key)).join('');
+    if(!body)body='<div class="lane-empty">'+(col.key==='closed'&&!showDone?'已藏起，「显示」里打开。':(later?'本期没有，都排在后面的 sprint。':'空。'))+'</div>';
+    if(later)body+='<div class="lane-more" onclick="widenSprintScope()" title="点击放宽到下一档">另有 '+later+' 个在后续排期，点击查看</div>';
+    return '<div class="lane '+col.key+'"><div class="lane-head"><span class="lane-name">'+col.name+
+      ' <span class="lane-count">'+vis.length+'</span></span>'+laneTools(col.key,vis)+'</div><div class="lane-body">'+body+'</div></div>';
   });
   const lanesEl=document.getElementById('lanes');
-  if(!laneHtml.length){
-    /* 全空就别藏了，照常三条泳道显示各自的空态提示 */
-    hiddenNames.length=0;
-    lanesEl.style.gridTemplateColumns='';
-    lanesEl.innerHTML=LANES.map(l=>'<div class="lane"><div class="lane-head"><span class="lane-name">'+l.name+'</span><span class="lane-count">0</span></div><div class="lane-body"><div class="lane-empty">暂无任务。</div></div></div>').join('');
-  }else{
-    lanesEl.style.gridTemplateColumns=window.innerWidth>900?('repeat('+laneHtml.length+',1fr)'):'';
-    lanesEl.innerHTML=laneHtml.join('');
-  }
-  const et=document.getElementById('emptyLaneToggle');
-  if(et){et.className=hideEmptyLanes?'btn':'btn ghost';et.textContent=hideEmptyLanes&&hiddenNames.length?('隐藏空泳道（'+hiddenNames.length+'）'):'隐藏空泳道'}
+  lanesEl.style.gridTemplateColumns='';
+  lanesEl.innerHTML=html.join('');
   const tg=document.getElementById('doneToggle');
   if(tg)tg.className=showDone?'btn':'btn ghost';
   ['current','near','all'].forEach(k=>{
@@ -3141,165 +3104,93 @@ function renderLanes(){
     const bits=[];
     bits.push(sprintScope==='all'?'全部排期':('当前 S'+cur+(sprintScope==='near'?' 加后两个 sprint':'')));
     if(laterTotal)bits.push('另有 '+laterTotal+' 个排在后面');
-    if(doneHiddenTotal)bits.push('已隐藏 '+doneHiddenTotal+' 个已完成');
+    if(doneHiddenTotal)bits.push('已藏 '+doneHiddenTotal+' 个已结束');
     hint.textContent=bits.join('，');
   }
-  renderRelease();
   renderPickHint();
-  renderReviewButtons();
-  /* 任务表变了，队列条里的标题也跟着重解析一次（新任务刚排上时标题才对得上） */
   renderQueueStrip();
-  hydrateFeedback();
   hydrateThreads();
 }
+/* 列头工具：只有「等我」列有。未判的判一批，有判决的按推荐一键处理。 */
+function laneTools(key,vis){
+  if(key!=='wait_me')return '';
+  const pending=vis.some(t=>t.review_pending);
+  const cands=rvCandidates('all');
+  const app=rvApplicable('all');
+  let h='<span class="lane-tools">';
+  h+='<button class="btn tiny ghost" '+((pending||!cands.length)?'disabled':'')+' onclick="reviewTasks(this,\'all\')" title="Fable 按第一性原理判这批该不该做 / 方案该不该落地">'+
+    (pending?'判定中':(cands.length?('判定 '+Math.min(cands.length,20)):'判定'))+'</button>';
+  if(app.length){
+    const c=rvTally(app);
+    h+='<button class="btn tiny" onclick="applyVerdicts(this,\'all\')" title="按每张卡上的判决处理：做的排队，放行的落地，砍的关掉，延后的挂起，并入的合并">全部按推荐（做 '+c.do+' 砍 '+c.drop+' 延 '+c.later+' 并 '+c.merge+'）</button>';
+  }
+  return h+'</span>';
+}
 
-function taskCard(t,lane){
-  /* 批准这一步没有了：判定的 do 就是批准。proposed 的 agent 任务也能直接勾选执行，
-     执行时服务端顺手置 approved。 */
-  const pickable=(lane==='agent'&&(t.status==='approved'||t.status==='proposed'));
-  /* 已在队列里的任务不许再勾：勾了也会被 pickedIds 滤掉，这里先把框禁掉说明原因。 */
-  const busy=qsTaskBusy(t);
-  const cbBusy=busy?(' disabled title="'+esc(t.job_state.status==='running'?'这个任务正在跑，等它跑完再选':'这个任务已经在队列里，不用重复排')+'"'):'';
-  const cb=pickable?'<input type="checkbox"'+cbBusy+' onchange="togglePick('+t.id+',this.checked)"'+(picked[t.id]&&!busy?' checked':'')+'>':'';
-  let acts='';
-  if(lane==='client'&&t.status!=='done')acts+='<button class="btn tiny ghost" onclick="setTaskStatus('+t.id+',\'done\')">标记完成</button>';
-  if(t.status==='review')acts+='<button class="btn tiny green" onclick="setTaskStatus('+t.id+',\'done\')">放行</button>';
-  const link=t.output_url?'<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出链接</a>':'';
-  const detail=t.detail?'<div class="tcard-detail">'+esc(t.detail)+'</div>':'';
+/* 卡片两行：第一行状态（在等什么 / 在跑什么 / 怎么结束的 + 方案 vN），第二行 Fable 判决。
+   按钮只有一对：同意 / 不同意，语义随阶段变；加线程、加文件。 */
+function stateLine(t){
+  const hs=t.human_state||'wait_me';
+  let tag='',txt='';
+  if(hs==='wait_me'){tag='等我';txt=t.wait_reason||'待判'}
+  else if(hs==='running'){tag='在跑';txt=t.run_note||'执行中';const js=t.job_state||{};if(js.status==='running'){const m=qsElapsedMin(js.claimed_at,null);if(m!=null)txt+=' '+(m>0?(m+' 分钟'):'不到 1 分钟')}}
+  else if(hs==='wait_ext'){tag='等外部';txt=t.wait_reason||'延后'}
+  else{tag={done:'完成',dropped:'砍掉',merged:'并入',killed:'不做'}[t.closed_kind||'done']||'结束';txt=''}
+  const failed=(t.job_state||{}).status==='failed'&&hs==='wait_me';
+  const bits=['<span class="st-tag">'+esc(tag)+'</span>'];
+  if(txt)bits.push('<span'+(failed?' class="st-fail"':'')+'>'+esc(txt)+'</span>');
+  if(t.round)bits.push('<span class="muted">方案 v'+t.round+'</span>');
+  if(t.status==='review'&&t.output_url)bits.push('<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出</a>');
+  return '<div class="st '+hs+(t.closed_kind?(' '+t.closed_kind):'')+'">'+bits.join('')+'</div>';
+}
+var detailOpen={};
+function toggleDetail(id){detailOpen[id]=!detailOpen[id];renderLanes()}
+function taskCard(t,col){
+  const hs=t.human_state||'wait_me';
+  const pickable=(hs==='wait_me'&&t.owner_type==='agent'&&['proposed','approved'].indexOf(t.status)>=0&&!t.review_pending);
+  const cb=pickable?'<input type="checkbox" onchange="togglePick('+t.id+',this.checked)"'+(picked[t.id]?' checked':'')+'>':'';
   const pr=PRIORITIES[priIdx(t.priority)];
   const priBadge='<span class="badge pri '+pr+'" title="点击切换优先级" onclick="cyclePriority('+t.id+',\''+pr+'\')">'+pr+'</span>';
-  /* 「反馈」文本框换成任务线程：说一句，opus 带着任务、方案、判决回一句，能落的动作列成卡。 */
+  const canDecide=hs==='wait_me'&&!t.review_pending&&['proposed','approved','blocked','review'].indexOf(t.status)>=0;
+  let acts='';
+  if(canDecide){
+    const yesLabel=t.status==='review'?'放行':(t.owner_type==='agent'?'执行':'批准');
+    acts+='<button class="btn tiny green" onclick="decideTask('+t.id+',true)">'+yesLabel+'</button>';
+    acts+='<button class="btn tiny ghost" onclick="decideTask('+t.id+',false)">不做</button>';
+  }
+  if(hs==='wait_ext')acts+='<button class="btn tiny green" onclick="decideTask('+t.id+',true)">现在做</button>';
   acts+='<button class="btn tiny ghost" onclick="toggleThread('+t.id+')">'+(thOpen[t.id]?'收起线程':'线程')+'</button>';
   acts+=dlAddBtn(t,'lane');
+  const dl=String(t.detail||'');
+  const clip=dl.length>150&&!detailOpen[t.id];
+  const detail=dl?'<div class="tcard-detail'+(clip?' clip':'')+'" onclick="toggleDetail('+t.id+')" title="'+(clip?'展开':'收起')+'">'+esc(dl)+'</div>':'';
   return '<div class="tcard">'+
     '<div class="tcard-top">'+cb+'<div class="tcard-title"><span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div></div>'+
+    stateLine(t)+
     rvLine(t)+
     detail+
-    '<div class="tcard-meta">'+priBadge+qsJobBadge(t)+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+
-    (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+
-    '<span class="badge '+t.status+'">'+t.status+'</span>'+link+acts+'</div>'+
+    '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+
+    (t.owner_type!=='agent'?'<span class="badge mod">'+esc(t.owner_type)+'</span>':'')+
+    (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+acts+'</div>'+
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
     fileDeliverables(t)+
     (thOpen[t.id]?threadBox(t,'lane'):'')+'</div>';
 }
-
-/* ---- 任务线程 ----
-   一个任务一条会话（服务端 POST /tasks/{id}/thread 取或建，根的 refs.tasks 挂这一个任务）。
-   消息走既有的 /inbox/{root}/chat，人说的每句同时进 feedback 抽 facts（服务端做）。
-   opus 回复里的 refs.actions 画成提议卡，人点「执行」打 /inbox/{root}/thread_action。
-   这一段没有别的写口子。 */
-var thOpen={},thData={},thSending={};
-const TH_ACTION_LABEL={redispatch:'改了重跑',kill:'不做了',later:'先放着',set_verdict:'改判',release:'放行落地'};
-function toggleThread(id){
-  thOpen[id]=!thOpen[id];
-  if(thOpen[id]&&!thData[id]){loadThread(id);return}
-  renderLanes();
-}
-async function loadThread(id,silent){
-  const d=await api('/tasks/'+id+'/thread','POST',{});
-  if(!d)return;
-  if(d._status>=400){if(!silent)fail(d,'线程载入失败');return}
-  thData[id]=d;
-  renderLanes();
-}
-/* 已执行过的提议：服务端写了系统行「已执行提议 {msgId}/{idx}：...」，刷新后按它把按钮锁住。 */
-function thDoneMap(msgs){
-  const m={};
-  (msgs||[]).forEach(x=>{
-    if(x.kind!=='chat_agent'||x.created_by==='seo-worker')return;
-    const mm=String(x.body||'').match(/^已执行提议 (\d+)\/(\d+)/);
-    if(mm)m[mm[1]+'/'+mm[2]]=true;
-  });
-  return m;
-}
-function thActionCard(rootId,msgId,idx,a,done){
-  const label=TH_ACTION_LABEL[a.type]||a.type;
-  const head=label+(a.type==='set_verdict'?(' 为 '+(RV_LABEL[a.verdict]||a.verdict)):'');
-  return '<div class="ch-draft"><div class="dt">提议：'+esc(head)+'</div>'+
-    (a.reason?'<div class="dd">'+esc(a.reason)+'</div>':'')+
-    '<div class="da">'+(done?'<span class="badge done">已执行</span>'
-      :'<button class="btn tiny" onclick="thRunAction('+rootId+','+msgId+','+idx+',this)">执行</button>'+
-       '<span class="plan-meta">点了才动看板，不点就只是一张卡。</span>')+'</div></div>';
-}
-function threadBox(t,where){
-  const d=thData[t.id];
-  const box='<div class="fb-box" id="th_'+where+'_'+t.id+'">';
-  if(!d)return box+'<span class="ch-empty">线程载入中</span></div>';
-  const msgs=d.replies||[];
-  const done=thDoneMap(msgs);
-  let stream='';
-  if(!msgs.length)stream='<span class="ch-empty">还没有消息。说一句，它会带着这个任务的说明、方案和判定来回。</span>';
-  else stream=msgs.map(m=>{
-    const isMe=m.kind==='chat_user';
-    const isSys=m.kind==='chat_agent'&&m.created_by!=='seo-worker';
-    const cls=isMe?'me':(isSys?'sys':'bot');
-    let h='<div class="ch-turn '+cls+'"><div class="ch-by">'+(isMe?esc(m.created_by||'我'):(isSys?'系统':'opus'))+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
-      '<div class="ch-bubble">'+esc(m.body||'')+'</div>';
-    ((m.refs&&m.refs.actions)||[]).forEach((a,i)=>{h+=thActionCard(d.root_id,m.id,i,a,!!done[m.id+'/'+i])});
-    return h+'</div>';
-  }).join('');
-  const pending=d.chat_pending?'<div class="ch-wait">opus 思考中，job #'+d.chat_pending+'，回复出来会自动出现</div>':'';
-  return box+'<div class="fb-title">任务线程 #'+d.root_id+'</div>'+
-    '<div class="ch-stream" style="max-height:320px">'+stream+'</div>'+pending+
-    '<div class="ch-form"><div class="fld"><textarea id="th_text_'+where+'_'+t.id+'" placeholder="例如：描述里别写 220，社交图用真照片，改了重跑。"></textarea></div>'+
-    '<div class="fb-row"><button class="btn tiny" '+((d.chat_pending||thSending[t.id])?'disabled':'')+' onclick="sendThread('+t.id+',\''+where+'\')">发送</button>'+
-    '<span class="plan-meta">你说的每一句都会进这个客户的 facts，下次判定和规划带着它。</span></div></div></div>';
-}
-async function sendThread(id,where){
-  const d0=thData[id];
-  if(!d0||thSending[id])return;
-  const el=document.getElementById('th_text_'+where+'_'+id);
-  const text=(el?el.value:'').trim();
-  if(!text){toast('先写点什么',true);return}
-  if(text.length>5000){toast('单条消息最多 5000 字',true);return}
-  thSending[id]=true;
-  const d=await api('/inbox/'+d0.root_id+'/chat','POST',{text});
-  thSending[id]=false;
-  if(!d)return;
-  if(d._status===409){toast('还在等上一条回复（job #'+(d.job_id||'?')+'）',true);return}
-  if(fail(d,'发送失败'))return;
-  loadThread(id,true);
-}
-async function thRunAction(rootId,msgId,idx,btn){
-  if(!confirm('执行这条提议？会直接动看板。'))return;
-  if(btn)btn.disabled=true;
-  const d=await api('/inbox/'+rootId+'/thread_action','POST',{message_id:msgId,idx});
-  if(btn)btn.disabled=false;
-  if(fail(d,'执行失败'))return;
-  toast(d.message||'已执行');
-  Object.keys(thData).forEach(id=>{if(thData[id]&&thData[id].root_id===rootId)loadThread(parseInt(id,10),true)});
-  loadClients(true);
-}
-/* 打开着的线程跟着任务页 15 秒轮询刷新，思考中的回复自己冒出来。 */
-function hydrateThreads(){
-  Object.keys(thOpen).forEach(id=>{if(thOpen[id]&&thData[id])loadThreadQuiet(parseInt(id,10))});
-}
-var thQuietBusy={};
-async function loadThreadQuiet(id){
-  if(thQuietBusy[id])return;
-  thQuietBusy[id]=true;
-  try{
-    const d=await api('/tasks/'+id+'/thread','POST',{});
-    if(d&&d._status<400){
-      const before=JSON.stringify((thData[id]||{}).replies||[])+String((thData[id]||{}).chat_pending||0);
-      const after=JSON.stringify(d.replies||[])+String(d.chat_pending||0);
-      thData[id]=d;
-      if(before!==after){
-        /* 只重画这一张卡的线程区，别打断正在输入的人 */
-        ['lane','rel'].forEach(w=>{
-          const el=document.getElementById('th_'+w+'_'+id);
-          if(!el)return;
-          const t=(tasksData||[]).find(x=>x.id===id);
-          if(!t)return;
-          const ta=document.getElementById('th_text_'+w+'_'+id);
-          const draft=ta?ta.value:'';
-          el.outerHTML=threadBox(t,w);
-          const ta2=document.getElementById('th_text_'+w+'_'+id);
-          if(ta2&&draft)ta2.value=draft;
-        });
-      }
-    }
-  }finally{thQuietBusy[id]=false}
+/* 同意 / 不同意。语义在服务端按阶段定（待判执行、待放行放行、失败重跑），不做 = 不做了，理由必填。 */
+async function decideTask(id,yes){
+  let note='';
+  if(!yes){
+    note=prompt('不做了。为什么？一句话，必填（会记进任务备注）。');
+    if(note==null)return;
+    if(!String(note).trim()){toast('得写个理由',true);return}
+  }else{
+    const t=(tasksData||[]).find(x=>x.id===id);
+    if(t&&t.status==='review'&&!confirm('放行 #'+id+'？会排一个 apply 任务把改动真正落到线上。'))return;
+  }
+  const d=await api('/tasks/'+id+'/decide','POST',{yes:!!yes,note:String(note||'').trim()});
+  if(fail(d,'操作失败'))return;
+  toast({execute:'已排队执行',release:'已放行，排队落地',approve:'已批准',killed:'已置为不做'}[d.did]||'已处理');
+  loadTasksAndQueue();loadClients(true);
 }
 
 /* ---- 任务判定 ----
@@ -3337,8 +3228,8 @@ function rvVisibleTasks(){
 }
 /* mode 'lane'：泳道里没开工的任务（该不该做）；'review'：待放行面板里的任务（方案该不该落地）。
    两组各自一颗按钮、各自一批，不混判。 */
-function rvStatuses(mode){return mode==='review'?['review']:['proposed','approved','blocked']}
-function rvPool(mode){return mode==='review'?(tasksData||[]).filter(t=>t.status==='review'):rvVisibleTasks()}
+function rvStatuses(mode){return mode==='review'?['review']:(mode==='all'?['proposed','approved','blocked','review']:['proposed','approved','blocked'])}
+function rvPool(mode){if(mode==='review')return (tasksData||[]).filter(t=>t.status==='review');const v=rvVisibleTasks();return mode==='all'?v.filter(t=>(t.human_state||'wait_me')==='wait_me'):v}
 function rvCandidates(mode){
   return rvPool(mode).filter(t=>rvStatuses(mode).indexOf(t.status)>=0&&!qsTaskBusy(t)&&!t.review_pending)
     .sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
@@ -3352,30 +3243,14 @@ function rvTally(list){
   list.forEach(t=>{c[t.review_effective]=(c[t.review_effective]||0)+1});
   return c;
 }
-function renderReviewButtons(){
-  const pending=(tasksData||[]).some(t=>t.review_pending);
-  [['lane','rvBtn','rvApplyBtn','快速判定','按推荐执行'],['review','rvRelBtn','rvRelApplyBtn','判定方案','按推荐处理']].forEach(cfg=>{
-    const mode=cfg[0];
-    const rb=document.getElementById(cfg[1]);
-    const ab=document.getElementById(cfg[2]);
-    if(!rb||!ab)return;
-    const cands=rvCandidates(mode);
-    rb.disabled=pending||!cands.length;
-    rb.textContent=pending?'判定中':(cands.length?(cfg[3]+'（'+Math.min(cands.length,20)+'）'):cfg[3]);
-    const app=rvApplicable(mode);
-    if(!app.length){ab.style.display='none';return}
-    const c=rvTally(app);
-    ab.style.display='';
-    ab.textContent=cfg[4]+'（'+(mode==='review'?'放行 ':'做 ')+c.do+' 砍 '+c.drop+' 延 '+c.later+' 并 '+c.merge+'）';
-  });
-}
+function renderReviewButtons(){}
 async function reviewTasks(btn,mode){
   mode=mode||'lane';
   const cands=rvCandidates(mode);
   if(!cands.length){toast('没有可判定的任务',true);return}
   const batch=cands.slice(0,20);
   const cut=cands.length-batch.length;
-  const what=mode==='review'?'份方案该不该落地':'个任务该不该做';
+  const what=mode==='review'?'份方案该不该落地':(mode==='all'?'个任务（待判的判该不该做，待放行的判方案该不该落地）':'个任务该不该做');
   if(!confirm('让 Fable 判 '+batch.length+' '+what+'？通常 1 分钟内，判决会显示在每张卡上，不会自动执行。'+(cut?('\n另有 '+cut+' 个按优先级排在 20 个之后，这轮不判。'):'')))return;
   btn.disabled=true;
   const d=await api('/tasks/review','POST',{client_id:curId,task_ids:batch.map(t=>t.id)});
@@ -3413,7 +3288,7 @@ async function applyVerdicts(btn,mode){
   const app=rvApplicable(mode);
   if(!app.length){toast('没有可执行的判决',true);return}
   const c=rvTally(app);
-  const lines=mode==='review'
+  const lines=(mode==='review'||mode==='all')
     ?['按判决处理 '+app.length+' 个待放行任务：','放行 '+c.do+' 个（排 apply_task 真正落地，这一步会改线上）','不落地 '+c.drop+' 个（置 done，备注原因）','暂不放行 '+c.later+' 个（留在待放行，备注等什么）','并入 '+c.merge+' 个（置 done，目标任务照常放行）']
     :['按判决处理 '+app.length+' 个任务：','做 '+c.do+' 个（agent 任务排队执行，其余置 approved）','砍掉 '+c.drop+' 个（置 done，备注原因）','延后 '+c.later+' 个（置 blocked，备注等什么）','并入 '+c.merge+' 个（置 done，目标任务说明追加来源）','','执行仍只到方案阶段，线上改动照旧要人放行。'];
   if(!confirm(lines.join('\n')))return;
@@ -3832,6 +3707,7 @@ function opsTags(t){
 function renderRelease(){
   const rev=tasksData.filter(t=>t.status==='review');
   const sec=document.getElementById('releaseSec');
+  if(!sec)return;
   sec.classList.toggle('hidden',!rev.length);
   if(!rev.length)return;
   rev.forEach(t=>{if(!(t.id in relPick))relPick[t.id]=true});

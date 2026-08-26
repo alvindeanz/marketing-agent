@@ -559,6 +559,60 @@ function attach_review_state($tasks,$cid){
     return $tasks;
 }
 
+/* 人类视角的任务状态，GET /tasks 用，纯派生不入库。看板只问一件事：这张卡在等谁。
+   human_state  wait_me（等人拍板）/ running（机器在跑）/ wait_ext（等外部）/ closed（结束）
+   wait_reason  等我的一句话：待判 / 待放行 / 上次执行失败 / 落地失败已回滚 / 判定中
+   run_note     在跑的一句话：排队第 N 位 / 执行中 / 落地中
+   closed_kind  done / dropped / merged / killed，从结果备注的标签推
+   round        跑过几轮 execute（方案 vN），数 job 不入库
+   依赖 attach_job_state 与 attach_review_state 先挂好。 */
+function attach_human_state($tasks,$cid){
+    if(!$tasks)return $tasks;
+    $rounds=[];
+    $q=db()->prepare("SELECT type,payload,status FROM agent_jobs WHERE client_id=? AND type='execute_task' AND status IN('done','failed','running') ORDER BY id DESC LIMIT 500");
+    $q->execute([$cid]);
+    foreach($q->fetchAll() as $r){
+        $tid=job_task_id('execute_task',$r['payload']);
+        if($tid)$rounds[$tid]=($rounds[$tid]??0)+1;
+    }
+    foreach($tasks as &$t){
+        $tid=(int)$t['id'];
+        $st=(string)$t['status'];
+        $js=$t['job_state']??['status'=>null];
+        $note=(string)($t['result_note']??'');
+        $hs='wait_me';$why='';$run='';$closed=null;
+        if($st==='done'){
+            $hs='closed';
+            if(preg_match('/\[(dropped|merged|killed)\][^\n]*$/s',$note,$mm)||preg_match('/\[(dropped|merged|killed)\]/',$note,$mm))$closed=$mm[1];
+            else $closed='done';
+        }elseif($js['status']==='running'||$js['status']==='queued'){
+            $hs='running';
+            $isApply=($js['job_type']??'')==='apply_task';
+            if($js['status']==='queued')$run=($isApply?'落地':'执行').'排队'.($js['position']?('第 '.$js['position'].' 位'):'');
+            else $run=$isApply?'落地中':'执行中';
+        }elseif($st==='blocked'){
+            $hs='wait_ext';
+            if(preg_match('/\[later\][^\n]*/',$note,$mm))$why=trim(preg_replace('/^\[later\]\s*/','',$mm[0]));
+            else $why='延后';
+        }elseif($st==='in_progress'){
+            $hs='running';$run='执行中';
+        }else{
+            $hs='wait_me';
+            if(!empty($t['review_pending']))$why='判定中';
+            elseif($js['status']==='failed')$why=(($js['job_type']??'')==='apply_task'?'落地失败，已回滚':'上次执行失败').'（job #'.$js['job_id'].'）';
+            elseif($st==='review')$why='待放行';
+            else $why=empty($t['review_effective'])?'待判':'待拍板';
+        }
+        $t['human_state']=$hs;
+        $t['wait_reason']=$why;
+        $t['run_note']=$run;
+        $t['closed_kind']=$closed;
+        $t['round']=$rounds[$tid]??0;
+    }
+    unset($t);
+    return $tasks;
+}
+
 /* CHAT-PURE-START
    纯函数区：不碰 db()，不调 res()，可以被 tests/chatapi.test.php 抠出来单测。
    改这两个标记的文字要同步改测试里的正则。 */
@@ -1054,15 +1108,17 @@ function attach_job_state($tasks,$cid){
     $pos=($que)?jobs_queue_positions():[];
     foreach($tasks as &$t){
         $tid=(int)$t['id'];
-        $state=['status'=>null,'job_id'=>null,'position'=>null,'claimed_at'=>null];
+        $state=['status'=>null,'job_id'=>null,'job_type'=>null,'position'=>null,'claimed_at'=>null];
         if(isset($run[$tid])){
             $state['status']='running';
             $state['job_id']=(int)$run[$tid]['id'];
+            $state['job_type']=$run[$tid]['type'];
             $state['claimed_at']=$run[$tid]['claimed_at'];
         }elseif(isset($que[$tid])){
             $jid=(int)$que[$tid]['id'];
             $state['status']='queued';
             $state['job_id']=$jid;
+            $state['job_type']=$que[$tid]['type'];
             $state['position']=isset($pos[$jid])?$pos[$jid]:null;
         }elseif(isset($fail[$tid])){
             $r=$fail[$tid];
@@ -1071,6 +1127,7 @@ function attach_job_state($tasks,$cid){
             if($upd===''||strcmp($ts,$upd)>0){
                 $state['status']='failed';
                 $state['job_id']=(int)$r['id'];
+                $state['job_type']=$r['type'];
             }
         }
         $t['job_state']=$state;
@@ -3343,6 +3400,47 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/review_override$#',$ROUTE,$mm)){
     res(200,['ok'=>true]);
 }
 
+// POST /tasks/{id}/decide body { yes: bool, note? } -> 卡上唯一的一对按钮。
+// 语义随阶段变：待判 / 上次执行失败 → yes 执行（proposed 顺手置 approved）；待放行 → yes 放行；
+// no 一律「不做了」置 done 记 [killed]，note 必填。延后和改判走线程，这里不做。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/decide$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    $tid=(int)$mm[1];
+    $i=input();
+    $yes=!empty($i['yes']);
+    $note=trim((string)($i['note']??''));
+    $tq=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");
+    $tq->execute([$tid]);
+    $t=$tq->fetch();
+    if(!$t)res(404,['error'=>'Task not found']);
+    $cid=(int)$t['client_id'];
+    if(!$yes){
+        if($note==='')res(400,['error'=>'note required: say why not']);
+        if($t['status']==='done')res(400,['error'=>'Task already closed']);
+        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
+        task_append_note($tid,'[killed] 人工不做：'.$note);
+        audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>0,'note'=>$note]);
+        res(200,['ok'=>true,'did'=>'killed']);
+    }
+    if($t['status']==='review'){
+        list($jids,$sk)=queue_task_jobs($cid,'apply_task',[$tid],$u['username'],'seo_tasks_release');
+        audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'release','job_ids'=>$jids]);
+        res(200,['ok'=>true,'did'=>'release','job_ids'=>$jids,'skipped'=>$sk]);
+    }
+    if(in_array($t['status'],['proposed','approved','blocked'],true)){
+        if($t['owner_type']!=='agent'){
+            db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=?")->execute([$tid]);
+            audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'approve']);
+            res(200,['ok'=>true,'did'=>'approve','job_ids'=>[]]);
+        }
+        if($t['status']==='blocked')db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=?")->execute([$tid]);
+        list($jids,$sk)=queue_task_jobs($cid,'execute_task',[$tid],$u['username'],'seo_job_create');
+        audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'execute','job_ids'=>$jids]);
+        res(200,['ok'=>true,'did'=>'execute','job_ids'=>$jids,'skipped'=>$sk]);
+    }
+    res(400,['error'=>'Task is '.$t['status'].', nothing to decide']);
+}
+
 // POST /tasks/apply_verdicts body { client_id, task_ids } -> 按有效判决批量执行。
 // 有效判决 = 人的推翻优先，其次 fable 的；过期的（判决后任务或 facts 改过）一律跳过，
 // 让人重判，不拿旧判决动新前提。
@@ -3617,7 +3715,7 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     ensure_review_schema();
     $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
     $s->execute([$cid]);
-    res(200,['tasks'=>attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid)]);
+    res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid)]);
 }
 
 // POST /tasks

@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (s) 跨认领登记：任务视图按「谁在等谁」重画，放行面板删除
+
+- 干了什么：Alvin 第一性原理审过的版本：看板只回答「哪些卡在等我」。不动数据库。seo-api.php 新增 `attach_human_state`（GET /tasks 派生 human_state = wait_me / running / wait_ext / closed，wait_reason、run_note、closed_kind、round 全部从 status + job_state + 判决 + 结果备注标签推，round 数 execute job），`attach_job_state` 多带 job_type 以区分执行与落地；新端点 `POST /tasks/{id}/decide {yes, note}`：卡上唯一一对按钮，语义按阶段定（待判 / 失败 → 执行，待放行 → 放行，非 agent → 批准；no = 不做了，理由必填记 [killed]）。前端：待放行面板整块删除；Agency / Client / Agent 三泳道改为四列 等我 / 机器在跑 / 等外部 / 结束，等我列混排按优先级，列头带「判定 N」与「全部按推荐（做 x 砍 y 延 z 并 w）」（一次调用同时处理待判与待放行）；卡片两行：状态行（等什么 / 在跑什么 / 怎么结束 + 方案 vN）与 Fable 判决行，status 徽标、job 徽标、需人判断、上次失败徽标全部并进状态行；说明超 150 字折叠点开；「显示已完成」改「显示已结束」，结束列默认藏；隐藏空泳道开关删除。旧的 renderRelease 等函数保留但无 DOM 挂点，直接返回。测试五套全过，php -l 在 250 过，内联 JS node --check 过。
+- 坑：human_state 是派生字段，前端凡是按 status 分组的逻辑都改成按它；taskVisible 的「已完成」判断也换成 closed。in_progress 这个枚举值实际没人写，派生时归 running 以防万一。
+- 下一步/认领：**已部署 api**（worker 无改动）。Alvin 看一眼实际效果再定细节。
+
 ### 2026-08-26 AIRA (r) 跨认领登记：任务线程替代反馈框
 
 - 干了什么：Alvin 定的方向二。一个任务一条线程，零新表：复用 seo_inbox 的 chat_root / chat_user / chat_agent，根的 refs.tasks 只挂这一个任务。seo-api.php：`POST /tasks/{id}/thread`（取或建，回完整视图）；`POST /inbox/{root}/chat` 在根挂了任务时同时投一条 seo_feedback 加 feedback job（线程是反馈的容器，facts 抽取不断）；chat_reply 接受 `actions`，`inbox_refs_norm` 加 actions 键（白名单 redispatch / kill / later / set_verdict / release，最多 3 条）；`POST /inbox/{root}/thread_action {message_id, idx}` 人点执行才落账（redispatch = 指令写进 detail 并排 execute_task；kill = done；later = blocked；set_verdict = 改判；release = 排 apply_task），每条提议只能执行一次，系统行「已执行提议 m/i」记账。`inbox_ref_tasks` 多带 detail 与判定字段。worker chat runner 加任务模式：根挂任务时 prompt 多一段任务全文 + 判决 + 等放行时的方案正文（截 6000 字），回复 json 可附 actions，`cleanActions` 白名单归一化，release 只在 review 状态放行。前端：任务卡与待放行行的「反馈」按钮换成「线程」，卡内展开消息流 + 提议卡 + 输入框，跟 15 秒轮询静默刷新且不打断输入。旧反馈端点与历史保留未删。测试：chat 31（新 2），其余四套不变，五套全过；php -l 在 250 过；内联 JS node --check 过。
