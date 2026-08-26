@@ -602,7 +602,7 @@ function attach_human_state($tasks,$cid){
             elseif($js['status']==='failed'){
                 $n=(int)($js['fail_count']??1);
                 $why=(($js['job_type']??'')==='apply_task'?'落地失败':'执行失败').($n>1?(' '.$n.' 次'):'').'（job #'.$js['job_id'].'）';
-                $failReason=task_fail_reason($t,$js['job_id']);
+                $failReason=task_fail_reason($t,$js['job_id'],(string)($js['job_type']??''));
             }
             elseif($st==='review')$why='待放行';
             else $why=empty($t['review_effective'])?'待判':'待拍板';
@@ -1215,8 +1215,22 @@ function attach_job_state($tasks,$cid){
 /* 任务最近一次失败的一句话原因。优先结果备注里 runner 写的「执行中止：/执行失败：」那句
    （那是模型自己说的为什么），没有就取 job 日志最后一条 FAILED 行。人看卡就能知道为什么，
    不用去 Jobs 页翻。 */
-function task_fail_reason($t,$jobId){
+function task_fail_reason($t,$jobId,$jobType=''){
     $note=(string)($t['result_note']??'');
+    /* execute 失败（含方案 lint 打回）不写任务备注，原因只在 job 日志里；apply 失败才写备注。
+       先按 job 类型选来源，否则会把上一轮 apply 的旧原因当成这次的。 */
+    if($jobType==='execute_task'&&$jobId){
+        $q=db()->prepare("SELECT log_text FROM agent_jobs WHERE id=?");
+        $q->execute([(int)$jobId]);
+        $r=$q->fetch();
+        $q->closeCursor();
+        $log=(string)(($r&&$r['log_text'])?$r['log_text']:'');
+        if(preg_match_all('/FAILED\s*::\s*(?:Error:\s*)?([^\n]+)/u',$log,$mm)&&$mm[1]){
+            $s=end($mm[1]);
+            $s=preg_replace('/\s+at\s+\S+\s*\(.*$/u','',$s);
+            return mb_substr(trim($s),0,300,'UTF-8');
+        }
+    }
     if(preg_match_all('/(?:执行中止|执行失败|发布后验证未通过|落地失败)[：:]\s*([^\n]+)/u',$note,$mm)&&$mm[1]){
         $s=end($mm[1]);
         $s=preg_replace('/\s*任务保持 review.*$/u','',$s);

@@ -396,11 +396,12 @@ t('buildNoteHeader 带 changeset 行与文件核对行', () => {
   assert.ok(lines.some((l) => l.indexOf('文件核对: 方案声明但未碰到') === 0));
 });
 t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺文件清单各打回一次', () => {
-  const ok = '## 2. API 调用序列\n步骤 1 PATCH /api/content/x/edit\n- 预期响应：200\n- 回读核对：GET elements 比对\n涉及文件：pages/index.html';
+  const ok = '## 2. API 调用序列\n步骤 1 PATCH /api/content/x/edit\n- 预期响应：200\n- 回读核对：GET elements 比对\n涉及文件：pages/index.html\n本方案不含 `POST /snapshots`，不碰 `/api/domains/*`、`/api/admin/*`。\n## 3. 变更预览\n附：v1 的 POST /api/content/x/snapshots 已删除';
   assert.deepStrictEqual(E.lintPlan(ok), []);
-  assert.ok(E.lintPlan('步骤 1 POST /api/content/x/snapshots\n涉及文件：a').some((x) => x.indexOf('snapshots') > -1));
-  assert.ok(E.lintPlan('PUT /api/content/x/redirects\n涉及文件：a').some((x) => x.indexOf('PUT') > -1));
-  assert.ok(E.lintPlan('GET /api/admin/users\n涉及文件：a').some((x) => x.indexOf('/api/admin') > -1));
+  assert.ok(E.lintPlan('## 2. API 调用序列\n步骤 1 POST /api/content/x/snapshots\n涉及文件：a').some((x) => x.indexOf('snapshots') > -1));
+  assert.ok(E.lintPlan('## 2. API 调用序列\nPUT /api/content/x/redirects\n涉及文件：a').some((x) => x.indexOf('PUT') > -1));
+  assert.ok(E.lintPlan('## 2. API 调用序列\nGET /api/admin/users\n涉及文件：a').some((x) => x.indexOf('/api/admin') > -1));
+  assert.deepStrictEqual(E.lintPlan('## 2. API 调用序列\n不碰 /api/admin，本方案无 API 调用\n涉及文件：无'), []);
   assert.ok(E.lintPlan('- 预期响应：200，回读体里 seo.title 逐字相等\n涉及文件：a').some((x) => x.indexOf('字段断言') > -1));
   assert.ok(E.lintPlan('- 预期响应：200\n- 回读核对：GET').some((x) => x.indexOf('涉及文件') > -1));
   assert.deepStrictEqual(E.planFiles('x\n```json\n{"files":["pages/a.html"]}\n```'), ['pages/a.html']);

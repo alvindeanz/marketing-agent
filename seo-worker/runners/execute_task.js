@@ -242,21 +242,35 @@ function missingPlanSections(text) {
  * 比 prepare 阶段多花 10 秒重写贵得多。返回问题描述数组，空数组即通过。
  */
 const PLAN_FORBIDDEN_PATHS = ['/api/domains', '/api/admin', '/api/partner', '/api/migrate', '/api/payments'];
+// 方案里说「不含 POST /snapshots」「不碰 /api/admin」是好话，不能当命中。带这些词的行跳过。
+const PLAN_NEGATION = /(不含|不许|不准|不拍|不调用|不发|不碰|不涉及|不用|不要|不再|不建议|禁止|严禁|删掉|已失效|不存在|不做)/;
+/** 只取「## 2. API 调用序列」到下一个 ## 之间的正文，真正会被 apply 照做的只有这一节。 */
+function planCallSection(text) {
+  const t = String(text || '');
+  const m = t.match(/(?:^|\n)##\s*2[\.、]?\s*API 调用序列[^\n]*\n/);
+  if (!m) return t;
+  const start = m.index + m[0].length;
+  const rest = t.slice(start);
+  const next = rest.search(/\n##\s*\d/);
+  return next === -1 ? rest : rest.slice(0, next);
+}
 function lintPlan(text) {
   const t = String(text || '');
   const problems = [];
-  // 1. 全站快照当前置步骤（大站 restore 必挂，且 changeset 才是安全网）
-  if (/POST\s+[^\n]*\/snapshots(?![^\n]*restore)/i.test(t)) {
+  const sec = planCallSection(t);
+  const lines = sec.split('\n');
+  const live = lines.filter((l) => !PLAN_NEGATION.test(l));
+  // 1. 全站快照当步骤（大站 restore 必挂，且 changeset 才是安全网）。只认调用行，不认注释。
+  if (live.some((l) => /\bPOST\b[^\n]*\/snapshots(?![^\n]*restore)/i.test(l))) {
     problems.push('方案把 POST /snapshots 写成了步骤，全站快照不许用，安全网是 changeset');
   }
   // 2. redirects 全量 PUT
-  if (/PUT\s+[^\n]*\/redirects/i.test(t)) problems.push('方案对 /redirects 用了 PUT，只准 PATCH');
-  // 3. 禁区路径
+  if (live.some((l) => /\bPUT\b[^\n]*\/redirects/i.test(l))) problems.push('方案对 /redirects 用了 PUT，只准 PATCH');
+  // 3. 禁区路径，只认调用行（带 HTTP 动词的）
   for (const p of PLAN_FORBIDDEN_PATHS) {
-    if (t.indexOf(p) !== -1) problems.push('方案出现禁区路径 ' + p);
+    if (live.some((l) => l.indexOf(p) !== -1 && /\b(GET|POST|PATCH|PUT|DELETE)\b/.test(l))) problems.push('方案出现禁区路径 ' + p);
   }
-  // 4. 响应字段硬断言。只查「预期响应」行，别的地方提字段名是允许的。
-  const lines = t.split('\n');
+  // 4. 响应字段硬断言。只查「预期响应」行。
   for (const line of lines) {
     if (!/预期响应/.test(line)) continue;
     if (/(===|字段(等于|为|应为|必须是)|\bok\s*[=:]\s*true|回读体里)/.test(line)) {
@@ -264,7 +278,7 @@ function lintPlan(text) {
       break;
     }
   }
-  // 5. 涉及文件清单
+  // 5. 涉及文件清单（全文找，可能写在第 2 节末尾或末尾 json）
   if (!/涉及文件/.test(t) && !/"files"\s*:/.test(t)) problems.push('方案没有列「涉及文件」清单，apply 无法和 changeset 比对');
   return problems;
 }
@@ -1473,6 +1487,7 @@ module.exports = {
   run,
   lintPlan,
   planFiles,
+  planCallSection,
   PLAN_FORBIDDEN_PATHS,
   buildPrompt,
   buildPreparePrompt,
