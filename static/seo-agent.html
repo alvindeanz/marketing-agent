@@ -258,8 +258,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .appr-item .t{flex:1;min-width:0;font-size:12.5px;color:#cbd5e1;word-break:break-word}
 
 /* Swimlanes */
-.lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start}
-@media(max-width:1400px){.lanes{grid-template-columns:repeat(2,1fr)}}
+.lanes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start}
 .lane.wait_me{border-color:#78350f}.lane.wait_me .lane-head{background:#1a1408}
 .st{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px;margin-top:5px;color:#94a3b8}
 .st .st-tag{font-weight:700;padding:1px 8px;border-radius:5px;font-size:11px}
@@ -512,6 +511,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
               <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
+              <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="Agency 与 Client 泳道常年为空，隐藏后 Agent 泳道撑满宽度">隐藏空泳道</button>
               <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
                 <option value="0">全部时间</option>
                 <option value="7">近 7 天</option>
@@ -520,6 +520,8 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
               </select>
             </span>
             <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
+            <button class="btn ghost" id="rvBtn" onclick="reviewTasks(this,'all')" title="Fable 按第一性原理判：待判的该不该做，待放行的方案该不该落地">判定</button>
+            <button class="btn" id="rvApplyBtn" onclick="applyVerdicts(this,'all')" style="display:none" title="按每张卡上的判决处理：做的排队，放行的落地，砍的关掉，延后的挂起，并入的合并">全部按推荐</button>
             <!-- 执行按钮就放在勾选框旁边，不用切到 Jobs 页找（Jobs 页那颗保留） -->
             <button class="btn green" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
           </div>
@@ -3067,32 +3069,47 @@ function toggleHideEmptyLanes(){
 }
 window.toggleHideEmptyLanes=toggleHideEmptyLanes;
 
-/* 四列，按「谁在等谁」分：等我 / 机器在跑 / 等外部 / 结束。human_state 由服务端派生。
-   等我列混排按优先级；结束列默认藏，「显示已结束」打开，受时间档约束。 */
-const HSTATES=[
-  {key:'wait_me',name:'等我'},
-  {key:'running',name:'机器在跑'},
-  {key:'wait_ext',name:'等外部'},
-  {key:'closed',name:'结束'},
-];
+/* 泳道按负责方（Agency / Client / Agent），泳道内不再按 status 分组：
+   每张卡自己带一行状态（等我 / 在跑 / 等外部 / 结束），排序先等我、再在跑、再等外部，同档按优先级。
+   结束的默认藏，「显示已结束」打开，受时间档约束。空泳道按开关隐藏。 */
+const HS_ORDER={wait_me:0,running:1,wait_ext:2,closed:3};
+function hsOf(t){return t.human_state||(t.status==='done'?'closed':'wait_me')}
 function renderLanes(){
   const cur=currentSprint(tasksData);
   let laterTotal=0,doneHiddenTotal=0;
-  const html=HSTATES.map(col=>{
-    const all=tasksData.filter(t=>(t.human_state||'wait_me')===col.key);
-    const afterDone=all.filter(taskVisible);
-    const vis=afterDone.filter(t=>withinScope(t,cur)).sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
+  const laneHtml=[];const hiddenNames=[];
+  LANES.forEach(lane=>{
+    const rows=tasksData.filter(t=>t.owner_type===lane.key);
+    const afterDone=rows.filter(taskVisible);
+    const vis=afterDone.filter(t=>withinScope(t,cur))
+      .sort((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id));
     const later=afterDone.length-vis.length;
-    laterTotal+=later;doneHiddenTotal+=all.length-afterDone.length;
-    let body=vis.map(t=>taskCard(t,col.key)).join('');
-    if(!body)body='<div class="lane-empty">'+(col.key==='closed'&&!showDone?'已藏起，「显示」里打开。':(later?'本期没有，都排在后面的 sprint。':'空。'))+'</div>';
-    if(later)body+='<div class="lane-more" onclick="widenSprintScope()" title="点击放宽到下一档">另有 '+later+' 个在后续排期，点击查看</div>';
-    return '<div class="lane '+col.key+'"><div class="lane-head"><span class="lane-name">'+col.name+
-      ' <span class="lane-count">'+vis.length+'</span></span>'+laneTools(col.key,vis)+'</div><div class="lane-body">'+body+'</div></div>';
+    const doneHidden=rows.length-afterDone.length;
+    laterTotal+=later;doneHiddenTotal+=doneHidden;
+    let body=vis.map(t=>taskCard(t,lane.key)).join('');
+    if(!body)body='<div class="lane-empty">'+(later?'本期没有任务，都排在后面的 sprint。':(doneHidden?'只有已结束任务，已按当前筛选隐藏。':'暂无任务。'))+'</div>';
+    if(later)body+='<div class="lane-more" onclick="widenSprintScope()" title="点击放宽到下一档">另有 '+later+' 个任务在后续排期，点击查看</div>';
+    const waitMe=vis.filter(t=>hsOf(t)==='wait_me').length;
+    const html='<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
+      '<span class="lane-count">'+vis.length+(waitMe?' <span style="color:#fbbf24">等我 '+waitMe+'</span>':'')+
+      (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' 已结束)</span>':'')+
+      (later?' <span class="lane-hidden">(+'+later+' 后续)</span>':'')+
+      '</span></div><div class="lane-body">'+body+'</div></div>';
+    const empty=!vis.length&&!later;
+    if(hideEmptyLanes&&empty)hiddenNames.push(lane.name);
+    else laneHtml.push(html);
   });
   const lanesEl=document.getElementById('lanes');
-  lanesEl.style.gridTemplateColumns='';
-  lanesEl.innerHTML=html.join('');
+  if(!laneHtml.length){
+    hiddenNames.length=0;
+    lanesEl.style.gridTemplateColumns='';
+    lanesEl.innerHTML=LANES.map(l=>'<div class="lane"><div class="lane-head"><span class="lane-name">'+l.name+'</span><span class="lane-count">0</span></div><div class="lane-body"><div class="lane-empty">暂无任务。</div></div></div>').join('');
+  }else{
+    lanesEl.style.gridTemplateColumns=window.innerWidth>900?('repeat('+laneHtml.length+',1fr)'):'';
+    lanesEl.innerHTML=laneHtml.join('');
+  }
+  const et=document.getElementById('emptyLaneToggle');
+  if(et){et.className=hideEmptyLanes?'btn':'btn ghost';et.textContent=hideEmptyLanes&&hiddenNames.length?('隐藏空泳道（'+hiddenNames.length+'）'):'隐藏空泳道'}
   const tg=document.getElementById('doneToggle');
   if(tg)tg.className=showDone?'btn':'btn ghost';
   ['current','near','all'].forEach(k=>{
@@ -3108,23 +3125,9 @@ function renderLanes(){
     hint.textContent=bits.join('，');
   }
   renderPickHint();
+  renderReviewButtons();
   renderQueueStrip();
   hydrateThreads();
-}
-/* 列头工具：只有「等我」列有。未判的判一批，有判决的按推荐一键处理。 */
-function laneTools(key,vis){
-  if(key!=='wait_me')return '';
-  const pending=vis.some(t=>t.review_pending);
-  const cands=rvCandidates('all');
-  const app=rvApplicable('all');
-  let h='<span class="lane-tools">';
-  h+='<button class="btn tiny ghost" '+((pending||!cands.length)?'disabled':'')+' onclick="reviewTasks(this,\'all\')" title="Fable 按第一性原理判这批该不该做 / 方案该不该落地">'+
-    (pending?'判定中':(cands.length?('判定 '+Math.min(cands.length,20)):'判定'))+'</button>';
-  if(app.length){
-    const c=rvTally(app);
-    h+='<button class="btn tiny" onclick="applyVerdicts(this,\'all\')" title="按每张卡上的判决处理：做的排队，放行的落地，砍的关掉，延后的挂起，并入的合并">全部按推荐（做 '+c.do+' 砍 '+c.drop+' 延 '+c.later+' 并 '+c.merge+'）</button>';
-  }
-  return h+'</span>';
 }
 
 /* 卡片两行：第一行状态（在等什么 / 在跑什么 / 怎么结束的 + 方案 vN），第二行 Fable 判决。
@@ -3362,7 +3365,20 @@ function rvTally(list){
   list.forEach(t=>{c[t.review_effective]=(c[t.review_effective]||0)+1});
   return c;
 }
-function renderReviewButtons(){}
+function renderReviewButtons(){
+  const rb=document.getElementById('rvBtn');
+  const ab=document.getElementById('rvApplyBtn');
+  if(!rb||!ab)return;
+  const pending=(tasksData||[]).some(t=>t.review_pending);
+  const cands=rvCandidates('all');
+  rb.disabled=pending||!cands.length;
+  rb.textContent=pending?'判定中':(cands.length?('判定（'+Math.min(cands.length,20)+'）'):'判定');
+  const app=rvApplicable('all');
+  if(!app.length){ab.style.display='none';return}
+  const c=rvTally(app);
+  ab.style.display='';
+  ab.textContent='全部按推荐（做 '+c.do+' 砍 '+c.drop+' 延 '+c.later+' 并 '+c.merge+'）';
+}
 async function reviewTasks(btn,mode){
   mode=mode||'lane';
   const cands=rvCandidates(mode);

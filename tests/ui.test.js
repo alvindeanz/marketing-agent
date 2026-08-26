@@ -57,11 +57,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'tas
 vm.runInContext('tasksData=' + JSON.stringify(fixture.tasks) + ';curId=16;curView="tasks";token="x";sprintScope="all";', ctx);
 
 console.log('task view');
-t('renderLanes renders every task into the four columns', () => {
+t('renderLanes renders every task into the owner lanes with a state line', () => {
   vm.runInContext('renderLanes()', ctx);
   const out = el('lanes').innerHTML;
   assert.ok(out.length > 1000, 'lanes html too short');
-  ['等我', '机器在跑', '等外部', '结束'].forEach((n) => assert.ok(out.indexOf(n) > -1, 'column ' + n + ' missing'));
+  ['Agent 机器'].forEach((n) => assert.ok(out.indexOf(n) > -1, 'lane ' + n + ' missing'));
+  assert.ok(out.indexOf('等我') > -1, 'state line missing');
   fixture.tasks.filter((x) => x.human_state !== 'closed').forEach((x) => {
     assert.ok(out.indexOf('#' + x.id + '</span>') > -1, 'task #' + x.id + ' missing from lanes');
   });
