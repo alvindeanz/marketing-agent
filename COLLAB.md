@@ -21,6 +21,18 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (o) 跨认领登记：任务判定（fable 闸 A）与只读 op 改 analysis 模式
+
+- 干了什么：Alvin 定的：任务跑 execute 之前先由 fable 按第一性原理判「该不该做」（不做会怎样、ROI 量级、是不是 agency 的活、前提是否还成立、顺序），判决 concise 一行显示在任务卡上给人审，审完按推荐批量执行。落地四层：
+  1. `seo-worker/specs/review_principles.md`：判断标准全文，五问加四档判决（do / later / merge / drop），改原则只改这一份。
+  2. worker：新 job 类型 `review_plan`（`runners/review_plan.js`，模型 `cfg.reviewModel` 默认 fable，只读工具），一批最多 20 个任务一次判；上下文 = 原则全文 + `buildPlanningBriefing` 的客户简报（profile、facts、内容注册表、GSC/GA4/Semrush）+ 本批任务全文。三层防线同 ruling。归一化：批外任务丢弃、非法值 / 无 evidence / merge 目标无效一律降 later 并写明、漏判补 later。唯一写操作 `POST /tasks/review_result`，不改任何任务状态。`runner_host.KNOWN_TYPES` 与 `ensure_job_types` 同步登记。
+  3. seo-api.php：`ensure_review_schema()` 在 seo_tasks 惰性加 9 列（review_verdict/reason/evidence/merge_into/adjust/job_id、reviewed_at、review_override/override_note）；`attach_review_state` 给 GET /tasks 挂 review_effective（人推翻优先）、review_stale（判决后任务或 facts 改过）、review_pending。写判决与推翻的 UPDATE 显式 `updated_at=updated_at`，否则判决一落地就算过期。新路由：`POST /tasks/review`（admin，排 job，同客户在飞 409）、`POST /tasks/review_result`（worker）、`POST /tasks/{id}/review_override`（admin，理由必填，不支持改成 merge）、`POST /tasks/apply_verdicts`（admin：do 置 approved 且 agent 任务走 queue_task_jobs 排 execute_task，drop 置 done 备注 [dropped]，later 置 blocked 备注 [later]，merge 置 done 备注 [merged] 并往目标 detail 追加来源；过期判决与非 proposed/approved/blocked 一律跳过并回 skipped）。
+  4. 前端：工具栏重排（显示已完成 / 隐藏空泳道 / 时间档折进「显示」），新增「快速判定（N）」与「按推荐执行（做 x 砍 y 延 z 并 w）」，任务卡标题下一行判决（四档四色，drop 红 later 黄 merge 紫 do 绿，过期半透明，判定中蓝字），「改判」走 prompt 输理由，理由同时投 `/tasks/{id}/feedback` 走 feedback job 变 fact，这是唯一学习回路。
+  另：`gsc-audit` / `ga4-audit` 在能力清单改成新等级 `agent_readonly`（capabilities.AUTONOMY_LEVELS 加一档），execute_task 对它走 analysis 模式一步出结果，不再走 prepare/apply 两段。起因是 Louvresky #84 花 12 分钟写了一份「打算怎么读 GSC」的方案，且 apply 阶段只有 curl 做不了 JWT。
+  测试：新增 `tests/review.test.js` 20 条；五套 24/29/90/88/20 全过；runner 与 runner_host `node --check` 加 require 加载过；内联 JS node --check 过；php -l 在 250 过。
+- 坑：判决写入用 `rowCount()` 计数，MariaDB 对值未变的 UPDATE 回 0，这里因 reviewed_at=NOW() 每次必变所以没事，别把这句 SQL 改成不带时间戳。前端「改判」用了原生 prompt，够用先上，要换成弹窗随时可以。
+- 下一步/认领：**已部署 api + worker**（Alvin 指示推进，2026-08-26 Aira 执行）。判决层评审（闸 B，prepare 出方案后再评对错）未做，等闸 A 跑几批看效果再定。
+
 ### 2026-08-26 AIRA (n) 跨认领登记：队列取单改客户轮转，不再纯 FIFO
 
 - 干了什么：Alvin 看到 Louvresky 一口气批 7 个任务，Kuddles 的 1 个只能排在后面吃灰，问是否该按客户拆任务编号。结论：编号不拆（全局自增 id 只负责唯一与引用，按客户分号只换来心理整齐，代价是复合键与跨客户引用歧义），改的是取单顺序。seo-api.php 新增公共件 jobs_queue_order_sql()：按客户分区用 ROW_NUMBER 编内部序号，正在跑着 job 的客户再让一位，全局按 (rn, id) 出；POST /jobs/claim、jobs_queue_positions、GET /jobs/queue 三处共用，看板显示的「排队中第 N 位」与 worker 下一次真实取单一致。同一客户内部仍严格按提交顺序，worker 仍单飞（写操作不并发的前提不动），listener.js 零改动。测试：php -l 在 250 过；node tests 四套 24/29/90/88 全过；排序 SQL 在 docker mariadb:10.3（与线上同版本）上实测，场景「16 号 1 跑 3 排、47 号后排 1、15 号后排 2」出单顺序为 47、15、16、15、16、16，符合预期。

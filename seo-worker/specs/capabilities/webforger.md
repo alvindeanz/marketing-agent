@@ -29,8 +29,8 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | page-delete | human_only | 删除页面 |
 | theme-global | human_only | 全站主题色、字体、圆角 |
 | commerce-bulk | human_only | 电商目录批量改价改库存 |
-| ga4-audit | agent_apply | 只读审计 GA4 事件与转化配置、数据质量，产出核查报告与修复清单 |
-| gsc-audit | agent_apply | 只读审计 GSC 索引覆盖、手动操作、安全问题、站点地图状态 |
+| ga4-audit | agent_readonly | 只读审计 GA4 事件与转化配置、数据质量，产出核查报告与修复清单，一步出结果不走 prepare/apply |
+| gsc-audit | agent_readonly | 只读审计 GSC 索引覆盖、手动操作、安全问题、站点地图状态，一步出结果不走 prepare/apply |
 | ga4-config-update | agent_prepare | GA4 配置变更：key event 标记、事件建改、数据流设置 |
 | gtm-edit | agent_prepare | GTM 容器变更：标签、触发器、变量，发布留人放行 |
 | gbp-update | agent_prepare | GBP 资料修改、类目、发帖、问答维护 |
@@ -226,11 +226,11 @@ agent 不执行这些，只能在方案或任务备注里写清楚要人做什�
 
 WebForger 客户的 GA4、GSC、GTM、GBP 由 agency 账号托管，agent 已获授权。凭据指路：worker 的 `secrets/ga4_sa.json` 是 service account key，对客户的 GA4 属性和 GSC 站点有读取权限（pull_data 就在用它），GA4 属性 id 和 GSC 站点 URL 在客户 profile 与 facts 里取。凭据内容任何情况下不写进产出文档、日志或任务备注。
 
-## ga4-audit（agent_apply）
+## ga4-audit（agent_readonly）
 
 只读操作：GA4 Data API 跑报告、Admin API 读事件与 key event 配置。工作区 `data/ga4/` 下有 pull_data 的缓存快照可先读。产出是核查报告加修复清单，修复清单里的每一项按本清单的分级标注归属（配置改动走 ga4-config-update 或 gtm-edit 的 prepare 流程）。
 
-## gsc-audit（agent_apply）
+## gsc-audit（agent_readonly）
 
 只读操作：Search Console API 读索引覆盖、sitemap 状态、安全与手动操作。工作区 `data/gsc/` 有缓存快照。
 

@@ -30,6 +30,7 @@ const KNOWN_TYPES = [
   'ruling',
   'backfill_metrics',
   'chat',
+  'review_plan',
 ];
 
 function send(msg) {

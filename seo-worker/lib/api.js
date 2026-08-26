@@ -166,6 +166,15 @@ class Api {
     return this.req('GET', '/snapshots' + (q.length ? '?' + q.join('&') : ''));
   }
 
+  /**
+   * POST /tasks/review_result body { client_id, job_id, summary, verdicts: [...] }
+   * -> { ok, written }. review_plan 的唯一写操作：把 fable 的判决落到任务行上，
+   * 不改任何任务状态。状态改动只发生在人点「按推荐执行」之后的 admin 端点。
+   */
+  async postReviewResult(body) {
+    return this.req('POST', '/tasks/review_result', body);
+  }
+
   /** GET /snapshots/{id} -> one snapshot including its full data */
   async getSnapshot(id) {
     return this.req('GET', '/snapshots/' + encodeURIComponent(id));

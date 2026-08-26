@@ -275,6 +275,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .tcard-title{flex:1;font-size:14.5px;color:#e2e8f0;line-height:1.45;min-width:0;word-break:break-word}
 .tcard-detail{font-size:13px;color:#8b98ab;line-height:1.55;margin-top:5px;white-space:pre-wrap}
 .tcard-meta{display:flex;align-items:center;gap:6px;margin-top:7px;flex-wrap:wrap}
+/* 判定行：fable 的一句判决，放在标题下、说明上，人一眼先看到它 */
+.rv{margin-top:6px;font-size:12.5px;line-height:1.5;display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+.rv .rv-tag{font-weight:700;padding:1px 8px;border-radius:5px;font-size:11px;white-space:nowrap}
+.rv.do{color:#8b98ab}.rv.do .rv-tag{background:#052e16;color:#22c55e}
+.rv.later{color:#fbbf24}.rv.later .rv-tag{background:#422006;color:#fbbf24}
+.rv.merge{color:#c084fc}.rv.merge .rv-tag{background:#3b1f6e;color:#c084fc}
+.rv.drop{color:#f87171}.rv.drop .rv-tag{background:#450a0a;color:#f87171}
+.rv.stale{opacity:.5}
+.rv .rv-ev{color:#64748b;font-size:12px}
+.rv .rv-ov{color:#60a5fa;font-size:12px}
+.rv .rv-adj{color:#fbbf24;font-size:12px}
+.rv-pending{margin-top:6px;font-size:12px;color:#60a5fa}
+.tb-more{display:none;gap:8px;align-items:center;flex-wrap:wrap}.tb-more.show{display:flex}
 .tcard-meta a{color:#60a5fa;font-size:11px;text-decoration:none;word-break:break-all}
 .tcard-meta a:hover{text-decoration:underline}
 .tcard input[type=checkbox]{margin-top:3px;width:14px;height:14px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0}
@@ -492,20 +505,27 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
       <div class="sec">
         <div class="sec-head">
           <div class="sec-title">任务泳道</div>
+          <!-- 工具栏分三段：范围（本期/30天/全部）、显示偏好（折进「显示」里）、动作。
+               动作三颗：新增、快速判定、执行。执行按钮在有判决时变成「按推荐执行」。 -->
           <div class="tb-group">
             <span class="plan-meta" id="taskFilterHint"></span>
             <button class="btn" id="sc_current" onclick="setSprintScope('current')">本期</button>
             <button class="btn ghost" id="sc_near" onclick="setSprintScope('near')">30 天</button>
             <button class="btn ghost" id="sc_all" onclick="setSprintScope('all')">全部</button>
-            <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已完成</button>
-            <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="Agency 与 Client 泳道常年为空，隐藏后 Agent 泳道撑满宽度">隐藏空泳道</button>
-            <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
-              <option value="0">全部时间</option>
-              <option value="7">近 7 天</option>
-              <option value="30">近 30 天</option>
-              <option value="90">近 90 天</option>
-            </select>
+            <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
+            <span class="tb-more" id="tbMore">
+              <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已完成</button>
+              <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="Agency 与 Client 泳道常年为空，隐藏后 Agent 泳道撑满宽度">隐藏空泳道</button>
+              <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
+                <option value="0">全部时间</option>
+                <option value="7">近 7 天</option>
+                <option value="30">近 30 天</option>
+                <option value="90">近 90 天</option>
+              </select>
+            </span>
             <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
+            <button class="btn ghost" id="rvBtn" onclick="reviewTasks(this)" title="Fable 按第一性原理判这批任务该不该做，判决显示在每张卡上">快速判定</button>
+            <button class="btn" id="rvApplyBtn" onclick="applyVerdicts(this)" style="display:none" title="按每张卡上的有效判决批量处理：做的排队，砍的关掉，延后的挂起，并入的合并">按推荐执行</button>
             <!-- 执行按钮就放在勾选框旁边，不用切到 Jobs 页找（Jobs 页那颗保留） -->
             <button class="btn green" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
           </div>
@@ -714,7 +734,7 @@ const PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush
 const TASK_STATUSES=['proposed','approved','in_progress','review','blocked','done'];
 const OWNERS=['agency','client','agent'];
 const LANES=[{key:'agency',name:'Agency 团队'},{key:'client',name:'Client 客户'},{key:'agent',name:'Agent 机器'}];
-const JOB_LABEL={discover:'摸底',pull_data:'拉数据',backfill_metrics:'回填历史数据',plan:'规划方案',execute_task:'执行任务',apply_task:'落地改动',report:'生成报告',feedback:'解析反馈',triage:'Fable 巡检'};
+const JOB_LABEL={discover:'摸底',pull_data:'拉数据',backfill_metrics:'回填历史数据',plan:'规划方案',execute_task:'执行任务',apply_task:'落地改动',report:'生成报告',feedback:'解析反馈',triage:'Fable 巡检',review_plan:'Fable 判定'};
 const FB_SOURCE_LABEL={manual:'团队判断',client:'客户原话'};
 const FB_STATUS={pending:{cls:'queued',name:'待解析'},parsed:{cls:'done',name:'已解析'},failed:{cls:'failed',name:'解析失败'}};
 const FB_MAX_IMAGES=5;
@@ -3116,6 +3136,7 @@ function renderLanes(){
   }
   renderRelease();
   renderPickHint();
+  renderReviewButtons();
   /* 任务表变了，队列条里的标题也跟着重解析一次（新任务刚排上时标题才对得上） */
   renderQueueStrip();
   hydrateFeedback();
@@ -3139,6 +3160,7 @@ function taskCard(t,lane){
   acts+=dlAddBtn(t,'lane');
   return '<div class="tcard">'+
     '<div class="tcard-top">'+cb+'<div class="tcard-title"><span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div></div>'+
+    rvLine(t)+
     detail+
     '<div class="tcard-meta">'+priBadge+qsJobBadge(t)+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+
@@ -3146,6 +3168,128 @@ function taskCard(t,lane){
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
     fileDeliverables(t)+
     (fbOpen[t.id]?feedbackBox(t):'')+'</div>';
+}
+
+/* ---- 任务判定 ----
+   fable 按 specs/review_principles.md 给每个任务一句判决（do / later / merge / drop），
+   服务端挂在任务行上：review_verdict 是 fable 的，review_override 是人推翻后的，
+   review_effective 取推翻优先。review_stale 表示判决之后任务或 facts 改过，只显示不执行。
+   这里只渲染和调端点，判断标准一行都不在前端。 */
+const RV_LABEL={do:'做',later:'延后',merge:'并入',drop:'砍掉'};
+const RV_ORDER=['do','later','merge','drop'];
+function rvLine(t){
+  if(t.review_pending)return '<div class="rv-pending">判定中，Fable 正在读这批任务，通常 3 到 5 分钟</div>';
+  const v=t.review_effective;
+  if(!v)return '';
+  const overridden=!!t.review_override;
+  const reason=overridden?t.review_override_note:t.review_reason;
+  let h='<div class="rv '+esc(v)+(t.review_stale?' stale':'')+'">'+
+    '<span class="rv-tag">'+esc(RV_LABEL[v]||v)+(v==='merge'&&t.review_merge_into?(' #'+t.review_merge_into):'')+'</span>'+
+    '<span>'+esc(reason||'')+'</span>';
+  if(!overridden&&t.review_evidence)h+='<span class="rv-ev">依据: '+esc(t.review_evidence)+'</span>';
+  if(!overridden&&v==='do'&&t.review_adjust)h+='<span class="rv-adj">前提修正: '+esc(t.review_adjust)+'</span>';
+  if(overridden)h+='<span class="rv-ov">人工改判，Fable 原判 '+esc(RV_LABEL[t.review_verdict]||t.review_verdict)+'</span>';
+  if(t.review_stale)h+='<span class="rv-ev">判决已过期（任务或 facts 改过），重判后才会执行</span>';
+  const editable=['proposed','approved','blocked'].indexOf(t.status)>=0;
+  if(editable){
+    h+='<button class="btn tiny ghost" onclick="rvOverride('+t.id+')">改判</button>';
+    if(overridden)h+='<button class="btn tiny ghost" onclick="rvClear('+t.id+')">撤销改判</button>';
+  }
+  return h+'</div>';
+}
+/* 判定的候选：当前视图里能看到的、还没开工的、不在队列里的任务。一批最多 20 个。 */
+function rvVisibleTasks(){
+  const cur=currentSprint(tasksData);
+  return (tasksData||[]).filter(t=>taskVisible(t)&&withinScope(t,cur));
+}
+function rvCandidates(){
+  return rvVisibleTasks().filter(t=>['proposed','approved','blocked'].indexOf(t.status)>=0&&!qsTaskBusy(t)&&!t.review_pending)
+    .sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
+}
+function rvApplicable(){
+  return rvVisibleTasks().filter(t=>t.review_effective&&!t.review_stale&&!t.review_pending&&
+    ['proposed','approved','blocked'].indexOf(t.status)>=0&&!qsTaskBusy(t));
+}
+function rvTally(list){
+  const c={do:0,later:0,merge:0,drop:0};
+  list.forEach(t=>{c[t.review_effective]=(c[t.review_effective]||0)+1});
+  return c;
+}
+function renderReviewButtons(){
+  const rb=document.getElementById('rvBtn');
+  const ab=document.getElementById('rvApplyBtn');
+  if(!rb||!ab)return;
+  const pending=(tasksData||[]).some(t=>t.review_pending);
+  const cands=rvCandidates();
+  rb.disabled=pending||!cands.length;
+  rb.textContent=pending?'判定中':(cands.length?('快速判定（'+Math.min(cands.length,20)+'）'):'快速判定');
+  const app=rvApplicable();
+  if(!app.length){ab.style.display='none';return}
+  const c=rvTally(app);
+  ab.style.display='';
+  ab.textContent='按推荐执行（做 '+c.do+' 砍 '+c.drop+' 延 '+c.later+' 并 '+c.merge+'）';
+}
+async function reviewTasks(btn){
+  const cands=rvCandidates();
+  if(!cands.length){toast('当前视图没有可判定的任务',true);return}
+  const batch=cands.slice(0,20);
+  const cut=cands.length-batch.length;
+  if(!confirm('让 Fable 判 '+batch.length+' 个任务该不该做？约 3 到 5 分钟，判决会显示在每张卡上，不会自动执行。'+(cut?('\n另有 '+cut+' 个按优先级排在 20 个之后，这轮不判。'):'')))return;
+  btn.disabled=true;
+  const d=await api('/tasks/review','POST',{client_id:curId,task_ids:batch.map(t=>t.id)});
+  setTimeout(()=>{btn.disabled=false},1200);
+  if(!d)return;
+  if(d._status===409){toast('已有一轮判定在跑（job #'+(d.job_id||'?')+'），等它出结果。',true);return}
+  if(fail(d,'判定排队失败'))return;
+  toast('已排队判定 '+d.count+' 个任务，job #'+d.job_id);
+  loadTasksAndQueue();
+}
+async function rvOverride(id){
+  const t=(tasksData||[]).find(x=>x.id===id);
+  if(!t)return;
+  const cur=t.review_effective;
+  const pick=prompt('改判 #'+id+'（当前 '+(RV_LABEL[cur]||cur)+'）。输入新判决：do / later / drop',cur==='do'?'drop':'do');
+  if(pick==null)return;
+  const v=String(pick).trim().toLowerCase();
+  if(['do','later','drop'].indexOf(v)<0){toast('只能改成 do、later 或 drop',true);return}
+  const note=prompt('为什么推翻 Fable 的判决？一句话，必填。会作为反馈进入客户 facts，下次判定它会带着这条。');
+  if(note==null)return;
+  if(!String(note).trim()){toast('改判必须写理由',true);return}
+  const d=await api('/tasks/'+id+'/review_override','POST',{verdict:v,note:String(note).trim()});
+  if(fail(d,'改判失败'))return;
+  /* 理由走既有的反馈通道变 fact，判定原则里的学习回路就这一条 */
+  const fb=await api('/tasks/'+id+'/feedback','POST',{source:'manual',text:'判定改判：Fable 判 '+(RV_LABEL[t.review_verdict]||t.review_verdict)+'（'+(t.review_reason||'')+'），人改为 '+(RV_LABEL[v]||v)+'。理由：'+String(note).trim()});
+  if(fb&&fb._status>=400)toast('改判已记，但反馈入库失败：'+(fb.error||''),true);
+  loadTasks();
+}
+async function rvClear(id){
+  const d=await api('/tasks/'+id+'/review_override','POST',{clear:true});
+  if(fail(d,'撤销失败'))return;
+  loadTasks();
+}
+async function applyVerdicts(btn){
+  const app=rvApplicable();
+  if(!app.length){toast('没有可执行的判决',true);return}
+  const c=rvTally(app);
+  const lines=['按判决处理 '+app.length+' 个任务：','做 '+c.do+' 个（agent 任务排队执行，其余置 approved）','砍掉 '+c.drop+' 个（置 done，备注原因）','延后 '+c.later+' 个（置 blocked，备注等什么）','并入 '+c.merge+' 个（置 done，目标任务说明追加来源）','','执行仍只到方案阶段，线上改动照旧要人放行。'];
+  if(!confirm(lines.join('\n')))return;
+  btn.disabled=true;
+  const d=await api('/tasks/apply_verdicts','POST',{client_id:curId,task_ids:app.map(t=>t.id)});
+  setTimeout(()=>{btn.disabled=false},1200);
+  if(!d)return;
+  if(fail(d,'执行失败'))return;
+  const dn=d.done||{};
+  const sk=(d.skipped||[]).length;
+  toast('做 '+(dn.do||0)+' 砍 '+(dn.drop||0)+' 延 '+(dn.later||0)+' 并 '+(dn.merge||0)+'，排队 '+((d.job_ids||[]).length)+' 个 job'+(sk?('，跳过 '+sk+' 个'):''));
+  loadTasksAndQueue();loadClients(true);
+}
+function toggleTbMore(){
+  const el=document.getElementById('tbMore');
+  const b=document.getElementById('tbMoreBtn');
+  if(!el)return;
+  const on=!el.classList.contains('show');
+  el.classList.toggle('show',on);
+  if(b)b.className=on?'btn':'btn ghost';
 }
 
 /* ---- 交付文件 ---- */

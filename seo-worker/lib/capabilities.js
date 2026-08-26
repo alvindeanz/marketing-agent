@@ -13,7 +13,10 @@ const DIR = path.join(__dirname, '..', 'specs', 'capabilities');
 const START = '<!-- PLANNING_VIEW_START -->';
 const END = '<!-- PLANNING_VIEW_END -->';
 
-const AUTONOMY_LEVELS = ['agent_apply', 'agent_prepare', 'human_only'];
+// agent_readonly: the agent may run it, but it is a read, so execute_task takes
+// it through analysis mode in one pass (no change plan, no apply stage). Added
+// 2026-08-26 after a gsc-audit task spent 12 minutes writing a plan for a read.
+const AUTONOMY_LEVELS = ['agent_apply', 'agent_prepare', 'agent_readonly', 'human_only'];
 
 function slugPlatform(platform) {
   return String(platform || '')

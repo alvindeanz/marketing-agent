@@ -257,7 +257,7 @@ function ensure_job_types(){
     $done=true;
     /* backfill_metrics 加在这里的同时必须加进 seo-worker/runner_host.js 的
        KNOWN_TYPES，两边漏一边 worker 领到活直接崩。2026-08 apply_task 就是这么炸的。 */
-    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics','chat'];
+    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics','chat','review_plan'];
     $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='type'");
     $q->execute();
     $col=$q->fetch();
@@ -430,6 +430,91 @@ function ensure_inbox_schema(){
     if(!$missing)return;
     $list=implode(',',array_map(function($w){return "'".$w."'";},INBOX_KINDS));
     db()->exec("ALTER TABLE seo_inbox MODIFY kind ENUM($list) NOT NULL");
+}
+
+/* 任务判定（review_plan job）落在 seo_tasks 自己的列上，不开新表：判决是任务的属性，
+   一个任务同一时刻只有一条有效判决，重判就覆盖。惰性加列，同 ensure_metrics_schema
+   的 information_schema 套路（10.3 没有 ADD COLUMN IF NOT EXISTS）。
+   review_verdict / reason / evidence / merge_into / adjust  fable 的判决
+   review_job_id / reviewed_at                              哪次判的、什么时候判的
+   review_override / review_override_note                   人推翻后的值与理由，理由必填
+   状态改动不在这里：判决本身不动 status，人点「按推荐执行」才动。 */
+define('REVIEW_VERDICTS',['do','later','merge','drop']);
+function ensure_review_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    $cols=[
+        'review_verdict'=>"VARCHAR(8) DEFAULT NULL",
+        'review_reason'=>"VARCHAR(255) NOT NULL DEFAULT ''",
+        'review_evidence'=>"VARCHAR(255) NOT NULL DEFAULT ''",
+        'review_merge_into'=>"INT DEFAULT NULL",
+        'review_adjust'=>"VARCHAR(400) NOT NULL DEFAULT ''",
+        'review_job_id'=>"INT DEFAULT NULL",
+        'reviewed_at'=>"DATETIME DEFAULT NULL",
+        'review_override'=>"VARCHAR(8) DEFAULT NULL",
+        'review_override_note'=>"VARCHAR(400) NOT NULL DEFAULT ''",
+    ];
+    $in=implode(',',array_fill(0,count($cols),'?'));
+    $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_tasks' AND COLUMN_NAME IN ($in)");
+    $q->execute(array_keys($cols));
+    $have=[];
+    foreach($q->fetchAll() as $r)$have[$r['COLUMN_NAME']]=true;
+    $q->closeCursor();
+    $add=[];
+    foreach($cols as $name=>$def){if(!isset($have[$name]))$add[]="ADD COLUMN `$name` $def";}
+    if($add)db()->exec("ALTER TABLE seo_tasks ".implode(',',$add));
+    ensure_job_types();
+}
+
+/* 追加一行结果备注，不覆盖已有内容。收件箱动作里的 $appendNote 闭包是同一句 SQL，
+   这里抽成函数给判定执行用。 */
+function task_append_note($tid,$note){
+    $note=trim((string)$note);
+    if($note==='')return;
+    db()->prepare("UPDATE seo_tasks SET result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
+        ->execute([mb_substr($note,0,1000,'UTF-8'),(int)$tid]);
+}
+
+/* 给任务行挂判定状态，GET /tasks 用。
+   review_effective  人推翻的优先，其次 fable 的，都没有为 null
+   review_stale      判决之后任务被改过，或该客户的 facts 更新过，判决按过期显示，
+                     执行时也不认。写判决的 UPDATE 显式保住 updated_at 不动，
+                     否则判决一落地任务就「被改过」了。
+   review_pending    有 review_plan job 在飞且 payload 点名了这个任务，卡上显示「判定中」。 */
+function attach_review_state($tasks,$cid){
+    if(!$tasks)return $tasks;
+    $fq=db()->prepare("SELECT MAX(updated_at) AS m FROM seo_facts WHERE client_id=?");
+    $fq->execute([$cid]);
+    $fr=$fq->fetch();
+    $fq->closeCursor();
+    $factsAt=(string)(($fr&&$fr['m'])?$fr['m']:'');
+    $pending=[];
+    $jq=db()->prepare("SELECT payload FROM agent_jobs WHERE client_id=? AND type='review_plan' AND status IN('queued','running')");
+    $jq->execute([$cid]);
+    foreach($jq->fetchAll() as $r){
+        $p=jdec($r['payload']);
+        if(is_array($p)&&isset($p['task_ids'])&&is_array($p['task_ids'])){
+            foreach($p['task_ids'] as $x){$pending[(int)$x]=true;}
+        }
+    }
+    $jq->closeCursor();
+    foreach($tasks as &$t){
+        $v=isset($t['review_verdict'])?$t['review_verdict']:null;
+        $o=isset($t['review_override'])?$t['review_override']:null;
+        $eff=$o?:($v?:null);
+        $at=(string)($t['reviewed_at']??'');
+        $stale=false;
+        if($v&&$at!==''){
+            if(strcmp($at,(string)($t['updated_at']??''))<0)$stale=true;
+            if($factsAt!==''&&strcmp($at,$factsAt)<0)$stale=true;
+        }
+        $t['review_effective']=$eff;
+        $t['review_stale']=$stale;
+        $t['review_pending']=isset($pending[(int)$t['id']]);
+    }
+    unset($t);
+    return $tasks;
 }
 
 /* CHAT-PURE-START
@@ -2906,6 +2991,203 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
     res(200,['ok'=>true,'job_ids'=>$jids,'job_id'=>$jids[0],'count'=>count($jids),'skipped'=>$skipped]);
 }
 
+/* =========================================================
+   任务判定：fable 按 specs/review_principles.md 判一批任务该不该做
+   POST /tasks/review          admin   排一个 review_plan job，一批最多 20 个
+   POST /tasks/review_result   worker  判决落到任务行上，不改状态
+   POST /tasks/{id}/review_override  admin  人推翻，理由必填
+   POST /tasks/apply_verdicts  admin   按有效判决批量执行：do 排队，drop 关掉，
+                                       later 置 blocked，merge 并入目标
+   固定路径全在 /tasks/{id} 的正则之前不成问题：那些正则都是 (\d+)，review 匹配不上。
+   ========================================================= */
+
+// POST /tasks/review body { client_id, task_ids } -> { ok, job_id, count }
+if($m==='POST'&&$ROUTE==='/tasks/review'){
+    $u=auth_admin();
+    ensure_review_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $ids=[];
+    if(isset($i['task_ids'])&&is_array($i['task_ids'])){
+        foreach($i['task_ids'] as $x){$x=(int)$x;if($x)$ids[$x]=true;}
+        $ids=array_keys($ids);
+    }
+    if(!$ids)res(400,['error'=>'task_ids required']);
+    if(count($ids)>20)res(400,['error'=>'batch too large, max 20 tasks']);
+    $in=implode(',',array_fill(0,count($ids),'?'));
+    $chk=db()->prepare("SELECT id,status,client_id FROM seo_tasks WHERE id IN ($in)");
+    $chk->execute($ids);
+    $found=$chk->fetchAll();
+    if(count($found)!==count($ids))res(400,['error'=>'Some tasks do not exist']);
+    foreach($found as $t){
+        if((int)$t['client_id']!==$cid)res(400,['error'=>'Task '.$t['id'].' belongs to another client']);
+        /* 在跑的、待放行的、做完的没什么好判的，判定只看还没开工的。 */
+        if(!in_array($t['status'],['proposed','approved','blocked'],true))res(400,['error'=>'Task '.$t['id'].' is '.$t['status'].', only proposed/approved/blocked tasks can be reviewed']);
+    }
+    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='review_plan' AND status IN('queued','running') LIMIT 1");
+    $dup->execute([$cid]);
+    $d=$dup->fetch();
+    $dup->closeCursor();
+    if($d)res(409,['error'=>'A review is already queued or running for this client','job_id'=>(int)$d['id']]);
+    $payload=json_encode(['task_ids'=>$ids],JSON_UNESCAPED_UNICODE);
+    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'review_plan',?,'queued',?)")
+        ->execute([$cid,$payload,$u['username']]);
+    $jid=(int)db()->lastInsertId();
+    audit($u['username'],'seo_tasks_review',(string)$jid,['client_id'=>$cid,'task_ids'=>$ids]);
+    fire_wake($jid);
+    res(200,['ok'=>true,'job_id'=>$jid,'count'=>count($ids)]);
+}
+
+// POST /tasks/review_result body { client_id, job_id, summary, verdicts:[{task_id,verdict,reason,evidence,merge_into,adjust}] }
+// worker only. 写判决不动 status，也显式保住 updated_at（否则判决一落地任务就算「被改过」，
+// attach_review_state 会把它当过期）。重判覆盖旧判决，同时清掉人的旧推翻。
+if($m==='POST'&&$ROUTE==='/tasks/review_result'){
+    auth_worker();
+    ensure_review_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    $jid=(int)($i['job_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $rows=$i['verdicts']??null;
+    if(!is_array($rows)||!$rows)res(400,['error'=>'verdicts required']);
+    if(count($rows)>20)res(400,['error'=>'batch too large, max 20']);
+    $up=db()->prepare("UPDATE seo_tasks SET review_verdict=?,review_reason=?,review_evidence=?,review_merge_into=?,review_adjust=?,review_job_id=?,reviewed_at=NOW(),review_override=NULL,review_override_note='',updated_at=updated_at WHERE id=? AND client_id=?");
+    $written=0;$refused=[];
+    foreach($rows as $n=>$v){
+        if(!is_array($v)){$refused[]="row $n: not an object";continue;}
+        $tid=(int)($v['task_id']??0);
+        $verdict=(string)($v['verdict']??'');
+        if(!$tid||!in_array($verdict,REVIEW_VERDICTS,true)){$refused[]="row $n: bad task_id or verdict";continue;}
+        $merge=($verdict==='merge')?((int)($v['merge_into']??0)?:null):null;
+        if($verdict==='merge'&&!$merge){$refused[]="row $n: merge without merge_into";continue;}
+        $up->execute([
+            $verdict,
+            mb_substr(trim((string)($v['reason']??'')),0,255,'UTF-8'),
+            mb_substr(trim((string)($v['evidence']??'')),0,255,'UTF-8'),
+            $merge,
+            mb_substr(trim((string)($v['adjust']??'')),0,400,'UTF-8'),
+            $jid?:null,
+            $tid,$cid
+        ]);
+        if($up->rowCount()>0)$written++;else $refused[]="row $n: task $tid not found for client";
+    }
+    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
+    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused]);
+}
+
+// POST /tasks/{id}/review_override body { verdict, note } -> 人推翻 fable 的判决，理由必填。
+// 前端在这之后再往 /tasks/{id}/feedback 投一条备注，让理由走 feedback job 变成 fact，
+// 下次判定 fable 就带着它。这里只记推翻本身。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/review_override$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_review_schema();
+    $tid=(int)$mm[1];
+    $i=input();
+    $verdict=(string)($i['verdict']??'');
+    $note=trim((string)($i['note']??''));
+    $clear=!empty($i['clear']);
+    $tq=db()->prepare("SELECT id,client_id,review_verdict FROM seo_tasks WHERE id=?");
+    $tq->execute([$tid]);
+    $t=$tq->fetch();
+    if(!$t)res(404,['error'=>'Task not found']);
+    if(!$t['review_verdict'])res(400,['error'=>'Task has no review verdict to override']);
+    if($clear){
+        db()->prepare("UPDATE seo_tasks SET review_override=NULL,review_override_note='',updated_at=updated_at WHERE id=?")->execute([$tid]);
+        audit($u['username'],'seo_task_review_override_clear',(string)$tid,[]);
+        res(200,['ok'=>true]);
+    }
+    if(!in_array($verdict,REVIEW_VERDICTS,true))res(400,['error'=>'bad verdict']);
+    if($note==='')res(400,['error'=>'note required: say why you overrule the verdict']);
+    if($verdict==='merge')res(400,['error'=>'override to merge is not supported, edit the tasks by hand']);
+    db()->prepare("UPDATE seo_tasks SET review_override=?,review_override_note=?,updated_at=updated_at WHERE id=?")
+        ->execute([$verdict,mb_substr($note,0,400,'UTF-8'),$tid]);
+    audit($u['username'],'seo_task_review_override',(string)$tid,['from'=>$t['review_verdict'],'to'=>$verdict,'note'=>$note]);
+    res(200,['ok'=>true]);
+}
+
+// POST /tasks/apply_verdicts body { client_id, task_ids } -> 按有效判决批量执行。
+// 有效判决 = 人的推翻优先，其次 fable 的；过期的（判决后任务或 facts 改过）一律跳过，
+// 让人重判，不拿旧判决动新前提。
+//   do     proposed/blocked 先置 approved，再按一任务一 job 排 execute_task
+//   drop   置 done，备注 [dropped]
+//   later  置 blocked，备注 [later] 等什么
+//   merge  置 done，备注 [merged]，目标任务说明追加一行来源
+if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
+    $u=auth_admin();
+    ensure_review_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $ids=[];
+    if(isset($i['task_ids'])&&is_array($i['task_ids'])){
+        foreach($i['task_ids'] as $x){$x=(int)$x;if($x)$ids[$x]=true;}
+        $ids=array_keys($ids);
+    }
+    if(!$ids)res(400,['error'=>'task_ids required']);
+    if(count($ids)>50)res(400,['error'=>'batch too large, max 50 tasks']);
+    $in=implode(',',array_fill(0,count($ids),'?'));
+    $q=db()->prepare("SELECT * FROM seo_tasks WHERE id IN ($in) AND client_id=?");
+    $q->execute(array_merge($ids,[$cid]));
+    $tasks=attach_review_state($q->fetchAll(),$cid);
+    $byId=[];foreach($tasks as $t)$byId[(int)$t['id']]=$t;
+    $skipped=[];$doIds=[];$done=['do'=>0,'drop'=>0,'later'=>0,'merge'=>0];
+    $merges=[];
+    foreach($ids as $tid){
+        if(!isset($byId[$tid])){$skipped[]=['task_id'=>$tid,'why'=>'不存在或不属于该客户'];continue;}
+        $t=$byId[$tid];
+        $eff=$t['review_effective'];
+        if(!$eff){$skipped[]=['task_id'=>$tid,'why'=>'没有判决'];continue;}
+        if($t['review_stale']){$skipped[]=['task_id'=>$tid,'why'=>'判决已过期，先重判'];continue;}
+        if(!in_array($t['status'],['proposed','approved','blocked'],true)){$skipped[]=['task_id'=>$tid,'why'=>'状态是 '.$t['status'].'，不动'];continue;}
+        $why=(string)($t['review_override']?$t['review_override_note']:$t['review_reason']);
+        if($eff==='do'){
+            if($t['status']!=='approved'){
+                db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=?")->execute([$tid]);
+            }
+            /* 只有 agent 任务有 execute_task 可排；agency / client 的活「做」就是批准，人去干。 */
+            if($t['owner_type']==='agent')$doIds[]=$tid;
+            $done['do']++;
+            continue;
+        }
+        if($eff==='drop'){
+            db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[dropped] 判定不做：'.$why);
+            $done['drop']++;continue;
+        }
+        if($eff==='later'){
+            db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[later] 判定延后：'.$why);
+            $done['later']++;continue;
+        }
+        if($eff==='merge'){
+            $target=(int)$t['review_merge_into'];
+            if(!$target){$skipped[]=['task_id'=>$tid,'why'=>'merge 没有目标'];continue;}
+            $merges[]=[$tid,$target,$t['title'],$why];
+            continue;
+        }
+    }
+    /* 并入最后做：目标任务的 detail 一改 updated_at 就动，它自己的判决会显示为过期，
+       那是真实的（说明变了），但要等它在本批里该做的事先做完。 */
+    foreach($merges as $mg){
+        list($tid,$target,$title,$why)=$mg;
+        $tg=db()->prepare("SELECT id FROM seo_tasks WHERE id=? AND client_id=?");
+        $tg->execute([$target,$cid]);
+        if(!$tg->fetch()){$skipped[]=['task_id'=>$tid,'why'=>'并入目标 #'.$target.' 不存在'];continue;}
+        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
+        task_append_note($tid,'[merged] 并入 #'.$target.'：'.$why);
+        db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?) WHERE id=?")
+            ->execute(['（并入自 #'.$tid.' '.mb_substr((string)$title,0,120,'UTF-8').'）',$target]);
+        $done['merge']++;
+    }
+    $jids=[];$qskipped=[];
+    if($doIds){
+        list($jids,$qskipped)=queue_task_jobs($cid,'execute_task',$doIds,$u['username'],'seo_job_create');
+    }
+    audit($u['username'],'seo_tasks_apply_verdicts',(string)$cid,['ids'=>$ids,'done'=>$done,'job_ids'=>$jids,'skipped'=>$skipped,'queue_skipped'=>$qskipped]);
+    res(200,['ok'=>true,'done'=>$done,'job_ids'=>$jids,'skipped'=>$skipped,'queue_skipped'=>$qskipped]);
+}
+
 // POST /feedback_upload -> one screenshot, multipart form field "file".
 // Runs before the feedback row exists: the browser uploads on paste, gets a
 // name back, and only sends the names along when the note is submitted. A file
@@ -3080,9 +3362,10 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/reject$#',$ROUTE,$mm)){
 if($m==='GET'&&$ROUTE==='/tasks'){
     auth_admin();
     $cid=need_client();
+    ensure_review_schema();
     $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
     $s->execute([$cid]);
-    res(200,['tasks'=>attach_job_state(attach_deliverables($s->fetchAll()),$cid)]);
+    res(200,['tasks'=>attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid)]);
 }
 
 // POST /tasks

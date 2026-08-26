@@ -36,6 +36,9 @@ const DEFAULTS = {
   // 收件箱对话。人在工作台按客户跟它聊数据、聊博客规划，只读加提议，
   // 唯一的产物是任务草案，人点立项才落账。谈的是策略，所以给大模型。
   chatModel: 'opus',
+  // 任务判定：一批任务该不该做，按 specs/review_principles.md 判。一次判错就是
+  // 一个不该做的任务进队列烧 10 分钟，或一个该做的被砍，所以给大模型。
+  reviewModel: 'fable',
   // 月报叙事层。数字由数据层算好，模型只写解读，但读者是客户老板，
   // 一次写完无人答疑，所以给大模型。
   reportModel: 'opus',
@@ -123,6 +126,7 @@ function load() {
   cfg.triageModel = String(cfg.triageModel || DEFAULTS.triageModel);
   cfg.rulingModel = String(cfg.rulingModel || DEFAULTS.rulingModel);
   cfg.chatModel = String(cfg.chatModel || DEFAULTS.chatModel);
+  cfg.reviewModel = String(cfg.reviewModel || DEFAULTS.reviewModel);
   cfg.reportModel = String(cfg.reportModel || DEFAULTS.reportModel);
   cfg.reportSsh = String(cfg.reportSsh || DEFAULTS.reportSsh);
   // 两个路径都去掉结尾斜杠，拼接时统一自己补，避免出现双斜杠的 URL。

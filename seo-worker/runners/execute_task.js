@@ -1277,8 +1277,11 @@ async function runOne(ctx, context, workspace, taskId) {
         taskId +
         ': op "' +
         op +
-        '" ignored, ' +
-        (level === 'human_only' ? 'it is human_only and an agent never runs it' : 'not in the platform manifest')
+        '" ' +
+        (level === 'agent_readonly'
+          ? 'is read only, running in analysis mode with no change plan'
+          : 'ignored, ' +
+            (level === 'human_only' ? 'it is human_only and an agent never runs it' : 'not in the platform manifest'))
     );
   }
   const prepare = ops.length > 0;
