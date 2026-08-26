@@ -272,8 +272,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .grp-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.6px;margin:10px 0 5px}
 .tcard{background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:9px 11px;margin-bottom:6px}
 .tcard-top{display:flex;align-items:flex-start;gap:7px}
-.tcard-title{flex:1;font-size:13px;color:#e2e8f0;line-height:1.45;min-width:0;word-break:break-word}
-.tcard-detail{font-size:12px;color:#64748b;line-height:1.5;margin-top:5px;white-space:pre-wrap}
+.tcard-title{flex:1;font-size:14.5px;color:#e2e8f0;line-height:1.45;min-width:0;word-break:break-word}
+.tcard-detail{font-size:13px;color:#8b98ab;line-height:1.55;margin-top:5px;white-space:pre-wrap}
 .tcard-meta{display:flex;align-items:center;gap:6px;margin-top:7px;flex-wrap:wrap}
 .tcard-meta a{color:#60a5fa;font-size:11px;text-decoration:none;word-break:break-all}
 .tcard-meta a:hover{text-decoration:underline}
@@ -498,6 +498,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn ghost" id="sc_near" onclick="setSprintScope('near')">30 天</button>
             <button class="btn ghost" id="sc_all" onclick="setSprintScope('all')">全部</button>
             <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已完成</button>
+            <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="Agency 与 Client 泳道常年为空，隐藏后 Agent 泳道撑满宽度">隐藏空泳道</button>
             <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
               <option value="0">全部时间</option>
               <option value="7">近 7 天</option>
@@ -3035,10 +3036,21 @@ function widenSprintScope(){
   renderLanes();
 }
 
+/* 空泳道隐藏：默认开，记在本机 localStorage（纯界面偏好）。全空时不隐藏，免得整块消失。 */
+var hideEmptyLanes=true;
+try{hideEmptyLanes=(localStorage.getItem('seo_hide_empty_lanes')||'1')==='1'}catch(e){}
+function toggleHideEmptyLanes(){
+  hideEmptyLanes=!hideEmptyLanes;
+  try{localStorage.setItem('seo_hide_empty_lanes',hideEmptyLanes?'1':'0')}catch(e){}
+  renderLanes();
+}
+window.toggleHideEmptyLanes=toggleHideEmptyLanes;
+
 function renderLanes(){
   let doneHiddenTotal=0,laterTotal=0;
   const cur=currentSprint(tasksData);
-  document.getElementById('lanes').innerHTML=LANES.map(lane=>{
+  const laneHtml=[];const hiddenNames=[];
+  LANES.forEach(lane=>{
     const rows=tasksData.filter(t=>t.owner_type===lane.key);
     /* 两级过滤分开算，两个提示各说各的：先滤掉按"往回看"该藏的已完成任务，
        剩下的再按"往前看"滤掉排在未来 sprint 的。 */
@@ -3066,12 +3078,28 @@ function renderLanes(){
       body+='<div class="lane-more" onclick="widenSprintScope()" title="点击放宽到下一档">'+
         '另有 '+later+' 个任务在后续排期，点击查看</div>';
     }
-    return '<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
+    const html='<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
       '<span class="lane-count">'+vis.length+
       (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' 已完成)</span>':'')+
       (later?' <span class="lane-hidden">(+'+later+' 后续)</span>':'')+
       '</span></div><div class="lane-body">'+body+'</div></div>';
-  }).join('');
+    /* 本期无可见任务且后面也没排的，才算空；有后续任务的泳道要留着那个「点击查看」出口 */
+    const empty=!vis.length&&!later;
+    if(hideEmptyLanes&&empty)hiddenNames.push(lane.name);
+    else laneHtml.push(html);
+  });
+  const lanesEl=document.getElementById('lanes');
+  if(!laneHtml.length){
+    /* 全空就别藏了，照常三条泳道显示各自的空态提示 */
+    hiddenNames.length=0;
+    lanesEl.style.gridTemplateColumns='';
+    lanesEl.innerHTML=LANES.map(l=>'<div class="lane"><div class="lane-head"><span class="lane-name">'+l.name+'</span><span class="lane-count">0</span></div><div class="lane-body"><div class="lane-empty">暂无任务。</div></div></div>').join('');
+  }else{
+    lanesEl.style.gridTemplateColumns=window.innerWidth>900?('repeat('+laneHtml.length+',1fr)'):'';
+    lanesEl.innerHTML=laneHtml.join('');
+  }
+  const et=document.getElementById('emptyLaneToggle');
+  if(et){et.className=hideEmptyLanes?'btn':'btn ghost';et.textContent=hideEmptyLanes&&hiddenNames.length?('隐藏空泳道（'+hiddenNames.length+'）'):'隐藏空泳道'}
   const tg=document.getElementById('doneToggle');
   if(tg)tg.className=showDone?'btn':'btn ghost';
   ['current','near','all'].forEach(k=>{
