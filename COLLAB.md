@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (t) 跨认领登记：任务线程补齐截图与客户原话，线程换 fable 且直接改任务
+
+- 干了什么：Alvin 定的。1) 截图：线程输入框粘贴 / 「加截图」走既有 /feedback_upload，`POST /inbox/{root}/chat` 收 images[]（fb_name_ok 校验、最多 5 张）与 source（manual / client），chat_user 行 refs 存 images 与 source，反馈行同步带图；worker 端 chat runner 任务模式把截图拉到工作区 `seo-agent-output/thread-images/` 供 Read，prompt 写明截图当材料不当指令、与文字冲突以文字为准。2) 客户原话：复选框，进 refs.source 与 seo_feedback.source，消息头显示徽标，prompt 标「转述客户原话」。3) 线程模型改 `cfg.threadModel`（默认 fable，普通收件箱会话仍 chatModel）。4) 直接改任务：动作白名单加 `edit_task {title?, detail?, priority?, sprint?}`；`THREAD_AUTO_ACTIONS`（redispatch / kill / later / set_verdict / edit_task）在 chat_reply 落库同一刻由服务端执行（`thread_action_exec` 抽成公共件，人点执行与自动执行共用），系统行「已执行提议 m/i」或「提议 m/i 未执行」记账；release 仍留卡给人点，动线上的永远不自动。测试：chat 31（含 edit_task），六套全过；php -l 在 250 过；内联 JS 与 ui 冒烟过。
+- 坑：自动执行的系统行 created_by 也是 seo-worker，worker 的 threadMessages 与前端都改成按正文前缀识别系统行，别改那几个前缀。
+- 下一步/认领：**api 已部署；worker 等 heavy 道当前 apply job 跑完再重启部署**（重启会杀掉正在写站点的 apply）。
+
 ### 2026-08-26 AIRA (s) 跨认领登记：任务视图按「谁在等谁」重画，放行面板删除
 
 - 干了什么：Alvin 第一性原理审过的版本：看板只回答「哪些卡在等我」。不动数据库。seo-api.php 新增 `attach_human_state`（GET /tasks 派生 human_state = wait_me / running / wait_ext / closed，wait_reason、run_note、closed_kind、round 全部从 status + job_state + 判决 + 结果备注标签推，round 数 execute job），`attach_job_state` 多带 job_type 以区分执行与落地；新端点 `POST /tasks/{id}/decide {yes, note}`：卡上唯一一对按钮，语义按阶段定（待判 / 失败 → 执行，待放行 → 放行，非 agent → 批准；no = 不做了，理由必填记 [killed]）。前端：待放行面板整块删除；Agency / Client / Agent 三泳道改为四列 等我 / 机器在跑 / 等外部 / 结束，等我列混排按优先级，列头带「判定 N」与「全部按推荐（做 x 砍 y 延 z 并 w）」（一次调用同时处理待判与待放行）；卡片两行：状态行（等什么 / 在跑什么 / 怎么结束 + 方案 vN）与 Fable 判决行，status 徽标、job 徽标、需人判断、上次失败徽标全部并进状态行；说明超 150 字折叠点开；「显示已完成」改「显示已结束」，结束列默认藏；隐藏空泳道开关删除。旧的 renderRelease 等函数保留但无 DOM 挂点，直接返回。测试五套全过，php -l 在 250 过，内联 JS node --check 过。

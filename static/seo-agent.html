@@ -3128,6 +3128,12 @@ function renderLanes(){
   renderReviewButtons();
   renderQueueStrip();
   hydrateThreads();
+  thHydrateStrips();
+}
+/* 线程输入框上方的截图条：复用反馈那套 fbImgs / renderFbStrip，按任务 id 共用。 */
+function thHydrateStrips(){
+  Object.keys(thOpen).forEach(id=>{if(thOpen[id]&&document.getElementById('fb_imgs_'+id))renderFbStrip(parseInt(id,10))});
+  Object.keys(thOpen).forEach(id=>{const b=document.getElementById('th_lane_'+id);if(b)hydrateFbStripImgs(b)});
 }
 
 /* 卡片两行：第一行状态（在等什么 / 在跑什么 / 怎么结束的 + 方案 vN），第二行 Fable 判决。
@@ -3201,8 +3207,9 @@ async function decideTask(id,yes){
    消息走既有的 /inbox/{root}/chat，人说的每句同时进 feedback 抽 facts（服务端做）。
    opus 回复里的 refs.actions 画成提议卡，人点「执行」打 /inbox/{root}/thread_action。
    这一段没有别的写口子。 */
-var thOpen={},thData={},thSending={};
-const TH_ACTION_LABEL={redispatch:'改了重跑',kill:'不做了',later:'先放着',set_verdict:'改判',release:'放行落地'};
+var thOpen={},thData={},thSending={},thClient={};
+const TH_ACTION_LABEL={redispatch:'改了重跑',kill:'不做了',later:'先放着',set_verdict:'改判',edit_task:'改任务',release:'放行落地'};
+function thIsSysLine(m){return m.kind==='chat_agent'&&/^(已执行提议|提议 \d+\/\d+ 未执行|已立项)/.test(String(m.body||''))}
 function toggleThread(id){
   thOpen[id]=!thOpen[id];
   if(thOpen[id]&&!thData[id]){loadThread(id);return}
@@ -3219,8 +3226,8 @@ async function loadThread(id,silent){
 function thDoneMap(msgs){
   const m={};
   (msgs||[]).forEach(x=>{
-    if(x.kind!=='chat_agent'||x.created_by==='seo-worker')return;
-    const mm=String(x.body||'').match(/^已执行提议 (\d+)\/(\d+)/);
+    if(x.kind!=='chat_agent')return;
+    const mm=String(x.body||'').match(/^(?:已执行提议|提议) (\d+)\/(\d+)/);
     if(mm)m[mm[1]+'/'+mm[2]]=true;
   });
   return m;
@@ -3244,33 +3251,43 @@ function threadBox(t,where){
   if(!msgs.length)stream='<span class="ch-empty">还没有消息。说一句，它会带着这个任务的说明、方案和判定来回。</span>';
   else stream=msgs.map(m=>{
     const isMe=m.kind==='chat_user';
-    const isSys=m.kind==='chat_agent'&&m.created_by!=='seo-worker';
+    const isSys=m.kind==='chat_agent'&&(m.created_by!=='seo-worker'||thIsSysLine(m));
     const cls=isMe?'me':(isSys?'sys':'bot');
-    let h='<div class="ch-turn '+cls+'"><div class="ch-by">'+(isMe?esc(m.created_by||'我'):(isSys?'系统':'opus'))+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
+    const who=isMe?(esc(m.created_by||'我')+((m.refs&&m.refs.source==='client')?' · <span class="badge review">客户原话</span>':'')):(isSys?'系统':'fable');
+    let h='<div class="ch-turn '+cls+'"><div class="ch-by">'+who+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
       '<div class="ch-bubble">'+esc(m.body||'')+'</div>';
+    const shots=(m.refs&&m.refs.images)||[];
+    if(shots.length)h+='<div class="fb-thumbs">'+shots.map(n=>fbThumb(n,0)).join('')+'</div>';
     ((m.refs&&m.refs.actions)||[]).forEach((a,i)=>{h+=thActionCard(d.root_id,m.id,i,a,!!done[m.id+'/'+i])});
     return h+'</div>';
   }).join('');
   const pending=d.chat_pending?'<div class="ch-wait">opus 思考中，job #'+d.chat_pending+'，回复出来会自动出现</div>':'';
   return box+'<div class="fb-title">任务线程 #'+d.root_id+'</div>'+
     '<div class="ch-stream" style="max-height:320px">'+stream+'</div>'+pending+
-    '<div class="ch-form"><div class="fld"><textarea id="th_text_'+where+'_'+t.id+'" placeholder="例如：描述里别写 220，社交图用真照片，改了重跑。"></textarea></div>'+
+    '<div class="ch-form"><div class="fld"><textarea id="th_text_'+where+'_'+t.id+'" onpaste="onFbPaste('+t.id+',event)" placeholder="例如：描述里别写 220，社交图用真照片，改了重跑。截图直接粘贴。"></textarea></div>'+
+    '<div class="fb-thumbs" id="fb_imgs_'+t.id+'"></div>'+
+    '<input type="file" class="hidden" id="fb_file_'+t.id+'" accept="image/png,image/jpeg,image/webp" multiple onchange="onFbPick('+t.id+',this)">'+
     '<div class="fb-row"><button class="btn tiny" '+((d.chat_pending||thSending[t.id])?'disabled':'')+' onclick="sendThread('+t.id+',\''+where+'\')">发送</button>'+
-    '<span class="plan-meta">你说的每一句都会进这个客户的 facts，下次判定和规划带着它。</span></div></div></div>';
+    '<button class="btn tiny ghost" onclick="pickFbFiles('+t.id+')">加截图</button>'+
+    '<label class="fb-check"><input type="checkbox" id="th_client_'+where+'_'+t.id+'"'+(thClient[t.id]?' checked':'')+' onchange="thClient['+t.id+']=this.checked"> 客户原话</label>'+
+    '<span class="plan-meta">你说的每一句都进这个客户的 facts。改任务、重跑、改判、不做，说了它就直接办；放行永远留给你点。</span></div></div></div>';
 }
 async function sendThread(id,where){
   const d0=thData[id];
   if(!d0||thSending[id])return;
   const el=document.getElementById('th_text_'+where+'_'+id);
   const text=(el?el.value:'').trim();
-  if(!text){toast('先写点什么',true);return}
+  const imgs=(fbImgs[id]||[]).slice();
+  if(!text&&!imgs.length){toast('写点什么，或者贴一张截图',true);return}
   if(text.length>5000){toast('单条消息最多 5000 字',true);return}
+  if(fbUploading[id]){toast('截图还在上传',true);return}
   thSending[id]=true;
-  const d=await api('/inbox/'+d0.root_id+'/chat','POST',{text});
+  const d=await api('/inbox/'+d0.root_id+'/chat','POST',{text,images:imgs,source:thClient[id]?'client':'manual'});
   thSending[id]=false;
   if(!d)return;
   if(d._status===409){toast('还在等上一条回复（job #'+(d.job_id||'?')+'）',true);return}
   if(fail(d,'发送失败'))return;
+  fbImgs[id]=[];thClient[id]=false;
   loadThread(id,true);
 }
 async function thRunAction(rootId,msgId,idx,btn){
@@ -3310,6 +3327,7 @@ async function loadThreadQuiet(id){
           const ta2=document.getElementById('th_text_'+w+'_'+id);
           if(ta2&&draft)ta2.value=draft;
         });
+        thHydrateStrips();
       }
     }
   }finally{thQuietBusy[id]=false}

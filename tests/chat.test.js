@@ -193,6 +193,8 @@ t('任务线程：动作白名单，release 只在 review 状态放行，缺 rea
   ]);
   const out2 = chat.cleanActions({ actions: [{ type: 'release' }, { type: 'later', reason: '等客户' }] }, { id: 1, status: 'approved' }, quiet);
   assert.deepStrictEqual(out2, [{ type: 'later', reason: '等客户' }]);
+  const ed = chat.cleanActions({ actions: [{ type: 'edit_task', priority: 'p1', reason: '客户要求提前' }, { type: 'edit_task', reason: '空' }] }, review, quiet);
+  assert.deepStrictEqual(ed, [{ type: 'edit_task', reason: '客户要求提前', priority: 'P1' }]);
   const many = chat.cleanActions({ actions: [1, 2, 3, 4].map(() => ({ type: 'kill', reason: 'r' })) }, review, quiet);
   assert.strictEqual(many.length, 3);
 });

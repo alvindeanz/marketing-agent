@@ -781,13 +781,24 @@ function inbox_refs_norm($v){
     }
     $out['drafts']=inbox_drafts_norm($v['drafts']??null);
     $out['actions']=inbox_actions_norm($v['actions']??null);
+    /* 任务线程里人发的消息可带截图（走 /feedback_upload 的文件名）与来源标记（manual / client）。 */
+    $out['images']=[];
+    if(isset($v['images'])&&is_array($v['images'])){
+        foreach($v['images'] as $n){$n=(string)$n;if(fb_name_ok($n)&&!in_array($n,$out['images'],true))$out['images'][]=$n;}
+        if(count($out['images'])>5)$out['images']=array_slice($out['images'],0,5);
+    }
+    $out['source']=(isset($v['source'])&&$v['source']==='client')?'client':'';
     return $out;
 }
 
 /* 任务线程里模型提议的动作，存在 chat_agent 行的 refs.actions，人点「执行」才落账
    （POST /inbox/{root}/thread_action）。白名单五种，跟 spawn_task 的草案同一个道理：
    提议是卡片，不是账本上的一行。 */
-define('THREAD_ACTIONS',['redispatch','kill','later','set_verdict','release']);
+define('THREAD_ACTIONS',['redispatch','kill','later','set_verdict','edit_task','release']);
+/* 线程里人话已经明确指向的动作，模型回复落库时服务端立即执行，不等人再点一次：
+   这些全是看板层改动，可逆，指令来源是人自己在线程里说的话。
+   release 不在里面：放行动线上，永远留人点。 */
+define('THREAD_AUTO_ACTIONS',['redispatch','kill','later','set_verdict','edit_task']);
 define('THREAD_MAX_ACTIONS',3);
 function inbox_actions_norm($v){
     if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
@@ -804,10 +815,65 @@ function inbox_actions_norm($v){
             if(!in_array($vd,['do','later','drop'],true))continue;
             $row['verdict']=$vd;
         }
+        if($type==='edit_task'){
+            $f=[];
+            if(isset($a['title'])&&trim((string)$a['title'])!=='')$f['title']=mb_substr(trim((string)$a['title']),0,255,'UTF-8');
+            if(isset($a['detail'])&&trim((string)$a['detail'])!=='')$f['detail']=mb_substr(trim((string)$a['detail']),0,4000,'UTF-8');
+            if(isset($a['priority'])&&in_array((string)$a['priority'],['P0','P1','P2','P3'],true))$f['priority']=(string)$a['priority'];
+            if(isset($a['sprint']))$f['sprint']=mb_substr(trim((string)$a['sprint']),0,10,'UTF-8');
+            if(!$f)continue;
+            $row['fields']=$f;
+        }
         if($row['reason']===''&&$type!=='release')continue;
         $out[]=$row;
     }
     return $out;
+}
+
+/* 执行一条线程动作。$a 是 inbox_actions_norm 出来的一行，$t 是任务行。
+   回 ['ok'=>bool,'what'=>说明,'job_ids'=>[]]，不 res() 不 exit，chat_reply 的自动执行与人点执行共用。 */
+function thread_action_exec($root,$t,$a,$by){
+    $tid=(int)$t['id'];$cid=(int)$t['client_id'];
+    $type=$a['type'];$reason=(string)($a['reason']??'');$jids=[];
+    if($type==='redispatch'){
+        if(!in_array($t['status'],['proposed','approved','blocked','review'],true))return ['ok'=>false,'what'=>'任务状态是 '.$t['status'].'，不能重派'];
+        db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?),status='approved' WHERE id=?")
+            ->execute(['[线程指令 '.date('Y-m-d').'] '.$reason,$tid]);
+        list($jids,$sk)=queue_task_jobs($cid,'execute_task',[$tid],$by,'seo_job_create');
+        return ['ok'=>true,'what'=>'已按线程指令重派执行，新指令已写进任务说明'.($jids?('，job #'.$jids[0]):'（任务已在队列，未重复排）'),'job_ids'=>$jids];
+    }
+    if($type==='kill'){
+        if($t['status']==='done')return ['ok'=>false,'what'=>'任务已经结束'];
+        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
+        task_append_note($tid,'[killed] 线程裁决不做：'.$reason);
+        return ['ok'=>true,'what'=>'已按不做处理，置 done','job_ids'=>[]];
+    }
+    if($type==='later'){
+        if($t['status']==='done')return ['ok'=>false,'what'=>'任务已经结束'];
+        db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
+        task_append_note($tid,'[later] 线程裁决延后：'.$reason);
+        return ['ok'=>true,'what'=>'已延后，置 blocked','job_ids'=>[]];
+    }
+    if($type==='set_verdict'){
+        if(empty($t['review_verdict']))return ['ok'=>false,'what'=>'任务还没有判决，没法改判'];
+        db()->prepare("UPDATE seo_tasks SET review_override=?,review_override_note=?,updated_at=updated_at WHERE id=?")
+            ->execute([$a['verdict'],mb_substr($reason,0,400,'UTF-8'),$tid]);
+        return ['ok'=>true,'what'=>'已改判为 '.$a['verdict'],'job_ids'=>[]];
+    }
+    if($type==='edit_task'){
+        $sets=[];$args=[];$names=[];
+        foreach(($a['fields']??[]) as $k=>$v){$sets[]="$k=?";$args[]=$v;$names[]=$k;}
+        if(!$sets)return ['ok'=>false,'what'=>'没有要改的字段'];
+        $args[]=$tid;
+        db()->prepare("UPDATE seo_tasks SET ".implode(',',$sets)." WHERE id=?")->execute($args);
+        return ['ok'=>true,'what'=>'已更新任务字段：'.implode('、',$names),'job_ids'=>[]];
+    }
+    if($type==='release'){
+        if($t['status']!=='review')return ['ok'=>false,'what'=>'任务不在待放行状态'];
+        list($jids,$sk)=queue_task_jobs($cid,'apply_task',[$tid],$by,'seo_tasks_release');
+        return ['ok'=>true,'what'=>'已放行'.($jids?('，apply job #'.$jids[0]):'（已在队列，未重复排）'),'job_ids'=>$jids];
+    }
+    return ['ok'=>false,'what'=>'未知动作'];
 }
 
 /* Drop task ids that do not exist, and on a card that belongs to one client,
@@ -2778,23 +2844,36 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
     $root=chat_root_or_die($rootId,true);
     $i=input();
     $text=trim((string)($i['text']??''));
-    if($text==='')res(400,['error'=>'text required']);
     if(mb_strlen($text,'UTF-8')>5000)res(400,['error'=>'text over 5000 chars']);
+    /* 截图与来源标记只在任务线程里有意义（走反馈那套校验与存储）。 */
+    $rootRefs=inbox_refs_norm($root['refs']);
+    $imgs=[];
+    if($rootRefs['tasks']&&isset($i['images'])&&is_array($i['images'])){
+        foreach($i['images'] as $n){
+            $n=(string)$n;
+            if(!fb_name_ok($n))res(400,['error'=>'bad image name']);
+            if(!is_file(fb_path($n)))res(400,['error'=>'Image no longer on disk: '.$n]);
+            if(!in_array($n,$imgs,true))$imgs[]=$n;
+        }
+        if(count($imgs)>$FEEDBACK_MAX_IMAGES)res(400,['error'=>'too many images, max '.$FEEDBACK_MAX_IMAGES]);
+    }
+    $src=(isset($i['source'])&&$i['source']==='client')?'client':'manual';
+    if($text===''&&!$imgs)res(400,['error'=>'text required']);
     $busy=chat_job_inflight($rootId);
     if($busy)res(409,['error'=>'这个会话还在等上一条回复','job_id'=>$busy]);
-    $msgId=chat_msg_insert($root,'chat_user',$text,$u['username']);
+    $msgRefs=($imgs||$src==='client')?['images'=>$imgs,'source'=>$src]:null;
+    $msgId=chat_msg_insert($root,'chat_user',$text===''?'（见截图）':$text,$u['username'],$msgRefs);
     $jid=chat_job_queue($root,$msgId,$u['username']);
     /* 任务线程：人说的每一句同时投一条反馈走 feedback job 抽 facts。线程是反馈的容器，
        学习回路不因为换了界面而断。 */
     $fbId=0;
-    $rootRefs=inbox_refs_norm($root['refs']);
     if($rootRefs['tasks']){
         ensure_feedback_schema();
         $ftid=(int)$rootRefs['tasks'][0];
-        db()->prepare("INSERT INTO seo_feedback(client_id,task_id,source,`text`,images,status,created_by)VALUES(?,?,'manual',?,NULL,'pending',?)")
-            ->execute([(int)$root['client_id'],$ftid,$text,$u['username']]);
+        db()->prepare("INSERT INTO seo_feedback(client_id,task_id,source,`text`,images,status,created_by)VALUES(?,?,?,?,?,'pending',?)")
+            ->execute([(int)$root['client_id'],$ftid,$src,$text,$imgs?json_encode($imgs):null,$u['username']]);
         $fbId=(int)db()->lastInsertId();
-        $fpayload=json_encode(['task_id'=>$ftid,'feedback_id'=>$fbId,'source'=>'manual','text'=>$text,'images'=>[],'complete_on_parse'=>false],JSON_UNESCAPED_UNICODE);
+        $fpayload=json_encode(['task_id'=>$ftid,'feedback_id'=>$fbId,'source'=>$src,'text'=>$text,'images'=>$imgs,'complete_on_parse'=>false],JSON_UNESCAPED_UNICODE);
         db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'feedback',?,'queued',?)")
             ->execute([(int)$root['client_id'],$fpayload,$u['username']]);
         $fjid=(int)db()->lastInsertId();
@@ -2827,11 +2906,33 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
     $rootRefs=inbox_refs_norm($root['refs']);
     $actions=$rootRefs['tasks']?inbox_actions_norm($i['actions']??null):[];
     $msgId=chat_msg_insert($root,'chat_agent',$body,'seo-worker',['drafts'=>$drafts,'actions'=>$actions]);
+    /* 任务线程的自动执行：白名单里的看板层动作在回复落库的同一刻执行，系统行记账，
+       前端看到的就是「已执行」。release 留卡给人点。指令来源是人在线程里说的话，
+       模型只是把它翻译成动作，和裁决 runner 一个道理。 */
+    $executed=[];
+    if($actions&&$rootRefs['tasks']){
+        ensure_review_schema();
+        $tq=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");
+        $tq->execute([(int)$rootRefs['tasks'][0]]);
+        $t=$tq->fetch();
+        if($t){
+            foreach($actions as $idx=>$a){
+                if(!in_array($a['type'],THREAD_AUTO_ACTIONS,true))continue;
+                $r=thread_action_exec($root,$t,$a,'seo-worker');
+                $line='已执行提议 '.$msgId.'/'.$idx.'：'.$r['what'].'。'.($r['ok']?'':'（未执行）');
+                if(!$r['ok'])$line='提议 '.$msgId.'/'.$idx.' 未执行：'.$r['what'].'。';
+                chat_msg_insert($root,'chat_agent',$line,'seo-worker',['tasks'=>[(int)$t['id']]]);
+                $executed[]=['idx'=>$idx,'type'=>$a['type'],'ok'=>$r['ok'],'what'=>$r['what']];
+                /* 同一轮里后面的动作要看到前面改过的状态 */
+                $tq->execute([(int)$t['id']]);$t=$tq->fetch();
+            }
+        }
+    }
     audit('seo-worker','seo_chat_reply',(string)$rootId,[
         'message_id'=>$msgId,'chars'=>mb_strlen($body,'UTF-8'),
-        'drafts'=>count($drafts),'drafts_dropped'=>max(0,$raw-count($drafts)),'actions'=>count($actions)
+        'drafts'=>count($drafts),'drafts_dropped'=>max(0,$raw-count($drafts)),'actions'=>count($actions),'executed'=>$executed
     ]);
-    res(200,['ok'=>true,'message_id'=>$msgId,'drafts'=>count($drafts),'actions'=>count($actions)]);
+    res(200,['ok'=>true,'message_id'=>$msgId,'drafts'=>count($drafts),'actions'=>count($actions),'executed'=>$executed]);
 }
 
 /* =========================================================
@@ -2912,39 +3013,12 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/thread_action$#',$ROUTE,$mm)){
     $tq->execute([$tid]);
     $t=$tq->fetch();
     if(!$t)res(404,['error'=>'任务不存在']);
-    $cid=(int)$t['client_id'];
-    $type=$a['type'];$reason=(string)($a['reason']??'');
-    $what='';$jids=[];
-    if($type==='redispatch'){
-        if(!in_array($t['status'],['proposed','approved','blocked','review'],true))res(400,['error'=>'任务状态是 '.$t['status'].'，不能重派']);
-        db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?),status='approved' WHERE id=?")
-            ->execute(['[线程指令 '.date('Y-m-d').'] '.$reason,$tid]);
-        list($jids,$sk)=queue_task_jobs($cid,'execute_task',[$tid],$u['username'],'seo_job_create');
-        $what='已按线程指令重派执行，新指令已写进任务说明'.($jids?('，job #'.$jids[0]):'（任务已在队列，未重复排）');
-    }elseif($type==='kill'){
-        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
-        task_append_note($tid,'[killed] 线程裁决不做：'.$reason);
-        $what='已按不做处理，置 done';
-    }elseif($type==='later'){
-        db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
-        task_append_note($tid,'[later] 线程裁决延后：'.$reason);
-        $what='已延后，置 blocked';
-    }elseif($type==='set_verdict'){
-        if(!$t['review_verdict'])res(400,['error'=>'任务还没有判决，没法改判']);
-        db()->prepare("UPDATE seo_tasks SET review_override=?,review_override_note=?,updated_at=updated_at WHERE id=?")
-            ->execute([$a['verdict'],mb_substr($reason,0,400,'UTF-8'),$tid]);
-        $what='已改判为 '.$a['verdict'];
-    }elseif($type==='release'){
-        if($t['status']!=='review')res(400,['error'=>'任务不在待放行状态']);
-        list($jids,$sk)=queue_task_jobs($cid,'apply_task',[$tid],$u['username'],'seo_tasks_release');
-        $what='已放行'.($jids?('，apply job #'.$jids[0]):'（已在队列，未重复排）');
-    }else{
-        res(400,['error'=>'未知动作']);
-    }
-    $line=$doneKey.'：'.$what.'。';
+    $r=thread_action_exec($root,$t,$a,$u['username']);
+    if(!$r['ok'])res(400,['error'=>$r['what']]);
+    $line=$doneKey.'：'.$r['what'].'。';
     $sysId=chat_msg_insert($root,'chat_agent',$line,$u['username'],['tasks'=>[$tid]]);
-    audit($u['username'],'seo_task_thread_action',(string)$tid,['root_id'=>$rootId,'message_id'=>$msgId,'idx'=>$idx,'type'=>$type,'job_ids'=>$jids]);
-    res(200,['ok'=>true,'message'=>$what,'job_ids'=>$jids,'system_message_id'=>$sysId]);
+    audit($u['username'],'seo_task_thread_action',(string)$tid,['root_id'=>$rootId,'message_id'=>$msgId,'idx'=>$idx,'type'=>$a['type'],'job_ids'=>$r['job_ids']]);
+    res(200,['ok'=>true,'message'=>$r['what'],'job_ids'=>$r['job_ids'],'system_message_id'=>$sysId]);
 }
 
 // POST /inbox/{root_id}/spawn_task -> 人点了「立项」。
