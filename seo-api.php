@@ -796,12 +796,30 @@ function jobs_inflight_tasks($type){
     return $by;
 }
 
-/* 全局排队位次 job_id => 位次（从 1 起）。worker 是单飞按 id 升序消化，
-   所以位次只有全局口径有意义，不按客户分。 */
+/* 队列取单顺序，claim、位次、GET /jobs/queue 三处共用，改顺序只改这一处。
+   规则：客户轮转，不是纯 FIFO。每个客户排队中的 job 按 id 编内部序号 rn，
+   正在跑着 job 的客户再让一位（rn 加 1），全局按 (rn, id) 出。
+   效果：A 客户一口气批 7 个，B 客户后来才排 1 个，B 排在 A 的第二个前面，
+   谁也饿不死谁；同一客户内部仍严格按提交顺序。
+   窗口函数 MariaDB 10.2 起可用，线上 10.3 没问题。 */
+function jobs_queue_order_sql(){
+    return "SELECT t.id FROM (
+                SELECT j.id,
+                       ROW_NUMBER() OVER (PARTITION BY j.client_id ORDER BY j.id)
+                         + (CASE WHEN r.client_id IS NULL THEN 0 ELSE 1 END) AS rn
+                FROM agent_jobs j
+                LEFT JOIN (SELECT DISTINCT client_id FROM agent_jobs WHERE status='running') r
+                  ON r.client_id=j.client_id
+                WHERE j.status='queued'
+            ) t ORDER BY t.rn, t.id";
+}
+
+/* 全局排队位次 job_id => 位次（从 1 起）。位次是 worker 下一次 claim 的真实顺序
+   （见 jobs_queue_order_sql），只有全局口径有意义，不按客户分。 */
 function jobs_queue_positions($limit=500){
     $limit=(int)$limit;
     if($limit<1)$limit=500;
-    $q=db()->query("SELECT id FROM agent_jobs WHERE status='queued' ORDER BY id LIMIT $limit");
+    $q=db()->query(jobs_queue_order_sql()." LIMIT $limit");
     $pos=[];$n=0;
     foreach($q->fetchAll() as $r){$n++;$pos[(int)$r['id']]=$n;}
     return $pos;
@@ -905,10 +923,11 @@ $PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_proj
 // MariaDB 10.3, and SKIP LOCKED only landed in MariaDB 10.6.
 // The conditional UPDATE is the whole race guard; single worker today, so
 // three retries are plenty.
+// Pick order is client round-robin, see jobs_queue_order_sql(). Not plain id.
 if($m==='POST'&&$ROUTE==='/jobs/claim'){
     auth_worker();
     $jid=0;
-    $pick=db()->prepare("SELECT id FROM agent_jobs WHERE status='queued' ORDER BY id LIMIT 1");
+    $pick=db()->prepare(jobs_queue_order_sql()." LIMIT 1");
     $take=db()->prepare("UPDATE agent_jobs SET status='running',claimed_at=NOW() WHERE id=? AND status='queued'");
     for($try=0;$try<3;$try++){
         $pick->execute();
@@ -932,7 +951,7 @@ if($m==='POST'&&$ROUTE==='/jobs/claim'){
 /* GET /jobs/queue -> 全局队列一眼看清：现在在跑哪一条、后面排着谁、我排第几。
    固定路径，声明在 /jobs/{id} 那批正则之前，同 /jobs/claim 的道理。
    auth_any：看板要看，worker 侧排查也要看。running 与 queued 合计最多 100 条，
-   位次按 id 升序从 1 起，因为 worker 单飞就是按 id 顺序线性消化的。
+   queued 的顺序与位次走 jobs_queue_order_sql（客户轮转），和 worker 下一次真实取单一致。
    elapsed_sec 走 TIMESTAMPDIFF 交给库算，不在 PHP 里跟时区较劲。 */
 if($m==='GET'&&$ROUTE==='/jobs/queue'){
     auth_any();
@@ -940,8 +959,16 @@ if($m==='GET'&&$ROUTE==='/jobs/queue'){
             TIMESTAMPDIFF(SECOND,j.claimed_at,NOW()) AS elapsed_sec,c.name AS client_name
         FROM agent_jobs j LEFT JOIN clients c ON c.id=j.client_id
         WHERE j.status IN('queued','running') ORDER BY j.id LIMIT 100");
+    $rows=$q->fetchAll();
+    $order=[];$k=0;
+    foreach(db()->query(jobs_queue_order_sql()." LIMIT 100")->fetchAll() as $o){$order[(int)$o['id']]=$k++;}
+    usort($rows,function($a,$b)use($order){
+        if($a['status']!==$b['status'])return $a['status']==='running'?-1:1;
+        $oa=$order[(int)$a['id']]??PHP_INT_MAX;$ob=$order[(int)$b['id']]??PHP_INT_MAX;
+        return $oa===$ob?((int)$a['id']<=>(int)$b['id']):($oa<=>$ob);
+    });
     $running=[];$queued=[];$n=0;
-    foreach($q->fetchAll() as $r){
+    foreach($rows as $r){
         $row=[
             'id'=>(int)$r['id'],
             'client_id'=>(int)$r['client_id'],

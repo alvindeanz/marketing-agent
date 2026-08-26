@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (n) 跨认领登记：队列取单改客户轮转，不再纯 FIFO
+
+- 干了什么：Alvin 看到 Louvresky 一口气批 7 个任务，Kuddles 的 1 个只能排在后面吃灰，问是否该按客户拆任务编号。结论：编号不拆（全局自增 id 只负责唯一与引用，按客户分号只换来心理整齐，代价是复合键与跨客户引用歧义），改的是取单顺序。seo-api.php 新增公共件 jobs_queue_order_sql()：按客户分区用 ROW_NUMBER 编内部序号，正在跑着 job 的客户再让一位，全局按 (rn, id) 出；POST /jobs/claim、jobs_queue_positions、GET /jobs/queue 三处共用，看板显示的「排队中第 N 位」与 worker 下一次真实取单一致。同一客户内部仍严格按提交顺序，worker 仍单飞（写操作不并发的前提不动），listener.js 零改动。测试：php -l 在 250 过；node tests 四套 24/29/90/88 全过；排序 SQL 在 docker mariadb:10.3（与线上同版本）上实测，场景「16 号 1 跑 3 排、47 号后排 1、15 号后排 2」出单顺序为 47、15、16、15、16、16，符合预期。
+- 坑：窗口函数 10.2 起可用，线上 10.3 没问题；若将来换回 10.1 或 MySQL 5.7 此处要改成自连接计数。
+- 下一步/认领：**待部署 api**（seo-api.php 单文件，PHP 即时生效，worker 无改动）。job 层没有优先级列，任务 P0/P1 目前不影响出单顺序，要不要把 seo_tasks.priority 带进 job 排序由 Aiden 定。
+
 ### 2026-08-26 AIRA (m) 跨认领登记：一任务一 job 线性队列，任务卡与队列条防呆
 
 - 干了什么：Alvin 第一性原理定的：任务是工作单位，各自 30 分钟预算与成败，worker 单飞按 job id 线性消化，不做并发。seo-api.php：POST /jobs 的 execute_task 多 task_ids 拆成每任务一个 job（payload 仍是 task_ids 单元素，runner 不用改），去重改按任务（在飞的跳过并回 skipped，全部跳过回 409 兼容旧前端提示），补 50 个上限；POST /tasks/release 同样拆成逐任务 apply_task；新增 GET /jobs/queue（auth_any，全局 running 与 queued，含 client_name、task_id、elapsed_sec、position）；GET /tasks 每行附 job_state（queued/running/failed/null 加 job_id 与全局位次），一条 SQL 无 N+1。新增公共件 job_task_id / jobs_inflight_tasks / jobs_queue_positions / queue_task_jobs / attach_job_state。前端 seo-agent.html：任务卡徽标（排队中第 N 位 / 运行中 M 分钟 / 上次失败）、在飞任务勾选框禁用、任务页顶部全局队列条（跨客户）、执行与放行按钮按 ids 数量反馈并报跳过数、任务页加入 15 秒轮询（原白名单只有 jobs/dash/inbox）。纯函数 qsElapsedMin / qsStripText 在 INSIGHTS-PURE 区间。测试：chat 29 / insights 90（新 4）/ report 88 / apply 24 全过，php -l 与 chatapi.test.php 16 条在 250 过，内联 JS node --check 过。**修掉 (g) 条报的「execute_task 多任务顶超时」**。
