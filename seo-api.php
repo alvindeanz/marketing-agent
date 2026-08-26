@@ -467,6 +467,45 @@ function ensure_review_schema(){
     ensure_job_types();
 }
 
+/* 排一个判定 job（review_plan，light 道，fable 几十秒）。三个自动入口加一个手动入口都走这里：
+   plan 落任务（/tasks/bulk）、execute 出方案（/tasks/{id}/result）、人工新建（POST /tasks）、
+   看板按钮（/tasks/review）。源头都是人点过的动作，不违反禁 cron。
+   同客户已有一个 queued 且没满 20 个的判定 job 就把任务并进它的 payload，别一任务一 job 刷屏；
+   running 的不动（payload 已被 worker 读走）。回 [job_id, merged]。 */
+function queue_review_job($cid,$ids,$by,$auditAction){
+    $ids=array_values(array_unique(array_filter(array_map('intval',(array)$ids))));
+    if(!$ids)return [0,false];
+    ensure_review_schema();
+    $q=db()->prepare("SELECT id,payload FROM agent_jobs WHERE client_id=? AND type='review_plan' AND status='queued' ORDER BY id DESC LIMIT 1");
+    $q->execute([$cid]);
+    $row=$q->fetch();
+    $q->closeCursor();
+    if($row){
+        $p=jdec($row['payload']);
+        $have=(is_array($p)&&isset($p['task_ids'])&&is_array($p['task_ids']))?array_map('intval',$p['task_ids']):[];
+        $merged=array_values(array_unique(array_merge($have,$ids)));
+        if(count($merged)<=20){
+            /* 条件 UPDATE：worker 这一瞬间可能刚 claim 走，status 不再是 queued 就落空，落空则新建。 */
+            $up=db()->prepare("UPDATE agent_jobs SET payload=? WHERE id=? AND status='queued'");
+            $up->execute([json_encode(['task_ids'=>$merged],JSON_UNESCAPED_UNICODE),(int)$row['id']]);
+            if($up->rowCount()>0){
+                audit($by,$auditAction,(string)$row['id'],['client_id'=>$cid,'task_ids'=>$ids,'merged_into_queued'=>true]);
+                return [(int)$row['id'],true];
+            }
+        }
+    }
+    $jids=[];
+    foreach(array_chunk($ids,20) as $chunk){
+        db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'review_plan',?,'queued',?)")
+            ->execute([$cid,json_encode(['task_ids'=>$chunk],JSON_UNESCAPED_UNICODE),$by]);
+        $jid=(int)db()->lastInsertId();
+        $jids[]=$jid;
+        audit($by,$auditAction,(string)$jid,['client_id'=>$cid,'task_ids'=>$chunk]);
+    }
+    fire_wake($jids[0]);
+    return [$jids[0],false];
+}
+
 /* 追加一行结果备注，不覆盖已有内容。收件箱动作里的 $appendNote 闭包是同一句 SQL，
    这里抽成函数给判定执行用。 */
 function task_append_note($tid,$note){
@@ -948,6 +987,8 @@ function queue_task_jobs($cid,$type,$ids,$user,$auditAction){
         if(!$tid)continue;
         if(isset($inflight[$tid])){$skipped[]=['task_id'=>$tid,'job_id'=>(int)$inflight[$tid]];continue;}
         $payload=['task_ids'=>[$tid]];
+        /* 批准步骤已取消：执行一个 proposed 的任务就等于批准它。 */
+        if($type==='execute_task')db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=? AND status='proposed'")->execute([$tid]);
         $s->execute([$cid,$type,json_encode($payload,JSON_UNESCAPED_UNICODE),$user]);
         $jid=(int)db()->lastInsertId();
         $jids[]=$jid;
@@ -1159,7 +1200,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         db()->prepare("UPDATE seo_tasks SET attention=? WHERE id=?")->execute([$i['attention']?1:0,$tid]);
     }
     audit('seo-worker','seo_task_result',(string)$tid,['output_url'=>$i['output_url']??'','attention'=>isset($i['attention'])?($i['attention']?1:0):null]);
-    res(200,['ok'=>true]);
+    /* 方案一出就自动判「该不该落地」，待放行面板上人看到的是判决不是 30KB 方案。 */
+    $cq=db()->prepare("SELECT client_id FROM seo_tasks WHERE id=?");
+    $cq->execute([$tid]);
+    $cr=$cq->fetch();
+    $cq->closeCursor();
+    list($rjid,$rmerged)=queue_review_job((int)($cr['client_id']??0),[$tid],'seo-worker','seo_tasks_review_auto');
+    res(200,['ok'=>true,'review_job_id'=>$rjid]);
 }
 
 // POST /tasks/{id}/complete -> apply stage finished, task is done for real
@@ -1870,7 +1917,9 @@ if($m==='POST'&&$ROUTE==='/tasks/bulk'){
         res(500,['error'=>'bulk insert failed']);
     }
     audit('seo-worker','seo_tasks_bulk',(string)$cid,['plan_id'=>$pid,'count'=>count($ids),'ids'=>$ids]);
-    res(200,['ok'=>true,'ids'=>$ids]);
+    /* plan 落的任务自动接一轮判定：人看到任务时就带着「该不该做」，批准这一步由判决的 do 隐含。 */
+    list($rjid,$rmerged)=queue_review_job($cid,$ids,'seo-worker','seo_tasks_review_auto');
+    res(200,['ok'=>true,'ids'=>$ids,'review_job_id'=>$rjid]);
 }
 
 // GET /context?client_id= -> single briefing payload for the LLM runner
@@ -3060,18 +3109,9 @@ if($m==='POST'&&$ROUTE==='/tasks/review'){
            在跑的、做完的没什么好判的。 */
         if(!in_array($t['status'],['proposed','approved','blocked','review'],true))res(400,['error'=>'Task '.$t['id'].' is '.$t['status'].', only proposed/approved/blocked/review tasks can be reviewed']);
     }
-    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='review_plan' AND status IN('queued','running') LIMIT 1");
-    $dup->execute([$cid]);
-    $d=$dup->fetch();
-    $dup->closeCursor();
-    if($d)res(409,['error'=>'A review is already queued or running for this client','job_id'=>(int)$d['id']]);
-    $payload=json_encode(['task_ids'=>$ids],JSON_UNESCAPED_UNICODE);
-    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'review_plan',?,'queued',?)")
-        ->execute([$cid,$payload,$u['username']]);
-    $jid=(int)db()->lastInsertId();
-    audit($u['username'],'seo_tasks_review',(string)$jid,['client_id'=>$cid,'task_ids'=>$ids]);
-    fire_wake($jid);
-    res(200,['ok'=>true,'job_id'=>$jid,'count'=>count($ids)]);
+    /* 不再 409：light 道几十秒一批，重复点就是重判，同客户排队中的判定会被并进去。 */
+    list($jid,$merged)=queue_review_job($cid,$ids,$u['username'],'seo_tasks_review');
+    res(200,['ok'=>true,'job_id'=>$jid,'count'=>count($ids),'merged'=>$merged]);
 }
 
 // POST /tasks/review_result body { client_id, job_id, summary, verdicts:[{task_id,verdict,reason,evidence,merge_into,adjust}] }
@@ -3429,7 +3469,9 @@ if($m==='POST'&&$ROUTE==='/tasks'){
     if($err)res(400,['error'=>$err]);
     $id=task_insert($cid,$t,$u['username']);
     audit($u['username'],'seo_task_add',(string)$id,['client_id'=>$cid,'title'=>$t['title'],'owner_type'=>$t['owner_type']]);
-    res(200,['ok'=>true,'id'=>$id]);
+    /* 人工新建的也判一轮，几十秒，省得手写的任务绕过了「该不该做」这一问。 */
+    list($rjid,$rmerged)=queue_review_job($cid,[$id],$u['username'],'seo_tasks_review_auto');
+    res(200,['ok'=>true,'id'=>$id,'review_job_id'=>$rjid]);
 }
 
 // PATCH /tasks/{id}

@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (q) 跨认领登记：判定自动接力，批准步骤取消
+
+- 干了什么：Alvin 定的方向一。seo-api.php 新公共件 `queue_review_job($cid,$ids,$by,$audit)`：同客户已有 queued 且未满 20 的 review_plan 就并入其 payload（条件 UPDATE 防与 claim 撞车，落空则新建），否则按 20 一批新建并 fire_wake。三处自动调用：`/tasks/bulk`（plan 落任务）、`/tasks/{id}/result`（execute 出方案，判该不该落地）、`POST /tasks`（人工新建）；`/tasks/review` 也改走它，不再 409。人的动作从「批准、执行、放行」三次降为「按推荐执行、按推荐处理」两次，且都是看一行字点一下。前端任务卡去掉「批准」按钮，proposed 的 agent 任务可直接勾选执行；`queue_task_jobs` 排 execute_task 时把 proposed 置 approved，方案页的整 plan 批准保留（那是 plan 级闸门）。测试五套全过，php -l 在 250 过，内联 JS node --check 过。
+- 坑：自动判定的来源是 worker 回写（/tasks/bulk、/result），所以 worker 服务令牌现在会间接创建 review_plan job；仍是人点过的 plan / execute 的收尾，不是定时触发。
+- 下一步/认领：**已部署 api**（worker 无改动）。方向二（任务线程）接着做。
+
 ### 2026-08-26 AIRA (p) 跨认领登记：worker 拆轻重两条道，判定不再排在 execute 后面
 
 - 干了什么：Alvin 定的三个方向之一（判定要快、要优先）。判定一批 20 到 45 秒，但 worker 单飞，排在 10 分钟的 execute 后面等于白等。零 schema 改动：`seo-worker/lib/lanes.js` 与 seo-api.php 的 `JOB_LANES` 同一张表（heavy = pull_data/discover/plan/execute_task/apply_task/report/backfill_metrics，light = review_plan/ruling/feedback/chat/triage，没登记的归 heavy）。listener 每条道各自单飞（`drainLane`），wake 与 poll 同时拍两条道，health 回 `lanes`；`POST /jobs/claim` 收 body.lane 只取该道，不传照旧全局（老 worker 兼容）；`jobs_queue_order_sql($lane)` 让位判断只看同道在跑的客户；位次按道各算，`GET /jobs/queue` 每行带 lane，queued 的 position 是道内位次。前端队列条排队数拆成「执行 x 判定 y」，判定中文案改「通常 1 分钟内」。测试：insights 91（新 1）、其余四套不变全过；lane 排序 SQL 在 docker mariadb:10.3 实测（16 号 heavy 在跑时，其 light 判定不让位；heavy 道 47 排在 16 前）；php -l 在 250 过；listener node --check 过。

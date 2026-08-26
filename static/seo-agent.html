@@ -3153,13 +3153,14 @@ function renderLanes(){
 }
 
 function taskCard(t,lane){
-  const pickable=(lane==='agent'&&t.status==='approved');
+  /* 批准这一步没有了：判定的 do 就是批准。proposed 的 agent 任务也能直接勾选执行，
+     执行时服务端顺手置 approved。 */
+  const pickable=(lane==='agent'&&(t.status==='approved'||t.status==='proposed'));
   /* 已在队列里的任务不许再勾：勾了也会被 pickedIds 滤掉，这里先把框禁掉说明原因。 */
   const busy=qsTaskBusy(t);
   const cbBusy=busy?(' disabled title="'+esc(t.job_state.status==='running'?'这个任务正在跑，等它跑完再选':'这个任务已经在队列里，不用重复排')+'"'):'';
   const cb=pickable?'<input type="checkbox"'+cbBusy+' onchange="togglePick('+t.id+',this.checked)"'+(picked[t.id]&&!busy?' checked':'')+'>':'';
   let acts='';
-  if(t.status==='proposed')acts+='<button class="btn tiny green" onclick="setTaskStatus('+t.id+',\'approved\')">批准</button>';
   if(lane==='client'&&t.status!=='done')acts+='<button class="btn tiny ghost" onclick="setTaskStatus('+t.id+',\'done\')">标记完成</button>';
   if(t.status==='review')acts+='<button class="btn tiny green" onclick="setTaskStatus('+t.id+',\'done\')">放行</button>';
   const link=t.output_url?'<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出链接</a>':'';
@@ -3259,9 +3260,8 @@ async function reviewTasks(btn,mode){
   const d=await api('/tasks/review','POST',{client_id:curId,task_ids:batch.map(t=>t.id)});
   setTimeout(()=>{btn.disabled=false},1200);
   if(!d)return;
-  if(d._status===409){toast('已有一轮判定在跑（job #'+(d.job_id||'?')+'），等它出结果。',true);return}
   if(fail(d,'判定排队失败'))return;
-  toast('已排队判定 '+d.count+' 个任务，job #'+d.job_id);
+  toast((d.merged?'已并入排队中的判定 job #':'已排队判定 '+d.count+' 个任务，job #')+d.job_id);
   loadTasksAndQueue();
 }
 async function rvOverride(id){
