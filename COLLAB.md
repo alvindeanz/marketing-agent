@@ -31,7 +31,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
   另：`gsc-audit` / `ga4-audit` 在能力清单改成新等级 `agent_readonly`（capabilities.AUTONOMY_LEVELS 加一档），execute_task 对它走 analysis 模式一步出结果，不再走 prepare/apply 两段。起因是 Louvresky #84 花 12 分钟写了一份「打算怎么读 GSC」的方案，且 apply 阶段只有 curl 做不了 JWT。
   测试：新增 `tests/review.test.js` 20 条；五套 24/29/90/88/20 全过；runner 与 runner_host `node --check` 加 require 加载过；内联 JS node --check 过；php -l 在 250 过。
 - 坑：判决写入用 `rowCount()` 计数，MariaDB 对值未变的 UPDATE 回 0，这里因 reviewed_at=NOW() 每次必变所以没事，别把这句 SQL 改成不带时间戳。前端「改判」用了原生 prompt，够用先上，要换成弹窗随时可以。
-- 下一步/认领：**已部署 api + worker**（Alvin 指示推进，2026-08-26 Aira 执行）。判决层评审（闸 B，prepare 出方案后再评对错）未做，等闸 A 跑几批看效果再定。
+- 下一步/认领：**已部署 api + worker**（Alvin 指示推进，2026-08-26 Aira 执行）。判决层评审（闸 B）**不做**，Alvin 2026-08-26 定：方案对错靠各客户 PJ 线程（Discord）人工抽查校准，抽查发现的偏差回写 facts 或 review_principles.md。
 
 ### 2026-08-26 AIRA (n) 跨认领登记：队列取单改客户轮转，不再纯 FIFO
 
