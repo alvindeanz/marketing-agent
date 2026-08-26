@@ -24,6 +24,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 ### 2026-08-26 AIRA (s) 跨认领登记：任务视图按「谁在等谁」重画，放行面板删除
 
 - 干了什么：Alvin 第一性原理审过的版本：看板只回答「哪些卡在等我」。不动数据库。seo-api.php 新增 `attach_human_state`（GET /tasks 派生 human_state = wait_me / running / wait_ext / closed，wait_reason、run_note、closed_kind、round 全部从 status + job_state + 判决 + 结果备注标签推，round 数 execute job），`attach_job_state` 多带 job_type 以区分执行与落地；新端点 `POST /tasks/{id}/decide {yes, note}`：卡上唯一一对按钮，语义按阶段定（待判 / 失败 → 执行，待放行 → 放行，非 agent → 批准；no = 不做了，理由必填记 [killed]）。前端：待放行面板整块删除；Agency / Client / Agent 三泳道改为四列 等我 / 机器在跑 / 等外部 / 结束，等我列混排按优先级，列头带「判定 N」与「全部按推荐（做 x 砍 y 延 z 并 w）」（一次调用同时处理待判与待放行）；卡片两行：状态行（等什么 / 在跑什么 / 怎么结束 + 方案 vN）与 Fable 判决行，status 徽标、job 徽标、需人判断、上次失败徽标全部并进状态行；说明超 150 字折叠点开；「显示已完成」改「显示已结束」，结束列默认藏；隐藏空泳道开关删除。旧的 renderRelease 等函数保留但无 DOM 挂点，直接返回。测试五套全过，php -l 在 250 过，内联 JS node --check 过。
+- 坑：首版部署后整页空白：重画 taskCard 时按锚点切片，把夹在中间的任务线程整段（var thOpen 等）切掉了，renderLanes 抛 ReferenceError。已从上一提交取回并补上 `tests/ui.test.js`：把内联 JS 装进 stub DOM，灌 `tests/fixtures/tasks_louvresky.json` 真实任务数据跑 renderLanes / 队列条 / 线程盒，以后前端切坏在测试里就炸，不用等人看到空白。
 - 坑：human_state 是派生字段，前端凡是按 status 分组的逻辑都改成按它；taskVisible 的「已完成」判断也换成 closed。in_progress 这个枚举值实际没人写，派生时归 running 以防万一。
 - 下一步/认领：**已部署 api**（worker 无改动）。Alvin 看一眼实际效果再定细节。
 
