@@ -505,6 +505,8 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
               <option value="90">近 90 天</option>
             </select>
             <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
+            <!-- 执行按钮就放在勾选框旁边，不用切到 Jobs 页找（Jobs 页那颗保留） -->
+            <button class="btn green" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
           </div>
         </div>
         <div class="panel hidden" id="addTaskPanel" style="margin-bottom:12px">
@@ -3595,10 +3597,13 @@ function pickedIds(){
   return Object.keys(picked).filter(k=>picked[k]&&!busy[k]).map(k=>parseInt(k,10));
 }
 function renderPickHint(){
-  const el=document.getElementById('pickHint');
-  if(!el)return;
   const ids=pickedIds();
   const n=ids.length;
+  /* 任务页工具栏的执行按钮：没勾就灰，勾了显示数量 */
+  const rb=document.getElementById('taskRunBtn');
+  if(rb){rb.disabled=!n;rb.textContent=n?('执行选中任务（'+n+'）'):'执行选中任务'}
+  const el=document.getElementById('pickHint');
+  if(!el)return;
   if(!n){el.textContent='在「任务」视图勾选已批准的 agent 任务，再回来点「执行选中任务」。';return}
   /* 勾选是按 id 记的，跟渲染无关：先在「全部」档勾了后面 sprint 的任务，再切回
      「本期」，那张卡会从泳道上消失但仍然在 payload 里。这里点名说破，免得有人
