@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (r) 跨认领登记：任务线程替代反馈框
+
+- 干了什么：Alvin 定的方向二。一个任务一条线程，零新表：复用 seo_inbox 的 chat_root / chat_user / chat_agent，根的 refs.tasks 只挂这一个任务。seo-api.php：`POST /tasks/{id}/thread`（取或建，回完整视图）；`POST /inbox/{root}/chat` 在根挂了任务时同时投一条 seo_feedback 加 feedback job（线程是反馈的容器，facts 抽取不断）；chat_reply 接受 `actions`，`inbox_refs_norm` 加 actions 键（白名单 redispatch / kill / later / set_verdict / release，最多 3 条）；`POST /inbox/{root}/thread_action {message_id, idx}` 人点执行才落账（redispatch = 指令写进 detail 并排 execute_task；kill = done；later = blocked；set_verdict = 改判；release = 排 apply_task），每条提议只能执行一次，系统行「已执行提议 m/i」记账。`inbox_ref_tasks` 多带 detail 与判定字段。worker chat runner 加任务模式：根挂任务时 prompt 多一段任务全文 + 判决 + 等放行时的方案正文（截 6000 字），回复 json 可附 actions，`cleanActions` 白名单归一化，release 只在 review 状态放行。前端：任务卡与待放行行的「反馈」按钮换成「线程」，卡内展开消息流 + 提议卡 + 输入框，跟 15 秒轮询静默刷新且不打断输入。旧反馈端点与历史保留未删。测试：chat 31（新 2），其余四套不变，五套全过；php -l 在 250 过；内联 JS node --check 过。
+- 坑：线程根按 `refs LIKE '%"tasks":[id]%'` 找，依赖 inbox_refs_norm 的规范序列化（tasks 在前、无空格），别改那个函数的输出格式。
+- 下一步/认领：**已部署 api + worker**（Alvin 指示推进，2026-08-26 Aira 执行）。三个方向全部落地。
+
 ### 2026-08-26 AIRA (q) 跨认领登记：判定自动接力，批准步骤取消
 
 - 干了什么：Alvin 定的方向一。seo-api.php 新公共件 `queue_review_job($cid,$ids,$by,$audit)`：同客户已有 queued 且未满 20 的 review_plan 就并入其 payload（条件 UPDATE 防与 claim 撞车，落空则新建），否则按 20 一批新建并 fire_wake。三处自动调用：`/tasks/bulk`（plan 落任务）、`/tasks/{id}/result`（execute 出方案，判该不该落地）、`POST /tasks`（人工新建）；`/tasks/review` 也改走它，不再 409。人的动作从「批准、执行、放行」三次降为「按推荐执行、按推荐处理」两次，且都是看一行字点一下。前端任务卡去掉「批准」按钮，proposed 的 agent 任务可直接勾选执行；`queue_task_jobs` 排 execute_task 时把 proposed 置 approved，方案页的整 plan 批准保留（那是 plan 级闸门）。测试五套全过，php -l 在 250 过，内联 JS node --check 过。

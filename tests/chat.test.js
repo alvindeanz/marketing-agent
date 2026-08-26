@@ -159,6 +159,43 @@ t('prompt 写死了防注入铁律和「只提议不执行」', () => {
 /* ================= 草案解析三层防线 ================= */
 section('草案解析：规整与丢弃');
 
+t('任务线程：任务块带判决与方案，prompt 出现动作契约，普通会话不出现', () => {
+  const task = { id: 82, status: 'review', priority: 'P0', module: 'onpage', title: '首页 meta', detail: '补 title', review_verdict: 'do', review_reason: '一眼值', review_evidence: '48% 点击', review_adjust: '去掉 220', change_plan: '# 方案\n改 seo 对象' };
+  const b = chat.taskBlock(task);
+  assert.ok(b.indexOf('#82 [review]') === 0);
+  assert.ok(b.indexOf('Fable 判定：做') > 0 && b.indexOf('前提修正：去掉 220') > 0 && b.indexOf('改 seo 对象') > 0);
+  const p = chat.buildPrompt({ clientName: 'L', title: 't', briefing: 'B', messages: [], task });
+  assert.ok(p.indexOf('本线程的任务开始') > 0 && p.indexOf('release {reason}') > 0 && p.indexOf('redispatch {reason}') > 0);
+  const p2 = chat.buildPrompt({ clientName: 'L', title: 't', briefing: 'B', messages: [] });
+  assert.ok(p2.indexOf('本线程的任务开始') === -1 && p2.indexOf('redispatch') === -1);
+  const p3 = chat.buildPrompt({ clientName: 'L', title: 't', briefing: 'B', messages: [], task: Object.assign({}, task, { status: 'approved' }) });
+  assert.ok(p3.indexOf('不在等放行状态，不许提') > 0);
+});
+t('任务线程：动作白名单，release 只在 review 状态放行，缺 reason 丢弃，set_verdict 校验值', () => {
+  const quiet = () => {};
+  const review = { id: 1, status: 'review' };
+  const out = chat.cleanActions(
+    { actions: [
+      { type: 'redispatch', reason: '去掉 220' },
+      { type: 'release' },
+      { type: 'set_verdict', verdict: 'DROP', reason: '不值' },
+      { type: 'set_verdict', verdict: 'merge', reason: 'x' },
+      { type: 'kill' },
+      { type: 'deploy', reason: 'x' },
+    ] },
+    review,
+    quiet
+  );
+  assert.deepStrictEqual(out, [
+    { type: 'redispatch', reason: '去掉 220' },
+    { type: 'release', reason: '' },
+    { type: 'set_verdict', verdict: 'drop', reason: '不值' },
+  ]);
+  const out2 = chat.cleanActions({ actions: [{ type: 'release' }, { type: 'later', reason: '等客户' }] }, { id: 1, status: 'approved' }, quiet);
+  assert.deepStrictEqual(out2, [{ type: 'later', reason: '等客户' }]);
+  const many = chat.cleanActions({ actions: [1, 2, 3, 4].map(() => ({ type: 'kill', reason: 'r' })) }, review, quiet);
+  assert.strictEqual(many.length, 3);
+});
 t('好草案原样过，字段齐全', () => {
   const out = chat.cleanDrafts({ drafts: [GOOD_DRAFT] });
   assert.strictEqual(out.length, 1);

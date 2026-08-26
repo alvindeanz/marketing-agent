@@ -268,6 +268,7 @@ class Api {
    * 这一行的 refs.drafts，不会建任何任务：草案要人在界面上点「立项」才落账。
    * 这是 chat runner 唯一的写操作，除此之外整条链路只读。
    */
+  /* body.actions（任务线程里模型提议的动作）随 drafts 一起原样交给服务端规整存进 refs。 */
   async postChatReply(rootId, body) {
     return this.req('POST', '/inbox/' + encodeURIComponent(rootId) + '/chat_reply', body);
   }
