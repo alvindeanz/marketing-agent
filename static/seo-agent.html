@@ -3192,7 +3192,8 @@ function rvLine(t){
   if(!overridden&&t.review_evidence)h+='<span class="rv-ev">依据: '+esc(t.review_evidence)+'</span>';
   if(!overridden&&v==='do'&&t.review_adjust)h+='<span class="rv-adj">前提修正: '+esc(t.review_adjust)+'</span>';
   if(overridden)h+='<span class="rv-ov">人工改判，Fable 原判 '+esc(RV_LABEL[t.review_verdict]||t.review_verdict)+'</span>';
-  if(t.review_stale)h+='<span class="rv-ev">判决已过期（任务或 facts 改过），重判后才会执行</span>';
+  if(t.review_stale)h+='<span class="rv-ev">判决已过期（任务在判决后被改过），重判后才会执行</span>';
+  else if(t.review_facts_newer)h+='<span class="rv-ev">判决后 facts 有更新，要稳可重判</span>';
   const editable=['proposed','approved','blocked','review'].indexOf(t.status)>=0;
   if(editable){
     h+='<button class="btn tiny ghost" onclick="rvOverride('+t.id+')">改判</button>';

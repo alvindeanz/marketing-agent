@@ -504,13 +504,16 @@ function attach_review_state($tasks,$cid){
         $o=isset($t['review_override'])?$t['review_override']:null;
         $eff=$o?:($v?:null);
         $at=(string)($t['reviewed_at']??'');
-        $stale=false;
+        /* 过期只认「任务本身在判决之后被改过」。facts 更新单独给个提示位，不算过期：
+           改判写反馈就会动 facts，若也算过期，一次改判会把全客户的判决全部作废（2026-08-26 实测）。 */
+        $stale=false;$factsNewer=false;
         if($v&&$at!==''){
             if(strcmp($at,(string)($t['updated_at']??''))<0)$stale=true;
-            if($factsAt!==''&&strcmp($at,$factsAt)<0)$stale=true;
+            if($factsAt!==''&&strcmp($at,$factsAt)<0)$factsNewer=true;
         }
         $t['review_effective']=$eff;
         $t['review_stale']=$stale;
+        $t['review_facts_newer']=$factsNewer;
         $t['review_pending']=isset($pending[(int)$t['id']]);
     }
     unset($t);
