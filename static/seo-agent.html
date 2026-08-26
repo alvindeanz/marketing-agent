@@ -266,6 +266,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .st.wait_ext .st-tag{background:#1e2433;color:#94a3b8;border:1px solid #334155}.st.closed .st-tag{background:#052e16;color:#22c55e}
 .st.closed.dropped .st-tag,.st.closed.killed .st-tag{background:#450a0a;color:#f87171}.st.closed.merged .st-tag{background:#3b1f6e;color:#c084fc}
 .st .st-fail{color:#f87171}
+.st-why{margin-top:3px;font-size:12px;color:#f87171;line-height:1.5}
 .lane-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .tcard-detail.clip{max-height:66px;overflow:hidden;position:relative;cursor:pointer}
 .tcard-detail.clip:after{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;background:linear-gradient(transparent,#0f1117)}
@@ -3150,7 +3151,28 @@ function stateLine(t){
   if(txt)bits.push('<span'+(failed?' class="st-fail"':'')+'>'+esc(txt)+'</span>');
   if(t.round)bits.push('<span class="muted">方案 v'+t.round+'</span>');
   if(t.status==='review'&&t.output_url)bits.push('<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出</a>');
-  return '<div class="st '+hs+(t.closed_kind?(' '+t.closed_kind):'')+'">'+bits.join('')+'</div>';
+  if(failed)bits.push('<button class="btn tiny ghost" onclick="showJobLog('+(t.job_state.job_id||0)+')">看日志</button>');
+  let h='<div class="st '+hs+(t.closed_kind?(' '+t.closed_kind):'')+'">'+bits.join('')+'</div>';
+  /* 失败原因单独一行红字：模型自己说的为什么，人不用翻日志就知道该改方案还是该修平台 */
+  if(failed&&t.fail_reason)h+='<div class="st-why">原因：'+esc(t.fail_reason)+'</div>';
+  return h;
+}
+/* 看日志：拉一条 job 的完整日志弹窗显示。只读。 */
+async function showJobLog(jobId){
+  if(!jobId)return;
+  const d=await api('/jobs/'+jobId);
+  if(fail(d,'日志载入失败'))return;
+  const j=d.job||{};
+  let bg=document.getElementById('jobLogBg');
+  if(!bg){
+    bg=document.createElement('div');bg.id='jobLogBg';bg.className='modal-bg';
+    bg.innerHTML='<div class="modal" style="max-width:960px;width:100%"><div class="sec-head"><div class="sec-title" id="jobLogTitle"></div><button class="btn tiny ghost" onclick="document.getElementById(\'jobLogBg\').classList.remove(\'show\')">关闭</button></div><div class="log-box" id="jobLogBox" style="max-height:70vh;overflow:auto;white-space:pre-wrap"></div></div>';
+    bg.addEventListener('click',e=>{if(e.target===bg)bg.classList.remove('show')});
+    document.body.appendChild(bg);
+  }
+  document.getElementById('jobLogTitle').textContent='job #'+j.id+' · '+(JOB_LABEL[j.type]||j.type)+' · '+j.status+(j.finished_at?(' · '+j.finished_at):'');
+  document.getElementById('jobLogBox').textContent=j.log_text||'（没有日志）';
+  bg.classList.add('show');
 }
 var detailOpen={};
 function toggleDetail(id){detailOpen[id]=!detailOpen[id];renderLanes()}
@@ -3194,7 +3216,10 @@ async function decideTask(id,yes){
     if(!String(note).trim()){toast('得写个理由',true);return}
   }else{
     const t=(tasksData||[]).find(x=>x.id===id);
-    if(t&&t.status==='review'&&!confirm('放行 #'+id+'？会排一个 apply 任务把改动真正落到线上。'))return;
+    if(t&&(t.job_state||{}).status==='failed'){
+      const n=(t.job_state.fail_count||1);
+      if(!confirm('#'+id+' 上一次已经失败'+(n>1?(' '+n+' 次'):'')+'：'+(t.fail_reason||'原因见日志')+'\n\n同一份方案再跑一次多半还是这个结果。确定要原样再跑？（改方案请走线程「改了重跑」）'))return;
+    }else if(t&&t.status==='review'&&!confirm('放行 #'+id+'？会排一个 apply 任务把改动真正落到线上。'))return;
   }
   const d=await api('/tasks/'+id+'/decide','POST',{yes:!!yes,note:String(note||'').trim()});
   if(fail(d,'操作失败'))return;
@@ -3375,8 +3400,9 @@ function rvCandidates(mode){
     .sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
 }
 function rvApplicable(mode){
+  /* 落地或执行失败过的不进按推荐：同一份方案再放一次只会再失败一次。要么线程里改了重跑，要么人看完日志手动点。 */
   return rvPool(mode).filter(t=>t.review_effective&&!t.review_stale&&!t.review_pending&&
-    rvStatuses(mode).indexOf(t.status)>=0&&!qsTaskBusy(t));
+    rvStatuses(mode).indexOf(t.status)>=0&&!qsTaskBusy(t)&&(t.job_state||{}).status!=='failed');
 }
 function rvTally(list){
   const c={do:0,later:0,merge:0,drop:0};

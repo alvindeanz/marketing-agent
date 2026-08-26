@@ -580,7 +580,7 @@ function attach_human_state($tasks,$cid){
         $st=(string)$t['status'];
         $js=$t['job_state']??['status'=>null];
         $note=(string)($t['result_note']??'');
-        $hs='wait_me';$why='';$run='';$closed=null;
+        $hs='wait_me';$why='';$run='';$closed=null;$failReason='';
         if($st==='done'){
             $hs='closed';
             if(preg_match('/\[(dropped|merged|killed)\][^\n]*$/s',$note,$mm)||preg_match('/\[(dropped|merged|killed)\]/',$note,$mm))$closed=$mm[1];
@@ -599,12 +599,17 @@ function attach_human_state($tasks,$cid){
         }else{
             $hs='wait_me';
             if(!empty($t['review_pending']))$why='判定中';
-            elseif($js['status']==='failed')$why=(($js['job_type']??'')==='apply_task'?'落地失败，已回滚':'上次执行失败').'（job #'.$js['job_id'].'）';
+            elseif($js['status']==='failed'){
+                $n=(int)($js['fail_count']??1);
+                $why=(($js['job_type']??'')==='apply_task'?'落地失败':'执行失败').($n>1?(' '.$n.' 次'):'').'（job #'.$js['job_id'].'）';
+                $failReason=task_fail_reason($t,$js['job_id']);
+            }
             elseif($st==='review')$why='待放行';
             else $why=empty($t['review_effective'])?'待判':'待拍板';
         }
         $t['human_state']=$hs;
         $t['wait_reason']=$why;
+        $t['fail_reason']=$failReason??'';
         $t['run_note']=$run;
         $t['closed_kind']=$closed;
         $t['round']=$rounds[$tid]??0;
@@ -1160,21 +1165,29 @@ function attach_job_state($tasks,$cid){
     $q=db()->prepare("SELECT id,type,status,payload,claimed_at,finished_at,created_at
         FROM agent_jobs WHERE client_id=? AND type IN('execute_task','apply_task') ORDER BY id DESC LIMIT 200");
     $q->execute([$cid]);
-    $run=[];$que=[];$fail=[];
+    $run=[];$que=[];$latest=[];$failRun=[];
     foreach($q->fetchAll() as $r){
         $tid=job_task_id($r['type'],$r['payload']);
         if(!$tid)continue;
         $st=(string)$r['status'];
-        /* 倒序遍历：running 与 queued 每次覆盖，留下的是 id 最小的那条，也就是最早排的；
-           failed 只认第一次见到的，也就是最近一条。 */
+        /* 倒序遍历：running 与 queued 每次覆盖，留下的是 id 最小的那条，也就是最早排的。
+           latest 只认第一次见到的，也就是这个任务最近一次 job，不管成败。
+           failRun 数「最近一次成功之后连续失败了几次」：人放行五次失败五次，卡上要写 5，
+           不是每次都像第一次。2026-08-26 的教训：以前失败判定拿 finished_at 和任务 updated_at 比，
+           而 apply 写失败备注本身就会顶掉 updated_at，失败信号被自己盖掉，卡上永远显示「待放行」。 */
         if($st==='running')$run[$tid]=$r;
         elseif($st==='queued')$que[$tid]=$r;
-        elseif($st==='failed'&&!isset($fail[$tid]))$fail[$tid]=$r;
+        if(!isset($latest[$tid])&&in_array($st,['done','failed'],true))$latest[$tid]=$r;
+        if(!isset($failRun[$tid]))$failRun[$tid]=['n'=>0,'closed'=>false];
+        if(!$failRun[$tid]['closed']){
+            if($st==='failed')$failRun[$tid]['n']++;
+            elseif($st==='done')$failRun[$tid]['closed']=true;
+        }
     }
     $pos=($que)?jobs_queue_positions():[];
     foreach($tasks as &$t){
         $tid=(int)$t['id'];
-        $state=['status'=>null,'job_id'=>null,'job_type'=>null,'position'=>null,'claimed_at'=>null];
+        $state=['status'=>null,'job_id'=>null,'job_type'=>null,'position'=>null,'claimed_at'=>null,'fail_count'=>0];
         if(isset($run[$tid])){
             $state['status']='running';
             $state['job_id']=(int)$run[$tid]['id'];
@@ -1186,20 +1199,38 @@ function attach_job_state($tasks,$cid){
             $state['job_id']=$jid;
             $state['job_type']=$que[$tid]['type'];
             $state['position']=isset($pos[$jid])?$pos[$jid]:null;
-        }elseif(isset($fail[$tid])){
-            $r=$fail[$tid];
-            $ts=(string)($r['finished_at']!==null&&$r['finished_at']!==''?$r['finished_at']:$r['created_at']);
-            $upd=(string)($t['updated_at']??'');
-            if($upd===''||strcmp($ts,$upd)>0){
-                $state['status']='failed';
-                $state['job_id']=(int)$r['id'];
-                $state['job_type']=$r['type'];
-            }
+        }elseif(isset($latest[$tid])&&$latest[$tid]['status']==='failed'&&$t['status']!=='done'){
+            $r=$latest[$tid];
+            $state['status']='failed';
+            $state['job_id']=(int)$r['id'];
+            $state['job_type']=$r['type'];
+            $state['fail_count']=(int)($failRun[$tid]['n']??1);
         }
         $t['job_state']=$state;
     }
     unset($t);
     return $tasks;
+}
+
+/* 任务最近一次失败的一句话原因。优先结果备注里 runner 写的「执行中止：/执行失败：」那句
+   （那是模型自己说的为什么），没有就取 job 日志最后一条 FAILED 行。人看卡就能知道为什么，
+   不用去 Jobs 页翻。 */
+function task_fail_reason($t,$jobId){
+    $note=(string)($t['result_note']??'');
+    if(preg_match_all('/(?:执行中止|执行失败|发布后验证未通过|落地失败)[：:]\s*([^\n]+)/u',$note,$mm)&&$mm[1]){
+        $s=end($mm[1]);
+        $s=preg_replace('/\s*任务保持 review.*$/u','',$s);
+        return mb_substr(trim($s),0,300,'UTF-8');
+    }
+    if($jobId){
+        $q=db()->prepare("SELECT log_text FROM agent_jobs WHERE id=?");
+        $q->execute([(int)$jobId]);
+        $r=$q->fetch();
+        $q->closeCursor();
+        $log=(string)(($r&&$r['log_text'])?$r['log_text']:'');
+        if(preg_match_all('/FAILED[:：]\s*([^\n]+)/u',$log,$mm)&&$mm[1])return mb_substr(trim(end($mm[1])),0,300,'UTF-8');
+    }
+    return '';
 }
 
 $m=$_SERVER['REQUEST_METHOD'];
@@ -1304,6 +1335,18 @@ if($m==='GET'&&$ROUTE==='/jobs/queue'){
 }
 
 // PATCH /jobs/{id} -> worker progress: status / log_append / token_usage
+// GET /jobs/{id} -> 一条 job 连同完整日志，任务卡上「看日志」用。admin 层。
+if($m==='GET'&&preg_match('#^/jobs/(\d+)$#',$ROUTE,$mm)){
+    auth_admin();
+    $g=db()->prepare("SELECT j.*,c.name AS client_name FROM agent_jobs j LEFT JOIN clients c ON c.id=j.client_id WHERE j.id=?");
+    $g->execute([(int)$mm[1]]);
+    $job=$g->fetch();
+    if(!$job)res(404,['error'=>'Job not found']);
+    $job['payload']=jdec($job['payload']);
+    $job['token_usage']=(int)$job['token_usage'];
+    res(200,['job'=>$job]);
+}
+
 if($m==='PATCH'&&preg_match('#^/jobs/(\d+)$#',$ROUTE,$mm)){
     auth_worker();
     $jid=(int)$mm[1];

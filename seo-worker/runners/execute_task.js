@@ -179,17 +179,21 @@ function buildPreparePrompt(opts) {
     '按执行顺序编号，每一步写清楚：',
     '- 方法与完整路径（siteId 用占位符）',
     '- 请求体（真实内容，不是示意，正文类字段写完整成品）',
-    '- 预期响应：状态码，以及响应里哪个字段等于什么才算成功',
+    '- 预期响应：**只写 HTTP 状态码**。不许写"响应里某字段等于什么"，平台响应结构不是契约，会变。',
+    '- 回读核对：这一步成功与否靠回读，写清回读哪个只读端点、比对什么内容（元素值、页面字段、文章正文、线上 URL 状态码）。',
     '- 这一步如果失败，是停下还是可以跳过',
-    '涉及两个以上文件的改动，第一步必须是拍快照。整页覆盖类操作，前面必须有一步 GET 留档。',
+    '每一条写请求都要带 header `X-WF-Changeset: $WF_CHANGESET`（apply 阶段 worker 会给出真实 id），每条 curl 带 `--max-time 120`。',
+    '**不许把 POST /snapshots 写成前置步骤**，安全网是 changeset。整页覆盖类操作，前面必须有一步 GET 留档。',
+    '第 2 节末尾加一行「涉及文件：」列出本方案会写到的平台文件（pages/x.html、posts/slug.md、config.json 这类），',
+    'apply 结束会拿 changeset 实际碰过的文件和它比对。',
     '',
     '## 3. 变更预览',
     '每个被改动的对象给 before 和 after 对照。文案类给原文和新文；重定向类给完整的新增和删除清单；',
     '样式类给改动的选择器和规则。人看这一段就要能判断该不该放行。',
     '',
     '## 4. 回滚方式',
-    '每一步怎么退回去，写成可执行的调用。用到平台归档或快照的，写清楚 label 或 archiveKey 从哪个',
-    '响应字段里取。说明哪些步骤一旦执行就不可逆。',
+    '每一步怎么退回去，写成可执行的调用（反向 PATCH 回原值、反向 redirects PATCH 这类）。',
+    '平台目前没有自助回滚接口，兜底是人按 changeset 原件还原，所以每一步的原值必须写在方案里。说明哪些步骤一旦执行就不可逆。',
     '',
     '## 5. 执行后验证',
     '编号列出 apply 阶段做完要跑的验证：回读哪个接口、比对哪个字段、哪个线上 URL 该返回什么状态码。',
@@ -211,8 +215,9 @@ function buildPreparePrompt(opts) {
     '- 最后附一段不超过 200 字的中文摘要，写清这次改什么、风险在哪、需要人重点看哪一点。',
     '- 摘要之后再附一个 json 块收尾，后面不要有任何内容：',
     '```json',
-    '{"target_urls":["https://example.co.nz/some-page/"]}',
+    '{"target_urls":["https://example.co.nz/some-page/"],"files":["pages/index.html","config.json"]}',
     '```',
+    '  files 是本方案会写到的平台文件清单，与第 2 节末尾「涉及文件」一致，apply 结束用它和 changeset 比对。',
     '  target_urls 是本方案**将会改动**的页面完整 URL 列表，写规范域、零跳转的那一个',
     '  （拿不准就 curl -L -w "%{num_redirects}" 验一下，必须是 0）。放行的人先看这几个地址',
     '  再决定放不放，所以只写真的会被改的页面，读过没改的不许写，接口地址与本地路径也不许写。',
@@ -229,6 +234,55 @@ const REQUIRED_PLAN_SECTIONS = ['变更目标与现状', 'API 调用序列', '�
 
 function missingPlanSections(text) {
   return REQUIRED_PLAN_SECTIONS.filter((s) => text.indexOf(s) === -1);
+}
+
+/**
+ * 方案文本的机械 lint，来自 2026-08-26 两次落地失败与 Aiden 的 bot 操作说明。
+ * 一条命中就打回重出，不让它进待放行：apply 阶段照着一份注定失败的方案跑 10 分钟，
+ * 比 prepare 阶段多花 10 秒重写贵得多。返回问题描述数组，空数组即通过。
+ */
+const PLAN_FORBIDDEN_PATHS = ['/api/domains', '/api/admin', '/api/partner', '/api/migrate', '/api/payments'];
+function lintPlan(text) {
+  const t = String(text || '');
+  const problems = [];
+  // 1. 全站快照当前置步骤（大站 restore 必挂，且 changeset 才是安全网）
+  if (/POST\s+[^\n]*\/snapshots(?![^\n]*restore)/i.test(t)) {
+    problems.push('方案把 POST /snapshots 写成了步骤，全站快照不许用，安全网是 changeset');
+  }
+  // 2. redirects 全量 PUT
+  if (/PUT\s+[^\n]*\/redirects/i.test(t)) problems.push('方案对 /redirects 用了 PUT，只准 PATCH');
+  // 3. 禁区路径
+  for (const p of PLAN_FORBIDDEN_PATHS) {
+    if (t.indexOf(p) !== -1) problems.push('方案出现禁区路径 ' + p);
+  }
+  // 4. 响应字段硬断言。只查「预期响应」行，别的地方提字段名是允许的。
+  const lines = t.split('\n');
+  for (const line of lines) {
+    if (!/预期响应/.test(line)) continue;
+    if (/(===|字段(等于|为|应为|必须是)|\bok\s*[=:]\s*true|回读体里)/.test(line)) {
+      problems.push('「预期响应」写了响应字段断言：' + line.trim().slice(0, 80) + '。只准写状态码，成功靠回读核对');
+      break;
+    }
+  }
+  // 5. 涉及文件清单
+  if (!/涉及文件/.test(t) && !/"files"\s*:/.test(t)) problems.push('方案没有列「涉及文件」清单，apply 无法和 changeset 比对');
+  return problems;
+}
+
+/** 方案末尾 json 里的 files 清单，apply 用来和 changeset 比对。没有就空数组。 */
+function planFiles(text) {
+  const parsed = extractTrailingJsonSafe(text);
+  const files = parsed && Array.isArray(parsed.files) ? parsed.files : [];
+  return files.map((f) => String(f || '').trim()).filter(Boolean).slice(0, 50);
+}
+function extractTrailingJsonSafe(text) {
+  try {
+    const { extractTrailingJson } = require('../lib/mdjson');
+    const r = extractTrailingJson(text);
+    return r && r.json && typeof r.json === 'object' ? r.json : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -1342,6 +1396,12 @@ async function runOne(ctx, context, workspace, taskId) {
 
   if (prepare) {
     const missing = missingPlanSections(output);
+    const lint = missing.length ? [] : lintPlan(output);
+    if (lint.length) {
+      // 和缺章节同一待遇：不 post result，任务留在 approved，job 判红并把问题写清楚，
+      // 人在卡上看到「执行失败：方案 lint 未过：...」就知道该在线程里让它重出。
+      throw new Error('task ' + taskId + ': 方案 lint 未过，打回重出：' + lint.join('；'));
+    }
     if (missing.length) {
       // Do not post a result: posting flips the task to review, which is the
       // releasable state, and a structurally broken plan must never be
@@ -1411,6 +1471,9 @@ async function run(ctx) {
 
 module.exports = {
   run,
+  lintPlan,
+  planFiles,
+  PLAN_FORBIDDEN_PATHS,
   buildPrompt,
   buildPreparePrompt,
   taskOps,

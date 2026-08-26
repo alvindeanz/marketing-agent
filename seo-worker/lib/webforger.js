@@ -138,6 +138,32 @@ class WebForger {
     return { siteId: this.siteId, username: user.username || '' };
   }
 
+  /**
+   * POST /api/changesets/{siteId} { reason, taskId } -> { id }
+   * apply 阶段的安全网：worker 自己开，把 id 塞进 prompt，模型每个写请求带
+   * X-WF-Changeset。开不出来就不 apply，没有安全网的写一次都不发。
+   */
+  async openChangeset(reason, taskId) {
+    const res = await this.req('POST', '/api/changesets/' + encodeURIComponent(this.siteId), {
+      reason: String(reason || '').slice(0, 200),
+      taskId: String(taskId || ''),
+    });
+    const id = res && (res.id || (res.changeset && res.changeset.id));
+    if (!id) throw new Error('changeset 响应里没有 id：' + JSON.stringify(res || {}).slice(0, 200));
+    return String(id);
+  }
+
+  /** GET /api/changesets/{siteId}/{csId} -> { changeset: { files: [...] , ... } } */
+  async getChangeset(csId) {
+    const res = await this.req(
+      'GET',
+      '/api/changesets/' + encodeURIComponent(this.siteId) + '/' + encodeURIComponent(csId)
+    );
+    const cs = (res && (res.changeset || res)) || {};
+    const files = Array.isArray(cs.files) ? cs.files.map((f) => (typeof f === 'string' ? f : (f && (f.path || f.file || f.name)) || '')).filter(Boolean) : [];
+    return { raw: cs, files, status: cs.status || '' };
+  }
+
   /** GET /api/blog/{siteId} -> summary rows, no bodies. */
   async listPosts() {
     const res = await this.req('GET', '/api/blog/' + encodeURIComponent(this.siteId) + this.langQuery('?'));

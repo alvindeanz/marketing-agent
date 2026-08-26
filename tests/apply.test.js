@@ -283,7 +283,7 @@ t('apply 的 prompt 把四个新字段都要出来了', () => {
     platform: null,
     credPath: '/tmp/ws/notes/webforger_credentials.md',
   });
-  ['affected_urls', 'snapshot_label', 'before_archive', 'checks', 'deferred'].forEach((k) => {
+  ['affected_urls', 'touched_files', 'before_archive', 'checks', 'deferred', 'X-WF-Changeset'].forEach((k) => {
     assert.ok(p.indexOf(k) > -1, 'prompt 里应当出现 ' + k);
   });
   assert.ok(p.indexOf('verification_passed') > -1, '老字段仍要写，兼容期不撤');
@@ -373,6 +373,37 @@ t('publishFile 的子目录也过白名单', () => {
       assert.ok(/不安全/.test(e.message));
     }
   );
+});
+
+
+console.log('changeset 与方案 lint');
+t('compareFiles：多出的文件算 extra，少的算 missing，一致时 text 为空', () => {
+  const r = A.compareFiles(['pages/index.html', 'config.json'], ['/pages/index.html', 'config.json']);
+  assert.deepStrictEqual(r.extra, []); assert.deepStrictEqual(r.missing, []); assert.strictEqual(r.text, '');
+  const r2 = A.compareFiles(['pages/index.html'], ['pages/index.html', 'posts/x.md']);
+  assert.deepStrictEqual(r2.extra, ['posts/x.md']); assert.ok(r2.text.indexOf('多出') > -1);
+  const r3 = A.compareFiles(['pages/a.html', 'pages/b.html'], ['pages/a.html']);
+  assert.deepStrictEqual(r3.missing, ['pages/b.html']);
+});
+t('planFilesOf 从方案末尾 json 取 files', () => {
+  assert.deepStrictEqual(A.planFilesOf('# 方案\n...\n```json\n{"target_urls":[],"files":["pages/index.html"," config.json "]}\n```'), ['pages/index.html', 'config.json']);
+  assert.deepStrictEqual(A.planFilesOf('没有 json'), []);
+});
+t('buildNoteHeader 带 changeset 行与文件核对行', () => {
+  const h = A.buildNoteHeader({ affectedUrls: [], judge: A.judgeChecks(null), changesetId: 'cs_1', changesetFiles: ['pages/index.html'], fileMismatch: '方案声明但未碰到 config.json' });
+  const lines = h.split('\n');
+  assert.ok(lines.some((l) => l === 'changeset: cs_1（1 文件: pages/index.html）'), lines.join(' | '));
+  assert.ok(lines.some((l) => l.indexOf('文件核对: 方案声明但未碰到') === 0));
+});
+t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺文件清单各打回一次', () => {
+  const ok = '## 2. API 调用序列\n步骤 1 PATCH /api/content/x/edit\n- 预期响应：200\n- 回读核对：GET elements 比对\n涉及文件：pages/index.html';
+  assert.deepStrictEqual(E.lintPlan(ok), []);
+  assert.ok(E.lintPlan('步骤 1 POST /api/content/x/snapshots\n涉及文件：a').some((x) => x.indexOf('snapshots') > -1));
+  assert.ok(E.lintPlan('PUT /api/content/x/redirects\n涉及文件：a').some((x) => x.indexOf('PUT') > -1));
+  assert.ok(E.lintPlan('GET /api/admin/users\n涉及文件：a').some((x) => x.indexOf('/api/admin') > -1));
+  assert.ok(E.lintPlan('- 预期响应：200，回读体里 seo.title 逐字相等\n涉及文件：a').some((x) => x.indexOf('字段断言') > -1));
+  assert.ok(E.lintPlan('- 预期响应：200\n- 回读核对：GET').some((x) => x.indexOf('涉及文件') > -1));
+  assert.deepStrictEqual(E.planFiles('x\n```json\n{"files":["pages/a.html"]}\n```'), ['pages/a.html']);
 });
 
 Promise.all(pending).then(() => {

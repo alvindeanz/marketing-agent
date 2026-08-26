@@ -39,13 +39,20 @@ function changePlanPath(workspace, taskId) {
   return path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + taskId + '.md');
 }
 
+/** 方案末尾 json 的 files 清单，与 execute_task.planFiles 同一口径。 */
+function planFilesOf(plan) {
+  const parsed = extractTrailingJson(plan);
+  const files = parsed && parsed.json && Array.isArray(parsed.json.files) ? parsed.json.files : [];
+  return files.map((f) => String(f || '').trim()).filter(Boolean).slice(0, 50);
+}
+
 function findTask(context, taskId) {
   const tasks = (context && Array.isArray(context.tasks) && context.tasks) || [];
   return tasks.find((t) => String(t.id) === String(taskId)) || null;
 }
 
 function buildPrompt(opts) {
-  const { task, plan, planFile, workspace, platform, credPath } = opts;
+  const { task, plan, planFile, workspace, platform, credPath, changesetId, siteId } = opts;
   return [
     '你是一家新西兰数字营销公司的 SEO 执行 agent，现在处于 apply 阶段。',
     '下面这份变更方案**已经过人工审批**。你的工作只有一件：严格照着它执行，然后自验。',
@@ -60,6 +67,14 @@ function buildPrompt(opts) {
     '   看到 429 按响应里的 retryAfter 退避，没有就退 60 秒，最多等一次，再不行就中止。',
     '5. **凭据严禁出现在你的输出里。** 不许把 token、密码、完整 Authorization 头写进',
     '   执行记录、摘要或任何回复内容。需要提及时写占位符。',
+    '6. **changeset 是本次写操作的安全网，worker 已经替你开好：`' + (changesetId || '（未开出，本次不许发任何写请求）') + '`，siteId `' + (siteId || '?') + '`。**',
+    '   每一个 POST / PATCH / PUT / DELETE 都必须带 `-H "X-WF-Changeset: ' + (changesetId || '') + '"`，漏一个就是没有安全网的裸写。',
+    '   方案里的 $WF_CHANGESET 占位符就替换成这个 id。每条 curl 带 `--max-time 120`。',
+    '7. **成功判定 = HTTP 2xx + 回读比对。** 不许拿响应 body 里某个字段的有无或取值判成败，',
+    '   平台响应结构会变。方案里若残留了字段断言，按「回读核对」那一行执行，字段不符只记录不中止。',
+    '8. **中止只做一件事：停手上报。** 401 / 403 / 409 / 挂起超过 120 秒 / 回读不符，一律停止写，',
+    '   在执行记录里写清五项：job id、changeset id、siteId、碰过的文件、最后一个成功的步骤加失败步骤的状态码与 error。',
+    '   不要自己尝试回滚，平台没有 revert 接口，人按 changeset 原件还原。半改状态点名哪些文件。',
     '',
     '任务',
     'Task id: ' + task.id,
@@ -103,7 +118,8 @@ function buildPrompt(opts) {
     '```json',
     '{"status":"success","steps_done":3,"steps_total":3,"verification_passed":true,',
     ' "affected_urls":["https://example.co.nz/some-page/"],',
-    ' "snapshot_label":"task-61-mtm-rewrite-pre",',
+    ' "touched_files":["pages/index.html"],',
+    ' "last_ok_step":"步骤 3 PATCH /edit 回读一致","fail_step":"",',
     ' "before_archive":"/data/aira/clients/example/backups/2026-08-25-task-61/before-rendered.html",',
     ' "checks":[{"name":"V1 接口返回 ok","passed":true,"deferred":false,"note":"ok=true"},',
     '  {"name":"V12 Rich Results Test","passed":false,"deferred":true,"note":"需浏览器交互，本环境跑不了，待人工补跑"}],',
@@ -116,7 +132,9 @@ function buildPrompt(opts) {
     '- affected_urls：本次**实际**改动到的页面完整 URL 列表，写规范域、零跳转的那一个',
     '  （拿不准就 curl -L -w "%{num_redirects}" 验一下，必须是 0）。没有页面被改动就写空数组。',
     '  不许把只读过没改过的页面写进来，也不许写接口地址或本地路径。',
-    '- snapshot_label：方案里那一步拍的平台快照 label 原文，方案没有拍快照就写空字符串。',
+    '- touched_files：你认为本次写到的平台文件清单（pages/x.html、posts/slug.md、config.json）。worker 会拿',
+    '  changeset 的真实清单核对，写不准没关系，但不许漏写你明知改过的。',
+    '- last_ok_step / fail_step：最后一个成功完成的步骤，以及失败或中止的那一步（含状态码与 error），成功时 fail_step 写空字符串。',
     '- before_archive：方案步骤里落到本地的改前渲染 HTML 的绝对路径（整页覆盖类必有这一步），',
     '  没有就写空字符串。写路径本身，不要写目录，不要写多个。',
     '- checks：方案"执行后验证"一节的每一条各一项，顺序照方案。',
@@ -219,6 +237,11 @@ function buildNoteHeader(o) {
   const lines = ['受影响页面: ' + (urls.length ? urls.join(' , ') : '未提供')];
   if (opts.archiveUrl) lines.push('改前存档: ' + opts.archiveUrl);
   if (opts.snapshotLabel) lines.push('快照: ' + String(opts.snapshotLabel).trim());
+  if (opts.changesetId) {
+    const files = Array.isArray(opts.changesetFiles) ? opts.changesetFiles : [];
+    lines.push('changeset: ' + String(opts.changesetId).trim() + '（' + files.length + ' 文件' + (files.length ? ': ' + files.slice(0, 12).join(', ') + (files.length > 12 ? ' 等' : '') : '') + '）');
+  }
+  if (opts.fileMismatch) lines.push('文件核对: ' + opts.fileMismatch);
   lines.push('检查: ' + checkSummary(opts.judge));
   return lines.join('\n') + '\n---\n';
 }
@@ -228,7 +251,7 @@ function readOutcome(output, log) {
   const parsed = extractTrailingJson(output);
   const say = log || function () {};
   // 解析不出来的情况没有任何可信字段，判定字段一律给空值。
-  const empty = { judge: judgeChecks(null), affectedUrls: [], snapshotLabel: '', beforeArchive: '' };
+  const empty = { judge: judgeChecks(null), affectedUrls: [], snapshotLabel: '', beforeArchive: '', touchedFiles: [], lastOkStep: '', failStep: '' };
   if (parsed.error || !parsed.json || typeof parsed.json !== 'object') {
     say('outcome block: ' + (parsed.error || 'not an object') + ', treating this task as failed');
     return Object.assign(
@@ -242,6 +265,9 @@ function readOutcome(output, log) {
     affectedUrls: normalizeUrls(json.affected_urls),
     snapshotLabel: truncate(String(json.snapshot_label || '').trim(), 120),
     beforeArchive: String(json.before_archive || '').trim(),
+    touchedFiles: (Array.isArray(json.touched_files) ? json.touched_files : []).map((f) => String(f || '').trim()).filter(Boolean).slice(0, 50),
+    lastOkStep: truncate(String(json.last_ok_step || '').trim(), 200),
+    failStep: truncate(String(json.fail_step || '').trim(), 300),
   };
   const status = String(json.status || '').trim().toLowerCase();
   if (!STATUSES.includes(status)) {
@@ -278,6 +304,52 @@ function readOutcome(output, log) {
     );
   }
   return Object.assign({ status, note: truncate(String(json.note || ''), 500), raw: json }, extra);
+}
+
+/* =========================================================
+   changeset：worker 代开、收尾比对
+   ========================================================= */
+
+/**
+ * 方案声明的文件清单 vs changeset 实际碰过的文件。纯函数。
+ * 多出来的文件 = 模型改了方案没写的东西，判失败；少了只记录（可能是中止前没走到）。
+ * 返回 { extra, missing, text }，text 是给 note 头部「文件核对」那一行的一句话，没问题回空串。
+ */
+function compareFiles(declared, touched) {
+  const norm = (f) => String(f || '').trim().replace(/^\/+/, '');
+  const d = new Set((declared || []).map(norm).filter(Boolean));
+  const t = new Set((touched || []).map(norm).filter(Boolean));
+  const extra = [...t].filter((f) => !d.has(f));
+  const missing = [...d].filter((f) => !t.has(f));
+  const bits = [];
+  if (extra.length) bits.push('changeset 多出方案未声明的文件 ' + extra.join(', '));
+  if (missing.length) bits.push('方案声明但未碰到 ' + missing.join(', '));
+  return { extra, missing, text: bits.join('；') };
+}
+
+/** 登录并开 changeset。开不出来就抛，调用方不 apply。 */
+async function openChangeset(ctx, workspace, profile, task) {
+  const { cfg, log } = ctx;
+  const credPath = path.join(workspace, 'notes', capabilities.slugPlatform(profile.platform || 'platform') + '_credentials.md');
+  const cred = wf.readCredentials(credPath);
+  const client = new wf.WebForger({ base: cfg.webforgerApi, timeoutMs: cfg.httpTimeoutMs });
+  const who = await client.login(cred.email, cred.password);
+  const reason = 'SEO 任务 #' + task.id + ' ' + truncate(String(task.title || ''), 80);
+  const id = await client.openChangeset(reason, 'job-' + ctx.job.id + '-task-' + task.id);
+  log('task ' + task.id + '：changeset 已开 ' + id + '（siteId ' + who.siteId + '）');
+  return { client, siteId: who.siteId, changesetId: id };
+}
+
+/** 收尾：读 changeset 的真实文件清单。读不到不炸，回空并记日志。 */
+async function readChangesetFiles(ctx, client, changesetId, taskId) {
+  try {
+    const cs = await client.getChangeset(changesetId);
+    ctx.log('task ' + taskId + '：changeset ' + changesetId + ' 碰过 ' + cs.files.length + ' 个文件' + (cs.status ? '，状态 ' + cs.status : ''));
+    return cs.files;
+  } catch (e) {
+    ctx.log('task ' + taskId + '：读 changeset 文件清单失败 :: ' + e.message);
+    return null;
+  }
 }
 
 /* =========================================================
@@ -529,8 +601,19 @@ async function runOne(ctx, context, workspace, taskId) {
     throw new Error('task ' + taskId + ': credentials file missing at ' + credPath + ', refusing to apply');
   }
 
-  const prompt = buildPrompt({ task, plan, planFile, workspace, platform, credPath });
-  log('task ' + taskId + ': applying, model ' + cfg.applyModel + ', prompt ' + prompt.length + ' chars');
+  // 安全网先于一切：changeset 开不出来，一条写请求都不发。
+  let cs;
+  try {
+    cs = await openChangeset(ctx, workspace, profile, task);
+  } catch (e) {
+    const note = buildNoteHeader({ affectedUrls: [], judge: judgeChecks(null) }) +
+      '执行中止：changeset 开不出来（' + truncate(e.message, 200) + '），没有安全网不发任何写请求，站点零改动。 任务保持 review，未标记完成。';
+    try { await api.postTaskResult(taskId, { output_url: '', note, attention: true }); } catch (e2) { log('task ' + taskId + ': could not write the failure note :: ' + e2.message); }
+    throw new Error('task ' + taskId + ': changeset open failed :: ' + e.message);
+  }
+  const declaredFiles = planFilesOf(plan);
+  const prompt = buildPrompt({ task, plan, planFile, workspace, platform, credPath, changesetId: cs.changesetId, siteId: cs.siteId });
+  log('task ' + taskId + ': applying, model ' + cfg.applyModel + ', prompt ' + prompt.length + ' chars, changeset ' + cs.changesetId + ', declared files ' + declaredFiles.length);
 
   const res = await runClaude(cfg, {
     prompt,
@@ -555,6 +638,16 @@ async function runOne(ctx, context, workspace, taskId) {
 
   const outcome = readOutcome(output, log);
 
+  // 收尾核对：changeset 真实碰过的文件 vs 方案声明。多出来的就是失败，不管模型说什么。
+  const touched = await readChangesetFiles(ctx, cs.client, cs.changesetId, taskId);
+  const cmp = compareFiles(declaredFiles, touched || outcome.touchedFiles);
+  if (cmp.extra.length && outcome.status === 'success') {
+    log('task ' + taskId + ': changeset touched undeclared files, treating as failed :: ' + cmp.extra.join(', '));
+    outcome.status = 'failed';
+    outcome.note = '模型声称成功，但 changeset 碰到了方案没声明的文件：' + cmp.extra.join(', ') + '。' + (outcome.note || '');
+  }
+  const csInfo = { changesetId: cs.changesetId, changesetFiles: touched || outcome.touchedFiles, fileMismatch: cmp.text };
+
   // Before the branch on purpose: an aborted apply may still have written the
   // file a human has to carry somewhere by hand, and that is exactly when they
   // need to be able to download it.
@@ -566,12 +659,12 @@ async function runOne(ctx, context, workspace, taskId) {
     : '';
 
   if (outcome.status === 'success') {
-    const header = buildNoteHeader({
+    const header = buildNoteHeader(Object.assign({
       affectedUrls: outcome.affectedUrls,
       archiveUrl,
       snapshotLabel: outcome.snapshotLabel,
       judge: outcome.judge,
-    });
+    }, csInfo));
     await api.completeTask(taskId, {
       note:
         header +
@@ -585,23 +678,23 @@ async function runOne(ctx, context, workspace, taskId) {
   // is retried. A half applied change needs a human, not another attempt.
   // 判失败且方案里拍过快照的，先当场兜底回滚一次，把结果写进 note 开头，
   // 人接手时第一眼看到的是站点现在到底回没回去，而不是要自己去查。
-  const rollbackLine =
-    outcome.status === 'failed' && outcome.snapshotLabel
-      ? await rollbackSnapshot(ctx, workspace, profile, taskId, outcome.snapshotLabel)
-      : '';
+  // 平台 revert 未上线，不再自动回滚（快照 restore 大站必挂）。失败 = 停手上报五项，人按 changeset 原件还原。
   const label = outcome.status === 'aborted' ? '执行中止' : '执行失败';
-  const header = buildNoteHeader({
+  const header = buildNoteHeader(Object.assign({
     affectedUrls: outcome.affectedUrls,
     archiveUrl,
     snapshotLabel: outcome.snapshotLabel,
     judge: outcome.judge,
-  });
+  }, csInfo));
+  const halfDone = (touched && touched.length) ? '站点有 ' + touched.length + ' 个文件已被改动（' + touched.slice(0, 8).join(', ') + '），需人按 changeset ' + cs.changesetId + ' 的原件核对或还原。' : '站点零改动。';
   const note =
     header +
-    (rollbackLine ? rollbackLine + ' ' : '') +
     label +
     '：' +
     (outcome.note || summarize(output, 300)) +
+    (outcome.failStep ? ' 失败步骤：' + outcome.failStep + '。' : '') +
+    (outcome.lastOkStep ? ' 最后成功：' + outcome.lastOkStep + '。' : '') +
+    ' ' + halfDone +
     ' 任务保持 review，未标记完成。执行记录 ' +
     path.basename(logFile);
   try {
@@ -662,6 +755,9 @@ module.exports = {
   buildNoteHeader,
   publishBeforeArchive,
   rollbackSnapshot,
+  compareFiles,
+  planFilesOf,
+  openChangeset,
   ALLOWED_TOOLS,
   BLOG_OPS,
   ARCHIVE_SUBDIR,

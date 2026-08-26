@@ -40,13 +40,22 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 
 ## 全局风险注记，写死不可绕过
 
-1. **redirects 只准 PATCH，严禁 PUT。** `PUT /redirects` 是全量替换，会把清单里没列出的历史重定向整片清空。任何时候都用 `PATCH` 带 `set` 和 `delete`。
-2. **多文件改动前先 `POST /api/content/{siteId}/snapshots`。** 单文件写入平台会自动归档，但跨文件的改动只有快照能整体回滚。改动涉及两个以上文件就先拍快照，`reason` 写清楚这次要干什么。
-3. **`isExistingPage: true` 的 404 严禁做 301。** 这类 404 是 bug 信号，代表 slug 写错、文件缺失或语言路由坏了。给它加重定向等于把 bug 盖住。挂进任务备注交给人排查。
-4. **`rewrite-page` 之前必须先 GET 原页留档。** 该操作整页覆盖，方案文档里要附原正文的存档位置，回滚方式写明确。
-5. **只操作自己的 siteId。** 服务端有 `requireSiteAccess()` 兜底，但那是最后一道，不是第一道。看到 403 不要换 payload 重试，停下报人。
-6. **看到 401 就停。** token 失效意味着密码轮换过，重试没有意义，找管理员要新密码。
-7. **429 按 `retryAfter` 退避**，没有就退 60 秒，不要连打。
+execute 与 apply 两个阶段的 prompt 都原样带上这一节。这里的规矩来自 Aiden 2026-08-26 的
+bot 账号操作说明（/mnt/share/aiden/to-aira-webforger-bot-ops-20260826.md）加当天两次落地失败的复盘。
+细节以 `https://api.webforger.ai/api/doc` 为准，本节与在线文档冲突时听在线文档的。
+
+0. **开工三断言。** `POST /api/auth/login` 后断言 `user.isShadow === true` 且 `user.shadowOf` 等于任务书的 siteId；再 `GET /api/content/{siteId}/meta` 看站点状态。三条任一不符，停下报人。
+1. **写操作安全网是 changeset，不是全站快照。** apply 阶段由 worker 代开 changeset 并把 id 写进 prompt；**每一个写请求（POST / PATCH / PUT / DELETE）都必须带 header `X-WF-Changeset: <id>`**，服务端会在首次碰到每个文件时存原件。方案里**禁止**把 `POST /api/content/{siteId}/snapshots` 写成前置步骤：250 文件以上的站 restore 必挂，对 SEO 改动也是错的粒度（2026-08-26 Louvresky #83 四轮全死在快照接口 120 秒无响应）。方案第 2 节末尾必须列「涉及文件」清单（例如 `pages/index.html`、`posts/slug.md`、`config.json`），apply 结束 worker 用 `GET /api/changesets/{siteId}/{csId}` 的 `files` 与它比对，多出来的文件就是失败。
+2. **成功判定 = HTTP 2xx + 回读比对。禁止对响应 body 的字段形状做硬断言。** 平台响应结构不是对外契约，会随版本变（`PATCH /edit` 实际回 `{ ok, updated, version }`，2026-08-26 #86 因方案写死 `page` 加 `applied` 而中止在半改状态）。方案里每一步的「预期响应」只准写状态码，成功与否靠下一行「回读核对」：回读哪个只读端点、比对什么内容。
+3. **redirects 只准 PATCH，严禁 PUT。** `PUT /redirects` 是全量替换，会把清单里没列出的历史重定向整片清空。任何时候都用 `PATCH` 带 `set` 和 `delete`。
+4. **`isExistingPage: true` 的 404 严禁做 301。** 这类 404 是 bug 信号，代表 slug 写错、文件缺失或语言路由坏了。给它加重定向等于把 bug 盖住。挂进任务备注交给人排查。
+5. **`rewrite-page` 之前必须先 GET 原页留档。** 该操作整页覆盖，方案文档里要附原正文的存档位置。
+6. **只操作自己的 siteId。** 跨站读到 200 说明安全边界破了，立刻停下报人。看到 403 不要换 payload 重试，停下报人。
+7. **超时与重试写死。** 每条 curl 必带 `--max-time 120`。401 停（密码轮换，重试无意义）；403 停；409 停（多半是 changeset 过期或冲突）；接口挂起超过 120 秒停。只有明确的 5xx 与 429 允许重试，带退避（429 按 `retryAfter`，没有就 60 秒），最多 2 次。
+8. **禁区。** 不碰 `/api/domains/*`、`/api/admin/*`、`/api/partner/*`、`/api/migrate/*`、`/api/payments/*`、改密码改邮箱的接口，不碰 KV / R2，不部署 worker，不发邮件，不改 site meta 的 `published` / `delivered`，不动页面注册表增删、导航结构、默认语种、indexing 开关（任务书逐条明确写了的除外）。方案里出现这些路径，prepare 阶段直接打回。
+9. **回滚现状。** changeset 的 revert 端点尚未上线，全站快照 restore 大站必挂。所以失败处置只有一种：**停手，不再尝试写，上报五项**：job id、changeset id、siteId、碰过的文件清单、最后一个成功完成的步骤加失败步骤的 HTTP 状态码与 `error` 文本，并点名哪些文件停在半改状态。人按 changeset `pre/` 里的原件还原。不要因为「反正能回滚」放胆改，现在没有回滚按钮。
+10. **在线文档一个任务只拉一次。** `curl -s https://api.webforger.ai/api/doc -o /tmp/wf-agent-api.md` 落到本地再 grep，别反复 curl 进上下文；`/api/doc.json` 只回目录，随便拉。本清单没写的端点先查它，不许猜。
+11. **页面硬规则（写任何页面 HTML 或博客正文之前）。** body-only fragment：不写 `<html>` `<head>` `<body>` `<style>` `<script>` `<nav>` `<footer>`；每个可编辑文本和图片必须带 `data-content-id="unique-id"`；内链一律带 trailing slash；禁 inline `style="grid-template-columns:..."`，用 `.grid-2col` / `.grid-3col` / `.grid-4col` / `.wf-*` / `.services-grid`；图片只用 `POST /generate-image` 生成的或 `GET /media` 里现成的，路径 `/assets/{filename}`，禁 placeholder 与外链 stock 图；shortcode 永远走 `PATCH /edit` 的 `type:"shortcode"`，禁手写 `<!--WF_*-->`；blog category 只取 `config.blogCategories[].slug` 已有值，要新的先 `POST /api/blog/{siteId}/categories`；category slug 必须英文 ASCII；改完 390px 宽不能横向滚动。
 
 ## 登录
 
@@ -150,7 +159,7 @@ POST /api/auth/login  {"email":"...","password":"..."}
 - `html` 必须是 body 片段：不能有 `<html>`、`<head>`、`<body>`、`<style>`、`<script>`、`<nav>`、`<footer>`，也不能手写 `<!--WF_*-->` 短代码标记。
 - `editability`：`auto` 跟随原页；`preserve` 要求保留 `data-content-id` 结构；`none` 给老页面。
 - 平台会写 `history/` 和 `archive/` 两份备份再替换。校验会硬拒不安全 HTML 和重复的 `data-content-id`，缺 H2、缺 CTA、缺表单只是 warning。
-- 一次改多页属于多文件改动，方案第一步就要 `POST /snapshots`。
+- 一次改多页也不拍全站快照，安全网是 apply 阶段 worker 代开的 changeset（见风险注记 1）。
 
 ## content-edit
 
@@ -195,7 +204,7 @@ POST /api/auth/login  {"email":"...","password":"..."}
 - 提交的是整份新片段，不是 diff。
 - styles 校验：必须含至少一个 `<style>` 块和至少一条 `{...}` 规则；不超过 500KB；不许出现 `<html>`、`<head>`、`<body>`、`<nav>`、`<footer>`、`<main>`、`<article>`、`<section>`；不许 `<script>` 和内联 `on*=`。
 - header/footer 校验：不超过 200KB，不许 `<html>`、`<head>`、`<body>`，不许内联事件。
-- **共享 CSS 改坏是全站坏。** 方案第一步必须是 `POST /snapshots`，回滚方式写成 `POST /snapshots/{label}/restore`。
+- **共享 CSS 改坏是全站坏。** 安全网是 apply 阶段 worker 代开的 changeset（原件在 `pre/`），方案回滚方式写成「按 changeset 原件由人还原」并附改前 CSS 的留档路径；不拍全站快照。
 - 单页样式不要走这里，单页 CSS 放该页正文里的内联 `<style>`，走 page-rewrite。
 
 ---
