@@ -186,6 +186,26 @@ t('taskBlock shows ops and a flattened detail', () => {
   assert.ok(b.indexOf('说明：a b') > 0);
 });
 
+t('a review task carries its change plan, a missing plan is stated', () => {
+  const ws = fs.mkdtempSync(path.join(require('os').tmpdir(), 'rvp-'));
+  fs.mkdirSync(path.join(ws, 'seo-agent-output'));
+  fs.writeFileSync(path.join(ws, 'seo-agent-output', 'change-plan-task-82.md'), '# 方案 82\n改首页 meta');
+  const out = R.attachChangePlans(
+    [{ id: 82, status: 'review', title: 'A' }, { id: 83, status: 'review', title: 'B' }, { id: 84, status: 'approved', title: 'C' }],
+    ws,
+    quiet
+  );
+  assert.ok(out[0].change_plan.indexOf('改首页 meta') > 0);
+  assert.strictEqual(out[1].change_plan, undefined);
+  assert.strictEqual(out[2].change_plan, undefined);
+  const b82 = R.taskBlock(out[0]);
+  assert.ok(b82.indexOf('方案该不该落地') > 0 && b82.indexOf('改首页 meta') > 0);
+  const b83 = R.taskBlock(out[1]);
+  assert.ok(b83.indexOf('方案缺失') > 0);
+  const b84 = R.taskBlock(out[2]);
+  assert.ok(b84.indexOf('方案') === -1);
+});
+
 console.log('runWith');
 
 function fakeCtx(tasks, judge) {

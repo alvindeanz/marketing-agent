@@ -30,6 +30,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
   4. 前端：工具栏重排（显示已完成 / 隐藏空泳道 / 时间档折进「显示」），新增「快速判定（N）」与「按推荐执行（做 x 砍 y 延 z 并 w）」，任务卡标题下一行判决（四档四色，drop 红 later 黄 merge 紫 do 绿，过期半透明，判定中蓝字），「改判」走 prompt 输理由，理由同时投 `/tasks/{id}/feedback` 走 feedback job 变 fact，这是唯一学习回路。
   另：`gsc-audit` / `ga4-audit` 在能力清单改成新等级 `agent_readonly`（capabilities.AUTONOMY_LEVELS 加一档），execute_task 对它走 analysis 模式一步出结果，不再走 prepare/apply 两段。起因是 Louvresky #84 花 12 分钟写了一份「打算怎么读 GSC」的方案，且 apply 阶段只有 curl 做不了 JWT。
   测试：新增 `tests/review.test.js` 20 条；五套 24/29/90/88/20 全过；runner 与 runner_host `node --check` 加 require 加载过；内联 JS node --check 过；php -l 在 250 过。
+- 补充（同日）：判定扩到 review 状态。待放行面板加「判定方案」与「按推荐处理」，worker 对 review 任务读工作区 `seo-agent-output/change-plan-task-{id}.md` 附进 prompt（截 7000 字），原则文件加「已出方案」一节（范围膨胀、自查矛盾未处理、通道不存在、风险对收益），判决语义变为 do=放行排 apply_task、later=留在待放行只记备注、drop=置 done 不落地、merge=并入目标。起因：Alvin 在待放行面板按不到判定。tests/review 21 条。
 - 坑：判决写入用 `rowCount()` 计数，MariaDB 对值未变的 UPDATE 回 0，这里因 reviewed_at=NOW() 每次必变所以没事，别把这句 SQL 改成不带时间戳。前端「改判」用了原生 prompt，够用先上，要换成弹窗随时可以。
 - 下一步/认领：**已部署 api + worker**（Alvin 指示推进，2026-08-26 Aira 执行）。判决层评审（闸 B）**不做**，Alvin 2026-08-26 定：方案对错靠各客户 PJ 线程（Discord）人工抽查校准，抽查发现的偏差回写 facts 或 review_principles.md。
 

@@ -488,9 +488,12 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
       <div class="sec hidden" id="releaseSec">
         <div class="sec-head">
           <div class="sec-title">待放行</div>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span class="plan-meta" id="relCount"></span>
             <button class="btn ghost" onclick="toggleAllRelease()">全选 / 全不选</button>
+            <!-- 待放行的判定：fable 读方案正文判「该不该落地」，判决显示在每行上，按推荐执行时 do 即放行 -->
+            <button class="btn ghost" id="rvRelBtn" onclick="reviewTasks(this,'review')" title="Fable 读每份方案，判该不该落地">判定方案</button>
+            <button class="btn" id="rvRelApplyBtn" onclick="applyVerdicts(this,'review')" style="display:none">按推荐处理</button>
             <button class="btn green" id="relBtn" onclick="releaseTasks()">批量放行</button>
           </div>
         </div>
@@ -3190,7 +3193,7 @@ function rvLine(t){
   if(!overridden&&v==='do'&&t.review_adjust)h+='<span class="rv-adj">前提修正: '+esc(t.review_adjust)+'</span>';
   if(overridden)h+='<span class="rv-ov">人工改判，Fable 原判 '+esc(RV_LABEL[t.review_verdict]||t.review_verdict)+'</span>';
   if(t.review_stale)h+='<span class="rv-ev">判决已过期（任务或 facts 改过），重判后才会执行</span>';
-  const editable=['proposed','approved','blocked'].indexOf(t.status)>=0;
+  const editable=['proposed','approved','blocked','review'].indexOf(t.status)>=0;
   if(editable){
     h+='<button class="btn tiny ghost" onclick="rvOverride('+t.id+')">改判</button>';
     if(overridden)h+='<button class="btn tiny ghost" onclick="rvClear('+t.id+')">撤销改判</button>';
@@ -3202,13 +3205,17 @@ function rvVisibleTasks(){
   const cur=currentSprint(tasksData);
   return (tasksData||[]).filter(t=>taskVisible(t)&&withinScope(t,cur));
 }
-function rvCandidates(){
-  return rvVisibleTasks().filter(t=>['proposed','approved','blocked'].indexOf(t.status)>=0&&!qsTaskBusy(t)&&!t.review_pending)
+/* mode 'lane'：泳道里没开工的任务（该不该做）；'review'：待放行面板里的任务（方案该不该落地）。
+   两组各自一颗按钮、各自一批，不混判。 */
+function rvStatuses(mode){return mode==='review'?['review']:['proposed','approved','blocked']}
+function rvPool(mode){return mode==='review'?(tasksData||[]).filter(t=>t.status==='review'):rvVisibleTasks()}
+function rvCandidates(mode){
+  return rvPool(mode).filter(t=>rvStatuses(mode).indexOf(t.status)>=0&&!qsTaskBusy(t)&&!t.review_pending)
     .sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
 }
-function rvApplicable(){
-  return rvVisibleTasks().filter(t=>t.review_effective&&!t.review_stale&&!t.review_pending&&
-    ['proposed','approved','blocked'].indexOf(t.status)>=0&&!qsTaskBusy(t));
+function rvApplicable(mode){
+  return rvPool(mode).filter(t=>t.review_effective&&!t.review_stale&&!t.review_pending&&
+    rvStatuses(mode).indexOf(t.status)>=0&&!qsTaskBusy(t));
 }
 function rvTally(list){
   const c={do:0,later:0,merge:0,drop:0};
@@ -3216,25 +3223,30 @@ function rvTally(list){
   return c;
 }
 function renderReviewButtons(){
-  const rb=document.getElementById('rvBtn');
-  const ab=document.getElementById('rvApplyBtn');
-  if(!rb||!ab)return;
   const pending=(tasksData||[]).some(t=>t.review_pending);
-  const cands=rvCandidates();
-  rb.disabled=pending||!cands.length;
-  rb.textContent=pending?'判定中':(cands.length?('快速判定（'+Math.min(cands.length,20)+'）'):'快速判定');
-  const app=rvApplicable();
-  if(!app.length){ab.style.display='none';return}
-  const c=rvTally(app);
-  ab.style.display='';
-  ab.textContent='按推荐执行（做 '+c.do+' 砍 '+c.drop+' 延 '+c.later+' 并 '+c.merge+'）';
+  [['lane','rvBtn','rvApplyBtn','快速判定','按推荐执行'],['review','rvRelBtn','rvRelApplyBtn','判定方案','按推荐处理']].forEach(cfg=>{
+    const mode=cfg[0];
+    const rb=document.getElementById(cfg[1]);
+    const ab=document.getElementById(cfg[2]);
+    if(!rb||!ab)return;
+    const cands=rvCandidates(mode);
+    rb.disabled=pending||!cands.length;
+    rb.textContent=pending?'判定中':(cands.length?(cfg[3]+'（'+Math.min(cands.length,20)+'）'):cfg[3]);
+    const app=rvApplicable(mode);
+    if(!app.length){ab.style.display='none';return}
+    const c=rvTally(app);
+    ab.style.display='';
+    ab.textContent=cfg[4]+'（'+(mode==='review'?'放行 ':'做 ')+c.do+' 砍 '+c.drop+' 延 '+c.later+' 并 '+c.merge+'）';
+  });
 }
-async function reviewTasks(btn){
-  const cands=rvCandidates();
-  if(!cands.length){toast('当前视图没有可判定的任务',true);return}
+async function reviewTasks(btn,mode){
+  mode=mode||'lane';
+  const cands=rvCandidates(mode);
+  if(!cands.length){toast('没有可判定的任务',true);return}
   const batch=cands.slice(0,20);
   const cut=cands.length-batch.length;
-  if(!confirm('让 Fable 判 '+batch.length+' 个任务该不该做？约 3 到 5 分钟，判决会显示在每张卡上，不会自动执行。'+(cut?('\n另有 '+cut+' 个按优先级排在 20 个之后，这轮不判。'):'')))return;
+  const what=mode==='review'?'份方案该不该落地':'个任务该不该做';
+  if(!confirm('让 Fable 判 '+batch.length+' '+what+'？通常 1 到 3 分钟，判决会显示在每张卡上，不会自动执行。'+(cut?('\n另有 '+cut+' 个按优先级排在 20 个之后，这轮不判。'):'')))return;
   btn.disabled=true;
   const d=await api('/tasks/review','POST',{client_id:curId,task_ids:batch.map(t=>t.id)});
   setTimeout(()=>{btn.disabled=false},1200);
@@ -3267,11 +3279,14 @@ async function rvClear(id){
   if(fail(d,'撤销失败'))return;
   loadTasks();
 }
-async function applyVerdicts(btn){
-  const app=rvApplicable();
+async function applyVerdicts(btn,mode){
+  mode=mode||'lane';
+  const app=rvApplicable(mode);
   if(!app.length){toast('没有可执行的判决',true);return}
   const c=rvTally(app);
-  const lines=['按判决处理 '+app.length+' 个任务：','做 '+c.do+' 个（agent 任务排队执行，其余置 approved）','砍掉 '+c.drop+' 个（置 done，备注原因）','延后 '+c.later+' 个（置 blocked，备注等什么）','并入 '+c.merge+' 个（置 done，目标任务说明追加来源）','','执行仍只到方案阶段，线上改动照旧要人放行。'];
+  const lines=mode==='review'
+    ?['按判决处理 '+app.length+' 个待放行任务：','放行 '+c.do+' 个（排 apply_task 真正落地，这一步会改线上）','不落地 '+c.drop+' 个（置 done，备注原因）','暂不放行 '+c.later+' 个（留在待放行，备注等什么）','并入 '+c.merge+' 个（置 done，目标任务照常放行）']
+    :['按判决处理 '+app.length+' 个任务：','做 '+c.do+' 个（agent 任务排队执行，其余置 approved）','砍掉 '+c.drop+' 个（置 done，备注原因）','延后 '+c.later+' 个（置 blocked，备注等什么）','并入 '+c.merge+' 个（置 done，目标任务说明追加来源）','','执行仍只到方案阶段，线上改动照旧要人放行。'];
   if(!confirm(lines.join('\n')))return;
   btn.disabled=true;
   const d=await api('/tasks/apply_verdicts','POST',{client_id:curId,task_ids:app.map(t=>t.id)});
@@ -3716,6 +3731,7 @@ function renderRelease(){
       '<input type="checkbox"'+(relPick[t.id]?' checked':'')+' onchange="setRelPick('+t.id+',this.checked)">'+
       '<div class="rel-main"><div class="tcard-title">'+
         '<span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div>'+
+      rvLine(t)+
       (blog?blogDeliverable(t):(short?'<div class="rel-note">'+linkifyText(short)+'</div>':''))+
       fileDeliverables(t)+
       '<div class="tcard-meta">'+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+link+

@@ -32,6 +32,11 @@ const PRINCIPLES_FILE = path.join(__dirname, '..', 'specs', 'review_principles.m
 const VERDICTS = ['do', 'later', 'merge', 'drop'];
 const MAX_TASKS = 20;
 const MAX_DETAIL_CHARS = 1500;
+// A task in review carries its change plan. The plan is the thing being judged
+// there, so it gets a budget of its own; it is the same file apply_task reads.
+const OUTPUT_DIRNAME = 'seo-agent-output';
+const CHANGE_PLAN_PREFIX = 'change-plan-task-';
+const MAX_PLAN_CHARS = 7000;
 const MAX_REASON_CHARS = 80;
 const MAX_EVIDENCE_CHARS = 120;
 const MAX_ADJUST_CHARS = 200;
@@ -56,11 +61,37 @@ function taskBlock(t) {
   if (t.ops) rows.push('  ops：' + t.ops);
   if (t.detail) rows.push('  说明：' + truncate(String(t.detail).replace(/\s+/g, ' '), MAX_DETAIL_CHARS));
   if (t.result_note) rows.push('  已有结果备注：' + summarize(String(t.result_note), 300));
+  if (t.change_plan) {
+    rows.push(
+      '  这个任务已出变更方案、等放行，判的是这份方案该不该落地。方案正文（超长已截断）：',
+      '  ----- 方案开始 -----',
+      truncate(String(t.change_plan), MAX_PLAN_CHARS),
+      '  ----- 方案结束 -----'
+    );
+  } else if (t.status === 'review') {
+    rows.push('  这个任务状态是等放行，但工作区里找不到它的变更方案文件，判定时把「方案缺失」当作事实。');
+  }
   return rows.join('\n');
 }
 
 function tasksBlock(tasks) {
   return (tasks || []).map(taskBlock).join('\n\n');
+}
+
+/** Read the change plan a review task is waiting on. Missing file is a fact, not an error. */
+function attachChangePlans(tasks, workspace, log) {
+  return (tasks || []).map((t) => {
+    if (t.status !== 'review') return t;
+    const file = path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + t.id + '.md');
+    try {
+      const text = fs.readFileSync(file, 'utf8');
+      if (log) log('判定：任务 #' + t.id + ' 附带方案 ' + text.length + ' 字');
+      return Object.assign({}, t, { change_plan: text });
+    } catch (e) {
+      if (log) log('判定：任务 #' + t.id + ' 是 review 状态但读不到方案 ' + file);
+      return t;
+    }
+  });
 }
 
 /**
@@ -269,7 +300,7 @@ async function runWith(ctx, judge) {
   const judged = await judge({
     principles: loadPrinciples(),
     briefing: briefing.text,
-    tasks: batch,
+    tasks: attachChangePlans(batch, workspace, log),
     clientName: profile.name || (context.client && context.client.name) || '',
     workspace,
     label: 'review job ' + job.id,
@@ -312,6 +343,7 @@ module.exports = {
   cleanVerdicts,
   taskBlock,
   tasksBlock,
+  attachChangePlans,
   loadPrinciples,
   VERDICTS,
   MAX_TASKS,

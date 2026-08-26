@@ -3022,8 +3022,9 @@ if($m==='POST'&&$ROUTE==='/tasks/review'){
     if(count($found)!==count($ids))res(400,['error'=>'Some tasks do not exist']);
     foreach($found as $t){
         if((int)$t['client_id']!==$cid)res(400,['error'=>'Task '.$t['id'].' belongs to another client']);
-        /* 在跑的、待放行的、做完的没什么好判的，判定只看还没开工的。 */
-        if(!in_array($t['status'],['proposed','approved','blocked'],true))res(400,['error'=>'Task '.$t['id'].' is '.$t['status'].', only proposed/approved/blocked tasks can be reviewed']);
+        /* 没开工的判「该不该做」，等放行的（review）判「方案该不该落地」，worker 会把方案正文附上。
+           在跑的、做完的没什么好判的。 */
+        if(!in_array($t['status'],['proposed','approved','blocked','review'],true))res(400,['error'=>'Task '.$t['id'].' is '.$t['status'].', only proposed/approved/blocked/review tasks can be reviewed']);
     }
     $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='review_plan' AND status IN('queued','running') LIMIT 1");
     $dup->execute([$cid]);
@@ -3131,7 +3132,7 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
     $q->execute(array_merge($ids,[$cid]));
     $tasks=attach_review_state($q->fetchAll(),$cid);
     $byId=[];foreach($tasks as $t)$byId[(int)$t['id']]=$t;
-    $skipped=[];$doIds=[];$done=['do'=>0,'drop'=>0,'later'=>0,'merge'=>0];
+    $skipped=[];$doIds=[];$releaseIds=[];$done=['do'=>0,'drop'=>0,'later'=>0,'merge'=>0];
     $merges=[];
     foreach($ids as $tid){
         if(!isset($byId[$tid])){$skipped[]=['task_id'=>$tid,'why'=>'不存在或不属于该客户'];continue;}
@@ -3139,8 +3140,19 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
         $eff=$t['review_effective'];
         if(!$eff){$skipped[]=['task_id'=>$tid,'why'=>'没有判决'];continue;}
         if($t['review_stale']){$skipped[]=['task_id'=>$tid,'why'=>'判决已过期，先重判'];continue;}
-        if(!in_array($t['status'],['proposed','approved','blocked'],true)){$skipped[]=['task_id'=>$tid,'why'=>'状态是 '.$t['status'].'，不动'];continue;}
+        if(!in_array($t['status'],['proposed','approved','blocked','review'],true)){$skipped[]=['task_id'=>$tid,'why'=>'状态是 '.$t['status'].'，不动'];continue;}
         $why=(string)($t['review_override']?$t['review_override_note']:$t['review_reason']);
+        /* 等放行的任务：do 就是放行（排 apply_task），later 留在待放行只记备注，
+           drop 关掉不落地，merge 关掉并把来源写到目标上，目标照常放行。 */
+        if($t['status']==='review'){
+            if($eff==='do'){$releaseIds[]=$tid;$done['do']++;continue;}
+            if($eff==='later'){task_append_note($tid,'[later] 判定暂不放行：'.$why);$done['later']++;continue;}
+            if($eff==='drop'){
+                db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
+                task_append_note($tid,'[dropped] 判定不落地：'.$why);
+                $done['drop']++;continue;
+            }
+        }
         if($eff==='do'){
             if($t['status']!=='approved'){
                 db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=?")->execute([$tid]);
@@ -3183,6 +3195,10 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
     $jids=[];$qskipped=[];
     if($doIds){
         list($jids,$qskipped)=queue_task_jobs($cid,'execute_task',$doIds,$u['username'],'seo_job_create');
+    }
+    if($releaseIds){
+        list($rj,$rs)=queue_task_jobs($cid,'apply_task',$releaseIds,$u['username'],'seo_tasks_release');
+        $jids=array_merge($jids,$rj);$qskipped=array_merge($qskipped,$rs);
     }
     audit($u['username'],'seo_tasks_apply_verdicts',(string)$cid,['ids'=>$ids,'done'=>$done,'job_ids'=>$jids,'skipped'=>$skipped,'queue_skipped'=>$qskipped]);
     res(200,['ok'=>true,'done'=>$done,'job_ids'=>$jids,'skipped'=>$skipped,'queue_skipped'=>$qskipped]);
