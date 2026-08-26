@@ -763,6 +763,15 @@ t('qsStripText 拼出运行中加排队一整行，标题走 titleMap', () => {
     '队列：运行中 #82 Louvresky · 首页标题重写（8 分钟） · 排队 3 个'
   );
 });
+t('qsStripText 两条道分开报排队数，没有轻活时照旧只报合计', () => {
+  const q = {
+    running: [],
+    queued: [{ id: 1, lane: 'heavy' }, { id: 2, lane: 'heavy' }, { id: 3, lane: 'light' }],
+  };
+  assert.strictEqual(P.qsStripText(q, {}, {}, null), '队列：排队 3 个（执行 2 判定 1）');
+  const onlyHeavy = { running: [], queued: [{ id: 1, lane: 'heavy' }] };
+  assert.strictEqual(P.qsStripText(onlyHeavy, {}, {}, null), '队列：排队 1 个');
+});
 t('qsStripText 找不到标题只显示任务号，超长截断，无 elapsed_sec 时用 claimed_at', () => {
   const q = {
     running: [{ id: 82, client_name: 'Bens', task_id: 404, claimed_at: '2026-08-25 09:58:00' }],

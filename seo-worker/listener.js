@@ -1,9 +1,12 @@
 'use strict';
 // SEO agent worker: long lived listener.
 //
-// State machine, in one breath: idle -> drain (claim jobs one at a time until
-// the API returns {job:null}) -> idle. A wake or a poll tick that lands while a
-// drain is running only sets pendingWake, and the drain reruns once it finishes.
+// State machine, in one breath, per lane: idle -> drain (claim jobs one at a
+// time until the API returns {job:null}) -> idle. A wake or a poll tick that
+// lands while a drain is running only sets pendingWake, and the drain reruns
+// once it finishes. Two lanes (lib/lanes.js): heavy (site writers, minutes)
+// and light (board only, seconds). Each lane is single flight on its own, so
+// a light job never waits behind a heavy one and two heavy jobs never overlap.
 //
 // Hard rule: nothing here starts an LLM on a schedule. The poll tick only asks
 // the API whether a human queued a job. Empty queue means the worker does
@@ -17,6 +20,7 @@ const { fork } = require('node:child_process');
 const { load } = require('./lib/config');
 const { Api } = require('./lib/api');
 const blogreview = require('./lib/blogreview');
+const { LANE_NAMES, laneOf } = require('./lib/lanes');
 const { ts, makeStdoutLogger, summarize } = require('./lib/util');
 
 const log = makeStdoutLogger('listener');
@@ -31,10 +35,12 @@ try {
 }
 const api = new Api(cfg);
 
+function laneState() {
+  return { busy: false, pendingWake: false, currentJob: null, lastDrainAt: null, lastDrainReason: null };
+}
+
 const state = {
-  busy: false,
-  pendingWake: false,
-  currentJob: null,
+  lanes: { heavy: laneState(), light: laneState() },
   startedAt: Date.now(),
   lastDrainAt: null,
   lastDrainReason: null,
@@ -56,8 +62,9 @@ const state = {
  * Run one job in a forked runner_host, stream its log back to the API, and
  * close the job out as done or failed. Never retries, never throws.
  */
-function runJob(job) {
+function runJob(job, lane) {
   return new Promise((resolve) => {
+    const ls = state.lanes[lane] || state.lanes.heavy;
     const jobTag = 'job#' + job.id + ' ' + job.type;
     // 报告 job 的三层（取数、叙事、渲染发布）叠起来会超过通用 30 分钟预算，
     // 单独给它 cfg.reportTimeoutMin，其余类型口径不变。
@@ -108,7 +115,7 @@ function runJob(job) {
       finalize(new Error('cannot fork runner_host: ' + e.message));
       return;
     }
-    state.currentJob = { id: job.id, type: job.type, client_id: job.client_id, startedAt: Date.now() };
+    ls.currentJob = { id: job.id, type: job.type, client_id: job.client_id, startedAt: Date.now() };
 
     const killTimer = setTimeout(() => {
       timedOut = true;
@@ -158,7 +165,7 @@ function runJob(job) {
       finished = true;
       clearTimeout(killTimer);
       clearInterval(flushTimer);
-      state.currentJob = null;
+      ls.currentJob = null;
 
       if (err) {
         push('FAILED: ' + (err.stack || err.message));
@@ -200,50 +207,65 @@ function runJob(job) {
 // ---------------------------------------------------------------------------
 
 /**
- * Claim and run jobs until the queue is empty. Single flight: a concurrent
- * call just marks pendingWake and returns.
+ * Claim and run one lane's jobs until that lane's queue is empty. Single
+ * flight per lane: a concurrent call just marks pendingWake and returns.
  */
-async function drain(reason) {
-  if (state.shuttingDown) return;
-  if (state.busy) {
-    state.pendingWake = true;
-    log('drain(' + reason + ') while busy, marked pending');
+async function drainLane(reason, lane) {
+  const ls = state.lanes[lane];
+  if (!ls || state.shuttingDown) return;
+  if (ls.busy) {
+    ls.pendingWake = true;
+    log('drain(' + reason + ', ' + lane + ') while busy, marked pending');
     return;
   }
-  state.busy = true;
-  state.lastDrainAt = ts();
-  state.lastDrainReason = reason;
+  ls.busy = true;
+  ls.lastDrainAt = ts();
+  ls.lastDrainReason = reason;
   let claimed = 0;
   try {
     for (;;) {
       if (state.shuttingDown) break;
       let job;
       try {
-        job = await api.claimJob();
+        job = await api.claimJob(lane);
       } catch (e) {
-        log('claim failed :: ' + e.message);
+        log('claim(' + lane + ') failed :: ' + e.message);
         break;
       }
       if (!job) break;
+      if (laneOf(job.type) !== lane) {
+        // The server filed it elsewhere. Run it anyway rather than leak a
+        // claimed job, but say so: the two lane tables have drifted.
+        log('job#' + job.id + ' ' + job.type + ' claimed on ' + lane + ' lane but lib/lanes.js says ' + laneOf(job.type));
+      }
       claimed += 1;
-      await runJob(job);
+      await runJob(job, lane);
       if (claimed >= 50) {
         // Safety valve against a runaway queue. Next drain picks up the rest.
-        log('claimed 50 jobs in one drain, pausing until next wake or poll');
-        state.pendingWake = true;
+        log('claimed 50 jobs in one ' + lane + ' drain, pausing until next wake or poll');
+        ls.pendingWake = true;
         break;
       }
     }
   } catch (e) {
-    log('drain error :: ' + (e.stack || e.message));
+    log('drain(' + lane + ') error :: ' + (e.stack || e.message));
   } finally {
-    state.busy = false;
-    if (claimed > 0) log('drain(' + reason + ') finished, ' + claimed + ' job(s) processed');
-    if (state.pendingWake && !state.shuttingDown) {
-      state.pendingWake = false;
-      setImmediate(() => drain('pending-wake'));
+    ls.busy = false;
+    if (claimed > 0) log('drain(' + reason + ', ' + lane + ') finished, ' + claimed + ' job(s) processed');
+    if (ls.pendingWake && !state.shuttingDown) {
+      ls.pendingWake = false;
+      setImmediate(() => drainLane('pending-wake', lane));
     }
   }
+}
+
+/** Kick every lane. Lanes run independently; this only fans the signal out. */
+function drain(reason) {
+  return Promise.all(LANE_NAMES.map((lane) => drainLane(reason, lane)));
+}
+
+function anyBusy() {
+  return LANE_NAMES.some((lane) => state.lanes[lane].busy);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,12 +323,9 @@ const server = http.createServer((req, res) => {
     sendJson(res, 200, {
       ok: true,
       version: VERSION,
-      state: state.busy ? 'busy' : 'idle',
-      pending_wake: state.pendingWake,
-      current_job: state.currentJob,
+      state: anyBusy() ? 'busy' : 'idle',
+      lanes: state.lanes,
       last_job: state.lastJob,
-      last_drain_at: state.lastDrainAt,
-      last_drain_reason: state.lastDrainReason,
       jobs_done: state.jobsDone,
       jobs_failed: state.jobsFailed,
       last_error: state.lastError,
@@ -330,7 +349,7 @@ const server = http.createServer((req, res) => {
     // Drain the request body so the client sees a clean close, then answer.
     req.resume();
     req.on('end', () => {
-      sendJson(res, 202, { ok: true, state: state.busy ? 'busy' : 'idle' });
+      sendJson(res, 202, { ok: true, state: anyBusy() ? 'busy' : 'idle' });
       log('wake accepted');
       drain('wake');
     });
@@ -359,7 +378,8 @@ server.listen(cfg.wakePort, cfg.bindHost, () => {
       cfg.pollIntervalSec +
       's, job timeout ' +
       cfg.jobTimeoutMin +
-      'min'
+      'min, lanes ' +
+      LANE_NAMES.join('+')
   );
   // Startup drain: pick up anything queued while the worker was down.
   drain('startup');
@@ -384,7 +404,7 @@ function shutdown(signal) {
   server.close();
   // A running job is left to its own timeout handling on restart. Give the
   // current child a short grace period, then exit.
-  setTimeout(() => process.exit(0), state.busy ? 5000 : 100).unref();
+  setTimeout(() => process.exit(0), anyBusy() ? 5000 : 100).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

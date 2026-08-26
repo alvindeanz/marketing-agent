@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (p) 跨认领登记：worker 拆轻重两条道，判定不再排在 execute 后面
+
+- 干了什么：Alvin 定的三个方向之一（判定要快、要优先）。判定一批 20 到 45 秒，但 worker 单飞，排在 10 分钟的 execute 后面等于白等。零 schema 改动：`seo-worker/lib/lanes.js` 与 seo-api.php 的 `JOB_LANES` 同一张表（heavy = pull_data/discover/plan/execute_task/apply_task/report/backfill_metrics，light = review_plan/ruling/feedback/chat/triage，没登记的归 heavy）。listener 每条道各自单飞（`drainLane`），wake 与 poll 同时拍两条道，health 回 `lanes`；`POST /jobs/claim` 收 body.lane 只取该道，不传照旧全局（老 worker 兼容）；`jobs_queue_order_sql($lane)` 让位判断只看同道在跑的客户；位次按道各算，`GET /jobs/queue` 每行带 lane，queued 的 position 是道内位次。前端队列条排队数拆成「执行 x 判定 y」，判定中文案改「通常 1 分钟内」。测试：insights 91（新 1）、其余四套不变全过；lane 排序 SQL 在 docker mariadb:10.3 实测（16 号 heavy 在跑时，其 light 判定不让位；heavy 道 47 排在 16 前）；php -l 在 250 过；listener node --check 过。
+- 坑：两条道意味着同一客户可能同时有一个 heavy 在改站点、一个 light 在读看板，light 全是只读站点，没有竞态。若将来往 light 塞会写站点的类型，这个前提就破了。
+- 下一步/认领：**已部署 api + worker**（Alvin 指示推进，2026-08-26 Aira 执行）。方向一（plan / execute 自动接判定，去掉批准步骤）与方向二（任务线程替代反馈框）接着做。
+
 ### 2026-08-26 AIRA (o) 跨认领登记：任务判定（fable 闸 A）与只读 op 改 analysis 模式
 
 - 干了什么：Alvin 定的：任务跑 execute 之前先由 fable 按第一性原理判「该不该做」（不做会怎样、ROI 量级、是不是 agency 的活、前提是否还成立、顺序），判决 concise 一行显示在任务卡上给人审，审完按推荐批量执行。落地四层：

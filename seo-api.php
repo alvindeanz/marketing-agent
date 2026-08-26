@@ -884,32 +884,55 @@ function jobs_inflight_tasks($type){
     return $by;
 }
 
+/* 两条道。worker 每条道各自单飞（seo-worker/lib/lanes.js 同一张表，两边同步改）：
+   heavy 写站点、跑几分钟的；light 只读只写看板、跑几十秒的（判定、裁决、反馈、对话、巡检）。
+   拆开的理由只有一个：判定不能排在 10 分钟的 execute 后面等。不在表里的类型归 heavy。 */
+define('JOB_LANES',[
+    'heavy'=>['pull_data','discover','plan','execute_task','apply_task','report','backfill_metrics'],
+    'light'=>['review_plan','ruling','feedback','chat','triage'],
+]);
+function job_lane($type){return in_array((string)$type,JOB_LANES['light'],true)?'light':'heavy';}
+/* 某条道的类型 IN 列表（SQL 片段，值来自常量不来自输入）。heavy 用「不在 light 里」表达，
+   这样没登记的新类型也落 heavy，跟 job_lane() 一致。 */
+function lane_type_sql($lane,$alias='j'){
+    $light=implode(',',array_map(function($w){return "'".$w."'";},JOB_LANES['light']));
+    if($lane==='light')return "$alias.type IN ($light)";
+    return "$alias.type NOT IN ($light)";
+}
+
 /* 队列取单顺序，claim、位次、GET /jobs/queue 三处共用，改顺序只改这一处。
+   $lane 传 'heavy' 或 'light' 时只排该道，正在跑的客户让位也只看同道（客户在 heavy 道跑着
+   execute 不该拖累它在 light 道的判定）。不传就是全局，老口径。
    规则：客户轮转，不是纯 FIFO。每个客户排队中的 job 按 id 编内部序号 rn，
    正在跑着 job 的客户再让一位（rn 加 1），全局按 (rn, id) 出。
    效果：A 客户一口气批 7 个，B 客户后来才排 1 个，B 排在 A 的第二个前面，
    谁也饿不死谁；同一客户内部仍严格按提交顺序。
    窗口函数 MariaDB 10.2 起可用，线上 10.3 没问题。 */
-function jobs_queue_order_sql(){
+function jobs_queue_order_sql($lane=null){
+    $laneQ=$lane?(' AND '.lane_type_sql($lane,'j')):'';
+    $laneR=$lane?(' AND '.lane_type_sql($lane,'x')):'';
     return "SELECT t.id FROM (
                 SELECT j.id,
                        ROW_NUMBER() OVER (PARTITION BY j.client_id ORDER BY j.id)
                          + (CASE WHEN r.client_id IS NULL THEN 0 ELSE 1 END) AS rn
                 FROM agent_jobs j
-                LEFT JOIN (SELECT DISTINCT client_id FROM agent_jobs WHERE status='running') r
+                LEFT JOIN (SELECT DISTINCT x.client_id FROM agent_jobs x WHERE x.status='running'$laneR) r
                   ON r.client_id=j.client_id
-                WHERE j.status='queued'
+                WHERE j.status='queued'$laneQ
             ) t ORDER BY t.rn, t.id";
 }
 
-/* 全局排队位次 job_id => 位次（从 1 起）。位次是 worker 下一次 claim 的真实顺序
-   （见 jobs_queue_order_sql），只有全局口径有意义，不按客户分。 */
+/* 排队位次 job_id => 位次（从 1 起），按道各自计数：位次是该道 worker 下一次 claim 的真实顺序。
+   两条道的 job id 不相交，所以合成一张表回。 */
 function jobs_queue_positions($limit=500){
     $limit=(int)$limit;
     if($limit<1)$limit=500;
-    $q=db()->query(jobs_queue_order_sql()." LIMIT $limit");
-    $pos=[];$n=0;
-    foreach($q->fetchAll() as $r){$n++;$pos[(int)$r['id']]=$n;}
+    $pos=[];
+    foreach(array_keys(JOB_LANES) as $lane){
+        $q=db()->query(jobs_queue_order_sql($lane)." LIMIT $limit");
+        $n=0;
+        foreach($q->fetchAll() as $r){$n++;$pos[(int)$r['id']]=$n;}
+    }
     return $pos;
 }
 
@@ -1012,10 +1035,15 @@ $PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_proj
 // The conditional UPDATE is the whole race guard; single worker today, so
 // three retries are plenty.
 // Pick order is client round-robin, see jobs_queue_order_sql(). Not plain id.
+// body.lane 'heavy' | 'light' restricts the pick to that lane (JOB_LANES); an
+// older worker that sends nothing gets any type, as before.
 if($m==='POST'&&$ROUTE==='/jobs/claim'){
     auth_worker();
+    $i=input();
+    $lane=(string)($i['lane']??'');
+    if($lane!==''&&!isset(JOB_LANES[$lane]))res(400,['error'=>'bad lane']);
     $jid=0;
-    $pick=db()->prepare(jobs_queue_order_sql()." LIMIT 1");
+    $pick=db()->prepare(jobs_queue_order_sql($lane?:null)." LIMIT 1");
     $take=db()->prepare("UPDATE agent_jobs SET status='running',claimed_at=NOW() WHERE id=? AND status='queued'");
     for($try=0;$try<3;$try++){
         $pick->execute();
@@ -1048,20 +1076,24 @@ if($m==='GET'&&$ROUTE==='/jobs/queue'){
         FROM agent_jobs j LEFT JOIN clients c ON c.id=j.client_id
         WHERE j.status IN('queued','running') ORDER BY j.id LIMIT 100");
     $rows=$q->fetchAll();
-    $order=[];$k=0;
-    foreach(db()->query(jobs_queue_order_sql()." LIMIT 100")->fetchAll() as $o){$order[(int)$o['id']]=$k++;}
-    usort($rows,function($a,$b)use($order){
+    /* 位次按道各算：每行带 lane，queued 里 position 是该道内的位次，排序 heavy 在前、道内按取单顺序。 */
+    $pos=jobs_queue_positions(100);
+    $laneIdx=['heavy'=>0,'light'=>1];
+    usort($rows,function($a,$b)use($pos,$laneIdx){
         if($a['status']!==$b['status'])return $a['status']==='running'?-1:1;
-        $oa=$order[(int)$a['id']]??PHP_INT_MAX;$ob=$order[(int)$b['id']]??PHP_INT_MAX;
+        $la=$laneIdx[job_lane($a['type'])];$lb=$laneIdx[job_lane($b['type'])];
+        if($la!==$lb)return $la<=>$lb;
+        $oa=$pos[(int)$a['id']]??PHP_INT_MAX;$ob=$pos[(int)$b['id']]??PHP_INT_MAX;
         return $oa===$ob?((int)$a['id']<=>(int)$b['id']):($oa<=>$ob);
     });
-    $running=[];$queued=[];$n=0;
+    $running=[];$queued=[];
     foreach($rows as $r){
         $row=[
             'id'=>(int)$r['id'],
             'client_id'=>(int)$r['client_id'],
             'client_name'=>$r['client_name']===null?'':(string)$r['client_name'],
             'type'=>$r['type'],
+            'lane'=>job_lane($r['type']),
             'task_id'=>job_task_id($r['type'],$r['payload'])
         ];
         if($r['status']==='running'){
@@ -1069,9 +1101,8 @@ if($m==='GET'&&$ROUTE==='/jobs/queue'){
             $row['elapsed_sec']=$r['elapsed_sec']===null?null:(int)$r['elapsed_sec'];
             $running[]=$row;
         }else{
-            $n++;
             $row['created_at']=$r['created_at'];
-            $row['position']=$n;
+            $row['position']=$pos[(int)$r['id']]??null;
             $queued[]=$row;
         }
     }

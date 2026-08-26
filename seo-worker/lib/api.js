@@ -22,9 +22,14 @@ class Api {
     });
   }
 
-  /** POST /jobs/claim -> { job: {...} } or { job: null } */
-  async claimJob() {
-    const res = await this.req('POST', '/jobs/claim', {});
+  /**
+   * POST /jobs/claim body { lane? } -> { job: {...} } or { job: null }
+   * lane 'heavy' | 'light' restricts the pick to that lane's job types (see
+   * lib/lanes.js). Omitted means any type, which is what a single drain did
+   * before the lanes existed; the server treats it the same way.
+   */
+  async claimJob(lane) {
+    const res = await this.req('POST', '/jobs/claim', lane ? { lane } : {});
     return res && res.job ? res.job : null;
   }
 

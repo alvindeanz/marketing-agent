@@ -1315,7 +1315,14 @@ function qsStripText(queue,titleMap,typeMap,nowIso){
     dur=(min==null)?'':('（'+(min>0?(min+' 分钟'):'不到 1 分钟')+'）');
     parts.push('运行中 #'+(it.id==null?'?':it.id)+' '+who+(what?(' · '+what):'')+dur);
   }
-  if(wait.length)parts.push('排队 '+wait.length+' 个');
+  /* 两条道分开报排队数：重活道（执行落地）和轻活道（判定裁决）互不排队，
+     合成一个数字会让人以为判定要等执行。行里没 lane 字段（旧后端）就照旧合计。 */
+  if(wait.length){
+    var heavy=0,light=0,j;
+    for(j=0;j<wait.length;j++){if((wait[j]||{}).lane==='light')light++;else heavy++}
+    if(light>0)parts.push('排队 '+wait.length+' 个（执行 '+heavy+' 判定 '+light+'）');
+    else parts.push('排队 '+wait.length+' 个');
+  }
   return parts.length?('队列：'+parts.join(' · ')):'';
 }
 
@@ -3181,7 +3188,7 @@ function taskCard(t,lane){
 const RV_LABEL={do:'做',later:'延后',merge:'并入',drop:'砍掉'};
 const RV_ORDER=['do','later','merge','drop'];
 function rvLine(t){
-  if(t.review_pending)return '<div class="rv-pending">判定中，Fable 正在读这批任务，通常 3 到 5 分钟</div>';
+  if(t.review_pending)return '<div class="rv-pending">判定中，Fable 正在读这批任务，通常 1 分钟内</div>';
   const v=t.review_effective;
   if(!v)return '';
   const overridden=!!t.review_override;
@@ -3247,7 +3254,7 @@ async function reviewTasks(btn,mode){
   const batch=cands.slice(0,20);
   const cut=cands.length-batch.length;
   const what=mode==='review'?'份方案该不该落地':'个任务该不该做';
-  if(!confirm('让 Fable 判 '+batch.length+' '+what+'？通常 1 到 3 分钟，判决会显示在每张卡上，不会自动执行。'+(cut?('\n另有 '+cut+' 个按优先级排在 20 个之后，这轮不判。'):'')))return;
+  if(!confirm('让 Fable 判 '+batch.length+' '+what+'？通常 1 分钟内，判决会显示在每张卡上，不会自动执行。'+(cut?('\n另有 '+cut+' 个按优先级排在 20 个之后，这轮不判。'):'')))return;
   btn.disabled=true;
   const d=await api('/tasks/review','POST',{client_id:curId,task_ids:batch.map(t=>t.id)});
   setTimeout(()=>{btn.disabled=false},1200);
