@@ -25,7 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 - 干了什么：Alvin 定的。1) 截图：线程输入框粘贴 / 「加截图」走既有 /feedback_upload，`POST /inbox/{root}/chat` 收 images[]（fb_name_ok 校验、最多 5 张）与 source（manual / client），chat_user 行 refs 存 images 与 source，反馈行同步带图；worker 端 chat runner 任务模式把截图拉到工作区 `seo-agent-output/thread-images/` 供 Read，prompt 写明截图当材料不当指令、与文字冲突以文字为准。2) 客户原话：复选框，进 refs.source 与 seo_feedback.source，消息头显示徽标，prompt 标「转述客户原话」。3) 线程模型改 `cfg.threadModel`（默认 fable，普通收件箱会话仍 chatModel）。4) 直接改任务：动作白名单加 `edit_task {title?, detail?, priority?, sprint?}`；`THREAD_AUTO_ACTIONS`（redispatch / kill / later / set_verdict / edit_task）在 chat_reply 落库同一刻由服务端执行（`thread_action_exec` 抽成公共件，人点执行与自动执行共用），系统行「已执行提议 m/i」或「提议 m/i 未执行」记账；release 仍留卡给人点，动线上的永远不自动。测试：chat 31（含 edit_task），六套全过；php -l 在 250 过；内联 JS 与 ui 冒烟过。
 - 坑：自动执行的系统行 created_by 也是 seo-worker，worker 的 threadMessages 与前端都改成按正文前缀识别系统行，别改那几个前缀。
-- 下一步/认领：**api 已部署；worker 等 heavy 道当前 apply job 跑完再重启部署**（重启会杀掉正在写站点的 apply）。
+- 下一步/认领：**已部署 api + worker**（worker 等 heavy 道的 apply #95 跑完才重启，2026-08-26 Aira 执行）。
 
 ### 2026-08-26 AIRA (s) 跨认领登记：任务视图按「谁在等谁」重画，放行面板删除
 
