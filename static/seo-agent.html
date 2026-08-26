@@ -3190,6 +3190,8 @@ function taskCard(t,col){
     acts+='<button class="btn tiny ghost" onclick="decideTask('+t.id+',false)">不做</button>';
   }
   if(hs==='wait_ext')acts+='<button class="btn tiny green" onclick="decideTask('+t.id+',true)">现在做</button>';
+  /* 机器判失败但人看过站点认为成了，或者人手工做完了：置完成，理由必填 */
+  if(hs==='wait_me'||hs==='wait_ext')acts+='<button class="btn tiny ghost" onclick="finishTask('+t.id+')">置完成</button>';
   acts+='<button class="btn tiny ghost" onclick="toggleThread('+t.id+')">'+(thOpen[t.id]?'收起线程':'线程')+'</button>';
   acts+=dlAddBtn(t,'lane');
   const dl=String(t.detail||'');
@@ -3206,6 +3208,15 @@ function taskCard(t,col){
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
     fileDeliverables(t)+
     (thOpen[t.id]?threadBox(t,'lane'):'')+'</div>';
+}
+async function finishTask(id){
+  const note=prompt('把 #'+id+' 置为完成。为什么人认它成了？一句话，必填（会记进任务备注）。');
+  if(note==null)return;
+  if(!String(note).trim()){toast('得写个理由',true);return}
+  const d=await api('/tasks/'+id+'/finish','POST',{note:String(note).trim()});
+  if(fail(d,'操作失败'))return;
+  toast('#'+id+' 已置完成');
+  loadTasksAndQueue();loadClients(true);
 }
 /* 同意 / 不同意。语义在服务端按阶段定（待判执行、待放行放行、失败重跑），不做 = 不做了，理由必填。 */
 async function decideTask(id,yes){

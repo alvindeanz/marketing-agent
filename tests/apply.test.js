@@ -384,6 +384,10 @@ t('compareFiles：多出的文件算 extra，少的算 missing，一致时 text 
   assert.deepStrictEqual(r2.extra, ['posts/x.md']); assert.ok(r2.text.indexOf('多出') > -1);
   const r3 = A.compareFiles(['pages/a.html', 'pages/b.html'], ['pages/a.html']);
   assert.deepStrictEqual(r3.missing, ['pages/b.html']);
+  const r4 = A.compareFiles(['posts/x.json'], [{ path: 'posts/x.json', preEtag: 'a', postEtag: 'b' }, { path: 'posts-index.json', preEtag: 'e', postEtag: 'e' }, { path: 'config.json', preEtag: 'q', postEtag: 'q' }, { path: 'history/2026-x.json' }]);
+  assert.deepStrictEqual(r4.extra, []); assert.deepStrictEqual(r4.side, ['posts-index.json', 'config.json', 'history/2026-x.json']);
+  const r5 = A.compareFiles(['posts/x.json'], [{ path: 'config.json', preEtag: 'q', postEtag: 'r' }]);
+  assert.deepStrictEqual(r5.extra, ['config.json']);
 });
 t('planFilesOf 从方案末尾 json 取 files', () => {
   assert.deepStrictEqual(A.planFilesOf('# 方案\n...\n```json\n{"target_urls":[],"files":["pages/index.html"," config.json "]}\n```'), ['pages/index.html', 'config.json']);

@@ -160,8 +160,21 @@ class WebForger {
       '/api/changesets/' + encodeURIComponent(this.siteId) + '/' + encodeURIComponent(csId)
     );
     const cs = (res && (res.changeset || res)) || {};
-    const files = Array.isArray(cs.files) ? cs.files.map((f) => (typeof f === 'string' ? f : (f && (f.path || f.file || f.name)) || '')).filter(Boolean) : [];
-    return { raw: cs, files, status: cs.status || '' };
+    const entries = Array.isArray(cs.files)
+      ? cs.files
+          .map((f) => {
+            if (typeof f === 'string') return { path: f, op: '', preEtag: '', postEtag: '' };
+            const o = f || {};
+            return {
+              path: String(o.path || o.file || o.name || ''),
+              op: String(o.op || ''),
+              preEtag: String(o.preEtag || o.pre_etag || ''),
+              postEtag: String(o.postEtag || o.post_etag || ''),
+            };
+          })
+          .filter((e) => e.path)
+      : [];
+    return { raw: cs, files: entries.map((e) => e.path), entries, status: cs.status || '' };
   }
 
   /** GET /api/blog/{siteId} -> summary rows, no bodies. */

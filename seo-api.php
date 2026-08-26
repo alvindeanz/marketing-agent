@@ -3572,6 +3572,25 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/decide$#',$ROUTE,$mm)){
     res(400,['error'=>'Task is '.$t['status'].', nothing to decide']);
 }
 
+// POST /tasks/{id}/finish body { note } -> 人认定完成。机器判失败但人看过站点认为成了（例如只因平台副产物没过比对）
+// 这种情况用它，note 必填写清为什么人认，追加进结果备注不覆盖。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/finish$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    $tid=(int)$mm[1];
+    $i=input();
+    $note=trim((string)($i['note']??''));
+    if($note==='')res(400,['error'=>'note required: say why you call it done']);
+    $tq=db()->prepare("SELECT id,status FROM seo_tasks WHERE id=?");
+    $tq->execute([$tid]);
+    $t=$tq->fetch();
+    if(!$t)res(404,['error'=>'Task not found']);
+    if($t['status']==='done')res(400,['error'=>'Task already done']);
+    db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
+    task_append_note($tid,'[applied] 人工认定完成：'.$note);
+    audit($u['username'],'seo_task_finish',(string)$tid,['note'=>$note,'from'=>$t['status']]);
+    res(200,['ok'=>true]);
+}
+
 // POST /tasks/apply_verdicts body { client_id, task_ids } -> 按有效判决批量执行。
 // 有效判决 = 人的推翻优先，其次 fable 的；过期的（判决后任务或 facts 改过）一律跳过，
 // 让人重判，不拿旧判决动新前提。

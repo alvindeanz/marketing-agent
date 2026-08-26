@@ -70,6 +70,8 @@ function buildPrompt(opts) {
     '6. **changeset 是本次写操作的安全网，worker 已经替你开好：`' + (changesetId || '（未开出，本次不许发任何写请求）') + '`，siteId `' + (siteId || '?') + '`。**',
     '   每一个 POST / PATCH / PUT / DELETE 都必须带 `-H "X-WF-Changeset: ' + (changesetId || '') + '"`，漏一个就是没有安全网的裸写。',
     '   方案里的 $WF_CHANGESET 占位符就替换成这个 id。每条 curl 带 `--max-time 120`。',
+    '   收尾比对 changeset 文件清单时，平台副产物不算多出：posts-index.json 这类索引、history/ archive/ 归档、',
+    '   以及 preEtag 等于 postEtag（内容零变化）的条目。只有方案没声明且内容真变了的文件才算失败。',
     '7. **成功判定 = HTTP 2xx + 回读比对。** 不许拿响应 body 里某个字段的有无或取值判成败，',
     '   平台响应结构会变。方案里若残留了字段断言，按「回读核对」那一行执行，字段不符只记录不中止。',
     '8. **中止只做一件事：停手上报。** 401 / 403 / 409 / 挂起超过 120 秒 / 回读不符，一律停止写，',
@@ -315,16 +317,45 @@ function readOutcome(output, log) {
  * 多出来的文件 = 模型改了方案没写的东西，判失败；少了只记录（可能是中止前没走到）。
  * 返回 { extra, missing, text }，text 是给 note 头部「文件核对」那一行的一句话，没问题回空串。
  */
+// 平台自己顺手重写的副产物，不算「方案没声明的文件」：博客 PATCH 会重写 posts-index.json
+// （2026-08-26 #83 因此被判失败，实际 preEtag 等于 postEtag 内容零变化）。
+// 规则两条：路径命中白名单，或 changeset 条目 pre 与 post etag 相同（内容没变）。
+const PLATFORM_SIDE_FILES = [/(^|\/)posts-index\.json$/, /(^|\/)[a-z0-9_-]+-index\.json$/, /(^|\/)sitemap[^\/]*\.xml$/, /^history\//, /^archive\//];
+function isPlatformSideFile(entry) {
+  const e = typeof entry === 'string' ? { path: entry } : entry || {};
+  const p = String(e.path || '').replace(/^\/+/, '');
+  if (PLATFORM_SIDE_FILES.some((re) => re.test(p))) return true;
+  if (e.preEtag && e.postEtag && e.preEtag === e.postEtag) return true;
+  return false;
+}
+/**
+ * 方案声明的文件清单 vs changeset 实际碰过的文件。纯函数。touched 可以是路径字符串数组，
+ * 也可以是 getChangeset 的 entries（带 etag）。
+ * 多出来的文件 = 模型改了方案没写的东西，判失败；平台副产物与内容零变化的条目不算多出，
+ * 只记进 side；少了只记录（可能是中止前没走到）。
+ * 返回 { extra, missing, side, text }，text 是给 note 头部「文件核对」那一行的一句话，没问题回空串。
+ */
 function compareFiles(declared, touched) {
   const norm = (f) => String(f || '').trim().replace(/^\/+/, '');
   const d = new Set((declared || []).map(norm).filter(Boolean));
-  const t = new Set((touched || []).map(norm).filter(Boolean));
-  const extra = [...t].filter((f) => !d.has(f));
-  const missing = [...d].filter((f) => !t.has(f));
+  const entries = (touched || []).map((x) => (typeof x === 'string' ? { path: x } : x || {})).filter((e) => e.path);
+  const extra = [];
+  const side = [];
+  const seen = new Set();
+  for (const e of entries) {
+    const p = norm(e.path);
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    if (d.has(p)) continue;
+    if (isPlatformSideFile(Object.assign({}, e, { path: p }))) side.push(p);
+    else extra.push(p);
+  }
+  const missing = [...d].filter((f) => !seen.has(f));
   const bits = [];
   if (extra.length) bits.push('changeset 多出方案未声明的文件 ' + extra.join(', '));
   if (missing.length) bits.push('方案声明但未碰到 ' + missing.join(', '));
-  return { extra, missing, text: bits.join('；') };
+  if (side.length) bits.push('平台副产物不计 ' + side.join(', '));
+  return { extra, missing, side, text: bits.join('；') };
 }
 
 /** 登录并开 changeset。开不出来就抛，调用方不 apply。 */
@@ -345,7 +376,7 @@ async function readChangesetFiles(ctx, client, changesetId, taskId) {
   try {
     const cs = await client.getChangeset(changesetId);
     ctx.log('task ' + taskId + '：changeset ' + changesetId + ' 碰过 ' + cs.files.length + ' 个文件' + (cs.status ? '，状态 ' + cs.status : ''));
-    return cs.files;
+    return cs.entries;
   } catch (e) {
     ctx.log('task ' + taskId + '：读 changeset 文件清单失败 :: ' + e.message);
     return null;
@@ -639,8 +670,18 @@ async function runOne(ctx, context, workspace, taskId) {
   const outcome = readOutcome(output, log);
 
   // 收尾核对：changeset 真实碰过的文件 vs 方案声明。多出来的就是失败，不管模型说什么。
-  const touched = await readChangesetFiles(ctx, cs.client, cs.changesetId, taskId);
-  const cmp = compareFiles(declaredFiles, touched || outcome.touchedFiles);
+  const touchedEntries = await readChangesetFiles(ctx, cs.client, cs.changesetId, taskId);
+  const touched = touchedEntries ? touchedEntries.map((e) => e.path) : null;
+  const cmp = compareFiles(declaredFiles, touchedEntries || outcome.touchedFiles);
+  // 模型自己的 V 项里若只因为平台副产物判了失败，按 worker 的比对口径纠回来：副产物不算多出。
+  if (outcome.status === 'failed' && !cmp.extra.length && outcome.judge.mode === 'checks') {
+    const onlySide = outcome.judge.failed.every((c) => /changeset|文件/.test(c.name));
+    if (onlySide && outcome.judge.failed.length) {
+      log('task ' + taskId + ': 唯一没过的检查项是 changeset 文件比对，而 worker 比对只多出平台副产物，改判成功');
+      outcome.status = 'success';
+      outcome.note = (outcome.note || '') + '（模型按方案把平台副产物 ' + cmp.side.join(', ') + ' 判成多出文件，worker 比对口径不计副产物，改判成功）';
+    }
+  }
   if (cmp.extra.length && outcome.status === 'success') {
     log('task ' + taskId + ': changeset touched undeclared files, treating as failed :: ' + cmp.extra.join(', '));
     outcome.status = 'failed';
@@ -756,6 +797,7 @@ module.exports = {
   publishBeforeArchive,
   rollbackSnapshot,
   compareFiles,
+  isPlatformSideFile,
   planFilesOf,
   openChangeset,
   ALLOWED_TOOLS,

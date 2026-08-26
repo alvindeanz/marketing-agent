@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-26 AIRA (v) 跨认领登记：changeset 比对放过平台副产物，加「置完成」
+
+- 干了什么：#83 v3 apply（job 126）14 处链接全改完、回读一致、线上生效，却被判失败：changeset 记了 5 个文件，方案声明 4 个，多出的 `posts-index.json` 是平台 PATCH 博客时自动重写的索引（preEtag 等于 postEtag，内容零变化），方案 V8 写死「多出任何一个文件即不通过」。修法：`lib/webforger.getChangeset` 保留每条的 op / preEtag / postEtag；`apply_task.compareFiles` 加 `isPlatformSideFile`（`posts-index.json`、`*-index.json`、`sitemap*.xml`、`history/`、`archive/`，以及 pre 等于 post etag 的条目）不算多出，只记进 side；模型自己的检查项若只因文件比对没过而 worker 比对无 extra，worker 改判成功；apply prompt 与 manifest 风险注记 1 同步写明口径。新端点 `POST /tasks/{id}/finish {note}`（人认定完成，理由必填，追加 [applied] 备注）与卡上「置完成」按钮，给「机器判失败但人看过站点认成」这种情况用。#83 已用它置完成。测试：apply 28（compareFiles 加两例），六套全过；php -l 在 250 过；内联 JS 过。
+- 坑：`GET /changesets/{siteId}/{csId}` 的 files 条目实测形状为对象 `{ path, op, touches, preEtag, postEtag }`（#83 日志坐实），字符串形状留作兼容。
+- 下一步/认领：**已部署 api + worker**。#86 v3 在等放行，走的是修正后的比对口径。
+
 ### 2026-08-26 AIRA (u) 跨认领登记：改站动作规范（changeset 协议）与失败可见性
 
 - 干了什么：Alvin 定的两件事。**一、失败必须看得见。** 复盘 #83 / #86：apply 失败四轮五轮，卡上始终显示「待放行」，判决 do 不失效，按推荐又放行。原因是 attach_job_state 的失败判定拿 job finished_at 与任务 updated_at 比，而 apply 写失败备注本身就顶掉 updated_at，把失败信号盖住。改为：任务最近一次 job 是 failed 即失败态，并数「最近一次成功之后连续失败 N 次」（job_state.fail_count）；`task_fail_reason` 从结果备注里「执行中止 / 执行失败：」那句或 job 日志最后一条 FAILED 提取一句话原因；GET /tasks 加 fail_reason；新端点 `GET /jobs/{id}`（admin，含完整 log_text）。前端：状态行写「落地失败 N 次（job #）」，下面一行红字原因，加「看日志」弹窗；`rvApplicable` 排除失败态任务，按推荐不再盲放；手动再跑要确认框复述失败原因。**二、改站动作规范。** Aiden 的 bot 操作说明（/mnt/share/aiden/to-aira-webforger-bot-ops-20260826.md）并入 `specs/capabilities/webforger.md` 全局风险注记（execute 与 apply 都带）：开工三断言、changeset 安全网（不拍全站快照）、成功判定 = 2xx + 回读且禁响应字段断言、redirects 只 PATCH、超时重试口径、禁区路径、回滚现状（revert 未上线，失败 = 停手上报五项）、/api/doc 一任务一次、页面硬规则。worker：`lib/webforger.js` 加 openChangeset / getChangeset；apply_task 由 worker 登录代开 changeset（开不出来一条写请求都不发），id 注入 prompt，结束读 changeset 真实文件清单与方案末尾 json 的 files 比对，多出未声明文件即判失败；outcome 契约去 snapshot_label 加 touched_files / last_ok_step / fail_step；note 头部加「changeset: cs_x（N 文件）」与「文件核对」行；**自动快照回滚删除**（大站必挂，且 revert 未上线），失败备注写清半改文件与 changeset id 供人还原。execute_task：prepare 模板改「预期响应只写状态码 + 回读核对」，第 2 节末尾「涉及文件」，json 加 files；新 `lintPlan`：快照前置、PUT redirects、禁区路径、预期响应字段断言、缺文件清单，任一命中 job 判红打回重出，不进待放行。测试：apply 28（新 4），六套全过；php -l 在 250 过；内联 JS 与 ui 冒烟过。
