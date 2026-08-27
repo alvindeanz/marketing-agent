@@ -455,12 +455,19 @@ async function runImageStage(ctx, opts) {
       );
 
       if (verdict.verdict === 'pass') {
+        // 超 200KB 的过检图本地压一遍再传回平台，用回传的路径。压不动或传不上就用原图并记日志，不拦。
+        let finalUrl = gen.url;
+        let finalBytes = dl.bytes;
+        if (dl.bytes > SIZE_WARN_BYTES) {
+          const c = await compressAndUpload(client, dest, path.join(tmpDir, slot + '-' + attempt + '-small.jpg'), log, label);
+          if (c) { finalUrl = c.url; finalBytes = c.bytes; }
+        }
         passed = {
           slot,
           anchor: brief.anchor,
           alt: brief.alt,
-          url: gen.url,
-          bytes: dl.bytes,
+          url: finalUrl,
+          bytes: finalBytes,
           attempts: attempt,
           prompt,
         };
@@ -513,6 +520,44 @@ async function runImageStage(ctx, opts) {
 }
 
 /**
+ * 压缩并回传。Pillow 在本机（PJ 手工产线同一做法），worker 无图像库就 spawn python3。
+ * 回 { url, bytes } 或 null（失败不炸，调用方用原图）。
+ */
+function compressAndUpload(client, srcPath, dstPath, log, label) {
+  return new Promise((resolve) => {
+    const { spawn } = require('node:child_process');
+    const script = path.join(__dirname, 'compress_image.py');
+    let out = '';
+    let child;
+    try {
+      child = spawn('python3', [script, srcPath, dstPath, String(SIZE_WARN_BYTES), '1280'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      log(label + '：压缩进程起不来，用原图 :: ' + e.message);
+      resolve(null);
+      return;
+    }
+    child.stdout.on('data', (c) => { out += c.toString('utf8'); });
+    child.on('close', async () => {
+      let r = null;
+      try { r = JSON.parse(out.trim().split('\n').pop() || '{}'); } catch (e) { r = null; }
+      if (!r || !r.ok) {
+        log(label + '：压缩失败，用原图 :: ' + ((r && r.error) || out.slice(0, 200)));
+        resolve(null);
+        return;
+      }
+      try {
+        const up = await client.uploadAsset(dstPath, 'image/jpeg');
+        log(label + '：已压缩到 ' + Math.round(r.bytes / 1024) + 'KB（质量 ' + r.quality + '，宽 ' + r.width + '）并回传 ' + up.url);
+        resolve({ url: up.url, bytes: r.bytes });
+      } catch (e) {
+        log(label + '：压缩后回传失败，用原图 :: ' + e.message);
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
  * 站内现成素材里挑一张当封面兜底：GET /api/content/{siteId}/media，按文件名和关键词的
  * 词重合度排，挑不到回 null。只挑 jpg / jpeg / png / webp。读不到接口也回 null，不炸。
  */
@@ -541,6 +586,7 @@ async function pickSiteMedia(client, keyword, log, taskId) {
 module.exports = {
   runImageStage,
   pickSiteMedia,
+  compressAndUpload,
   insertBodyImages,
   insertionIndex,
   buildQcPrompt,

@@ -177,6 +177,25 @@ class WebForger {
     return { raw: cs, files: entries.map((e) => e.path), entries, status: cs.status || '' };
   }
 
+  /**
+   * POST /api/content/{siteId}/upload (multipart) -> { ok, url: "/assets/..." }
+   * 图片类 2MB 上限，MIME 按内容校验。配图压缩后回传用。
+   */
+  async uploadAsset(filePath, contentType) {
+    const { postMultipart } = require('./http');
+    const buffer = fs.readFileSync(filePath);
+    const filename = require('node:path').basename(filePath);
+    const res = await postMultipart(this.base + '/api/content/' + encodeURIComponent(this.siteId) + '/upload', {
+      timeoutMs: this.timeoutMs,
+      headers: this.headers(),
+      fields: {},
+      file: { field: 'file', filename, contentType: contentType || 'image/jpeg', buffer },
+    });
+    const url = res && (res.url || (res.path ? '/' + String(res.path).replace(/^\/+/, '') : ''));
+    if (!url) throw new Error('upload 响应里没有 url：' + JSON.stringify(res || {}).slice(0, 200));
+    return { url: String(url), raw: res };
+  }
+
   /** GET /api/blog/{siteId} -> summary rows, no bodies. */
   async listPosts() {
     const res = await this.req('GET', '/api/blog/' + encodeURIComponent(this.siteId) + this.langQuery('?'));
