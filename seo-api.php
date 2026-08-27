@@ -465,6 +465,9 @@ function ensure_review_schema(){
     $add=[];
     foreach($cols as $name=>$def){if(!isset($have[$name]))$add[]="ADD COLUMN `$name` $def";}
     if($add)db()->exec("ALTER TABLE seo_tasks ".implode(',',$add));
+    /* 2026-08-27 加哈希列前已有的判决没有哈希，用当前内容回填一次（假定内容未变，
+       变了也只是少报一次过期，下次重判自然覆盖）。幂等：只补空的。 */
+    db()->exec("UPDATE seo_tasks SET review_text_hash=MD5(CONCAT(IFNULL(title,''),'|',IFNULL(detail,''))) WHERE review_verdict IS NOT NULL AND review_text_hash IS NULL");
     ensure_job_types();
 }
 
