@@ -199,7 +199,7 @@ t('a review task carries its change plan, a missing plan is stated', () => {
   assert.strictEqual(out[1].change_plan, undefined);
   assert.strictEqual(out[2].change_plan, undefined);
   const b82 = R.taskBlock(out[0]);
-  assert.ok(b82.indexOf('方案该不该落地') > 0 && b82.indexOf('改首页 meta') > 0);
+  assert.ok(b82.indexOf('该不该照它往下走') > 0 && b82.indexOf('改首页 meta') > 0);
   const b83 = R.taskBlock(out[1]);
   assert.ok(b83.indexOf('方案缺失') > 0);
   const b84 = R.taskBlock(out[2]);
