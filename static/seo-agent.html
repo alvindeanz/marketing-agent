@@ -3414,9 +3414,10 @@ function rvCandidates(mode){
     .sort((a,b)=>priIdx(a.priority)-priIdx(b.priority)||a.id-b.id);
 }
 function rvApplicable(mode){
-  /* 落地或执行失败过的不进按推荐：同一份方案再放一次只会再失败一次。要么线程里改了重跑，要么人看完日志手动点。 */
+  /* 判决为「做」且失败过的不进按推荐：同一份方案再跑一次只会再失败一次。砍掉、并入、延后跟失败无关，照处理。 */
   return rvPool(mode).filter(t=>t.review_effective&&!t.review_stale&&!t.review_pending&&
-    rvStatuses(mode).indexOf(t.status)>=0&&!qsTaskBusy(t)&&(t.job_state||{}).status!=='failed');
+    rvStatuses(mode).indexOf(t.status)>=0&&!qsTaskBusy(t)&&
+    !((t.job_state||{}).status==='failed'&&t.review_effective==='do'));
 }
 function rvTally(list){
   const c={do:0,later:0,merge:0,drop:0};
