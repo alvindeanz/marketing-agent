@@ -2900,10 +2900,13 @@ async function addTask(){
   loadTasks();loadClients(true);
 }
 
+var sprintAnchor=null,sprintDays=14,sprintOpen={};
 async function loadTasks(){
   const d=await api('/tasks?client_id='+curId);
   if(fail(d,'任务载入失败'))return;
   tasksData=d.tasks||[];
+  sprintAnchor=d.sprint_anchor||null;
+  sprintDays=Number(d.sprint_days)||14;
   renderLanes();
 }
 
@@ -3026,7 +3029,25 @@ function sprintNum(t){
   const m=String((t&&t.sprint)||'').trim().toUpperCase().match(/^S(\d+)$/);
   return m?parseInt(m[1],10):null;
 }
+/* 日历口径（2026-08-27 Alvin 定）：S1 从 plan 生成日起两周，S2 接着两周，以此类推。
+   本期 = 今天落在哪一档。欠着的往期任务照显示并标逾期，本期做完了就等下一期，不自动把下期拉上来。
+   没有锚点（老数据）时退回「最小未完成 S 号」。 */
+function sprintRange(n){
+  if(!sprintAnchor)return null;
+  const a=Date.parse(sprintAnchor+'T00:00:00');
+  if(isNaN(a))return null;
+  const from=new Date(a+(n-1)*sprintDays*86400000),to=new Date(a+n*sprintDays*86400000-1);
+  const f=d=>(d.getMonth()+1)+'/'+d.getDate();
+  return {from,to,label:f(from)+' 至 '+f(to)};
+}
 function currentSprint(tasks){
+  if(sprintAnchor){
+    const a=Date.parse(sprintAnchor+'T00:00:00');
+    if(!isNaN(a)){
+      const n=Math.floor((Date.now()-a)/(sprintDays*86400000))+1;
+      return Math.max(1,Math.min(n,6));
+    }
+  }
   const open=[],all=[];
   (tasks||[]).forEach(t=>{
     const n=sprintNum(t);
@@ -3035,8 +3056,6 @@ function currentSprint(tasks){
     if(t.status!=='done')open.push(n);
   });
   if(open.length)return Math.min.apply(null,open);
-  /* 全都做完了：停在最后一个 sprint，而不是跳到一个不存在的下一期，
-     这样开着"显示已完成"的人还能看到刚收尾的那批。 */
   if(all.length)return Math.max.apply(null,all);
   return 1;
 }
@@ -3052,8 +3071,10 @@ function withinScope(t,cur){
   if(sprintScope==='all')return true;
   const n=sprintNum(t);
   if(n===null)return true; // 没有 S 标签的任务永远算本期
+  if(sprintOpen[n])return true; // 人点开了那一期
   return n<=scopeHorizon(cur);
 }
+function toggleSprint(n){sprintOpen[n]=!sprintOpen[n];renderLanes()}
 function setSprintScope(v){sprintScope=v;renderLanes()}
 function widenSprintScope(){
   sprintScope=sprintScope==='current'?'near':'all';
@@ -3089,7 +3110,15 @@ function renderLanes(){
     laterTotal+=later;doneHiddenTotal+=doneHidden;
     let body=vis.map(t=>taskCard(t,lane.key)).join('');
     if(!body)body='<div class="lane-empty">'+(later?'本期没有任务，都排在后面的 sprint。':(doneHidden?'只有已结束任务，已按当前筛选隐藏。':'暂无任务。'))+'</div>';
-    if(later)body+='<div class="lane-more" onclick="widenSprintScope()" title="点击放宽到下一档">另有 '+later+' 个任务在后续排期，点击查看</div>';
+    if(later){
+      /* 下期按 S 号折叠成一行，点开看，不自动浮上来 */
+      const by={};
+      afterDone.filter(t=>!withinScope(t,cur)).forEach(t=>{const n=sprintNum(t);by[n]=(by[n]||0)+1});
+      Object.keys(by).sort((a,b)=>a-b).forEach(n=>{
+        const r=sprintRange(Number(n));
+        body+='<div class="lane-more" onclick="toggleSprint('+n+')" title="点开这一期">S'+n+(r?('（'+r.label+'）'):'')+' · '+by[n]+' 个任务，点击展开</div>';
+      });
+    }
     const waitMe=vis.filter(t=>hsOf(t)==='wait_me').length;
     const html='<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
       '<span class="lane-count">'+vis.length+(waitMe?' <span style="color:#fbbf24">等我 '+waitMe+'</span>':'')+
@@ -3122,8 +3151,16 @@ function renderLanes(){
     const bits=[];
     /* 换档提示：本期 = 未完成任务里最小的 S 号。上一个 S 全部结束后视图会自动跳到下一个 S，
        后面的卡会「凭空」浮上来。把这件事说破，别让人以为多了新任务。 */
-    const doneS=[];(tasksData||[]).forEach(t=>{const n=sprintNum(t);if(n!==null&&n<cur&&doneS.indexOf(n)<0)doneS.push(n)});
-    bits.push(sprintScope==='all'?'全部排期':('当前 S'+cur+(doneS.length?('（S'+Math.max.apply(null,doneS)+' 已全部结束，自动进入 S'+cur+'）'):'')+(sprintScope==='near'?' 加后两个 sprint':'')));
+    const r=sprintRange(cur);
+    const openNow=(tasksData||[]).filter(t=>{const n=sprintNum(t);return n!==null&&n<=cur&&t.status!=='done'}).length;
+    const overdue=(tasksData||[]).filter(t=>{const n=sprintNum(t);return n!==null&&n<cur&&t.status!=='done'}).length;
+    const nextR=sprintRange(cur+1);
+    let head=sprintScope==='all'?'全部排期':('本期 S'+cur+(r?('（'+r.label+'）'):''));
+    if(sprintScope!=='all'&&sprintAnchor){
+      if(overdue)head+='，逾期未完成 '+overdue+' 个';
+      else if(!openNow&&cur<6)head+='，本期已全部完成，下一期 S'+(cur+1)+(nextR?(' 从 '+nextR.label.split(' 至 ')[0]+' 开始'):'');
+    }
+    bits.push(head+(sprintScope==='near'?' 加后两个 sprint':''));
     if(laterTotal)bits.push('另有 '+laterTotal+' 个排在后面');
     if(doneHiddenTotal)bits.push('已藏 '+doneHiddenTotal+' 个已结束');
     hint.textContent=bits.join('，');
@@ -3153,6 +3190,9 @@ function stateLine(t){
   const bits=['<span class="st-tag">'+esc(tag)+'</span>'];
   if(txt)bits.push('<span'+(failed?' class="st-fail"':'')+'>'+esc(txt)+'</span>');
   if(t.round)bits.push('<span class="muted">方案 v'+t.round+'</span>');
+  const sn=sprintNum(t);
+  if(sprintAnchor&&sn!==null&&sn<currentSprint(tasksData)&&hs!=='closed')bits.push('<span class="st-fail">S'+sn+' 逾期</span>');
+  else if(sprintAnchor&&sn!==null&&sn>currentSprint(tasksData)&&hs!=='closed')bits.push('<span class="muted">S'+sn+' 下期</span>');
   if(t.status==='review'&&t.output_url)bits.push('<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出</a>');
   if(failed)bits.push('<button class="btn tiny ghost" onclick="showJobLog('+(t.job_state.job_id||0)+')">看日志</button>');
   let h='<div class="st '+hs+(t.closed_kind?(' '+t.closed_kind):'')+'">'+bits.join('')+'</div>';

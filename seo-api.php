@@ -3929,7 +3929,13 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     ensure_review_schema();
     $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
     $s->execute([$cid]);
-    res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid)]);
+    /* sprint 锚点：生效 plan 的生成日（没有生效的取最新一份）。前端按两周一档推算 S1..S6 的日历区间，
+       「本期」按今天落在哪一档定，逾期的照显示，做完了就等下一档，不再按「最小未完成 S 号」跳。 */
+    $pq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
+    $pq->execute([$cid]);
+    $pr=$pq->fetch();
+    $pq->closeCursor();
+    res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid),'sprint_anchor'=>($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null,'sprint_days'=>14]);
 }
 
 // POST /tasks
