@@ -3120,7 +3120,10 @@ function renderLanes(){
   const hint=document.getElementById('taskFilterHint');
   if(hint){
     const bits=[];
-    bits.push(sprintScope==='all'?'全部排期':('当前 S'+cur+(sprintScope==='near'?' 加后两个 sprint':'')));
+    /* 换档提示：本期 = 未完成任务里最小的 S 号。上一个 S 全部结束后视图会自动跳到下一个 S，
+       后面的卡会「凭空」浮上来。把这件事说破，别让人以为多了新任务。 */
+    const doneS=[];(tasksData||[]).forEach(t=>{const n=sprintNum(t);if(n!==null&&n<cur&&doneS.indexOf(n)<0)doneS.push(n)});
+    bits.push(sprintScope==='all'?'全部排期':('当前 S'+cur+(doneS.length?('（S'+Math.max.apply(null,doneS)+' 已全部结束，自动进入 S'+cur+'）'):'')+(sprintScope==='near'?' 加后两个 sprint':'')));
     if(laterTotal)bits.push('另有 '+laterTotal+' 个排在后面');
     if(doneHiddenTotal)bits.push('已藏 '+doneHiddenTotal+' 个已结束');
     hint.textContent=bits.join('，');

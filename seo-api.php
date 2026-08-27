@@ -454,6 +454,7 @@ function ensure_review_schema(){
         'reviewed_at'=>"DATETIME DEFAULT NULL",
         'review_override'=>"VARCHAR(8) DEFAULT NULL",
         'review_override_note'=>"VARCHAR(400) NOT NULL DEFAULT ''",
+        'review_text_hash'=>"CHAR(32) DEFAULT NULL",
     ];
     $in=implode(',',array_fill(0,count($cols),'?'));
     $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_tasks' AND COLUMN_NAME IN ($in)");
@@ -547,7 +548,13 @@ function attach_review_state($tasks,$cid){
            改判写反馈就会动 facts，若也算过期，一次改判会把全客户的判决全部作废（2026-08-26 实测）。 */
         $stale=false;$factsNewer=false;
         if($v&&$at!==''){
-            if(strcmp($at,(string)($t['updated_at']??''))<0)$stale=true;
+            $h=(string)($t['review_text_hash']??'');
+            if($h!==''){
+                if(md5((string)($t['title']??'').'|'.(string)($t['detail']??''))!==$h)$stale=true;
+            }elseif(strcmp($at,(string)($t['updated_at']??''))<0){
+                /* 老判决没存哈希，退回时间比较 */
+                $stale=true;
+            }
             if($factsAt!==''&&strcmp($at,$factsAt)<0)$factsNewer=true;
         }
         $t['review_effective']=$eff;
@@ -3477,7 +3484,9 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
     $rows=$i['verdicts']??null;
     if(!is_array($rows)||!$rows)res(400,['error'=>'verdicts required']);
     if(count($rows)>20)res(400,['error'=>'batch too large, max 20']);
-    $up=db()->prepare("UPDATE seo_tasks SET review_verdict=?,review_reason=?,review_evidence=?,review_merge_into=?,review_adjust=?,review_job_id=?,reviewed_at=NOW(),review_override=NULL,review_override_note='',updated_at=updated_at WHERE id=? AND client_id=?");
+    /* 过期判定改按内容哈希：只有标题或说明真改了才算过期。批准、放行、写备注这些状态动作
+       会动 updated_at，但判决依据的内容没变，不该让判决失效（2026-08-27 #88 #89 因整 plan 批准被误判过期）。 */
+    $up=db()->prepare("UPDATE seo_tasks SET review_verdict=?,review_reason=?,review_evidence=?,review_merge_into=?,review_adjust=?,review_job_id=?,reviewed_at=NOW(),review_override=NULL,review_override_note='',review_text_hash=MD5(CONCAT(IFNULL(title,''),'|',IFNULL(detail,''))),updated_at=updated_at WHERE id=? AND client_id=?");
     $written=0;$refused=[];
     foreach($rows as $n=>$v){
         if(!is_array($v)){$refused[]="row $n: not an object";continue;}
