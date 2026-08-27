@@ -1235,11 +1235,18 @@ function attach_job_state($tasks,$cid){
             $state['job_type']=$que[$tid]['type'];
             $state['position']=isset($pos[$jid])?$pos[$jid]:null;
         }elseif(isset($latest[$tid])&&$latest[$tid]['status']==='failed'&&$t['status']!=='done'){
+            /* 最近一次 job 失败了才算失败态，且失败之后任务没有被再写过。
+               runner 的失败备注在 job 收尾前写入，两者常在同一秒，所以比较用「晚于或同秒」；
+               之后人或 worker 再写结果（updated_at 晚一秒以上）就清掉失败徽标。 */
             $r=$latest[$tid];
-            $state['status']='failed';
-            $state['job_id']=(int)$r['id'];
-            $state['job_type']=$r['type'];
-            $state['fail_count']=(int)($failRun[$tid]['n']??1);
+            $ts=(string)($r['finished_at']!==null&&$r['finished_at']!==''?$r['finished_at']:$r['created_at']);
+            $upd=(string)($t['updated_at']??'');
+            if($upd===''||strcmp($ts,$upd)>=0){
+                $state['status']='failed';
+                $state['job_id']=(int)$r['id'];
+                $state['job_type']=$r['type'];
+                $state['fail_count']=(int)($failRun[$tid]['n']??1);
+            }
         }
         $t['job_state']=$state;
     }
