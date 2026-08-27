@@ -521,8 +521,12 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   record('发布前状态 ' + (statusBefore || '未知'));
 
   if (statusBefore === 'published') {
-    // A retry after a partial run. Do not publish twice, just verify.
-    record('文章已经是 published，跳过发布，直接验证线上');
+    // 已发布文章被就地改稿：PATCH 不推送，重新 publish 才把新正文推到线上。publish 幂等，
+    // 对纯重试也无害（2026-08-27 #88 就地扩写成本文）。
+    const gate = publishGate(post);
+    if (gate.length) throw new Error('task ' + taskId + '：发布门未过，不重新发布：' + gate.join('；'));
+    await client.publishPost(slug);
+    record('文章已是 published，重新 publish 以推送改稿');
   } else if (statusBefore && statusBefore !== 'draft') {
     throw new Error('task ' + taskId + '：文章状态是 ' + statusBefore + '，不是 draft，停下报人');
   } else {
