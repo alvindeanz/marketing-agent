@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-27 AIRA (z) 跨认领登记：已发布文章的就地改稿改为「存交付文件，放行后 apply 替换」
+
+- 干了什么：#88 第二轮（job 143）就地扩写成功（2290 词、2 个 HTML 表、审稿删掉内部措辞与电气内容），但暴露一个安全缺口：**WebForger 对已发布文章的 PATCH 直接上线**（实测，之前记忆里「PATCH 不推送要 republish」是错的），等于改稿绕过了放行。修：execute 博客改稿遇到 status published 不碰平台，新正文 payload 存成 `task-N/revised-body-<slug>.md` 交付文件，交付用正式链接并注明「线上未动，放行 = 替换并发布」；apply 的 runBlogPublish 对已发布文章：有交付文件就先过发布门，再 PATCH 替换，再 publish 兜底推送；没有就跳过。
+- 坑：#88 这一轮的改稿已经上线了（修复前跑的），结果已落到卡上并打 attention，请人通读线上文；多余草稿 outdoor-shade-cost-comparison-nz-louvre-pergola-or-awning 未发布待人工删。另：本条第一次执行时 shell 工作目录被重置到 /data/aira，git add -A 把外层仓库 6147 个文件打进一个提交（未推送），已 reset --soft 撤回并全部 unstage，工作区文件未动；以后所有仓库命令一律用绝对路径。
+- 下一步/认领：**worker 本条部署。**
+
 ### 2026-08-27 AIRA (y) 跨认领登记：判定与写稿之间的断点补上；大纲阶段的放行 = 写正文
 
 - 干了什么：#88 首轮全流程实测暴露两处断点。1) **大纲阶段的放行被当成 apply**（job 140，1 秒失败找不到变更方案）：seo-api.php 新 `blog_outline_stage()` / `blog_release_as_write()`，decide、apply_verdicts、/tasks/release、线程 release 四处统一：博客任务 output_url 不是预览链接时，放行 = 说明追加 [大纲已批] 并重排 execute_task；卡上按钮改「大纲已批，写正文」。2) **写稿 prompt 拿不到判定前提修正与已批大纲**（job 141：Fable 判「就地扩写现有成本文」，写手另起一篇对比文）：runBlogTask 读 task.review_adjust 与 task-N/outline-task-N.md 作为「判定前提修正」「已批大纲」硬约束注入写稿 / 改稿 prompt；`expandInPlaceSlug` 解析「就地扩写 /blog/<slug>」，命中且文章存在就切成 revise 模式改那篇不新建。另：review_plan 对 review 任务按顺序附变更方案 / 博客大纲 / 最新草稿（此前只认方案，博客大纲判不到）；判定原则加「方案里的选择题由 Fable 选、公开可查的信息不算客户独有」。测试 blog 5 / review 22，其余不变。

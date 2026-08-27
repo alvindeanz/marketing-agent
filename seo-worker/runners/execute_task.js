@@ -1352,21 +1352,27 @@ async function runBlogTask(ctx, context, workspace, task) {
   let finalSlug = '';
   let publishedRevise = false;
   if (mode === 'revise' && slug) {
-    // PATCH does not rotate the preview token, so the link the client already
-    // has keeps working. That is the whole reason revisions go through here.
-    await client.patchPost(slug, payload);
-    const got = await client.getPost(slug);
-    previewUrl = String((got && got.previewUrl) || outputUrl);
-    finalSlug = slug;
-    // 已发布文章没有预览 token：改稿躺在平台里，线上仍是旧文，放行时重新 publish 才推送。
-    // 交付用正式链接，备注说清「未上线」。
-    const stNow = String(((got && got.post) || {}).status || '').toLowerCase();
-    if (!previewUrl && stNow === 'published') {
+    const before = await client.getPost(slug);
+    const stNow = String(((before && before.post) || {}).status || '').toLowerCase();
+    if (stNow === 'published') {
+      // 已发布文章：PATCH 会直接上线（2026-08-27 #88 实测），等于绕过放行。
+      // 所以这里不碰平台，把新正文存成交付文件，放行后由 apply 阶段 PATCH 并发布。
       publishedRevise = true;
+      const revDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
+      fs.mkdirSync(revDir, { recursive: true });
+      const revFile = path.join(revDir, 'revised-body-' + slug + '.md');
+      fs.writeFileSync(revFile, JSON.stringify(payload, null, 1), 'utf8');
       const host = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
       previewUrl = host ? 'https://' + host + '/blog/' + slug + '/' : '';
-      log('task ' + taskId + '：已发布文章 ' + slug + ' 已就地改稿，线上未变，放行时重新发布才生效');
+      finalSlug = slug;
+      log('task ' + taskId + '：已发布文章 ' + slug + ' 的改稿存为交付文件 ' + path.basename(revFile) + '，线上未动，放行后 apply 才 PATCH 并发布');
     } else {
+      // PATCH does not rotate the preview token, so the link the client already
+      // has keeps working. That is the whole reason revisions go through here.
+      await client.patchPost(slug, payload);
+      const got = await client.getPost(slug);
+      previewUrl = String((got && got.previewUrl) || outputUrl);
+      finalSlug = slug;
       log('task ' + taskId + '：草稿 ' + slug + ' 已改稿，预览链接不变');
     }
   } else {
@@ -1467,7 +1473,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   const social = String(draft.social_message).split(blogcheck.PREVIEW_TOKEN).join(previewUrl);
   const summary =
     '写了 ' + (draft.keyword || draft.title) + ' 主题，骨架 ' + roll.skeleton.label +
-    '，' + (mode === 'revise' ? (publishedRevise ? '就地扩写已发布文章（改稿在平台里，线上未变，放行 = 重新发布）' : '按客户反馈改稿') : '新建草稿') +
+    '，' + (mode === 'revise' ? (publishedRevise ? '就地扩写已发布文章（新正文在交付文件 revised-body-*.md 里，线上未动，放行 = 替换并发布）' : '按客户反馈改稿') : '新建草稿') +
     '，分类 ' + draft.category + '。' + imageNote + reviewNote;
 
   const note = [

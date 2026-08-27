@@ -521,12 +521,20 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   record('发布前状态 ' + (statusBefore || '未知'));
 
   if (statusBefore === 'published') {
-    // 已发布文章被就地改稿：PATCH 不推送，重新 publish 才把新正文推到线上。publish 幂等，
-    // 对纯重试也无害（2026-08-27 #88 就地扩写成本文）。
-    const gate = publishGate(post);
-    if (gate.length) throw new Error('task ' + taskId + '：发布门未过，不重新发布：' + gate.join('；'));
-    await client.publishPost(slug);
-    record('文章已是 published，重新 publish 以推送改稿');
+    // 已发布文章的就地改稿：execute 阶段把新正文存在 task-N/revised-body-<slug>.md，没碰平台。
+    // 放行到这里才 PATCH 上去（PATCH 对已发布文章直接上线），再 publish 一次兜底推送。
+    const revFile = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId, 'revised-body-' + slug + '.md');
+    if (fs.existsSync(revFile)) {
+      const payload = JSON.parse(fs.readFileSync(revFile, 'utf8'));
+      const gate = publishGate(Object.assign({}, post, { body: payload.body, meta: Object.assign({}, post.meta || {}, payload.meta || {}) }));
+      if (gate.length) throw new Error('task ' + taskId + '：发布门未过，不替换已发布文章：' + gate.join('；'));
+      await client.patchPost(slug, payload);
+      record('已发布文章已按交付文件替换正文（' + Buffer.byteLength(String(payload.body || ''), 'utf8') + ' 字节）');
+      await client.publishPost(slug);
+      record('重新 publish 以推送');
+    } else {
+      record('文章已经是 published 且没有待替换的改稿，跳过发布，直接验证线上');
+    }
   } else if (statusBefore && statusBefore !== 'draft') {
     throw new Error('task ' + taskId + '：文章状态是 ' + statusBefore + '，不是 draft，停下报人');
   } else {
