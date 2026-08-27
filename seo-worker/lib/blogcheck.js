@@ -457,6 +457,11 @@ function checkDraft(draft, ctx) {
     if (DASH_RE.test(d[f])) errors.push(f + ' 里出现了破折号，用逗号句号或分号替代');
   }
 
+  // 除 Style Roll 之外的 HTML 注释一律不许：模型爱把「DRAFT NOTE / PENDING CLIENT CONFIRMATION」
+  // 这类内部话写成注释带进正文，读者看不见但源码里有（2026-08-27 #88 上线后才发现）。
+  const comments = (body.match(/<!--[\s\S]*?-->/g) || []).filter((c) => !/Style Roll/i.test(c));
+  if (comments.length) errors.push('正文含 ' + comments.length + ' 段非 Style Roll 的 HTML 注释（内部备注不许进正文）：' + comments[0].slice(0, 60));
+
   // 交付 lint 规则（与 PJ 手工产线共用同一份 scripts/deliverable_lint_rules.json）：
   // 禁用词、绝对化表述、meta / excerpt 的禁用开头。ctx.lintRules 是合并好的 _default 加客户层。
   for (const e of checkLintRules(d, ctx.lintRules)) errors.push(e);

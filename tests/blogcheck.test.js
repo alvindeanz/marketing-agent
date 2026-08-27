@@ -16,5 +16,11 @@ t('管道表与 HTML 表都算表格', () => {
 t('没有表格计 0', () => {
   assert.strictEqual(C.structure('## A\n\ntext\n\n- a\n- b\n').tables, 0);
 });
+t('非 Style Roll 的 HTML 注释被拦', () => {
+  const d={title:'t',slug:'a-b',category:'blog',keyword:'k',excerpt:'e',meta_description:'x'.repeat(60),body_markdown:'<!-- Style Roll: 骨架=Checklist -->\n<!-- DRAFT NOTE pending -->\n## A\n\ntext [a](/a/)\n<script type="application/ld+json">{"@type":"FAQPage"}</script>',social_message:'中'.repeat(90)+'{PREVIEW_URL}'};
+  const v=C.checkDraft(d,{roll:null,allowedPaths:['/a/'],categories:['blog'],lang:'',keepImages:[],expectImageBriefs:false,lintRules:{}});
+  assert.ok(v.errors.some(e=>e.indexOf('HTML 注释')>-1), v.errors.join(' | '));
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
