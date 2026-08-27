@@ -764,6 +764,8 @@ function buildBlogPrompt(opts) {
     '客户已确认的事实（写作素材，只能用这里的，不许编数字）',
     facts,
     '',
+    opts.clientRules || '',
+    '',
     registryText,
     '',
     conflictText || '',
@@ -808,6 +810,8 @@ function buildBlogRevisePrompt(opts) {
     '客户已确认的事实',
     facts,
     '',
+    opts.clientRules || '',
+    '',
     registryText,
     '（本篇自己已经从上面的清单里排除掉了。改稿不许把主题往清单里其他条目上靠。）',
     '',
@@ -842,6 +846,148 @@ function readDraftJson(output) {
  * put the draft on the platform. The draft is never published here, and the
  * task lands in review with the three deliverables a human needs to forward it.
  */
+/**
+ * 客户规则层：PJ 手工产线动笔前读的东西，原样喂给无头模型。
+ * 两个来源：客户工作区的 CLAUDE.md，以及记忆目录里该客户的 feedback_* 文件
+ * （客户目录名 = 工作区目录名）。每份截 1500 字，总量 9000 字，超出的按文件名排序截掉并记日志。
+ */
+const RULES_PER_FILE = 1500;
+const RULES_TOTAL = 9000;
+function clientRulesBlock(cfg, workspace, log) {
+  const slug = path.basename(String(workspace || ''));
+  const parts = [];
+  let total = 0;
+  const push = (label, text) => {
+    const t = truncate(String(text || '').trim(), RULES_PER_FILE);
+    if (!t) return false;
+    if (total + t.length > RULES_TOTAL) return false;
+    parts.push('[' + label + ']\n' + t);
+    total += t.length;
+    return true;
+  };
+  try {
+    const claude = path.join(workspace, 'CLAUDE.md');
+    if (fs.existsSync(claude)) push('客户 CLAUDE.md', fs.readFileSync(claude, 'utf8'));
+  } catch (e) { /* 没有就没有 */ }
+  try {
+    const dir = path.join(String(cfg.memoryDir || ''), slug);
+    if (slug && fs.existsSync(dir)) {
+      const files = fs.readdirSync(dir).filter((f) => /^feedback_.*\.md$/.test(f)).sort();
+      let dropped = 0;
+      for (const f of files) {
+        const raw = fs.readFileSync(path.join(dir, f), 'utf8').replace(/^---[\s\S]*?---\s*/, '');
+        if (!push(f.replace(/\.md$/, ''), raw)) dropped += 1;
+      }
+      if (log) log('客户规则层：' + slug + ' 读到 ' + files.length + ' 条 feedback 记忆' + (dropped ? '，超预算丢 ' + dropped + ' 条' : ''));
+    }
+  } catch (e) {
+    if (log) log('客户规则层读取失败，照常写 :: ' + e.message);
+  }
+  if (!parts.length) return '';
+  return [
+    '===== 客户规则开始（这是我们团队在这个客户身上踩过的坑，每一条都是硬约束，优先级高于 SOP 通用规则）=====',
+    parts.join('\n\n'),
+    '===== 客户规则结束 =====',
+  ].join('\n');
+}
+
+/**
+ * 大纲门：任务要求「先大纲、客户回批」时，本轮只出大纲进待放行，不写正文。
+ * 回批后人在线程里说「大纲已批」触发重跑，任务说明里会带 [大纲已批] 标记（线程指令写进 detail），
+ * 或者人工把这句加进说明，就直通正文。
+ */
+const OUTLINE_GATE_RE = /(大纲|outline)[^\n]{0,30}(客户|回批|审批|过目|先审|先交|approv)/i;
+const OUTLINE_DONE_RE = /大纲已批|大纲已过|outline approved|大纲回批通过/i;
+function outlineGate(task) {
+  const text = [task && task.detail, task && task.review_adjust].filter(Boolean).join('\n');
+  if (OUTLINE_DONE_RE.test(text)) return { gate: false, why: '任务说明里已标大纲已批' };
+  if (OUTLINE_GATE_RE.test(text)) return { gate: true, why: '任务要求大纲先交客户回批' };
+  return { gate: false, why: '' };
+}
+
+function buildOutlinePrompt(opts) {
+  const { task, roll, siteBlock, facts, clientRules, registryText, sop, allowedPaths } = opts;
+  return [
+    '你是这家新西兰数字营销公司的 SEO 内容 agent。这个任务要求**大纲先交客户回批，回批后才写正文**。',
+    '所以你这一轮只出大纲，不写正文。无人值守，一次写完。',
+    '',
+    '风格组合已由程序掷定，正文阶段会沿用：' + styleroll.rollSummary(roll),
+    '',
+    '任务',
+    taskDetail(task),
+    '',
+    '站点信息',
+    siteBlock,
+    '',
+    '客户已确认的事实（只能用这里的，不许编数字）',
+    facts,
+    '',
+    clientRules || '',
+    '',
+    registryText,
+    '',
+    '===== SOP 摘录（骨架与红线，大纲要按它的结构走）=====',
+    sop,
+    '===== SOP 摘录结束 =====',
+    '',
+    '内链只准从这些真实路径里选：',
+    (allowedPaths || []).slice(0, 60).map((p) => '   ' + p).join('\n'),
+    '',
+    '产出格式：最终回复以一个 json 代码块结尾，块后不许有文字：',
+    '```json',
+    '{"title":"英文标题，含目标关键词","keyword":"目标关键词","slug":"ascii-lowercase","category":"站点现有分类 slug",',
+    ' "outline_markdown":"大纲全文 markdown：每个 H2 一行加两三句要写什么、要用哪条 fact、要放哪条内链、表格放哪里；末尾列出 FAQ 三问",',
+    ' "questions_for_client":["需要客户确认的点，例如行情区间的口径"],',
+    ' "social_message":"中文微信话术，80 到 150 字，请客户看大纲，结尾带 {PREVIEW_URL} 占位符"}',
+    '```',
+    '中文说明，英文标题与大纲条目按站点语言。不用 emoji，不用破折号。字符串里不许有未转义英文双引号。',
+  ].join('\n');
+}
+
+/** 审稿：机器校验过了之后，大模型按客户规则再读一遍，只出意见。回 { ok, verdict, issues } */
+async function reviewDraft(ctx, opts) {
+  const { cfg, log } = ctx;
+  const { draft, clientRules, task, workspace, taskId } = opts;
+  const prompt = [
+    '你是这家新西兰 SEO agency 的审稿人。下面是一篇无头模型写好、机器校验已通过的博客草稿。',
+    '你的工作只有一件：按客户规则和交付常识挑出**必须改**的地方，不改文，不复述，不夸。',
+    '只看这些：事实与口径（有没有编数字、有没有违反客户规则里的红线）、页面类型与读者路径是否对题、',
+    '是否有 AI 腔与废话、内链与 FAQ 是否自然、标题与 meta 是否像人写的。结构骨架机器已查过，不用再查。',
+    '',
+    '任务',
+    taskDetail(task),
+    '',
+    clientRules || '（该客户没有额外规则）',
+    '',
+    '===== 草稿开始 =====',
+    'title: ' + draft.title,
+    'meta_description: ' + draft.meta_description,
+    'excerpt: ' + draft.excerpt,
+    '',
+    truncate(String(draft.body_markdown || ''), 24000),
+    '===== 草稿结束 =====',
+    '',
+    '输出：最终回复以一个 json 代码块结尾，块后不许有文字：',
+    '```json',
+    '{"verdict":"pass","issues":[]}',
+    '```',
+    '或 {"verdict":"revise","issues":["具体到段落或句子的修改要求，每条一句，最多 6 条"]}。',
+    '只有真的必须改才 revise；措辞偏好不算。全中文，不用 emoji，不用破折号，字符串里不许有英文双引号。',
+    '不要读工作目录里的文件，材料已经全在上面。',
+  ].join('\n');
+  try {
+    const res = await runClaude(cfg, { prompt, cwd: workspace, log, model: cfg.blogReviewModel, allowedTools: 'Read', label: 'blog review ' + taskId });
+    const parsed = extractTrailingJson(String(res.stdout || ''));
+    if (parsed.error || !parsed.json) return { ok: false, verdict: 'pass', issues: [], error: parsed.error || 'no json' };
+    const verdict = String(parsed.json.verdict || 'pass').toLowerCase() === 'revise' ? 'revise' : 'pass';
+    const issues = (Array.isArray(parsed.json.issues) ? parsed.json.issues : []).map((x) => summarize(x, 300)).filter(Boolean).slice(0, 6);
+    return { ok: true, verdict: issues.length ? verdict : 'pass', issues };
+  } catch (e) {
+    log('task ' + taskId + '：审稿调用失败，按通过处理 :: ' + e.message);
+    return { ok: false, verdict: 'pass', issues: [], error: e.message };
+  }
+}
+
 async function runBlogTask(ctx, context, workspace, task) {
   const { cfg, api, log } = ctx;
   const profile = (context && context.profile) || {};
@@ -996,6 +1142,17 @@ async function runBlogTask(ctx, context, workspace, task) {
     registryText,
   };
 
+  const clientRules = clientRulesBlock(cfg, workspace, log);
+  const lintRules = blogcheck.loadLintRules(cfg.lintRulesFile, path.basename(workspace));
+  shared.clientRules = clientRules;
+
+  // ---- 大纲门 ----
+  const gate = outlineGate(task);
+  if (mode === 'create' && gate.gate) {
+    log('task ' + taskId + '：大纲门生效（' + gate.why + '），本轮只出大纲');
+    return runOutlineOnly(ctx, { task, workspace, roll, shared, clientRules, allowedPaths, client, taskId });
+  }
+
   const feedback = latestFeedbackNote(task);
   const basePrompt =
     mode === 'revise'
@@ -1014,6 +1171,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     lang: cfg.blogLang || '',
     keepImages,
     expectImageBriefs: mode !== 'revise',
+    lintRules,
   };
   let draft = null;
   let lastErrors = [];
@@ -1065,6 +1223,40 @@ async function runBlogTask(ctx, context, workspace, task) {
       'task ' + taskId + '：两次生成都没通过机器校验，草稿未上平台，任务保持原状。最后一次的问题：' +
         lastErrors.join(' | ')
     );
+  }
+
+  // ---- 审稿：一次审，一次定点修，不循环 ----
+  let reviewNote = '';
+  const review = await reviewDraft(ctx, { draft, clientRules, task, workspace, taskId });
+  if (review.verdict === 'revise' && review.issues.length) {
+    log('task ' + taskId + '：审稿要求修改 ' + review.issues.length + ' 处：' + review.issues.join(' | '));
+    const fixPrompt = basePrompt +
+      '\n\n===== 审稿意见（定点修改，其余保持原样）=====\n' +
+      '下面是你上一版的完整 json，审稿人要求改这几处。只改被点名的地方，改完交一次完整的 json：\n' +
+      review.issues.map((e, i) => i + 1 + '. ' + e).join('\n') +
+      '\n\n上一版：\n```json\n' + JSON.stringify(draft) + '\n```';
+    try {
+      const res = await runClaude(cfg, { prompt: fixPrompt, cwd: workspace, log, model: cfg.claudeModel, allowedTools: ALLOWED_TOOLS, label: 'blog task ' + taskId + ' fix' });
+      const read = readDraftJson(String(res.stdout || '').trim());
+      if (read.ok) {
+        const v2 = blogcheck.checkDraft(read.draft, checkCtx);
+        if (v2.ok) {
+          draft = read.draft;
+          reviewNote = '审稿修改 ' + review.issues.length + ' 处。';
+          log('task ' + taskId + '：定点修改后机器校验通过');
+        } else {
+          reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改版没过校验，沿用修改前版本，意见附在备注。';
+          log('task ' + taskId + '：定点修改版没过校验（' + v2.errors.join(' | ') + '），沿用修改前版本');
+        }
+      } else {
+        reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改版解析失败，沿用修改前版本，意见附在备注。';
+      }
+    } catch (e) {
+      reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改调用失败，沿用修改前版本，意见附在备注。';
+      log('task ' + taskId + '：定点修改调用失败 :: ' + e.message);
+    }
+  } else {
+    log('task ' + taskId + '：审稿通过' + (review.ok ? '' : '（审稿调用异常，按通过）'));
   }
 
   // Cannibalisation gate. This one is deliberately not in the retry loop: a
@@ -1123,7 +1315,17 @@ async function runBlogTask(ctx, context, workspace, task) {
     finalSlug = slug;
     log('task ' + taskId + '：草稿 ' + slug + ' 已改稿，预览链接不变');
   } else {
-    const created = await client.createPost(Object.assign({ slug: draft.slug }, payload));
+    // 上一轮跑到一半失败时草稿可能已经在平台上（同 slug）。有就改它，别再建一篇重复的。
+    let existing = null;
+    try { const g = await client.getPost(draft.slug); existing = (g && g.post) || null; } catch (e) { existing = null; }
+    let created;
+    if (existing && String(existing.status || '').toLowerCase() !== 'published') {
+      log('task ' + taskId + '：平台上已有同 slug 草稿 ' + draft.slug + '（上一轮遗留），改它不新建');
+      await client.patchPost(draft.slug, payload);
+      created = await client.getPost(draft.slug);
+    } else {
+      created = await client.createPost(Object.assign({ slug: draft.slug }, payload));
+    }
     const post = (created && created.post) || {};
     finalSlug = String(post.slug || draft.slug);
     previewUrl = String((created && created.previewUrl) || '');
@@ -1142,6 +1344,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   // host serves /assets/, and because a blocked image stage must leave a draft
   // behind for a human rather than nothing at all.
   let imageNote = '';
+  let imagesMissing = false;
   if (mode === 'revise') {
     // Deliberately untouched. The mechanical keepImages check already forced the
     // writer to carry every existing picture through, and regenerating images on
@@ -1162,7 +1365,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   } else {
     const origin = wf.originOf(previewUrl);
     const tmpDir = blogimages.tmpDirFor(workspace, OUTPUT_DIRNAME, taskId);
-    let placed;
+    let placed = null;
     try {
       placed = await blogimages.runImageStage(
         { cfg, log },
@@ -1178,35 +1381,39 @@ async function runBlogTask(ctx, context, workspace, task) {
         }
       );
     } catch (e) {
-      // The draft stays on the platform on purpose, with its preview link, so a
-      // human picks up a written post that needs pictures rather than restarting.
-      log('task ' + taskId + '：配图未完成，草稿 ' + finalSlug + ' 保留在平台上，预览 ' + previewUrl);
-      throw e;
+      // 配图工序本身炸了（FLUX 不通、下载失败之类）。稿子照样交付，图全部标待人工。
+      log('task ' + taskId + '：配图工序异常，稿子照常交付，配图全部待人工 :: ' + e.message);
+      placed = { body: draft.body_markdown, ogImage: '', heroAlt: '', heroFallback: '', results: [], blocked: [{ slot: 'all', attempts: 0, failures: [{ reasons: [e.message] }] }] };
     } finally {
       blogimages.cleanupTmp(tmpDir, log);
     }
 
-    await client.patchPost(finalSlug, {
-      body: placed.body,
-      // meta merges server side, but description is sent again so a future
-      // change to that behaviour cannot quietly drop it.
-      meta: { description: draft.meta_description, ogImage: placed.ogImage },
-    });
+    const meta = { description: draft.meta_description };
+    if (placed.ogImage) meta.ogImage = placed.ogImage;
+    await client.patchPost(finalSlug, { body: placed.body, meta });
     fs.writeFileSync(draftFile, placed.body, 'utf8');
-    const totalKb = Math.round(placed.results.reduce((n, r) => n + r.bytes, 0) / 1024);
-    const retries = placed.results.reduce((n, r) => n + (r.attempts - 1), 0);
+    const okCount = placed.results.length;
+    const total = (draft.image_briefs || []).length || 4;
+    const missing = (placed.blocked || []).map((b) => b.slot);
+    const retries = placed.results.reduce((n, r) => n + ((r.attempts || 1) - 1), 0);
+    const big = placed.results.filter((r) => r.bytes > blogimages.SIZE_WARN_BYTES).map((r) => r.slot);
     log(
-      'task ' + taskId + '：配图完成并已写回草稿，封面 ' + placed.ogImage + '，正文 ' +
-        (placed.results.length - 1) + ' 张，累计 ' + totalKb + 'KB，重生成 ' + retries + ' 次'
+      'task ' + taskId + '：配图 ' + okCount + '/' + total + ' 已写回草稿' + (placed.ogImage ? '，封面 ' + placed.ogImage : '，封面缺') +
+        (missing.length ? '，缺 ' + missing.join('、') : '') + '，重生成 ' + retries + ' 次'
     );
-    imageNote = '配图 ' + placed.results.length + ' 张已生成并插入（封面 1 加正文 ' + (placed.results.length - 1) + '）。';
+    imageNote = '配图 ' + okCount + '/' + total + '。' +
+      (placed.heroFallback ? '封面用站内素材兜底。' : '') +
+      (missing.length ? '缺 ' + missing.join('、') + ' 待人工配图（FLUX 连续 ' + blogimages.MAX_ATTEMPTS + ' 次质检不过，最后原因：' +
+        (placed.blocked || []).map((b) => b.slot + ' ' + ((b.failures || []).slice(-1)[0] || {}).reasons).join('；').slice(0, 300) + '）。' : '') +
+      (big.length ? '超 200KB：' + big.join('、') + '，发布前需压缩。' : '');
+    imagesMissing = missing.length > 0 || !placed.ogImage;
   }
 
   const social = String(draft.social_message).split(blogcheck.PREVIEW_TOKEN).join(previewUrl);
   const summary =
     '写了 ' + (draft.keyword || draft.title) + ' 主题，骨架 ' + roll.skeleton.label +
     '，' + (mode === 'revise' ? '按客户反馈改稿' : '新建草稿') +
-    '，分类 ' + draft.category + '。' + imageNote;
+    '，分类 ' + draft.category + '。' + imageNote + reviewNote;
 
   const note = [
     '预览链接：' + previewUrl,
@@ -1214,15 +1421,61 @@ async function runBlogTask(ctx, context, workspace, task) {
     SOCIAL_OPEN,
     social,
     SOCIAL_CLOSE,
-    '要点：' + summarize(summary, 200),
-  ].join('\n');
+    '要点：' + summarize(summary, 400),
+    (review.verdict === 'revise' && review.issues.length && !/审稿修改/.test(reviewNote)) ? '审稿意见（未能自动落实）：' + review.issues.join('；') : '',
+  ].filter(Boolean).join('\n');
 
   // Anything the pass left in the task's deliverable directory goes up before
   // the result, so the card and its downloads appear together.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
-  await api.postTaskResult(taskId, { output_url: previewUrl, note });
-  log('task ' + taskId + '：已交付，任务进 review 等人转发客户');
+  // 图没齐就打 attention：稿子进待放行，但人得先补图，发布门会拦。
+  await api.postTaskResult(taskId, { output_url: previewUrl, note, attention: imagesMissing });
+  log('task ' + taskId + '：已交付，任务进 review 等人转发客户' + (imagesMissing ? '（配图不齐，已标需人判断）' : ''));
   return draftFile;
+}
+
+/** 大纲门那一轮：只出大纲，存成交付文件，任务进待放行等客户回批。 */
+async function runOutlineOnly(ctx, opts) {
+  const { cfg, api, log } = ctx;
+  const { task, workspace, roll, shared, clientRules, allowedPaths, taskId } = opts;
+  const prompt = buildOutlinePrompt({
+    task, roll, siteBlock: shared.siteBlock, facts: shared.facts, clientRules,
+    registryText: shared.registryText, sop: shared.sop, allowedPaths,
+  });
+  log('task ' + taskId + '：出大纲，模型 ' + cfg.claudeModel + '，prompt ' + prompt.length + ' 字符');
+  const res = await runClaude(cfg, { prompt, cwd: workspace, log, model: cfg.claudeModel, allowedTools: ALLOWED_TOOLS, label: 'blog outline ' + taskId });
+  const parsed = extractTrailingJson(String(res.stdout || '').trim());
+  if (parsed.error || !parsed.json || !parsed.json.outline_markdown) {
+    throw new Error('task ' + taskId + '：大纲 json 解析失败或缺 outline_markdown：' + (parsed.error || ''));
+  }
+  const o = parsed.json;
+  const outDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
+  fs.mkdirSync(outDir, { recursive: true });
+  const file = path.join(outDir, 'outline-task-' + taskId + '.md');
+  const qs = Array.isArray(o.questions_for_client) ? o.questions_for_client : [];
+  fs.writeFileSync(file, [
+    '# ' + String(o.title || task.title),
+    '',
+    'keyword: ' + String(o.keyword || ''),
+    'slug: ' + String(o.slug || ''),
+    'category: ' + String(o.category || ''),
+    'style: ' + styleroll.rollSummary(roll),
+    '',
+    String(o.outline_markdown),
+    '',
+    qs.length ? '## 需客户确认\n' + qs.map((q) => '- ' + q).join('\n') : '',
+  ].join('\n'), 'utf8');
+  await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
+  const social = String(o.social_message || '').split(blogcheck.PREVIEW_TOKEN).join('（大纲见附件）');
+  const note = [
+    '大纲已出（交付文件 outline-task-' + taskId + '.md），等客户回批。',
+    '客户话术：', SOCIAL_OPEN, social, SOCIAL_CLOSE,
+    qs.length ? '需客户确认：' + qs.join('；') : '',
+    '回批通过后，在线程里说「大纲已批，写正文」，会带着这句重跑出正文。',
+  ].filter(Boolean).join('\n');
+  await api.postTaskResult(taskId, { output_url: '', note, attention: false });
+  log('task ' + taskId + '：大纲已交付，任务进 review 等客户回批');
+  return file;
 }
 
 // A key like gbp.status: a namespace, a dot, then at least one segment.
@@ -1488,6 +1741,9 @@ module.exports = {
   lintPlan,
   planFiles,
   planCallSection,
+  clientRulesBlock,
+  outlineGate,
+  buildOutlinePrompt,
   PLAN_FORBIDDEN_PATHS,
   buildPrompt,
   buildPreparePrompt,

@@ -322,6 +322,59 @@ function checkImageBriefs(draft, st) {
  *        expectImageBriefs }
  * Returns { ok, errors: [], structure }
  */
+/**
+ * deliverable_lint_rules.json 的三类规则套到草稿上。规则文件与 PJ 手工产线同一份，
+ * 这里只读 banned_terms / absolute_claims / forbidden_openers 三键，别的键不认。
+ */
+function checkLintRules(d, rules) {
+  const r = rules || {};
+  const errors = [];
+  const fields = ['title', 'excerpt', 'meta_description', 'body_markdown'];
+  const banned = Object.assign({}, r.banned_terms || {}, r.banned_terms_page_copy_only || {});
+  for (const term of Object.keys(banned)) {
+    const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    for (const f of fields) {
+      if (re.test(String(d[f] || ''))) {
+        errors.push(f + ' 出现禁用词「' + term + '」：' + banned[term]);
+        break;
+      }
+    }
+  }
+  for (const pat of r.absolute_claims || []) {
+    let re;
+    try { re = new RegExp(pat, 'i'); } catch (e) { continue; }
+    for (const f of fields) {
+      const m = String(d[f] || '').match(re);
+      if (m) { errors.push(f + ' 出现绝对化表述「' + m[0] + '」，禁绝对化'); break; }
+    }
+  }
+  for (const opener of r.forbidden_openers || []) {
+    for (const f of ['excerpt', 'meta_description']) {
+      if (String(d[f] || '').trim().toLowerCase().indexOf(String(opener).toLowerCase()) === 0) {
+        errors.push(f + ' 以禁用开头「' + opener + '」起句');
+      }
+    }
+  }
+  return errors;
+}
+
+/** 读并合并 lint 规则：_default 加客户层（按客户目录名）。读不到回空对象，不炸。 */
+function loadLintRules(file, clientSlug) {
+  try {
+    const all = JSON.parse(require('node:fs').readFileSync(file, 'utf8'));
+    const base = all._default || {};
+    const c = (clientSlug && all[clientSlug]) || {};
+    return {
+      banned_terms: Object.assign({}, base.banned_terms || {}, c.banned_terms || {}),
+      banned_terms_page_copy_only: Object.assign({}, base.banned_terms_page_copy_only || {}, c.banned_terms_page_copy_only || {}),
+      absolute_claims: [].concat(base.absolute_claims || [], c.absolute_claims || []),
+      forbidden_openers: [].concat(base.forbidden_openers || [], c.forbidden_openers || []),
+    };
+  } catch (e) {
+    return {};
+  }
+}
+
 function checkDraft(draft, ctx) {
   const errors = [];
   const d = draft || {};
@@ -404,6 +457,10 @@ function checkDraft(draft, ctx) {
     if (DASH_RE.test(d[f])) errors.push(f + ' 里出现了破折号，用逗号句号或分号替代');
   }
 
+  // 交付 lint 规则（与 PJ 手工产线共用同一份 scripts/deliverable_lint_rules.json）：
+  // 禁用词、绝对化表述、meta / excerpt 的禁用开头。ctx.lintRules 是合并好的 _default 加客户层。
+  for (const e of checkLintRules(d, ctx.lintRules)) errors.push(e);
+
   // Category has to be one that already exists.
   const cats = (ctx.categories || []).map((c) => String(c).toLowerCase());
   if (cats.length && cats.indexOf(String(d.category).toLowerCase()) === -1) {
@@ -437,6 +494,8 @@ function checkDraft(draft, ctx) {
 
 module.exports = {
   checkDraft,
+  checkLintRules,
+  loadLintRules,
   checkSkeleton,
   checkImageBriefs,
   structure,

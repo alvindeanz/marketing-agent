@@ -473,6 +473,19 @@ async function rollbackSnapshot(ctx, workspace, profile, taskId, label) {
  * already written, already reviewed by the team, and already approved by the
  * client; the only question left is whether the platform did what it said.
  */
+/** 发布门的检查项，纯函数。回问题数组，空即通过。 */
+function publishGate(post) {
+  const p = post || {};
+  const body = String(p.body || '');
+  const meta = p.meta || {};
+  const problems = [];
+  if (!meta.ogImage && !p.ogImage && !p.featuredImage) problems.push('没有封面图（meta.ogImage 为空）');
+  if (/待人工配图/.test(body)) problems.push('正文还有待人工配图标记');
+  if (/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/m.test(body)) problems.push('正文有 markdown 管道表，WebForger 不渲染，改成 HTML 表');
+  if (!/application\/ld\+json/i.test(body)) problems.push('正文缺 FAQPage JSON-LD');
+  return problems;
+}
+
 async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   const { cfg, api, log } = ctx;
   const taskId = task.id;
@@ -513,6 +526,11 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   } else if (statusBefore && statusBefore !== 'draft') {
     throw new Error('task ' + taskId + '：文章状态是 ' + statusBefore + '，不是 draft，停下报人');
   } else {
+    // 发布门：红线在这一道，不在写稿那一道。封面缺、正文有待人工配图标记、管道表残留，一律不发。
+    const gate = publishGate(post);
+    if (gate.length) {
+      throw new Error('task ' + taskId + '：发布门未过，不发布：' + gate.join('；'));
+    }
     await client.publishPost(slug);
     record('已调用 publish');
   }
@@ -798,6 +816,7 @@ module.exports = {
   rollbackSnapshot,
   compareFiles,
   isPlatformSideFile,
+  publishGate,
   planFilesOf,
   openChangeset,
   ALLOWED_TOOLS,

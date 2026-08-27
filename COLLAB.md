@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-27 AIRA (x) 跨认领登记：博客流水线改成带门的阶段机，把 PJ 手工产线的纪律搬进无头跑
+
+- 干了什么：Alvin 第一性原理审过：正文、配图、发布是三个独立交付物，红线绑在它保护的那道门上，任何一次运行都交出做成的部分。worker 侧改动（execute_task 博客模式、blogimages、blogcheck、apply_task 发布、config）：1) **配图不再连坐正文**：`runImageStage` 槽位 3 次不过只记 blocked 不抛；封面缺时 `pickSiteMedia` 从 `GET /media` 按关键词挑站内真实素材兜底（跳过 flux- 生成图）；稿子照常 PATCH 上平台、进待放行，备注写「配图 x/4，缺哪个槽、最后原因、超 200KB 哪张」，图不齐打 attention。2) **客户规则层**：`clientRulesBlock` 读客户工作区 CLAUDE.md 与记忆目录 `<客户>/feedback_*.md`（去 frontmatter，每份 1500 字，总 9000 字），注入写稿、改稿、大纲、审稿四个 prompt，优先级高于 SOP 通用规则。3) **交付 lint 共用**：blogcheck 读 `/data/aira/scripts/deliverable_lint_rules.json`（_default 加客户层）的 banned_terms / absolute_claims / forbidden_openers，与 PJ 手工产线同一份规则表。4) **审稿**：机器校验过后 `reviewDraft`（`blogReviewModel` 默认 fable）按客户规则只出意见，opus 定点修一次再过机器校验，不循环；修不过沿用原版并把意见写进备注。5) **大纲门**：任务说明或判定前提修正里有「大纲 + 客户回批 / 审批」就只出大纲（交付文件 outline-task-N.md 加客户话术）进待放行；说明里带「大纲已批」（线程「改了重跑」写进去的）才写正文。6) **同 slug 复用**：上一轮遗留的同 slug 未发布草稿改它不新建，避免重复文章。7) **发布门**（apply_task.publishGate）：缺封面、正文有待人工配图标记、残留管道表、缺 FAQ JSON-LD 一律不发。新 `tests/blog.test.js` 4 条，八套全过。
+- 坑：图片超 200KB 的压缩没做（worker 无图像库，FLUX 不接尺寸参数），只在备注里点名超标的槽位，发布前人工压；要根治得平台侧压缩。审稿多一次 fable 调用约 30 秒，改稿多一次 opus 约 5 分钟，只在审稿判 revise 时发生。
+- 下一步/认领：**worker 本条部署。** Louvresky #88 说明里写着「大纲交客户回批」，重跑会先出大纲进待放行，这是设计行为。
+
 ### 2026-08-27 AIRA (w) 跨认领登记：博客校验数 HTML 表格；判决过期改内容哈希；换档提示
 
 - 干了什么：1) Louvresky #89（Cost Breakdown 骨架）两次生成都被机器校验打回「至少 2 个表格，实际 0」。根因是自相矛盾：SOP 要求 2+ 表格，而 WebForger 博客渲染器不认 markdown 管道表（见记忆 feedback_webforger_no_gfm_tables），SOP 又没说可以写 HTML 表，blogcheck 只数管道表分隔行。修：`lib/blogcheck.structure` 同时数 `<table` 出现次数（回 pipeTables / htmlTables / tables）；SOP 的 Cost Breakdown 与轻快型两处写明「表格一律 raw HTML `<table>`，不写管道表」。新 `tests/blogcheck.test.js`。2) seo-api.php 判决过期改按 `review_text_hash`（标题加说明的 MD5，review_result 写入，ensure_review_schema 为老判决回填一次）：整 plan 批准、放行、写备注这些状态动作不再让判决失效（#88 #89 被误判过期）。3) 前端工具栏提示行在 sprint 换档时写「S2 已全部结束，自动进入 S3」，Alvin 两次把浮上来的下一期任务当成新任务。测试七套全过。

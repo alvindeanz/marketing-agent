@@ -42,6 +42,11 @@ const DEFAULTS = {
   // 任务线程（chat runner 的任务模式）。人在卡上跟它聊这个任务，它能直接改任务、重派、
   // 改判，落的是看板层动作，判断要稳，给大模型。普通收件箱会话仍走 chatModel。
   threadModel: 'fable',
+  // 博客正文审稿：机器校验过了之后由大模型按客户规则审一遍，只出意见，opus 定点修一次，不循环。
+  blogReviewModel: 'fable',
+  // 与 PJ 手工产线共用的交付 lint 规则表，和记忆目录（客户 feedback_* 规则注入博客 prompt）。
+  lintRulesFile: '/data/aira/scripts/deliverable_lint_rules.json',
+  memoryDir: '/root/.claude/projects/-data-aira/memory',
   // 月报叙事层。数字由数据层算好，模型只写解读，但读者是客户老板，
   // 一次写完无人答疑，所以给大模型。
   reportModel: 'opus',
@@ -131,6 +136,9 @@ function load() {
   cfg.chatModel = String(cfg.chatModel || DEFAULTS.chatModel);
   cfg.reviewModel = String(cfg.reviewModel || DEFAULTS.reviewModel);
   cfg.threadModel = String(cfg.threadModel || DEFAULTS.threadModel);
+  cfg.blogReviewModel = String(cfg.blogReviewModel || DEFAULTS.blogReviewModel);
+  cfg.lintRulesFile = String(cfg.lintRulesFile || DEFAULTS.lintRulesFile);
+  cfg.memoryDir = String(cfg.memoryDir || DEFAULTS.memoryDir);
   cfg.reportModel = String(cfg.reportModel || DEFAULTS.reportModel);
   cfg.reportSsh = String(cfg.reportSsh || DEFAULTS.reportSsh);
   // 两个路径都去掉结尾斜杠，拼接时统一自己补，避免出现双斜杠的 URL。

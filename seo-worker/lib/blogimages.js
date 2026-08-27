@@ -403,6 +403,7 @@ async function runImageStage(ctx, opts) {
 
   fs.mkdirSync(tmpDir, { recursive: true });
   const results = [];
+  const blocked = [];
 
   for (const brief of briefs) {
     const slot = String(brief.slot);
@@ -473,15 +474,12 @@ async function runImageStage(ctx, opts) {
     }
 
     if (!passed) {
-      const blocked = { slot, anchor: brief.anchor, attempts: MAX_ATTEMPTS, failures };
-      log('task ' + taskId + '：配图阻塞 ' + JSON.stringify(blocked));
-      const err = new Error(
-        'task ' + taskId + '：槽位 ' + slot + ' 连续 ' + MAX_ATTEMPTS +
-          ' 次配图质检不过，配图是 SOP 红线，任务不交付无图稿。草稿保留在平台上等人接手。最后一次的问题：' +
-          (failures[failures.length - 1].reasons.join('；') || '未说明')
-      );
-      err.blocked = blocked;
-      throw err;
+      // 一个槽位画不出来不连坐正文。记下来，稿子照常交付，卡上写清缺哪张，人换一张真实照片。
+      // 2026-08-27 Louvresky #88：正文合格、两张图合格，被第三张画不出的复合场景图判了整任务失败。
+      const item = { slot, anchor: brief.anchor, alt: brief.alt, attempts: MAX_ATTEMPTS, failures };
+      blocked.push(item);
+      log('task ' + taskId + '：配图阻塞（不拦正文）' + JSON.stringify(item));
+      continue;
     }
     results.push(passed);
     log(
@@ -489,22 +487,60 @@ async function runImageStage(ctx, opts) {
     );
   }
 
-  const hero = results.find((r) => r.slot === 'hero');
-  if (!hero) throw new Error('task ' + taskId + '：配图结果里没有 hero，无法设置特色图');
-  const bodyShots = results.filter((r) => r.slot !== 'hero');
-  // SOP 二: the hero is the Featured Image and must not also sit in the body,
-  // or the post opens with the same picture twice.
-  for (const shot of bodyShots) {
-    if (shot.url === hero.url) {
-      throw new Error('task ' + taskId + '：正文图 ' + shot.slot + ' 和封面图用了同一个文件 ' + hero.url);
+  let hero = results.find((r) => r.slot === 'hero');
+  let heroFallback = '';
+  if (!hero) {
+    // 封面是发布门的红线，先试站内现成素材兜底，再不行留空给人补。
+    const pick = await pickSiteMedia(client, keyword, log, taskId);
+    if (pick) {
+      hero = { slot: 'hero', anchor: '', alt: pick.alt, url: pick.url, bytes: pick.bytes || 0, attempts: 0, prompt: '' };
+      heroFallback = pick.url;
+      log('task ' + taskId + '：封面用站内现成素材兜底 ' + pick.url);
+    } else {
+      log('task ' + taskId + '：封面没有生成出来，站内也没挑到合适素材，留空待人工');
     }
   }
+  const bodyShots = results.filter((r) => r.slot !== 'hero' && !(hero && r.url === hero.url));
   const nextBody = insertBodyImages(opts.body, bodyShots);
-  return { body: nextBody, ogImage: hero.url, heroAlt: cleanAlt(hero.alt), results };
+  return {
+    body: nextBody,
+    ogImage: hero ? hero.url : '',
+    heroAlt: hero ? cleanAlt(hero.alt) : '',
+    heroFallback,
+    results,
+    blocked,
+  };
+}
+
+/**
+ * 站内现成素材里挑一张当封面兜底：GET /api/content/{siteId}/media，按文件名和关键词的
+ * 词重合度排，挑不到回 null。只挑 jpg / jpeg / png / webp。读不到接口也回 null，不炸。
+ */
+async function pickSiteMedia(client, keyword, log, taskId) {
+  try {
+    const res = await client.req('GET', '/api/content/' + encodeURIComponent(client.siteId) + '/media');
+    const list = Array.isArray(res) ? res : (res && (res.media || res.items || res.files)) || [];
+    const kw = String(keyword || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+    let best = null;
+    for (const m of list) {
+      const url = String((m && (m.url || m.path || m.name)) || '');
+      if (!/\.(jpe?g|png|webp)$/i.test(url)) continue;
+      if (/flux-/.test(url)) continue; // 生成图不算真实素材
+      const name = url.toLowerCase();
+      const score = kw.reduce((n, w) => n + (name.indexOf(w) !== -1 ? 1 : 0), 0);
+      if (!best || score > best.score) best = { score, url: url.startsWith('/') || url.startsWith('http') ? url : '/assets/' + url, bytes: Number(m && (m.bytes || m.size)) || 0 };
+    }
+    if (!best || best.score === 0) return null;
+    return { url: best.url, bytes: best.bytes, alt: String(keyword || '') };
+  } catch (e) {
+    if (log) log('task ' + taskId + '：读站内素材失败，封面不兜底 :: ' + e.message);
+    return null;
+  }
 }
 
 module.exports = {
   runImageStage,
+  pickSiteMedia,
   insertBodyImages,
   insertionIndex,
   buildQcPrompt,
