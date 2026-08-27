@@ -510,6 +510,27 @@ function queue_review_job($cid,$ids,$by,$auditAction){
     return [$jids[0],false];
 }
 
+/* 博客任务的「放行」语义按阶段变：
+   大纲阶段（ops 含 blog-draft，output_url 不是博客预览链接）放行 = 写正文，重排 execute_task 并在说明里标 [大纲已批]；
+   草稿阶段（output_url 是预览链接）放行 = 发布，排 apply_task。
+   2026-08-27 #88 在大纲阶段被当成 apply，去找变更方案文件当然没有。 */
+function blog_outline_stage($t){
+    $ops=strtolower((string)($t['ops']??''));
+    if(strpos($ops,'blog-draft')===false)return false;
+    $u=(string)($t['output_url']??'');
+    return ($u===''||strpos($u,'/blog/')===false);
+}
+function blog_release_as_write($cid,$t,$by){
+    $tid=(int)$t['id'];
+    if(strpos((string)($t['detail']??''),'[大纲已批]')===false){
+        db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?),status='approved' WHERE id=?")
+            ->execute(['[大纲已批] '.date('Y-m-d').' 人已批大纲，按大纲写正文。',$tid]);
+    }else{
+        db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=?")->execute([$tid]);
+    }
+    return queue_task_jobs($cid,'execute_task',[$tid],$by,'seo_job_create');
+}
+
 /* 追加一行结果备注，不覆盖已有内容。收件箱动作里的 $appendNote 闭包是同一句 SQL，
    这里抽成函数给判定执行用。 */
 function task_append_note($tid,$note){
@@ -885,6 +906,10 @@ function thread_action_exec($root,$t,$a,$by){
     }
     if($type==='release'){
         if($t['status']!=='review')return ['ok'=>false,'what'=>'任务不在待放行状态'];
+        if(blog_outline_stage($t)){
+            list($jids,$sk)=blog_release_as_write($cid,$t,$by);
+            return ['ok'=>true,'what'=>'大纲已批，已排队写正文'.($jids?('，job #'.$jids[0]):'（已在队列）'),'job_ids'=>$jids];
+        }
         list($jids,$sk)=queue_task_jobs($cid,'apply_task',[$tid],$by,'seo_tasks_release');
         return ['ok'=>true,'what'=>'已放行'.($jids?('，apply job #'.$jids[0]):'（已在队列，未重复排）'),'job_ids'=>$jids];
     }
@@ -3427,7 +3452,18 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
     }
     /* 一任务一 job：放行几个任务就建几个 apply_task job，各自 30 分钟预算与各自成败。
        去重按任务，不再是「这个客户已有 apply 在跑就整批挡回去」。 */
-    list($jids,$skipped)=queue_task_jobs($cid,'apply_task',$ids,$u['username'],'seo_tasks_release');
+    /* 博客大纲阶段的任务，放行 = 写正文，不进 apply。 */
+    $writeIds=[];$applyIds=[];
+    foreach($found as $t){
+        $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([(int)$t['id']]);$row=$full->fetch();
+        if(blog_outline_stage($row))$writeIds[]=(int)$t['id'];else $applyIds[]=(int)$t['id'];
+    }
+    $jids=[];$skipped=[];
+    foreach($writeIds as $wid){
+        $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([$wid]);$row=$full->fetch();
+        list($wj,$ws)=blog_release_as_write($cid,$row,$u['username']);$jids=array_merge($jids,$wj);$skipped=array_merge($skipped,$ws);
+    }
+    if($applyIds){list($aj,$as)=queue_task_jobs($cid,'apply_task',$applyIds,$u['username'],'seo_tasks_release');$jids=array_merge($jids,$aj);$skipped=array_merge($skipped,$as);}
     /* 一条都没新建说明放行的任务全在飞，旧前端认 409 加 job_id 那套提示。 */
     if(!$jids)res(409,['error'=>'Apply job already queued or running','job_id'=>$skipped?$skipped[0]['job_id']:0,'job_ids'=>[],'count'=>0,'skipped'=>$skipped]);
     /* job_id 保留成第一个新建 job，旧前端的「job #」提示不至于变成 undefined。 */
@@ -3566,6 +3602,11 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/decide$#',$ROUTE,$mm)){
         res(200,['ok'=>true,'did'=>'killed']);
     }
     if($t['status']==='review'){
+        if(blog_outline_stage($t)){
+            list($jids,$sk)=blog_release_as_write($cid,$t,$u['username']);
+            audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'write_draft','job_ids'=>$jids]);
+            res(200,['ok'=>true,'did'=>'write_draft','job_ids'=>$jids,'skipped'=>$sk]);
+        }
         list($jids,$sk)=queue_task_jobs($cid,'apply_task',[$tid],$u['username'],'seo_tasks_release');
         audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'release','job_ids'=>$jids]);
         res(200,['ok'=>true,'did'=>'release','job_ids'=>$jids,'skipped'=>$sk]);
@@ -3628,7 +3669,7 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
     $q->execute(array_merge($ids,[$cid]));
     $tasks=attach_review_state($q->fetchAll(),$cid);
     $byId=[];foreach($tasks as $t)$byId[(int)$t['id']]=$t;
-    $skipped=[];$doIds=[];$releaseIds=[];$done=['do'=>0,'drop'=>0,'later'=>0,'merge'=>0];
+    $skipped=[];$doIds=[];$releaseIds=[];$jids=[];$done=['do'=>0,'drop'=>0,'later'=>0,'merge'=>0];
     $merges=[];
     foreach($ids as $tid){
         if(!isset($byId[$tid])){$skipped[]=['task_id'=>$tid,'why'=>'不存在或不属于该客户'];continue;}
@@ -3641,7 +3682,10 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
         /* 等放行的任务：do 就是放行（排 apply_task），later 留在待放行只记备注，
            drop 关掉不落地，merge 关掉并把来源写到目标上，目标照常放行。 */
         if($t['status']==='review'){
-            if($eff==='do'){$releaseIds[]=$tid;$done['do']++;continue;}
+            if($eff==='do'){
+                if(blog_outline_stage($t)){list($wj,$ws)=blog_release_as_write($cid,$t,$u['username']);$jids=array_merge($jids??[],$wj);$done['do']++;continue;}
+                $releaseIds[]=$tid;$done['do']++;continue;
+            }
             if($eff==='later'){task_append_note($tid,'[later] 判定暂不放行：'.$why);$done['later']++;continue;}
             if($eff==='drop'){
                 db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
@@ -3688,9 +3732,10 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
             ->execute(['（并入自 #'.$tid.' '.mb_substr((string)$title,0,120,'UTF-8').'）',$target]);
         $done['merge']++;
     }
-    $jids=[];$qskipped=[];
+    $qskipped=[];
     if($doIds){
-        list($jids,$qskipped)=queue_task_jobs($cid,'execute_task',$doIds,$u['username'],'seo_job_create');
+        list($ej,$qskipped)=queue_task_jobs($cid,'execute_task',$doIds,$u['username'],'seo_job_create');
+        $jids=array_merge($jids,$ej);
     }
     if($releaseIds){
         list($rj,$rs)=queue_task_jobs($cid,'apply_task',$releaseIds,$u['username'],'seo_tasks_release');
