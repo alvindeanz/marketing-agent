@@ -206,6 +206,20 @@ t('a review task carries its change plan, a missing plan is stated', () => {
   assert.ok(b84.indexOf('方案') === -1);
 });
 
+t('review 任务没有方案时改附大纲或最新草稿', () => {
+  const ws = fs.mkdtempSync(path.join(require('os').tmpdir(), 'rva-'));
+  fs.mkdirSync(path.join(ws, 'seo-agent-output', 'task-88'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'seo-agent-output', 'task-88', 'outline-task-88.md'), '# 大纲');
+  fs.writeFileSync(path.join(ws, 'seo-agent-output', 'blog-task-89-1.md'), 'old');
+  fs.writeFileSync(path.join(ws, 'seo-agent-output', 'blog-task-89-2.md'), 'new');
+  assert.strictEqual(R.reviewArtifactFor(ws, 88).kind, '博客大纲');
+  assert.ok(R.reviewArtifactFor(ws, 89).file.endsWith('blog-task-89-2.md'));
+  assert.strictEqual(R.reviewArtifactFor(ws, 90), null);
+  const out = R.attachChangePlans([{ id: 88, status: 'review', title: 'A' }], ws, () => {});
+  assert.strictEqual(out[0].artifact_kind, '博客大纲');
+  assert.ok(R.taskBlock(out[0]).indexOf('博客大纲开始') > 0);
+});
+
 console.log('runWith');
 
 function fakeCtx(tasks, judge) {

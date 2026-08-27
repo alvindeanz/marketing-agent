@@ -62,11 +62,14 @@ function taskBlock(t) {
   if (t.detail) rows.push('  说明：' + truncate(String(t.detail).replace(/\s+/g, ' '), MAX_DETAIL_CHARS));
   if (t.result_note) rows.push('  已有结果备注：' + summarize(String(t.result_note), 300));
   if (t.change_plan) {
+    const kind = t.artifact_kind || '变更方案';
     rows.push(
-      '  这个任务已出变更方案、等放行，判的是这份方案该不该落地。方案正文（超长已截断）：',
-      '  ----- 方案开始 -----',
+      '  这个任务已出' + kind + '、等放行，判的是这份' + kind + '该不该照它往下走。' +
+        (kind === '变更方案' ? '' : '博客产出的判决语义：do = 按它写正文 / 放行发布，later = 先不写并写清等什么，drop = 不做，merge = 并入其他任务。') +
+        kind + '正文（超长已截断）：',
+      '  ----- ' + kind + '开始 -----',
       truncate(String(t.change_plan), MAX_PLAN_CHARS),
-      '  ----- 方案结束 -----'
+      '  ----- ' + kind + '结束 -----'
     );
   } else if (t.status === 'review') {
     rows.push('  这个任务状态是等放行，但工作区里找不到它的变更方案文件，判定时把「方案缺失」当作事实。');
@@ -78,17 +81,40 @@ function tasksBlock(tasks) {
   return (tasks || []).map(taskBlock).join('\n\n');
 }
 
-/** Read the change plan a review task is waiting on. Missing file is a fact, not an error. */
+/**
+ * Read what a review task is waiting on. A change plan for site edits; for a
+ * blog task the outline (task-N/outline-task-N.md) or the newest draft
+ * (blog-task-N-*.md). Missing file is a fact, not an error.
+ */
+function reviewArtifactFor(workspace, taskId) {
+  const out = path.join(workspace, OUTPUT_DIRNAME);
+  const plan = path.join(out, CHANGE_PLAN_PREFIX + taskId + '.md');
+  if (fs.existsSync(plan)) return { kind: '变更方案', file: plan };
+  const outline = path.join(out, 'task-' + taskId, 'outline-task-' + taskId + '.md');
+  if (fs.existsSync(outline)) return { kind: '博客大纲', file: outline };
+  try {
+    const drafts = fs
+      .readdirSync(out)
+      .filter((f) => f.indexOf('blog-task-' + taskId + '-') === 0 && /\.md$/.test(f))
+      .sort();
+    if (drafts.length) return { kind: '博客草稿', file: path.join(out, drafts[drafts.length - 1]) };
+  } catch (e) { /* no output dir */ }
+  return null;
+}
 function attachChangePlans(tasks, workspace, log) {
   return (tasks || []).map((t) => {
     if (t.status !== 'review') return t;
-    const file = path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + t.id + '.md');
+    const art = reviewArtifactFor(workspace, t.id);
+    if (!art) {
+      if (log) log('判定：任务 #' + t.id + ' 是 review 状态但工作区里没有方案、大纲或草稿');
+      return t;
+    }
     try {
-      const text = fs.readFileSync(file, 'utf8');
-      if (log) log('判定：任务 #' + t.id + ' 附带方案 ' + text.length + ' 字');
-      return Object.assign({}, t, { change_plan: text });
+      const text = fs.readFileSync(art.file, 'utf8');
+      if (log) log('判定：任务 #' + t.id + ' 附带' + art.kind + ' ' + text.length + ' 字');
+      return Object.assign({}, t, { change_plan: text, artifact_kind: art.kind });
     } catch (e) {
-      if (log) log('判定：任务 #' + t.id + ' 是 review 状态但读不到方案 ' + file);
+      if (log) log('判定：任务 #' + t.id + ' 读不到 ' + art.file);
       return t;
     }
   });
@@ -344,6 +370,7 @@ module.exports = {
   taskBlock,
   tasksBlock,
   attachChangePlans,
+  reviewArtifactFor,
   loadPrinciples,
   VERDICTS,
   MAX_TASKS,
