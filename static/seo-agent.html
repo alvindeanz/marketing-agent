@@ -3188,7 +3188,8 @@ function taskCard(t,col){
   const canDecide=hs==='wait_me'&&!t.review_pending&&['proposed','approved','blocked','review'].indexOf(t.status)>=0;
   let acts='';
   if(canDecide){
-    const yesLabel=t.status==='review'?'放行':(t.owner_type==='agent'?'执行':'批准');
+    const outlineStage=t.status==='review'&&isBlogTask(t)&&!(t.output_url&&t.output_url.indexOf('/blog/')>=0);
+    const yesLabel=t.status==='review'?(outlineStage?'大纲已批，写正文':'放行'):(t.owner_type==='agent'?'执行':'批准');
     acts+='<button class="btn tiny green" onclick="decideTask('+t.id+',true)">'+yesLabel+'</button>';
     acts+='<button class="btn tiny ghost" onclick="decideTask('+t.id+',false)">不做</button>';
   }
@@ -3233,11 +3234,11 @@ async function decideTask(id,yes){
     if(t&&(t.job_state||{}).status==='failed'){
       const n=(t.job_state.fail_count||1);
       if(!confirm('#'+id+' 上一次已经失败'+(n>1?(' '+n+' 次'):'')+'：'+(t.fail_reason||'原因见日志')+'\n\n同一份方案再跑一次多半还是这个结果。确定要原样再跑？（改方案请走线程「改了重跑」）'))return;
-    }else if(t&&t.status==='review'&&!confirm('放行 #'+id+'？会排一个 apply 任务把改动真正落到线上。'))return;
+    }else if(t&&t.status==='review'&&!(isBlogTask(t)&&!(t.output_url&&t.output_url.indexOf('/blog/')>=0))&&!confirm('放行 #'+id+'？会排一个 apply 任务把改动真正落到线上。'))return;
   }
   const d=await api('/tasks/'+id+'/decide','POST',{yes:!!yes,note:String(note||'').trim()});
   if(fail(d,'操作失败'))return;
-  toast({execute:'已排队执行',release:'已放行，排队落地',approve:'已批准',killed:'已置为不做'}[d.did]||'已处理');
+  toast({execute:'已排队执行',release:'已放行，排队落地',write_draft:'大纲已批，排队写正文',approve:'已批准',killed:'已置为不做'}[d.did]||'已处理');
   loadTasksAndQueue();loadClients(true);
 }
 
