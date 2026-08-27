@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-27 AIRA (y) 跨认领登记：判定与写稿之间的断点补上；大纲阶段的放行 = 写正文
+
+- 干了什么：#88 首轮全流程实测暴露两处断点。1) **大纲阶段的放行被当成 apply**（job 140，1 秒失败找不到变更方案）：seo-api.php 新 `blog_outline_stage()` / `blog_release_as_write()`，decide、apply_verdicts、/tasks/release、线程 release 四处统一：博客任务 output_url 不是预览链接时，放行 = 说明追加 [大纲已批] 并重排 execute_task；卡上按钮改「大纲已批，写正文」。2) **写稿 prompt 拿不到判定前提修正与已批大纲**（job 141：Fable 判「就地扩写现有成本文」，写手另起一篇对比文）：runBlogTask 读 task.review_adjust 与 task-N/outline-task-N.md 作为「判定前提修正」「已批大纲」硬约束注入写稿 / 改稿 prompt；`expandInPlaceSlug` 解析「就地扩写 /blog/<slug>」，命中且文章存在就切成 revise 模式改那篇不新建。另：review_plan 对 review 任务按顺序附变更方案 / 博客大纲 / 最新草稿（此前只认方案，博客大纲判不到）；判定原则加「方案里的选择题由 Fable 选、公开可查的信息不算客户独有」。测试 blog 5 / review 22，其余不变。
+- 坑：job 141 建出的多余草稿 `outdoor-shade-cost-comparison-nz-louvre-pergola-or-awning` 留在平台未发布（bot 无删文通道），#88 的 output_url 已清空防误发布；人工删或改期另用。
+- 下一步/认领：**api 已部署；worker 本条部署后重跑 #88。**
+
 ### 2026-08-27 AIRA (x) 跨认领登记：博客流水线改成带门的阶段机，把 PJ 手工产线的纪律搬进无头跑
 
 - 干了什么：Alvin 第一性原理审过：正文、配图、发布是三个独立交付物，红线绑在它保护的那道门上，任何一次运行都交出做成的部分。worker 侧改动（execute_task 博客模式、blogimages、blogcheck、apply_task 发布、config）：1) **配图不再连坐正文**：`runImageStage` 槽位 3 次不过只记 blocked 不抛；封面缺时 `pickSiteMedia` 从 `GET /media` 按关键词挑站内真实素材兜底（跳过 flux- 生成图）；稿子照常 PATCH 上平台、进待放行，备注写「配图 x/4，缺哪个槽、最后原因、超 200KB 哪张」，图不齐打 attention。2) **客户规则层**：`clientRulesBlock` 读客户工作区 CLAUDE.md 与记忆目录 `<客户>/feedback_*.md`（去 frontmatter，每份 1500 字，总 9000 字），注入写稿、改稿、大纲、审稿四个 prompt，优先级高于 SOP 通用规则。3) **交付 lint 共用**：blogcheck 读 `/data/aira/scripts/deliverable_lint_rules.json`（_default 加客户层）的 banned_terms / absolute_claims / forbidden_openers，与 PJ 手工产线同一份规则表。4) **审稿**：机器校验过后 `reviewDraft`（`blogReviewModel` 默认 fable）按客户规则只出意见，opus 定点修一次再过机器校验，不循环；修不过沿用原版并把意见写进备注。5) **大纲门**：任务说明或判定前提修正里有「大纲 + 客户回批 / 审批」就只出大纲（交付文件 outline-task-N.md 加客户话术）进待放行；说明里带「大纲已批」（线程「改了重跑」写进去的）才写正文。6) **同 slug 复用**：上一轮遗留的同 slug 未发布草稿改它不新建，避免重复文章。7) **发布门**（apply_task.publishGate）：缺封面、正文有待人工配图标记、残留管道表、缺 FAQ JSON-LD 一律不发。新 `tests/blog.test.js` 4 条，八套全过。

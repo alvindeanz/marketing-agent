@@ -766,6 +766,8 @@ function buildBlogPrompt(opts) {
     '',
     opts.clientRules || '',
     '',
+    opts.guidance || '',
+    '',
     registryText,
     '',
     conflictText || '',
@@ -811,6 +813,8 @@ function buildBlogRevisePrompt(opts) {
     facts,
     '',
     opts.clientRules || '',
+    '',
+    opts.guidance || '',
     '',
     registryText,
     '（本篇自己已经从上面的清单里排除掉了。改稿不许把主题往清单里其他条目上靠。）',
@@ -896,6 +900,12 @@ function clientRulesBlock(cfg, workspace, log) {
  * 回批后人在线程里说「大纲已批」触发重跑，任务说明里会带 [大纲已批] 标记（线程指令写进 detail），
  * 或者人工把这句加进说明，就直通正文。
  */
+/** 判定或大纲里「就地扩写 /blog/<slug>」的 slug，没有回空串。 */
+function expandInPlaceSlug(text) {
+  const t = String(text || '');
+  const m = t.match(/(?:就地扩写|原地扩写|扩写现有|in[- ]place|expand(?:ing)? (?:the )?existing)[^\n]{0,80}?\/blog\/([a-z0-9-]+)\/?/i);
+  return m ? m[1] : '';
+}
 const OUTLINE_GATE_RE = /(大纲|outline)[^\n]{0,30}(客户|回批|审批|过目|先审|先交|approv)/i;
 const OUTLINE_DONE_RE = /大纲已批|大纲已过|outline approved|大纲回批通过/i;
 function outlineGate(task) {
@@ -1074,6 +1084,39 @@ async function runBlogTask(ctx, context, workspace, task) {
     }
   }
 
+  // ---- 已批大纲与判定前提修正：写正文那一轮必须照它们写，两轮之间不能断 ----
+  // 2026-08-27 #88：Fable 判「就地扩写现有成本文」，写手没拿到这句，另起了一篇对比文。
+  const adjustText = String(task.review_adjust || '').trim();
+  let outlineText = '';
+  if (mode === 'create' && OUTLINE_DONE_RE.test(String(task.detail || ''))) {
+    const of = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId, 'outline-task-' + taskId + '.md');
+    try { outlineText = fs.readFileSync(of, 'utf8'); log('task ' + taskId + '：读到已批大纲 ' + outlineText.length + ' 字'); } catch (e) { log('task ' + taskId + '：标了大纲已批但读不到大纲文件 ' + of); }
+  }
+  const expandSlug = mode === 'create' ? expandInPlaceSlug(adjustText + '\n' + outlineText) : '';
+  if (expandSlug) {
+    try {
+      const got = await client.getPost(expandSlug);
+      const post = (got && got.post) || null;
+      if (post) {
+        mode = 'revise';
+        slug = expandSlug;
+        currentBody = String(post.body || '');
+        const parsedRoll = styleroll.parseRollComment(currentBody);
+        const keep = parsedRoll.found && styleroll.skeletonByLabel(parsedRoll.skeletonLabel);
+        if (keep) roll.skeleton = keep;
+        log('task ' + taskId + '：判定 / 大纲要求就地扩写 ' + expandSlug + '，本轮改这篇不新建');
+      } else {
+        log('task ' + taskId + '：要求就地扩写的 ' + expandSlug + ' 平台上没有，按新建处理');
+      }
+    } catch (e) {
+      log('task ' + taskId + '：读要扩写的文章 ' + expandSlug + ' 失败，按新建处理 :: ' + e.message);
+    }
+  }
+  const guidance = [
+    adjustText ? '===== 判定前提修正（硬约束，优先级高于任务说明）=====\n' + adjustText + '\n===== 前提修正结束 =====' : '',
+    outlineText ? '===== 已批大纲（正文必须照它写，H2 顺序、每节要点、内链与表格位置都按它来）=====\n' + truncate(outlineText, 12000) + '\n===== 大纲结束 =====' : '',
+  ].filter(Boolean).join('\n\n');
+
   // Registry and cannibalisation, built after the mode is known so a revision
   // can exclude its own post from its own ban list.
   const reg = await blogRegistry(ctx, context, client, profile, taskId);
@@ -1145,6 +1188,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   const clientRules = clientRulesBlock(cfg, workspace, log);
   const lintRules = blogcheck.loadLintRules(cfg.lintRulesFile, path.basename(workspace));
   shared.clientRules = clientRules;
+  shared.guidance = guidance;
 
   // ---- 大纲门 ----
   const gate = outlineGate(task);
@@ -1153,7 +1197,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     return runOutlineOnly(ctx, { task, workspace, roll, shared, clientRules, allowedPaths, client, taskId });
   }
 
-  const feedback = latestFeedbackNote(task);
+  const feedback = latestFeedbackNote(task) || (guidance ? '（本轮不是客户改稿，是按判定与已批大纲就地扩写。改稿依据见下方「判定前提修正」与「已批大纲」。）' : '');
   const basePrompt =
     mode === 'revise'
       ? buildBlogRevisePrompt(Object.assign({}, shared, { currentBody, feedback, slug }))
@@ -1743,6 +1787,7 @@ module.exports = {
   planCallSection,
   clientRulesBlock,
   outlineGate,
+  expandInPlaceSlug,
   buildOutlinePrompt,
   PLAN_FORBIDDEN_PATHS,
   buildPrompt,

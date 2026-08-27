@@ -18,6 +18,12 @@ t('任务说明要求大纲先交客户回批就进大纲门；标了大纲已�
   assert.strictEqual(E.outlineGate({ detail: '直接写一篇成本文' }).gate, false);
 });
 
+t('判定或大纲里的「就地扩写 /blog/x」被解析成 slug', () => {
+  assert.strictEqual(E.expandInPlaceSlug('一，不另发新文，按大纲映射就地扩写 /blog/how-much-does-a-louvre-roof-cost-in-nz-the-factors-that-shape-your-quote，避免互抢'), 'how-much-does-a-louvre-roof-cost-in-nz-the-factors-that-shape-your-quote');
+  assert.strictEqual(E.expandInPlaceSlug('apply this outline as an in place expansion of `/blog/abc-def/` rather than'), 'abc-def');
+  assert.strictEqual(E.expandInPlaceSlug('另发一篇 /blog/new-post/'), '');
+});
+
 console.log('客户规则层');
 t('读工作区 CLAUDE.md 与记忆目录 feedback_* 并去掉 frontmatter，超预算截断', () => {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-'));
