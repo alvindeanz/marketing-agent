@@ -79,10 +79,18 @@ function structure(body) {
     const m = line.match(/^\s*##\s+(.+?)\s*$/);
     if (m) h2.push(m[1].trim());
   }
-  const tables = lines.filter((l) => TABLE_SEP_RE.test(l)).length;
+  // 表格两种口径都数：markdown 管道表的分隔行，加 raw HTML 的 <table>。
+  // WebForger 的博客渲染器不认管道表（只认 CommonMark，见记忆 feedback_webforger_no_gfm_tables），
+  // SOP 让模型写 HTML 表格；校验若只数管道表，Cost Breakdown 骨架在 WebForger 上永远过不了
+  // （2026-08-27 Louvresky #89 两次生成都因此打回）。
+  const pipeTables = lines.filter((l) => TABLE_SEP_RE.test(l)).length;
+  const htmlTables = (clean.match(/<table\b/gi) || []).length;
+  const tables = pipeTables + htmlTables;
   const olItems = lines.filter((l) => OL_RE.test(l)).length;
   return {
     tables,
+    pipeTables,
+    htmlTables,
     uls: countBlocks(lines, (l) => UL_RE.test(l)),
     ols: countBlocks(lines, (l) => OL_RE.test(l)),
     olItems,

@@ -61,7 +61,7 @@ invoke 本 skill 后，立刻按下面顺序执行，不能跳：
 - 结果导向 30%："Bathroom Renovation Cost NZ 2026: Real Prices from $15K–$45K"
 
 ### 维度 F：段落密度（权重随机）
-- 轻快型 50%：短段（2-3 句）+ 多列表/表格，扫读友好
+- 轻快型 50%：短段（2-3 句）+ 多列表/表格，扫读友好（表格用 raw HTML `<table>`，不用管道表）
 - 中等型 50%：中段（4-5 句）+ 少列表，阅读感更强
 
 ### 冲突排除表（Roll 到了必须重新选）
@@ -85,7 +85,7 @@ invoke 本 skill 后，立刻按下面顺序执行，不能跳：
 **标注骨架但不执行 = 违反 SOP = 不发布。**
 
 ### 1 — Cost Breakdown / Pricing Math
-- 必须有 2+ 表格（价格对比 / TCO 对比）
+- 必须有 2+ 表格（价格对比 / TCO 对比）。**表格一律写成 raw HTML**：`<table><thead><tr><th>…</th></tr></thead><tbody><tr><td>…</td></tr></tbody></table>`，不写 markdown 管道表（`| a | b |`），WebForger 的博客渲染器不认管道表，会把 `|---|` 原样显示在页面上。不加 inline style，主题已有表格样式。
 - UL 列表不超过 3 个
 - 第一个 H2 后 200 字内必须出现价格数据
 - H2 标题偏功能性（"What It Costs" / "Price Comparison" / "5-year TCO"）

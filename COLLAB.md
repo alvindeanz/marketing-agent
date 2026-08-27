@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-27 AIRA (w) 跨认领登记：博客校验数 HTML 表格；判决过期改内容哈希；换档提示
+
+- 干了什么：1) Louvresky #89（Cost Breakdown 骨架）两次生成都被机器校验打回「至少 2 个表格，实际 0」。根因是自相矛盾：SOP 要求 2+ 表格，而 WebForger 博客渲染器不认 markdown 管道表（见记忆 feedback_webforger_no_gfm_tables），SOP 又没说可以写 HTML 表，blogcheck 只数管道表分隔行。修：`lib/blogcheck.structure` 同时数 `<table` 出现次数（回 pipeTables / htmlTables / tables）；SOP 的 Cost Breakdown 与轻快型两处写明「表格一律 raw HTML `<table>`，不写管道表」。新 `tests/blogcheck.test.js`。2) seo-api.php 判决过期改按 `review_text_hash`（标题加说明的 MD5，review_result 写入，ensure_review_schema 为老判决回填一次）：整 plan 批准、放行、写备注这些状态动作不再让判决失效（#88 #89 被误判过期）。3) 前端工具栏提示行在 sprint 换档时写「S2 已全部结束，自动进入 S3」，Alvin 两次把浮上来的下一期任务当成新任务。测试七套全过。
+- 坑：站上已有的管道表老文章仍会原样显示 `|---|`，那是内容问题不是校验问题，要修走 qk 那份 fix_tables.js 的转换思路另立任务。
+- 下一步/认领：**api 已部署（40af22f）；worker 本条部署。** Louvresky S3 的正确走法是「全部按推荐」：#89 并入 #88，#88 执行出大纲。
+
 ### 2026-08-26 AIRA (v) 跨认领登记：changeset 比对放过平台副产物，加「置完成」
 
 - 干了什么：#83 v3 apply（job 126）14 处链接全改完、回读一致、线上生效，却被判失败：changeset 记了 5 个文件，方案声明 4 个，多出的 `posts-index.json` 是平台 PATCH 博客时自动重写的索引（preEtag 等于 postEtag，内容零变化），方案 V8 写死「多出任何一个文件即不通过」。修法：`lib/webforger.getChangeset` 保留每条的 op / preEtag / postEtag；`apply_task.compareFiles` 加 `isPlatformSideFile`（`posts-index.json`、`*-index.json`、`sitemap*.xml`、`history/`、`archive/`，以及 pre 等于 post etag 的条目）不算多出，只记进 side；模型自己的检查项若只因文件比对没过而 worker 比对无 extra，worker 改判成功；apply prompt 与 manifest 风险注记 1 同步写明口径。新端点 `POST /tasks/{id}/finish {note}`（人认定完成，理由必填，追加 [applied] 备注）与卡上「置完成」按钮，给「机器判失败但人看过站点认成」这种情况用。#83 已用它置完成。测试：apply 28（compareFiles 加两例），六套全过；php -l 在 250 过；内联 JS 过。
