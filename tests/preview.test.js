@@ -32,12 +32,19 @@ t('文档预览无 Copy 按钮，含种类与 markdown 渲染', () => {
   const html = P.renderDocPreview({ title: 'Plan', markdown: '## 1. 变更目标\n\n| 位置 | before | after |\n|---|---|---|\n| title | a | b |', kind: '变更方案', taskId: 3, client: 'C', note: 'n' });
   assert.ok(html.indexOf('copyBtn') === -1 && html.indexOf('变更方案') > -1 && html.indexOf('<td>b</td>') > -1 && html.indexOf('class="warn"') > -1);
 });
-t('变更方案预览：变更目标与变更预览展开，其余折叠', () => {
-  const md = '引言\n\n## 1. 变更目标与现状\n\ngoal\n\n## 2. API 调用序列\n\ncalls\n\n## 3. 变更预览\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n## 4. 回滚方式\n\nrb';
+t('变更方案预览：只展开放行卡，其余全部收进一个折叠块', () => {
+  const md = '引言\n\n## 0. 放行卡\n\n- 改什么：x\n\n## 1. 变更目标与现状\n\ngoal\n\n## 2. API 调用序列\n\ncalls\n\n## 3. 变更预览\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n## 4. 回滚方式\n\nrb';
   const html = P.renderDocPreview({ title: 'X', markdown: md, kind: '变更方案', taskId: 1, client: 'C' });
-  assert.ok(html.indexOf('<h2>1. 变更目标与现状</h2>') > -1 && html.indexOf('<h2>3. 变更预览</h2>') > -1);
-  assert.ok(/<details><summary[^>]*>2\. API 调用序列/.test(html) && /<details><summary[^>]*>4\. 回滚方式/.test(html));
-  assert.ok(html.indexOf('<td>2</td>') > -1);
+  assert.strictEqual((html.match(/<details>/g) || []).length, 1);
+  const cut = html.indexOf('<details>');
+  assert.ok(html.indexOf('<h2>0. 放行卡</h2>') > -1 && html.indexOf('<h2>0. 放行卡</h2>') < cut);
+  const det = html.slice(cut);
+  for (const s of ['1. 变更目标与现状', '2. API 调用序列', '3. 变更预览', '4. 回滚方式', '引言', '<td>2</td>']) assert.ok(det.indexOf(s) > -1, s);
+});
+t('变更方案预览：老方案没有放行卡时整份折叠', () => {
+  const md = '## 1. 变更目标与现状\n\n取证一大堆\n\n## 3. 变更预览\n\nba';
+  const html = P.renderDocPreview({ title: 'X', markdown: md, kind: '变更方案', taskId: 1, client: 'C' });
+  assert.ok(html.indexOf('取证一大堆') > html.indexOf('<details>'));
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

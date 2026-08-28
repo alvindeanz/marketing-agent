@@ -172,7 +172,16 @@ function buildPreparePrompt(opts) {
     '- 不确定的地方去读真实数据，不要靠猜。方案里出现凭想象写的 contentId、slug 或路径，',
     '  apply 阶段一定会撞车。',
     '',
-    '产出：变更方案文档，写成 Markdown，中文，四个部分',
+    '产出：变更方案文档，写成 Markdown，中文。方案标题下面先是「放行卡」，再是五个章节',
+    '',
+    '## 0. 放行卡',
+    '这一节是团队放行时**唯一会读**的东西，其余章节只有 apply 机器读。所以它必须短、必须是结论：',
+    '- 改什么：每个被改的页面或对象一行，写「页面：字段，旧值 → 新值」。只写结果，不写怎么改。',
+    '- 为什么：一两句。',
+    '- 风险与回滚：一两句，最坏情况是什么，怎么退回去。',
+    '- 需要人定：只列必须由人拍板的点，没有就写「无」。',
+    '硬限制：全节不超过 ' + RELEASE_CARD_MAX_CHARS + ' 个字符；不许出现代码块、curl、HTTP 方法、接口路径、字节偏移、',
+    '取证过程。这些全部属于下面的章节。放行卡超长或夹带代码会被机械校验打回。',
     '',
     '## 1. 变更目标与现状',
     '这次要改什么，为什么改，现在是什么状态。现状必须是你实际 GET 回来的，附上你读到的关键值。',
@@ -207,15 +216,14 @@ function buildPreparePrompt(opts) {
     '- 不许编造数字或接口字段。清单里没有的端点不许出现在方案里。',
     '- **你的最终回复本身就是方案文档**。runner 会把你最终回复的全文原样存为 ' + planFile + '，',
     '  apply 阶段只认这份文件。你没有 Write 权限，不要尝试自己写文件，也不要在最终回复里写',
-    '  工作总结或"方案已保存"之类的话，最终回复从方案标题开始，到摘要后面那个 json 块结束，',
+    '  工作总结或"方案已保存"之类的话，最终回复从方案标题开始，到末尾那个 json 块结束，',
     '  别的一个字不要有。',
     '  方案必须自洽完整，不能依赖你脑子里没写出来的上下文。',
-    '- 五个章节一个都不能少，章节标题原样保留。就算你调研后推翻了任务原设，只要你提出任何',
-    '  要执行的变更，也必须把它写满五段结构；你的调研结论和对原设的修正写进第 1 节。',
+    '- 放行卡加五个章节一个都不能少，章节标题原样保留。就算你调研后推翻了任务原设，只要你提出任何',
+    '  要执行的变更，也必须把它写满这个结构；你的调研结论和对原设的修正写进第 1 节。',
     '  确实没有任何变更可做时，第 2 节写"本方案无 API 调用"，其余章节照样保留并说明原因。',
     '- 缺章节的方案会被机械校验直接打回，等于这次 prepare 白跑。',
-    '- 最后附一段不超过 200 字的中文摘要，写清这次改什么、风险在哪、需要人重点看哪一点。',
-    '- 摘要之后再附一个 json 块收尾，后面不要有任何内容：',
+    '- 第 5 节之后直接附一个 json 块收尾，后面不要有任何内容：',
     '```json',
     '{"target_urls":["https://example.co.nz/some-page/"],"files":["pages/index.html","config.json"]}',
     '```',
@@ -232,10 +240,39 @@ function buildPreparePrompt(opts) {
 // The five sections a change plan must carry, mirroring buildPreparePrompt. A
 // plan missing any of them can not be applied, so it never reaches the release
 // panel: the job fails and the task stays approved.
-const REQUIRED_PLAN_SECTIONS = ['变更目标与现状', 'API 调用序列', '变更预览', '回滚方式', '执行后验证'];
+const REQUIRED_PLAN_SECTIONS = ['放行卡', '变更目标与现状', 'API 调用序列', '变更预览', '回滚方式', '执行后验证'];
 
 function missingPlanSections(text) {
   return REQUIRED_PLAN_SECTIONS.filter((s) => text.indexOf(s) === -1);
+}
+
+/**
+ * 放行卡：方案顶部给人读的那一节。2026-08-28 #71 的教训是一份 30KB 方案把取证过程
+ * 全摊给放行的人看，人要的只是「改什么、为什么、坏了怎么退、哪里要我拍板」。
+ * 这节是唯一进预览页默认视图和看板卡片的内容，所以长度和内容在这里硬卡。
+ */
+const RELEASE_CARD_MAX_CHARS = 800;
+const RELEASE_CARD_FORBIDDEN = /```|\bcurl\b|\b(GET|POST|PATCH|PUT|DELETE)\b\s*\/|\/api\/|字节/;
+
+/** 「## 0. 放行卡」到下一个 ## 之间的正文，没有就空串。 */
+function planReleaseCard(text) {
+  const t = String(text || '');
+  const m = t.match(/(?:^|\n)##\s*0?[\.、]?\s*放行卡[^\n]*\n/);
+  if (!m) return '';
+  const rest = t.slice(m.index + m[0].length);
+  const next = rest.search(/\n##\s/);
+  return (next === -1 ? rest : rest.slice(0, next)).trim();
+}
+function lintReleaseCard(text) {
+  const card = planReleaseCard(text);
+  const problems = [];
+  if (!card) return problems; // 缺节由 missingPlanSections 报
+  if (card.length > RELEASE_CARD_MAX_CHARS) {
+    problems.push('放行卡 ' + card.length + ' 字符，上限 ' + RELEASE_CARD_MAX_CHARS + '，取证和步骤挪到第 1、2 节');
+  }
+  const hit = card.match(RELEASE_CARD_FORBIDDEN);
+  if (hit) problems.push('放行卡夹带了代码或接口细节（' + hit[0].trim() + '），放行的人不读这些，挪到后面章节');
+  return problems;
 }
 
 /**
@@ -282,7 +319,8 @@ function lintPlan(text) {
   }
   // 5. 涉及文件清单（全文找，可能写在第 2 节末尾或末尾 json）
   if (!/涉及文件/.test(t) && !/"files"\s*:/.test(t)) problems.push('方案没有列「涉及文件」清单，apply 无法和 changeset 比对');
-  return problems;
+  // 6. 放行卡超长或夹带代码：人读的那一节退化成论文
+  return problems.concat(lintReleaseCard(t));
 }
 
 /** 方案末尾 json 里的 files 清单，apply 用来和 changeset 比对。没有就空数组。 */
@@ -1797,8 +1835,9 @@ async function runOne(ctx, context, workspace, taskId) {
     ? buildTargetHeader(readTargetUrls(output)) +
       '变更方案已生成，待人工放行后由 apply_task 执行。方案文件 ' +
       path.basename(file) +
-      '。摘要：' +
-      summarize(output, 400)
+      '。\n' +
+      // 卡片正文就是放行卡，人在看板上看完这段就能放；旧方案没有放行卡时退回截断摘要。
+      (planReleaseCard(output) || '摘要：' + summarize(output, 400))
     : summarize(output, 500));
   // Deliverables before the result: by the time the card shows up on the board
   // its downloads are already attached to it.
@@ -1853,6 +1892,9 @@ async function run(ctx) {
 module.exports = {
   run,
   lintPlan,
+  lintReleaseCard,
+  planReleaseCard,
+  RELEASE_CARD_MAX_CHARS,
   planFiles,
   planCallSection,
   clientRulesBlock,

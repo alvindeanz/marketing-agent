@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-28 AIRA (ab) 跨认领登记：变更方案加「放行卡」，预览页与看板卡片只给人看这一节
+
+- 干了什么：Alvin 看 Kuddles #71 预览页的反馈：给团队看的应该是「要做啥」的结论，不是几万字取证。根因是一份方案同时喂人和 apply 机器，预览把第 1 节（取证）整节展开。改法：prepare prompt 在标题下强制 `## 0. 放行卡`（改什么每对象一行「旧值 → 新值」、为什么、风险与回滚、需要人定；`RELEASE_CARD_MAX_CHARS`=800，禁代码块 / curl / HTTP 方法 / 接口路径 / 字节偏移），`REQUIRED_PLAN_SECTIONS` 加放行卡，`lintPlan` 新增 `lintReleaseCard` 超长或夹带即打回；末尾那段 200 字摘要取消（json 块保留）。看板 result_note 正文改为放行卡原文（旧方案无卡时退回截断摘要）。`renderDocPreview` 变更方案只展开放行卡，其余全部（含 before/after 原文）收进一个折叠块；老方案没卡整份折叠。#71 的方案手工补了放行卡（第 2 节未动），预览页已重传。tests 九套全过。
+- 坑：放行卡是给人的，别在里面写 apply 要读的东西；apply 只认第 2 节，卡上和第 2 节冲突以第 2 节为准，所以卡里不许出现执行细节。
+- 下一步/认领：**worker 本条部署。** #71 等放行，卡上三个「需要人定」要 Alvin 拍。
+
 ### 2026-08-28 AIRA (aa) 跨认领登记：任务产出的内部预览页（agencyreport 通道）；分析型任务的「同意」= 验收
 
 - 干了什么：Alvin 定的：所有产出先在我们自己的服务器上渲染成预览页给人看，看完再放行动客户站（PJ 手工产线的做法）。worker 新 `lib/preview.js`：零依赖 markdown 转 HTML（标题、段落、列表、管道表、行内、raw HTML 放行、注释剔除）；`renderBlogPreview`（review-only 的 meta 表、hero、正文、图片补绝对地址、Copy Article HTML 按钮，与 PJ 博客交付惯例一致）与 `renderDocPreview`（方案 / 大纲 / 分析报告）。execute_task 四个产出点（分析、prepare 方案、博客成稿、大纲）都经 `publishFile` 传到 250 的 `reports/{client}/preview/task-N.html`，result_note 首行写「预览: url」，前端状态行显示「预览」链接；博客话术里的占位符在大纲阶段替换成预览链接。另：分析型任务（agent 且无 ops）在 review 时「同意」= 置 done 记 [applied] 验收，不再排 apply 去找不存在的变更方案（Kuddles #72 #73 昨天因此失败）；decide / apply_verdicts / /tasks/release 三处同口径，卡上按钮显示「验收」。新 `tests/preview.test.js` 4 条，九套全过；php -l 在 250 过。

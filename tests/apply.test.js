@@ -300,7 +300,8 @@ t('prepare 的 prompt 要 target_urls，且允许方案末尾带 json 块', () =
     planFile: '/tmp/change-plan-task-61.md',
   });
   assert.ok(p.indexOf('target_urls') > -1);
-  assert.ok(p.indexOf('到摘要后面那个 json 块结束') > -1, '收尾约束要与新增的 json 块一致');
+  assert.ok(p.indexOf('到末尾那个 json 块结束') > -1, '收尾约束要与新增的 json 块一致');
+  assert.ok(p.indexOf('## 0. 放行卡') > -1 && p.indexOf(String(E.RELEASE_CARD_MAX_CHARS)) > -1, '放行卡与上限要进 prompt');
 });
 
 /* ---------- prepare 的目标页面一行 ---------- */
@@ -410,6 +411,16 @@ t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺�
   assert.ok(E.lintPlan('- 预期响应：200，回读体里 seo.title 逐字相等\n涉及文件：a').some((x) => x.indexOf('字段断言') > -1));
   assert.ok(E.lintPlan('- 预期响应：200\n- 回读核对：GET').some((x) => x.indexOf('涉及文件') > -1));
   assert.deepStrictEqual(E.planFiles('x\n```json\n{"files":["pages/a.html"]}\n```'), ['pages/a.html']);
+});
+t('放行卡：提取、超长打回、夹带 curl 或接口路径打回', () => {
+  const card = '- 改什么：/childcare/ 面包屑，旧标题 → 新标题\n- 为什么：页面已改版\n- 风险与回滚：改回原值\n- 需要人定：无';
+  const plan = '# 标题\n\n## 0. 放行卡\n\n' + card + '\n\n## 1. 变更目标与现状\n\n取证\n## 2. API 调用序列\n涉及文件：a';
+  assert.strictEqual(E.planReleaseCard(plan), card);
+  assert.strictEqual(E.planReleaseCard('## 1. 变更目标与现状\nx'), '');
+  assert.deepStrictEqual(E.lintReleaseCard(plan), []);
+  assert.ok(E.lintPlan(plan.replace(card, '啊'.repeat(E.RELEASE_CARD_MAX_CHARS + 1))).some((x) => x.indexOf('上限') > -1));
+  assert.ok(E.lintReleaseCard(plan.replace('改回原值', '反向 PATCH /api/pages/x')).some((x) => x.indexOf('夹带') > -1));
+  assert.ok(E.lintReleaseCard(plan.replace('改回原值', '跑 curl 回读')).some((x) => x.indexOf('夹带') > -1));
 });
 
 Promise.all(pending).then(() => {
