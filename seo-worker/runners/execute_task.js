@@ -245,7 +245,7 @@ function missingPlanSections(text) {
  */
 const PLAN_FORBIDDEN_PATHS = ['/api/domains', '/api/admin', '/api/partner', '/api/migrate', '/api/payments'];
 // 方案里说「不含 POST /snapshots」「不碰 /api/admin」是好话，不能当命中。带这些词的行跳过。
-const PLAN_NEGATION = /(不含|不许|不准|不拍|不调用|不发|不碰|不涉及|不用|不要|不再|不建议|禁止|严禁|删掉|已失效|不存在|不做)/;
+const PLAN_NEGATION = /(不含|不许|不准|不拍|不调用|不发|不碰|不涉及|不用|不使用|不出现|不得|不要|不再|不建议|禁止|严禁|删掉|已失效|不存在|不做)/;
 /** 只取「## 2. API 调用序列」到下一个 ## 之间的正文，真正会被 apply 照做的只有这一节。 */
 function planCallSection(text) {
   const t = String(text || '');

@@ -406,6 +406,7 @@ t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺�
   assert.ok(E.lintPlan('## 2. API 调用序列\nPUT /api/content/x/redirects\n涉及文件：a').some((x) => x.indexOf('PUT') > -1));
   assert.ok(E.lintPlan('## 2. API 调用序列\nGET /api/admin/users\n涉及文件：a').some((x) => x.indexOf('/api/admin') > -1));
   assert.deepStrictEqual(E.lintPlan('## 2. API 调用序列\n不碰 /api/admin，本方案无 API 调用\n涉及文件：无'), []);
+  assert.deepStrictEqual(E.lintPlan('## 2. API 调用序列\n- 任何位置都不得调用 \`POST /api/content/x/snapshots\`。\n- 本方案不使用全站快照，不出现 POST /snapshots。\n涉及文件：a'), []);
   assert.ok(E.lintPlan('- 预期响应：200，回读体里 seo.title 逐字相等\n涉及文件：a').some((x) => x.indexOf('字段断言') > -1));
   assert.ok(E.lintPlan('- 预期响应：200\n- 回读核对：GET').some((x) => x.indexOf('涉及文件') > -1));
   assert.deepStrictEqual(E.planFiles('x\n```json\n{"files":["pages/a.html"]}\n```'), ['pages/a.html']);
