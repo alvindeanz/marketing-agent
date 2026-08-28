@@ -32,5 +32,13 @@ t('文档预览无 Copy 按钮，含种类与 markdown 渲染', () => {
   const html = P.renderDocPreview({ title: 'Plan', markdown: '## 1. 变更目标\n\n| 位置 | before | after |\n|---|---|---|\n| title | a | b |', kind: '变更方案', taskId: 3, client: 'C', note: 'n' });
   assert.ok(html.indexOf('copyBtn') === -1 && html.indexOf('变更方案') > -1 && html.indexOf('<td>b</td>') > -1 && html.indexOf('class="warn"') > -1);
 });
+t('变更方案预览：变更目标与变更预览展开，其余折叠', () => {
+  const md = '引言\n\n## 1. 变更目标与现状\n\ngoal\n\n## 2. API 调用序列\n\ncalls\n\n## 3. 变更预览\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n## 4. 回滚方式\n\nrb';
+  const html = P.renderDocPreview({ title: 'X', markdown: md, kind: '变更方案', taskId: 1, client: 'C' });
+  assert.ok(html.indexOf('<h2>1. 变更目标与现状</h2>') > -1 && html.indexOf('<h2>3. 变更预览</h2>') > -1);
+  assert.ok(/<details><summary[^>]*>2\. API 调用序列/.test(html) && /<details><summary[^>]*>4\. 回滚方式/.test(html));
+  assert.ok(html.indexOf('<td>2</td>') > -1);
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
