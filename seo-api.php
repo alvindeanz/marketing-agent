@@ -514,6 +514,10 @@ function queue_review_job($cid,$ids,$by,$auditAction){
    大纲阶段（ops 含 blog-draft，output_url 不是博客预览链接）放行 = 写正文，重排 execute_task 并在说明里标 [大纲已批]；
    草稿阶段（output_url 是预览链接）放行 = 发布，排 apply_task。
    2026-08-27 #88 在大纲阶段被当成 apply，去找变更方案文件当然没有。 */
+/* 分析型任务（没有 ops 的 agent 任务）产出是报告，进 review 后「同意」= 验收完成，不排 apply。 */
+function analysis_task($t){
+    return ($t['owner_type']??'')==='agent'&&trim((string)($t['ops']??''))==='';
+}
 function blog_outline_stage($t){
     $ops=strtolower((string)($t['ops']??''));
     if(strpos($ops,'blog-draft')===false)return false;
@@ -3461,10 +3465,13 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
        去重按任务，不再是「这个客户已有 apply 在跑就整批挡回去」。 */
     /* 博客大纲阶段的任务，放行 = 写正文，不进 apply。 */
     $writeIds=[];$applyIds=[];
+    $acceptIds=[];
     foreach($found as $t){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([(int)$t['id']]);$row=$full->fetch();
-        if(blog_outline_stage($row))$writeIds[]=(int)$t['id'];else $applyIds[]=(int)$t['id'];
+        if(analysis_task($row))$acceptIds[]=(int)$t['id'];
+        elseif(blog_outline_stage($row))$writeIds[]=(int)$t['id'];else $applyIds[]=(int)$t['id'];
     }
+    foreach($acceptIds as $aid){db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$aid]);task_append_note($aid,'[applied] 分析报告已验收。');}
     $jids=[];$skipped=[];
     foreach($writeIds as $wid){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([$wid]);$row=$full->fetch();
@@ -3609,6 +3616,12 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/decide$#',$ROUTE,$mm)){
         res(200,['ok'=>true,'did'=>'killed']);
     }
     if($t['status']==='review'){
+        if(analysis_task($t)){
+            db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[applied] 分析报告已验收。');
+            audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'accept']);
+            res(200,['ok'=>true,'did'=>'accept','job_ids'=>[]]);
+        }
         if(blog_outline_stage($t)){
             list($jids,$sk)=blog_release_as_write($cid,$t,$u['username']);
             audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'write_draft','job_ids'=>$jids]);
@@ -3690,6 +3703,7 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
            drop 关掉不落地，merge 关掉并把来源写到目标上，目标照常放行。 */
         if($t['status']==='review'){
             if($eff==='do'){
+                if(analysis_task($t)){db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);task_append_note($tid,'[applied] 分析报告已验收（按推荐）。');$done['do']++;continue;}
                 if(blog_outline_stage($t)){list($wj,$ws)=blog_release_as_write($cid,$t,$u['username']);$jids=array_merge($jids??[],$wj);$done['do']++;continue;}
                 $releaseIds[]=$tid;$done['do']++;continue;
             }

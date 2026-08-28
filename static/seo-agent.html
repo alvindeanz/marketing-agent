@@ -3193,6 +3193,8 @@ function stateLine(t){
   const sn=sprintNum(t);
   if(sprintAnchor&&sn!==null&&sn<currentSprint(tasksData)&&hs!=='closed')bits.push('<span class="st-fail">S'+sn+' 逾期</span>');
   else if(sprintAnchor&&sn!==null&&sn>currentSprint(tasksData)&&hs!=='closed')bits.push('<span class="muted">S'+sn+' 下期</span>');
+  const pv=String(t.result_note||'').match(/预览: (https?:\/\/\S+)/g);
+  if(pv&&pv.length){const u=pv[pv.length-1].replace(/^预览: /,'');bits.push('<a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-weight:700">预览</a>')}
   if(t.status==='review'&&t.output_url)bits.push('<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出</a>');
   if(failed)bits.push('<button class="btn tiny ghost" onclick="showJobLog('+(t.job_state.job_id||0)+')">看日志</button>');
   let h='<div class="st '+hs+(t.closed_kind?(' '+t.closed_kind):'')+'">'+bits.join('')+'</div>';
@@ -3229,7 +3231,8 @@ function taskCard(t,col){
   let acts='';
   if(canDecide){
     const outlineStage=t.status==='review'&&isBlogTask(t)&&!(t.output_url&&t.output_url.indexOf('/blog/')>=0);
-    const yesLabel=t.status==='review'?(outlineStage?'大纲已批，写正文':'放行'):(t.owner_type==='agent'?'执行':'批准');
+    const analysis=t.owner_type==='agent'&&!String(t.ops||'').trim();
+    const yesLabel=t.status==='review'?(analysis?'验收':(outlineStage?'大纲已批，写正文':'放行')):(t.owner_type==='agent'?'执行':'批准');
     acts+='<button class="btn tiny green" onclick="decideTask('+t.id+',true)">'+yesLabel+'</button>';
     acts+='<button class="btn tiny ghost" onclick="decideTask('+t.id+',false)">不做</button>';
   }
@@ -3278,7 +3281,7 @@ async function decideTask(id,yes){
   }
   const d=await api('/tasks/'+id+'/decide','POST',{yes:!!yes,note:String(note||'').trim()});
   if(fail(d,'操作失败'))return;
-  toast({execute:'已排队执行',release:'已放行，排队落地',write_draft:'大纲已批，排队写正文',approve:'已批准',killed:'已置为不做'}[d.did]||'已处理');
+  toast({execute:'已排队执行',release:'已放行，排队落地',write_draft:'大纲已批，排队写正文',accept:'报告已验收，任务完成',approve:'已批准',killed:'已置为不做'}[d.did]||'已处理');
   loadTasksAndQueue();loadClients(true);
 }
 

@@ -18,6 +18,8 @@ const { runClaude } = require('../lib/llm');
 const { buildBrief } = require('../lib/brief');
 const { extractTrailingJson } = require('../lib/mdjson');
 const capabilities = require('../lib/capabilities');
+const preview = require('../lib/preview');
+const { publishFile } = require('../lib/publish');
 const styleroll = require('../lib/styleroll');
 const blogcheck = require('../lib/blogcheck');
 const blogimages = require('../lib/blogimages');
@@ -851,6 +853,29 @@ function readDraftJson(output) {
  * task lands in review with the three deliverables a human needs to forward it.
  */
 /**
+ * 内部预览页：把产出渲染成 HTML 传到 agencyreport 的 reports/{client}/preview/task-N.html，
+ * 回对外链接；传不上去回空串并记日志，不炸任务（预览是给人看的旁证，不是交付物本身）。
+ */
+async function publishPreview(ctx, workspace, taskId, html, log) {
+  const { cfg } = ctx;
+  try {
+    const slug = path.basename(workspace);
+    const dir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
+    fs.mkdirSync(dir, { recursive: true });
+    const local = path.join(dir, 'preview-task-' + taskId + '.html');
+    fs.writeFileSync(local, html, 'utf8');
+    const res = await publishFile(cfg, slug, 'preview', 'task-' + taskId + '.html', local, log);
+    return res.url;
+  } catch (e) {
+    if (log) log('task ' + taskId + '：预览页上传失败，卡上没有预览链接 :: ' + e.message);
+    return '';
+  }
+}
+function previewLine(url) {
+  return url ? '预览: ' + url + '\n' : '';
+}
+
+/**
  * 客户规则层：PJ 手工产线动笔前读的东西，原样喂给无头模型。
  * 两个来源：客户工作区的 CLAUDE.md，以及记忆目录里该客户的 feedback_* 文件
  * （客户目录名 = 工作区目录名）。每份截 1500 字，总量 9000 字，超出的按文件名排序截掉并记日志。
@@ -1406,7 +1431,10 @@ async function runBlogTask(ctx, context, workspace, task) {
   // behind for a human rather than nothing at all.
   let imageNote = '';
   let imagesMissing = false;
+  let placedBody = '';
+  let placedOg = '';
   if (mode === 'revise') {
+    placedBody = mode === 'revise' && publishedRevise ? String(payload.body || '') : '';
     // Deliberately untouched. The mechanical keepImages check already forced the
     // writer to carry every existing picture through, and regenerating images on
     // a copy revision is how a client ends up with a different photo every round.
@@ -1452,6 +1480,8 @@ async function runBlogTask(ctx, context, workspace, task) {
     const meta = { description: draft.meta_description };
     if (placed.ogImage) meta.ogImage = placed.ogImage;
     await client.patchPost(finalSlug, { body: placed.body, meta });
+    placedBody = placed.body;
+    placedOg = placed.ogImage || '';
     fs.writeFileSync(draftFile, placed.body, 'utf8');
     const okCount = placed.results.length;
     const total = (draft.image_briefs || []).length || 4;
@@ -1476,8 +1506,21 @@ async function runBlogTask(ctx, context, workspace, task) {
     '，' + (mode === 'revise' ? (publishedRevise ? '就地扩写已发布文章（新正文在交付文件 revised-body-*.md 里，线上未动，放行 = 替换并发布）' : '按客户反馈改稿') : '新建草稿') +
     '，分类 ' + draft.category + '。' + imageNote + reviewNote;
 
+  const clientName = (context && context.client && context.client.name) || profile.domain || '';
+  const previewNote = publishedRevise ? '已发布文章的改稿，线上未动，放行 = 替换并发布。' : (imagesMissing ? '配图不齐，发布前需人工补图。' : '');
+  const pvHtml = preview.renderBlogPreview({
+    draft: Object.assign({}, draft, { body_markdown: (placedBody || draft.body_markdown) }),
+    ogImage: placedOg,
+    host: profile.domain,
+    taskId,
+    client: clientName,
+    note: previewNote,
+    previewUrl: publishedRevise ? '' : previewUrl,
+  });
+  const internalPreview = await publishPreview(ctx, workspace, taskId, pvHtml, log);
   const note = [
-    '预览链接：' + previewUrl,
+    previewLine(internalPreview).trim(),
+    (publishedRevise ? '正式链接（线上未动）：' : '平台预览链接：') + previewUrl,
     '客户话术：',
     SOCIAL_OPEN,
     social,
@@ -1527,8 +1570,13 @@ async function runOutlineOnly(ctx, opts) {
     qs.length ? '## 需客户确认\n' + qs.map((q) => '- ' + q).join('\n') : '',
   ].join('\n'), 'utf8');
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
-  const social = String(o.social_message || '').split(blogcheck.PREVIEW_TOKEN).join('（大纲见附件）');
+  const pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
+    title: String(o.title || task.title), markdown: fs.readFileSync(file, 'utf8'), kind: '博客大纲', taskId,
+    client: (shared && shared.siteBlock ? '' : '') || path.basename(workspace),
+  }), log);
+  const social = String(o.social_message || '').split(blogcheck.PREVIEW_TOKEN).join(pvUrl || '（大纲见附件）');
   const note = [
+    previewLine(pvUrl).trim(),
     '大纲已出（交付文件 outline-task-' + taskId + '.md），等客户回批。',
     '客户话术：', SOCIAL_OPEN, social, SOCIAL_CLOSE,
     qs.length ? '需客户确认：' + qs.join('；') : '',
@@ -1740,13 +1788,18 @@ async function runOne(ctx, context, workspace, taskId) {
     }
   }
 
-  const note = prepare
+  const pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
+    title: task.title || 'task ' + taskId, markdown: output, kind: prepare ? '变更方案' : '分析报告', taskId,
+    client: (context && context.client && context.client.name) || path.basename(workspace),
+    note: prepare ? '这是待放行的变更方案，不是变更本身。放行后 apply 照它执行并回读验证。' : '分析型任务的产出是这份报告，同意 = 验收完成。',
+  }), log);
+  const note = previewLine(pvUrl) + (prepare
     ? buildTargetHeader(readTargetUrls(output)) +
       '变更方案已生成，待人工放行后由 apply_task 执行。方案文件 ' +
       path.basename(file) +
       '。摘要：' +
       summarize(output, 400)
-    : summarize(output, 500);
+    : summarize(output, 500));
   // Deliverables before the result: by the time the card shows up on the board
   // its downloads are already attached to it.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);

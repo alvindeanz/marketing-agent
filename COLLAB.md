@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-28 AIRA (aa) 跨认领登记：任务产出的内部预览页（agencyreport 通道）；分析型任务的「同意」= 验收
+
+- 干了什么：Alvin 定的：所有产出先在我们自己的服务器上渲染成预览页给人看，看完再放行动客户站（PJ 手工产线的做法）。worker 新 `lib/preview.js`：零依赖 markdown 转 HTML（标题、段落、列表、管道表、行内、raw HTML 放行、注释剔除）；`renderBlogPreview`（review-only 的 meta 表、hero、正文、图片补绝对地址、Copy Article HTML 按钮，与 PJ 博客交付惯例一致）与 `renderDocPreview`（方案 / 大纲 / 分析报告）。execute_task 四个产出点（分析、prepare 方案、博客成稿、大纲）都经 `publishFile` 传到 250 的 `reports/{client}/preview/task-N.html`，result_note 首行写「预览: url」，前端状态行显示「预览」链接；博客话术里的占位符在大纲阶段替换成预览链接。另：分析型任务（agent 且无 ops）在 review 时「同意」= 置 done 记 [applied] 验收，不再排 apply 去找不存在的变更方案（Kuddles #72 #73 昨天因此失败）；decide / apply_verdicts / /tasks/release 三处同口径，卡上按钮显示「验收」。新 `tests/preview.test.js` 4 条，九套全过；php -l 在 250 过。
+- 坑：预览不是站点主题，版式类改动放行后仍要看线上回读；预览页 noindex 但可公开访问，别放凭据。旧任务（本条之前出的）没有预览链接，重跑才有。
+- 下一步/认领：**api + worker 本条部署。** Kuddles #71（v1 方案含快照前置被新规矩拒）重出 v2 作预览页首测；#72 #73 按验收处理。
+
 ### 2026-08-27 AIRA (z) 跨认领登记：已发布文章的就地改稿改为「存交付文件，放行后 apply 替换」
 
 - 干了什么：#88 第二轮（job 143）就地扩写成功（2290 词、2 个 HTML 表、审稿删掉内部措辞与电气内容），但暴露一个安全缺口：**WebForger 对已发布文章的 PATCH 直接上线**（实测，之前记忆里「PATCH 不推送要 republish」是错的），等于改稿绕过了放行。修：execute 博客改稿遇到 status published 不碰平台，新正文 payload 存成 `task-N/revised-body-<slug>.md` 交付文件，交付用正式链接并注明「线上未动，放行 = 替换并发布」；apply 的 runBlogPublish 对已发布文章：有交付文件就先过发布门，再 PATCH 替换，再 publish 兜底推送；没有就跳过。
