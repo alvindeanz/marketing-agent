@@ -1227,7 +1227,11 @@ async function runBlogTask(ctx, context, workspace, task) {
   const lang = cfg.blogLang ? cfg.blogLang : '英文（站点默认语言）';
   // On a revision the images already placed by the image pass are load bearing:
   // the model must carry them through untouched, and the checker compares sets.
-  const keepImages = mode === 'revise' ? currentBody.match(/!\[[^\]]*\]\([^)]+\)/g) || [] : [];
+  // 改稿轮默认沿用原图；revise 的 reason 里写了「重新配图」才整套重出（2026-08-29 #110 四张全缺的场景）。
+  const reviseReason = String((ctx.job && ctx.job.payload && ctx.job.payload.reason) || '');
+  const regenImages = mode === 'revise' && /重新配图|补图|regen[_ ]?images?/i.test(reviseReason);
+  if (regenImages) log('task ' + taskId + '：改稿轮要求重新配图，本轮丢弃原图并按新 brief 重出');
+  const keepImages = mode === 'revise' && !regenImages ? currentBody.match(/!\[[^\]]*\]\([^)]+\)/g) || [] : [];
   const shared = {
     task,
     roll,
@@ -1246,12 +1250,12 @@ async function runBlogTask(ctx, context, workspace, task) {
       categories,
       lang,
       keepImages,
-      withImageBriefs: mode !== 'revise',
+      withImageBriefs: mode !== 'revise' || regenImages,
     }),
     // Image briefs on a fresh write only. A revision keeps the pictures the
     // image stage already placed, so it neither writes briefs nor re-runs the
     // stage, and its image rules stay exactly what they were.
-    contract: blogOutputContract(roll, { withImageBriefs: mode !== 'revise' }),
+    contract: blogOutputContract(roll, { withImageBriefs: mode !== 'revise' || regenImages }),
     registryText,
   };
 
@@ -1267,7 +1271,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     return runOutlineOnly(ctx, { task, workspace, roll, shared, clientRules, allowedPaths, client, taskId });
   }
 
-  const feedback = latestFeedbackNote(task) || (guidance ? '（本轮不是客户改稿，是按判定与已批大纲就地扩写。改稿依据见下方「判定前提修正」与「已批大纲」。）' : '');
+  const feedback = latestFeedbackNote(task) || (regenImages ? '（本轮为补图重出：正文保持原意，只做必要润色，不换选题不换结构；必须随正文产出 4 份 image_briefs。' + (reviseReason ? ' 重出原因：' + reviseReason : '') + '）' : '') || (guidance ? '（本轮不是客户改稿，是按判定与已批大纲就地扩写。改稿依据见下方「判定前提修正」与「已批大纲」。）' : '');
   const basePrompt =
     mode === 'revise'
       ? buildBlogRevisePrompt(Object.assign({}, shared, { currentBody, feedback, slug }))
@@ -1478,8 +1482,8 @@ async function runBlogTask(ctx, context, workspace, task) {
   let imagesMissing = false;
   let placedBody = '';
   let placedOg = '';
-  if (mode === 'revise') {
-    placedBody = mode === 'revise' && publishedRevise ? String(payload.body || '') : '';
+  if (mode === 'revise' && !regenImages) {
+    placedBody = publishedRevise ? String(payload.body || '') : '';
     // Deliberately untouched. The mechanical keepImages check already forced the
     // writer to carry every existing picture through, and regenerating images on
     // a copy revision is how a client ends up with a different photo every round.
