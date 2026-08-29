@@ -3595,6 +3595,12 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/approve$#',$ROUTE,$mm)){
     $p=db();
     $p->beginTransaction();
     try{
+        /* 被取代的现役方案：它还没开工的任务（proposed / approved / blocked）一起收掉，
+           理由指向新方案。已在 review / in_progress 的留着，那是做到一半的活。
+           v2 里要保留的内容，plan_review 已经按 from 吸收进新任务了。 */
+        $sq=$p->prepare("SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>?");
+        $sq->execute([$plan['client_id'],$pid]);
+        $supersededIds=array_map('intval',array_column($sq->fetchAll(),'id'));
         $p->prepare("UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>?")
           ->execute([$plan['client_id'],$pid]);
         $p->prepare("UPDATE seo_plans SET status='active',approved_by=?,reject_reason=NULL WHERE id=?")
@@ -3615,10 +3621,16 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/approve$#',$ROUTE,$mm)){
     }
     /* 方向确认卡：批准 = 确认方向，收件箱里这张卡关掉 */
     db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([(int)$plan['client_id'],'[plan:'.$pid.']%']);
+    $closedOld=[];
+    foreach($supersededIds as $spid){
+        $oq=db()->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status IN('proposed','approved','blocked')");
+        $oq->execute([$spid]);
+        foreach($oq->fetchAll() as $r){ if(!task_close((int)$r['id'],'merged','方案 #'.$spid.' 被 #'.$pid.' 取代，未开工任务收掉',$u['username']))$closedOld[]=(int)$r['id']; }
+    }
     $excluded=$total-$approved;
     if($excluded<0)$excluded=0;
     audit($u['username'],'seo_plan_approve',(string)$pid,['client_id'=>(int)$plan['client_id'],'approved_count'=>$approved,'excluded_count'=>$excluded]);
-    res(200,['ok'=>true,'approved_count'=>$approved,'excluded_count'=>$excluded]);
+    res(200,['ok'=>true,'approved_count'=>$approved,'excluded_count'=>$excluded,'closed_superseded'=>$closedOld]);
 }
 
 // POST /tasks/release -> hand a batch of reviewed tasks to the worker to apply

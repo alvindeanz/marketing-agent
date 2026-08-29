@@ -64,6 +64,13 @@ function historyBlock(tasks, currentPlanId) {
   return rows.join('\n');
 }
 
+/** 现役方案还没做完的任务：v2 要么吸收（from 写它的 id），要么明说不要。批准 v2 时这些会被按 merged 收掉。 */
+function activeOpenBlock(tasks, activePlanId, currentPlanId) {
+  if (!activePlanId || Number(activePlanId) === Number(currentPlanId)) return '';
+  const rows = (tasks || []).filter((t) => Number(t.plan_id) === Number(activePlanId) && !['done'].includes(String(t.status)));
+  return rows.map(taskLine).join('\n');
+}
+
 function taskLine(t) {
   return '- #' + t.id + ' [' + (t.sprint || '?') + '][' + (t.priority || 'P2') + '][' + (t.module || '?') + '][' + (t.owner_type || '?') + ']' +
     (t.ops ? '[ops ' + t.ops + ']' : '') + ' ' + t.title + '\n  ' + truncate(String(t.detail || '').replace(/\s+/g, ' '), 600);
@@ -103,6 +110,9 @@ function buildPrompt(o) {
     '',
     '===== 本客户历史方案的处置记录（以前被砍、被并、被人推翻的）',
     o.history || '（无，首次导入）',
+    '',
+    '===== 现役方案还没做完的任务（批准 v2 时这些会被收掉，所以 v2 必须决定：吸收它就把它的任务号写进 from，不要它就在 changes 里 drop 并说明）',
+    o.activeOpen || '（无现役方案或已全部完成）',
     '',
     '===== 简报（事实与数据）',
     o.briefing,
@@ -149,7 +159,7 @@ function cleanOutput(json, capability, log) {
     s1: arr(c.s1, 3),
     changed: arr(c.changed, 6),
     unsure: arr(c.unsure, 3),
-    ask: summarize(String(c.ask || '确认方向，批准 v2'), 120),
+    ask: summarize(String(c.ask || '确认方向，批准新版方案'), 120),
   };
   return out;
 }
@@ -226,6 +236,7 @@ async function runWith(ctx, judge) {
     clientRules: clientRulesBlock(cfg, workspace, log),
     globalRules: globalRulesDigest(cfg),
     history: historyBlock(context.tasks || [], planId),
+    activeOpen: activeOpenBlock(context.tasks || [], context.active_plan && context.active_plan.id, planId),
     briefing: briefing.text,
     planBody: String(plan.body || ''),
     tasks: v1Tasks,
@@ -259,4 +270,4 @@ async function run(ctx) {
   return runWith(ctx, (opts) => judgeWithModel(ctx, opts));
 }
 
-module.exports = { run, runWith, judgeWithModel, buildPrompt, cleanOutput, renderCard, globalRulesDigest, historyBlock, EXPERIENCE_FILE, CHANGE_TYPES };
+module.exports = { run, runWith, judgeWithModel, buildPrompt, cleanOutput, renderCard, globalRulesDigest, historyBlock, activeOpenBlock, EXPERIENCE_FILE, CHANGE_TYPES };

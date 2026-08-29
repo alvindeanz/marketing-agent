@@ -64,6 +64,17 @@ t('carries experience, client rules, briefing and task ids', () => {
   for (const m of ['EXP-MARK', 'RULE-MARK', 'BRIEF', 'BODY', '#97', 'page-meta-update', '"card"']) assert.ok(p.includes(m), 'missing ' + m);
 });
 
+console.log('activeOpenBlock');
+t('lists open tasks of the active plan, skips done and the plan under review', () => {
+  const b = R.activeOpenBlock([
+    { id: 63, plan_id: 5, status: 'approved', title: 'open', sprint: 'S2' },
+    { id: 64, plan_id: 5, status: 'done', title: 'closed', sprint: 'S2' },
+    { id: 121, plan_id: 10, status: 'proposed', title: 'v1', sprint: 'S1' },
+  ], 5, 10);
+  assert.ok(b.includes('#63') && !b.includes('#64') && !b.includes('#121'));
+  assert.strictEqual(R.activeOpenBlock([], 5, 5), '');
+});
+
 console.log('runWith');
 function fakeCtx(planStatus, posted) {
   return {
