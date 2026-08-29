@@ -3555,6 +3555,8 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/review_result$#',$ROUTE,$mm)){
         res(400,['error'=>'review_result failed: '.$e->getMessage()]);
     }
     foreach($old as $tid)task_close($tid,'merged','方案层过闸并入 v'.$ver.'（plan #'.$v2id.'）','plan_review');
+    /* 被取代的草稿如果本身也是过闸产物，它那张确认卡作废 */
+    db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([$cid,'[plan:'.$pid.']%']);
     $cardBody='[plan:'.$v2id.'] '.$card;
     db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'digest',?,?,NULL,'open','seo-worker')")
         ->execute([$cid,$cardBody,json_encode(inbox_refs_norm(['tasks'=>$ids]),JSON_UNESCAPED_UNICODE)]);

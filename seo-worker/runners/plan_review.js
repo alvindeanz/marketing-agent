@@ -159,7 +159,7 @@ function cleanOutput(json, capability, log) {
     s1: arr(c.s1, 3),
     changed: arr(c.changed, 6),
     unsure: arr(c.unsure, 3),
-    ask: summarize(String(c.ask || '确认方向，批准新版方案'), 120),
+    ask: summarize(String(c.ask || '确认方向，批准新版方案').replace(/\bv2\b/g, '新版方案'), 120),
   };
   return out;
 }
