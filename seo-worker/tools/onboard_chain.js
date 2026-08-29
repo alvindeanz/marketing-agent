@@ -39,6 +39,14 @@ async function runStep(type) {
   }
 }
 (async () => {
+  // 起跑前查工作区有没有 CLAUDE.md：worker 写稿与预览页的客户铁律只从这份文件读，
+  // 没有它博客会在零品牌规则下生成（2026-08-29 benscurtainsnz #110 踩过）。
+  const prof = await call('GET', '/profile?client_id=' + cid);
+  const ws = (prof.profile && prof.profile.workspace_dir) || prof.workspace_dir || '';
+  const wsPath = ws ? (ws.startsWith('/') ? ws : '/data/aira/clients/' + ws) : '';
+  if (!wsPath || !require('fs').existsSync(require('path').join(wsPath, 'CLAUDE.md'))) {
+    throw new Error('工作区 ' + (wsPath || '(profile 没填 workspace_dir)') + ' 缺 CLAUDE.md，先写客户铁律再导入');
+  }
   for (const type of CHAIN.slice(CHAIN.indexOf(start))) await runStep(type);
   console.log(ts() + ' client ' + cid + ' 链跑完，去看板看 plan draft');
 })().catch((e) => { console.error(ts() + ' 链中止：' + e.message); process.exit(1); });
