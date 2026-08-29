@@ -541,6 +541,31 @@ function blog_release_as_write($cid,$t,$by){
 
 /* 追加一行结果备注，不覆盖已有内容。收件箱动作里的 $appendNote 闭包是同一句 SQL，
    这里抽成函数给判定执行用。 */
+/* 2026-08-29 W2：任务结束只走这一个口。kind 五选一，含义各不相同，看板按它画不同的样子：
+     applied   机器落地，证据是 apply 写的「检查:」行（reason 可空，但 note 里必须已有检查行或随 reason 给出）
+     accepted  人验收（分析报告、人工认定完成），reason 必填
+     dropped / merged / killed   无交付关闭，reason 必填
+   返回 null 成功，或一句错误说明。任何地方直接 UPDATE status='done' 都算绕过这个闸。 */
+function task_close($tid,$kind,$reason='',$by=''){
+    $tid=(int)$tid;
+    $kind=(string)$kind;
+    if(!in_array($kind,['applied','accepted','dropped','merged','killed'],true))return '结束类型非法：'.$kind;
+    $reason=trim((string)$reason);
+    $g=db()->prepare("SELECT id,status,result_note,output_url FROM seo_tasks WHERE id=?");
+    $g->execute([$tid]);
+    $t=$g->fetch();
+    if(!$t)return '任务不存在';
+    if($t['status']==='done')return '任务已经结束';
+    if($kind==='applied'){
+        $hasChecks=preg_match('/(^|\n)检查:/u',(string)$t['result_note'])||preg_match('/(^|\n)检查:/u',$reason);
+        if(!$hasChecks&&$reason==='')return 'applied 必须带「检查:」行或说明，没有证据不能算落地';
+    }elseif($reason===''){
+        return $kind.' 必须写理由';
+    }
+    db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
+    task_append_note($tid,'['.$kind.'] '.($by!==''?($by.'：'):'').$reason);
+    return null;
+}
 function task_append_note($tid,$note){
     $note=trim((string)$note);
     if($note==='')return;
@@ -640,7 +665,8 @@ function attach_human_state($tasks,$cid){
         $hs='wait_me';$why='';$run='';$closed=null;$failReason='';
         if($st==='done'){
             $hs='closed';
-            if(preg_match('/\[(dropped|merged|killed)\][^\n]*$/s',$note,$mm)||preg_match('/\[(dropped|merged|killed)\]/',$note,$mm))$closed=$mm[1];
+            if(preg_match('/\[(dropped|merged|killed|accepted)\][^\n]*$/s',$note,$mm)||preg_match('/\[(dropped|merged|killed|accepted)\]/',$note,$mm))$closed=$mm[1];
+            elseif(preg_match('/\[applied\] (分析报告已验收|人工认定完成)/u',$note))$closed='accepted'; /* 2026-08-29 之前的老写法 */
             else $closed='done';
         }elseif($js['status']==='running'||$js['status']==='queued'){
             $hs='running';
@@ -908,9 +934,8 @@ function thread_action_exec($root,$t,$a,$by){
         return ['ok'=>true,'what'=>'已按线程指令重派执行，新指令已写进任务说明'.($jids?('，job #'.$jids[0]):'（任务已在队列，未重复排）'),'job_ids'=>$jids];
     }
     if($type==='kill'){
-        if($t['status']==='done')return ['ok'=>false,'what'=>'任务已经结束'];
-        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
-        task_append_note($tid,'[killed] 线程裁决不做：'.$reason);
+        $err=task_close($tid,'killed','线程裁决不做：'.$reason);
+        if($err)return ['ok'=>false,'what'=>$err];
         return ['ok'=>true,'what'=>'已按不做处理，置 done','job_ids'=>[]];
     }
     if($type==='later'){
@@ -1498,12 +1523,10 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/complete$#',$ROUTE,$mm)){
     $chk=db()->prepare("SELECT id FROM seo_tasks WHERE id=?");
     $chk->execute([$tid]);
     if(!$chk->fetch())res(404,['error'=>'Task not found']);
-    db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
     $note=trim((string)($i['note']??''));
-    if($note!==''){
-        db()->prepare("UPDATE seo_tasks SET result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
-            ->execute(['[applied] '.$note,$tid]);
-    }
+    if($note==='')res(400,['error'=>'note required：落地结果要带「检查:」行，没有证据不能算完成']);
+    $err=task_close($tid,'applied',$note);
+    if($err)res(400,['error'=>$err]);
     audit('seo-worker','seo_task_complete',(string)$tid,['note'=>$note]);
     res(200,['ok'=>true]);
 }
@@ -1541,7 +1564,8 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/feedback_result$#',$ROUTE,$mm)){
         ->execute(['[反馈] '.$summary,$tid]);
     $complete=!empty($i['complete']);
     if($complete){
-        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
+        $err=task_close($tid,'accepted','按反馈认定完成：'.$summary);
+        if($err)$complete=false;
     }
     audit('seo-worker','seo_feedback_result',(string)$tid,['feedback_id'=>$fid,'complete'=>$complete?1:0]);
     res(200,['ok'=>true,'complete'=>$complete]);
@@ -2589,8 +2613,8 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/actions$#',$ROUTE,$mm)){
                 $out['message']='kill_task 必须写清为什么不做了，没有理由，未执行';
                 $results[]=$out;continue;
             }
-            db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([(int)$t['id']]);
-            $appendNote((int)$t['id'],'[killed] 人工裁决不再做：'.$reason);
+            $err=task_close((int)$t['id'],'killed','人工裁决不再做：'.$reason);
+            if($err){$out['message']=$err;$results[]=$out;continue;}
             $out['ok']=true;
             $out['message']='任务 #'.$t['id'].'「'.$t['title'].'」已按不做处理，置 done 并在结果备注写明原因';
             $results[]=$out;$okCount++;
@@ -3496,7 +3520,12 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
         if(analysis_task($row))$acceptIds[]=(int)$t['id'];
         elseif(blog_outline_stage($row))$writeIds[]=(int)$t['id'];else $applyIds[]=(int)$t['id'];
     }
-    foreach($acceptIds as $aid){db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$aid]);task_append_note($aid,'[applied] 分析报告已验收。');}
+    foreach($acceptIds as $aid){
+        $full=db()->prepare("SELECT output_url,result_note FROM seo_tasks WHERE id=?");$full->execute([$aid]);$row=$full->fetch();
+        if(trim((string)$row['output_url'])===''&&strpos((string)$row['result_note'],'预览: ')===false)res(400,['error'=>'任务 '.$aid.' 是分析任务但没有产出链接也没有预览，无法验收']);
+        $err=task_close($aid,'accepted','分析报告已验收',$u['username']);
+        if($err)res(400,['error'=>'任务 '.$aid.'：'.$err]);
+    }
     $jids=[];$skipped=[];
     foreach($writeIds as $wid){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([$wid]);$row=$full->fetch();
@@ -3634,16 +3663,16 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/decide$#',$ROUTE,$mm)){
     $cid=(int)$t['client_id'];
     if(!$yes){
         if($note==='')res(400,['error'=>'note required: say why not']);
-        if($t['status']==='done')res(400,['error'=>'Task already closed']);
-        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
-        task_append_note($tid,'[killed] 人工不做：'.$note);
+        $err=task_close($tid,'killed','人工不做：'.$note,$u['username']);
+        if($err)res(400,['error'=>$err]);
         audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>0,'note'=>$note]);
         res(200,['ok'=>true,'did'=>'killed']);
     }
     if($t['status']==='review'){
         if(analysis_task($t)){
-            db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
-            task_append_note($tid,'[applied] 分析报告已验收。');
+            if(trim((string)$t['output_url'])===''&&strpos((string)$t['result_note'],'预览: ')===false)res(400,['error'=>'分析任务没有产出链接也没有预览，无法验收']);
+            $err=task_close($tid,'accepted','分析报告已验收',$u['username']);
+            if($err)res(400,['error'=>$err]);
             audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'accept']);
             res(200,['ok'=>true,'did'=>'accept','job_ids'=>[]]);
         }
@@ -3682,9 +3711,8 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/finish$#',$ROUTE,$mm)){
     $tq->execute([$tid]);
     $t=$tq->fetch();
     if(!$t)res(404,['error'=>'Task not found']);
-    if($t['status']==='done')res(400,['error'=>'Task already done']);
-    db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
-    task_append_note($tid,'[applied] 人工认定完成：'.$note);
+    $err=task_close($tid,'accepted','人工认定完成：'.$note,$u['username']);
+    if($err)res(400,['error'=>$err]);
     audit($u['username'],'seo_task_finish',(string)$tid,['note'=>$note,'from'=>$t['status']]);
     res(200,['ok'=>true]);
 }
@@ -3728,14 +3756,19 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
            drop 关掉不落地，merge 关掉并把来源写到目标上，目标照常放行。 */
         if($t['status']==='review'){
             if($eff==='do'){
-                if(analysis_task($t)){db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);task_append_note($tid,'[applied] 分析报告已验收（按推荐）。');$done['do']++;continue;}
+                if(analysis_task($t)){
+                    if(trim((string)$t['output_url'])===''&&strpos((string)$t['result_note'],'预览: ')===false){$skipped[]=['task_id'=>$tid,'why'=>'分析任务没有产出也没有预览，不能验收'];continue;}
+                    $err=task_close($tid,'accepted','分析报告已验收（按推荐）',$u['username']);
+                    if($err){$skipped[]=['task_id'=>$tid,'why'=>$err];continue;}
+                    $done['do']++;continue;
+                }
                 if(blog_outline_stage($t)){list($wj,$ws)=blog_release_as_write($cid,$t,$u['username']);$jids=array_merge($jids??[],$wj);$done['do']++;continue;}
                 $releaseIds[]=$tid;$done['do']++;continue;
             }
             if($eff==='later'){task_append_note($tid,'[later] 判定暂不放行：'.$why);$done['later']++;continue;}
             if($eff==='drop'){
-                db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
-                task_append_note($tid,'[dropped] 判定不落地：'.$why);
+                $err=task_close($tid,'dropped','判定不落地：'.$why);
+                if($err){$skipped[]=['task_id'=>$tid,'why'=>$err];continue;}
                 $done['drop']++;continue;
             }
         }
@@ -3749,8 +3782,8 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
             continue;
         }
         if($eff==='drop'){
-            db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
-            task_append_note($tid,'[dropped] 判定不做：'.$why);
+            $err=task_close($tid,'dropped','判定不做：'.$why);
+            if($err){$skipped[]=['task_id'=>$tid,'why'=>$err];continue;}
             $done['drop']++;continue;
         }
         if($eff==='later'){
@@ -3772,8 +3805,8 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
         $tg=db()->prepare("SELECT id FROM seo_tasks WHERE id=? AND client_id=?");
         $tg->execute([$target,$cid]);
         if(!$tg->fetch()){$skipped[]=['task_id'=>$tid,'why'=>'并入目标 #'.$target.' 不存在'];continue;}
-        db()->prepare("UPDATE seo_tasks SET status='done' WHERE id=?")->execute([$tid]);
-        task_append_note($tid,'[merged] 并入 #'.$target.'：'.$why);
+        $err=task_close($tid,'merged','并入 #'.$target.'：'.$why);
+        if($err){$skipped[]=['task_id'=>$tid,'why'=>$err];continue;}
         db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?) WHERE id=?")
             ->execute(['（并入自 #'.$tid.' '.mb_substr((string)$title,0,120,'UTF-8').'）',$target]);
         $done['merge']++;
@@ -4007,9 +4040,15 @@ if($m==='GET'&&$ROUTE==='/board'){
             if(preg_match_all('/预览: (https?:\/\/\S+)/',$note,$pm))$pv=end($pm[1]);
             $evidence='';
             if($t['status']==='done'){
-                if(preg_match_all('/检查:[^\n]*/u',$note,$em))$evidence=end($em[0]);
-                elseif(preg_match('/\[(applied|dropped|merged|killed)\]/',$note,$km))$evidence='['.$km[1].'] 无检查行';
-                else $evidence='无证据';
+                $ck=($t['closed_kind']??'')?:'done';
+                if($ck==='done'){
+                    if(preg_match_all('/检查:[^\n]*/u',$note,$em))$evidence=end($em[0]);
+                    else $evidence='无证据（落地态没有检查行）';
+                }else{
+                    if(preg_match_all('/\[(accepted|dropped|merged|killed)\][^\n]*/u',$note,$em))$evidence=end($em[0]);
+                    elseif(preg_match('/\[applied\] [^\n]*/u',$note,$km))$evidence=$km[0];
+                    else $evidence='无证据';
+                }
             }
             $sn=null;
             if(preg_match('/^S(\d+)$/i',trim((string)($t['sprint']??'')),$sm))$sn=(int)$sm[1];

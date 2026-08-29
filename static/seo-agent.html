@@ -264,7 +264,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .st .st-tag{font-weight:700;padding:1px 8px;border-radius:5px;font-size:11px}
 .st.wait_me .st-tag{background:#422006;color:#fbbf24}.st.running .st-tag{background:#1e3a5f;color:#60a5fa}
 .st.wait_ext .st-tag{background:#1e2433;color:#94a3b8;border:1px solid #334155}.st.closed .st-tag{background:#052e16;color:#22c55e}
-.st.closed.dropped .st-tag,.st.closed.killed .st-tag{background:#450a0a;color:#f87171}.st.closed.merged .st-tag{background:#3b1f6e;color:#c084fc}
+.st.closed.dropped .st-tag,.st.closed.killed .st-tag{background:#450a0a;color:#f87171}.st.closed.merged .st-tag{background:#3b1f6e;color:#c084fc}.st.closed.accepted .st-tag{background:#0c2a4a;color:#60a5fa}
 .st .st-fail{color:#f87171}
 .st-why{margin-top:3px;font-size:12px;color:#f87171;line-height:1.5}
 .lane-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -3189,7 +3189,7 @@ function stateLine(t){
   if(hs==='wait_me'){tag='等我';txt=t.wait_reason||'待判'}
   else if(hs==='running'){tag='在跑';txt=t.run_note||'执行中';const js=t.job_state||{};if(js.status==='running'){const m=qsElapsedMin(js.claimed_at,null);if(m!=null)txt+=' '+(m>0?(m+' 分钟'):'不到 1 分钟')}}
   else if(hs==='wait_ext'){tag='等外部';txt=t.wait_reason||'延后'}
-  else{tag={done:'完成',dropped:'砍掉',merged:'并入',killed:'不做'}[t.closed_kind||'done']||'结束';txt=''}
+  else{tag={done:'落地',accepted:'验收',dropped:'砍掉',merged:'并入',killed:'不做'}[t.closed_kind||'done']||'结束';txt=''}
   const failed=(t.job_state||{}).status==='failed'&&hs==='wait_me';
   const bits=['<span class="st-tag">'+esc(tag)+'</span>'];
   if(txt)bits.push('<span'+(failed?' class="st-fail"':'')+'>'+esc(txt)+'</span>');

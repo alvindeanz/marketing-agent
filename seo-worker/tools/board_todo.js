@@ -17,7 +17,7 @@ const GEN_HEAD = '## 看板（生成）';
 const NOTE_HEAD = '## 批注（手写）';
 
 const STATE_LABEL = { wait_me: '等我', running: '在跑', wait_ext: '等外部', closed: '结束' };
-const CLOSED_LABEL = { done: '完成', dropped: '砍掉', merged: '并入', killed: '不做' };
+const CLOSED_LABEL = { done: '落地', accepted: '验收', dropped: '砍掉', merged: '并入', killed: '不做' };
 
 function line(t) {
   const st = t.human_state === 'closed'
@@ -26,7 +26,7 @@ function line(t) {
   const bits = ['#' + t.id, t.sprint || '-', t.priority || '', st];
   if (t.overdue) bits.push('逾期');
   if (t.manual_pending) bits.push('待人工: ' + (t.manual_checks || []).join('、'));
-  if (t.human_state === 'closed' && t.evidence && !/^检查:/.test(t.evidence)) bits.push('证据: ' + t.evidence);
+  if (t.human_state === 'closed' && t.evidence && !/^检查:|^\[(accepted|dropped|merged|killed)\]/.test(t.evidence)) bits.push('证据: ' + t.evidence);
   return '- ' + bits.filter(Boolean).join(' · ') + ' | ' + String(t.title || '').slice(0, 60);
 }
 
