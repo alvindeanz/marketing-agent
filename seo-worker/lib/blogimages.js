@@ -284,7 +284,7 @@ async function generateWithRetry(client, prompt, log, label, gen = {}) {
         tmpPath: gen.tmpPath,
         log,
       });
-      if (r.provider === 'bfl') log(label + '：bfl ' + r.model + ' ' + Math.round(r.ms / 1000) + 's，cost ' + r.cost + ' credit');
+      if (r.provider !== 'webforger') log(label + '：' + r.provider + ' ' + r.model + ' ' + Math.round(r.ms / 1000) + 's' + (r.cost ? '，cost ' + r.cost + ' credit' : '') + (r.predictSec ? '，predict ' + r.predictSec.toFixed(1) + 's' : ''));
       return r;
     } catch (e) {
       lastErr = e;
@@ -410,7 +410,9 @@ async function runImageStage(ctx, opts) {
   const { client, workspace, tmpDir, taskId, briefs, keyword, origin } = opts;
   const workspaceSlug = path.basename(String(workspace || ''));
   const provider = imagegen.pickProvider(ctx.cfg || {}, workspaceSlug, log);
-  log('task ' + taskId + '：配图源 ' + provider + (provider === 'bfl' ? ' ' + ((ctx.cfg || {}).bflModel || 'flux-2-pro') : ' (平台 FLUX 1.1 Pro)'));
+  const c0 = ctx.cfg || {};
+  const modelNote = provider === 'bfl' ? ' ' + (c0.bflModel || 'flux-2-pro') : provider === 'replicate' ? ' ' + (c0.replicateModel || 'flux-2-pro') : ' (平台 FLUX 1.1 Pro)';
+  log('task ' + taskId + '：配图源 ' + provider + modelNote);
   if (!origin) throw new Error('task ' + taskId + '：拿不到站点 origin，无法下载生成出来的图片');
 
   fs.mkdirSync(tmpDir, { recursive: true });

@@ -30,9 +30,13 @@ const DEFAULTS = {
   // 配图生成源：webforger（平台 generate-image，Replicate FLUX 1.1 Pro）或 bfl（直连 Black Forest Labs FLUX.2）。
   // 灰度用 bflCanaryClients（工作区 slug 数组）先放几家跑，全局默认不动。key 没配一律回落 webforger。
   imageProvider: 'webforger',
+  imageCanaryProvider: 'replicate',
+  imageCanaryClients: [],
+  replicateModel: 'flux-2-pro',
+  replicateApiToken: '',
+  replicateInput: {},
   bflModel: 'flux-2-pro',
   bflApiKey: '',
-  bflCanaryClients: [],
   // Triage reads the whole pipeline and judges it, so it gets the big model.
   triageModel: 'fable',
   // Reading a human ruling and turning it into board actions. Small job by
@@ -140,7 +144,11 @@ function load() {
   cfg.imageProvider = String(cfg.imageProvider || DEFAULTS.imageProvider);
   cfg.bflModel = String(cfg.bflModel || DEFAULTS.bflModel);
   cfg.bflApiKey = String(cfg.bflApiKey || process.env.BFL_API_KEY || '');
-  cfg.bflCanaryClients = Array.isArray(cfg.bflCanaryClients) ? cfg.bflCanaryClients.map(String) : [];
+  cfg.imageCanaryProvider = String(cfg.imageCanaryProvider || DEFAULTS.imageCanaryProvider);
+  cfg.imageCanaryClients = Array.isArray(cfg.imageCanaryClients) ? cfg.imageCanaryClients.map(String) : [];
+  cfg.replicateModel = String(cfg.replicateModel || DEFAULTS.replicateModel);
+  cfg.replicateApiToken = String(cfg.replicateApiToken || process.env.REPLICATE_API_TOKEN || '');
+  cfg.replicateInput = cfg.replicateInput && typeof cfg.replicateInput === 'object' ? cfg.replicateInput : {};
   cfg.triageModel = String(cfg.triageModel || DEFAULTS.triageModel);
   cfg.rulingModel = String(cfg.rulingModel || DEFAULTS.rulingModel);
   cfg.chatModel = String(cfg.chatModel || DEFAULTS.chatModel);
