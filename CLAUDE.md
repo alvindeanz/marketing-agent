@@ -24,7 +24,7 @@ pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert �
 
 ## 部署
 
-`./deploy.sh check|api|worker`，凭据在 .deploy-env（gitignored，含 ROS_PASS/BT_PASS）。先 commit 再部署。api 先传 /tmp 远端 php -l 过了才落位；worker 备份、rsync 校验和白名单同步、双端哈希清单比对、node --check 加 require 加载校验、重启 systemd、失败自动回滚，DEPLOYED 文件记 rev。runner_host.js 顶层直接跑 main，不可 require；新 job 类型必须同时登记 runner_host 的 KNOWN_TYPES 和 seo-api 的 ensure_job_types（漏一边必崩，历史事故）。
+`./deploy.sh check|api|worker`，凭据在 .deploy-env（gitignored，含 ROS_PASS/BT_PASS）。先 commit 再部署。api 先传 /tmp 远端 php -l 过了才落位；worker 备份、rsync 校验和白名单同步、双端哈希清单比对、node --check 加 require 加载校验、重启 systemd、失败自动回滚，DEPLOYED 文件记 rev。runner_host.js 顶层直接跑 main，不可 require；新 job 类型必须同时登记 runner_host 的 KNOWN_TYPES、seo-api 的 ensure_job_types、两边的 lanes 表；并且任何 INSERT agent_jobs 的新入口都要先调 `ensure_job_types()`，type 列是惰性扩的 ENUM，没扩就插会被截成空串（2026-08-29 plan_review job 195）。
 
 ## 历史出处
 
