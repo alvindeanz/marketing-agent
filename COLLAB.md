@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-29 AIRA (ac) 登记：三归位规划 W1 到 W4 全部落地（不交接，Aira 独立执行）
+
+- 干了什么：规划见 `/data/aira/projects/MA/memory/PLAN.md`。W1 事实唯一：新 `GET /board`（auth_any，跨客户总览：sprint 档、human_state、待人工项、预览链接、结束态证据、api rev）；`seo-worker/tools/board_todo.js` 由它生成 PJ 的 TODO.md（看板段禁手改，批注段手写）；apply 里 deferred 验证项从 result_note「检查:」行解析，进 `/attention.manual_checks`，卡片与例外队列显示「待人工 N 项」，`POST /tasks/{id}/manual_done` 盖章（note 必填，新列 manual_done_at / manual_done_note）。W2 done 有证据：所有写 done 的 13 处统一走 `task_close($tid,$kind,$reason,$by)`，kind 五选一 applied / accepted / dropped / merged / killed，applied 必须带「检查:」行，其余必填理由；分析任务无产出无预览不许验收；`/complete` 无 note 拒；closed_kind 新增 accepted（前端「验收」蓝标），老「[applied] 分析报告已验收 / 人工认定完成」按 accepted 派生。Louvresky #82 #85 重开为 #94 #95。W3 记忆租户闸：`/data/aira/scripts/memory_lint.py` 挂 PostToolUse hook（路径二选一、frontmatter type、跨客户口径检查），全库扫出 6 处已改；预览页顶部回显客户 CLAUDE.md（`clientRules`）。W4：deploy.sh ros 本机模式（ROS_PASS 已失效，本机跳过 ssh），`/board` 带 api_rev，board_todo 报部署漂移。九套测试全过，api 与 worker 均已部署 938af1a。
+- 坑：`/overview` 已被单客户 Dashboard 占用，跨客户总览叫 `/board`。task_close 之外任何 `UPDATE seo_tasks SET status='done'` 都算绕闸，加新路径请走它。
+- 下一步：历史无证据结束态不回填；worker 不注入 `_global/feedback_*` 的缺口待评估。
+
 ### 2026-08-28 AIRA (ab) 跨认领登记：变更方案加「放行卡」，预览页与看板卡片只给人看这一节
 
 - 干了什么：Alvin 看 Kuddles #71 预览页的反馈：给团队看的应该是「要做啥」的结论，不是几万字取证。根因是一份方案同时喂人和 apply 机器，预览把第 1 节（取证）整节展开。改法：prepare prompt 在标题下强制 `## 0. 放行卡`（改什么每对象一行「旧值 → 新值」、为什么、风险与回滚、需要人定；`RELEASE_CARD_MAX_CHARS`=800，禁代码块 / curl / HTTP 方法 / 接口路径 / 字节偏移），`REQUIRED_PLAN_SECTIONS` 加放行卡，`lintPlan` 新增 `lintReleaseCard` 超长或夹带即打回；末尾那段 200 字摘要取消（json 块保留）。看板 result_note 正文改为放行卡原文（旧方案无卡时退回截断摘要）。`renderDocPreview` 变更方案只展开放行卡，其余全部（含 before/after 原文）收进一个折叠块；老方案没卡整份折叠。#71 的方案手工补了放行卡（第 2 节未动），预览页已重传。tests 九套全过。
