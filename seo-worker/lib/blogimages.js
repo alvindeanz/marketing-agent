@@ -23,6 +23,7 @@ const path = require('node:path');
 
 const { runClaude } = require('./llm');
 const { downloadTo } = require('./http');
+const imagegen = require('./imagegen');
 const { extractTrailingJson } = require('./mdjson');
 const blogcheck = require('./blogcheck');
 
@@ -273,11 +274,17 @@ async function qcImage(ctx, opts) {
  * A 5xx or a timeout from the FLUX endpoint is a flaky upstream, not a bad
  * prompt, so it is retried here; a 4xx is our fault and fails immediately.
  */
-async function generateWithRetry(client, prompt, log, label) {
+async function generateWithRetry(client, prompt, log, label, gen = {}) {
   let lastErr = null;
   for (let i = 0; i < FLUX_TRANSPORT_TRIES; i += 1) {
     try {
-      const r = await client.generateImage(prompt, { timeoutMs: FLUX_TIMEOUT_MS });
+      const r = await imagegen.generateOne(gen.cfg || {}, client, prompt, {
+        timeoutMs: FLUX_TIMEOUT_MS,
+        workspaceSlug: gen.workspaceSlug,
+        tmpPath: gen.tmpPath,
+        log,
+      });
+      if (r.provider === 'bfl') log(label + '：bfl ' + r.model + ' ' + Math.round(r.ms / 1000) + 's，cost ' + r.cost + ' credit');
       return r;
     } catch (e) {
       lastErr = e;
@@ -401,6 +408,9 @@ function cleanupTmp(tmpDir, log) {
 async function runImageStage(ctx, opts) {
   const { log } = ctx;
   const { client, workspace, tmpDir, taskId, briefs, keyword, origin } = opts;
+  const workspaceSlug = path.basename(String(workspace || ''));
+  const provider = imagegen.pickProvider(ctx.cfg || {}, workspaceSlug, log);
+  log('task ' + taskId + '：配图源 ' + provider + (provider === 'bfl' ? ' ' + ((ctx.cfg || {}).bflModel || 'flux-2-pro') : ' (平台 FLUX 1.1 Pro)'));
   if (!origin) throw new Error('task ' + taskId + '：拿不到站点 origin，无法下载生成出来的图片');
 
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -416,7 +426,9 @@ async function runImageStage(ctx, opts) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       const label = 'task ' + taskId + ' 配图 ' + slot + ' #' + attempt;
       log(label + '：调 FLUX，prompt ' + prompt.length + ' 字符');
-      const gen = await generateWithRetry(client, prompt, log, label);
+      const gen = await generateWithRetry(client, prompt, log, label, {
+        cfg: ctx.cfg, workspaceSlug, tmpPath: path.join(tmpDir, slot + '-' + attempt + '-bfl.jpg'),
+      });
       const dest = path.join(tmpDir, slot + '-' + attempt + '.jpg');
       const url = gen.url.startsWith('http') ? gen.url : origin + gen.url;
       const dl = await downloadTo(url, dest, { maxBytes: DOWNLOAD_MAX_BYTES });
