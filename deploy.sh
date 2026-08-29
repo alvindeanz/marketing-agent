@@ -15,8 +15,20 @@ WHITELIST=(listener.js runner_host.js lib runners specs)
 
 [ -f .deploy-env ] || { echo "缺 .deploy-env（含 ROS_PASS/BT_PASS），拒绝继续"; exit 1; }
 source .deploy-env
-SSH_ROS=(sshpass -p "$ROS_PASS" ssh -o StrictHostKeyChecking=no "$ROS")
 SSH_BT=(sshpass -p "$BT_PASS" ssh -o StrictHostKeyChecking=no "$BT")
+
+# ros 侧三个动作。脚本在 ros 本机以 root 跑时（$ROS_DIR 就在本地）不走 ssh，直接本地执行；
+# 2026-08-29 起 .deploy-env 里的 ROS_PASS 已失效，本机模式是主路径，ssh 模式留给从别的机器部署。
+if [ -d "$ROS_DIR" ] && [ "$(id -u)" = "0" ]; then ROS_LOCAL=1; else ROS_LOCAL=0; fi
+ros_sh(){   # ros_sh "<shell>"，stdin 透传
+  if [ "$ROS_LOCAL" = 1 ]; then bash -c "$1"; else sshpass -p "$ROS_PASS" ssh -o StrictHostKeyChecking=no "$ROS" "$1"; fi
+}
+ros_sudo(){ # 需要 root 的命令
+  if [ "$ROS_LOCAL" = 1 ]; then bash -c "$1"; else sshpass -p "$ROS_PASS" ssh -o StrictHostKeyChecking=no "$ROS" "printf '%s\n' \"\$ROS_PASS\" | sudo -S $1"; fi
+}
+ros_rsync(){ # ros_rsync <rsync flags...> <src>；目标固定 $ROS_DIR/
+  if [ "$ROS_LOCAL" = 1 ]; then rsync "$@" "$ROS_DIR/"; else sshpass -p "$ROS_PASS" rsync -e "ssh -o StrictHostKeyChecking=no" "$@" "$ROS:$ROS_DIR/"; fi
+}
 
 rev(){ git rev-parse --short HEAD 2>/dev/null || echo "no-git"; }
 dirty(){ [ -n "$(git status --porcelain seo-worker seo-api.php static/seo-agent.html sql 2>/dev/null)" ]; }
@@ -36,12 +48,11 @@ manifest_local(){ # 本地白名单文件 md5 清单（BSD md5 -r 输出转 GNU 
 case "${1:-}" in
 check)
   echo "== 本地版本: $(rev) =="; warn_dirty
-  echo "== ros worker 线上版本 =="
-  "${SSH_ROS[@]}" "cat $ROS_DIR/DEPLOYED 2>/dev/null || echo '（无 DEPLOYED 记录，脚本上线前的部署）'"
+  echo "== ros worker 线上版本（$([ "$ROS_LOCAL" = 1 ] && echo 本机 || echo ssh)） =="
+  ros_sh "cat $ROS_DIR/DEPLOYED 2>/dev/null || echo '（无 DEPLOYED 记录，脚本上线前的部署）'"
   echo "== ros worker 漂移（rsync -c 空跑，无输出即一致） =="
   for item in "${WHITELIST[@]}"; do
-    sshpass -p "$ROS_PASS" rsync -rcin --delete -e "ssh -o StrictHostKeyChecking=no" \
-      "$WORKER_SRC/$item" "$ROS:$ROS_DIR/" | sed 's/^/    /' || true
+    ros_rsync -rcin --delete "$WORKER_SRC/$item" | sed 's/^/    /' || true
   done
   echo "== 250 看板线上版本 =="
   "${SSH_BT[@]}" "cat $BT_DIR/DEPLOYED-seo 2>/dev/null || echo '（无 DEPLOYED-seo 记录）'"
@@ -57,29 +68,26 @@ worker)
   warn_dirty
   TS=$(date +%Y%m%d-%H%M%S); BAK="$ROS_DIR/.bak-deploy-$TS"
   echo "[1/6] ros 侧备份到 $BAK"
-  "${SSH_ROS[@]}" "cd $ROS_DIR && mkdir -p $BAK && cp -r ${WHITELIST[*]} $BAK/"
+  ros_sh "cd $ROS_DIR && mkdir -p $BAK && cp -r ${WHITELIST[*]} $BAK/"
   echo "[2/6] rsync 同步白名单（校验和模式）"
-  for item in "${WHITELIST[@]}"; do
-    sshpass -p "$ROS_PASS" rsync -rc --delete -e "ssh -o StrictHostKeyChecking=no" \
-      "$WORKER_SRC/$item" "$ROS:$ROS_DIR/"
-  done
+  for item in "${WHITELIST[@]}"; do ros_rsync -rc --delete "$WORKER_SRC/$item"; done
   echo "[3/6] 双端哈希清单比对"
   manifest_local > /tmp/seo-worker.manifest
-  "${SSH_ROS[@]}" "cd $ROS_DIR && md5sum -c --quiet -" < /tmp/seo-worker.manifest \
-    && echo "    全部一致" || { echo "哈希比对失败，回滚"; "${SSH_ROS[@]}" "cd $ROS_DIR && cp -r $BAK/* . "; exit 1; }
+  ros_sh "cd $ROS_DIR && md5sum -c --quiet -" < /tmp/seo-worker.manifest \
+    && echo "    全部一致" || { echo "哈希比对失败，回滚"; ros_sh "cd $ROS_DIR && cp -r $BAK/* . "; exit 1; }
   echo "[4/6] 语法与加载校验"
   # 注意：runner_host.js 顶层直接调 main()，require 它会真执行，只做 node --check；runners/*.js 与 lib 可安全 require
-  if ! "${SSH_ROS[@]}" "cd $ROS_DIR && for f in \$(find ${WHITELIST[*]} -name '*.js'); do node --check \$f || exit 1; done \
+  if ! ros_sh "cd $ROS_DIR && for f in \$(find ${WHITELIST[*]} -name '*.js'); do node --check \$f || exit 1; done \
       && for r in runners/*.js lib/*.js; do node -e \"require('$ROS_DIR/'+process.argv[1])\" \$r || exit 1; done"; then
     echo "校验失败，回滚并恢复服务"
-    "${SSH_ROS[@]}" "cd $ROS_DIR && cp -r $BAK/* . && printf '$ROS_PASS\n' | sudo -S systemctl restart seo-worker"
+    ros_sh "cd $ROS_DIR && cp -r $BAK/* ."; ros_sudo "systemctl restart seo-worker"
     exit 1
   fi
   echo "[5/6] 重启 seo-worker"
-  "${SSH_ROS[@]}" "printf '$ROS_PASS\n' | sudo -S systemctl restart seo-worker && sleep 2 && printf '$ROS_PASS\n' | sudo -S systemctl is-active seo-worker" \
-    || { echo "重启后不 active，回滚"; "${SSH_ROS[@]}" "cd $ROS_DIR && cp -r $BAK/* ."; "${SSH_ROS[@]}" "printf '$ROS_PASS\n' | sudo -S systemctl restart seo-worker"; exit 1; }
+  ros_sudo "systemctl restart seo-worker && sleep 2 && systemctl is-active seo-worker" \
+    || { echo "重启后不 active，回滚"; ros_sh "cd $ROS_DIR && cp -r $BAK/* ."; ros_sudo "systemctl restart seo-worker"; exit 1; }
   echo "[6/6] 写 DEPLOYED 记录，清理 30 天前旧备份"
-  "${SSH_ROS[@]}" "printf 'rev %s\ndate %s\nmanifest_md5 %s\n' '$(rev)' '$TS' '$(md5 -q /tmp/seo-worker.manifest 2>/dev/null || md5sum /tmp/seo-worker.manifest | cut -d' ' -f1)' > $ROS_DIR/DEPLOYED; find $ROS_DIR -maxdepth 1 -name '.bak-deploy-*' -mtime +30 -exec rm -rf {} +"
+  ros_sh "printf 'rev %s\ndate %s\nmanifest_md5 %s\n' '$(rev)' '$TS' '$(md5 -q /tmp/seo-worker.manifest 2>/dev/null || md5sum /tmp/seo-worker.manifest | cut -d' ' -f1)' > $ROS_DIR/DEPLOYED; find $ROS_DIR -maxdepth 1 -name '.bak-deploy-*' -mtime +30 -exec rm -rf {} +"
   echo "worker 部署完成：rev $(rev)"
   ;;
 

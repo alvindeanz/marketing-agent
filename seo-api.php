@@ -455,6 +455,10 @@ function ensure_review_schema(){
         'review_override'=>"VARCHAR(8) DEFAULT NULL",
         'review_override_note'=>"VARCHAR(400) NOT NULL DEFAULT ''",
         'review_text_hash'=>"CHAR(32) DEFAULT NULL",
+        /* 2026-08-29 W1：apply 里 deferred 的验证项（要浏览器、要等收录）人补跑完之后盖章的时间。
+           待补跑的清单本身从 result_note 的「检查: … 待人工 N 项（…）」那行解析，不另存。 */
+        'manual_done_at'=>"DATETIME DEFAULT NULL",
+        'manual_done_note'=>"VARCHAR(400) NOT NULL DEFAULT ''",
     ];
     $in=implode(',',array_fill(0,count($cols),'?'));
     $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_tasks' AND COLUMN_NAME IN ($in)");
@@ -594,6 +598,24 @@ function attach_review_state($tasks,$cid){
     return $tasks;
 }
 
+/* 待人工补跑的验证项。apply 成功的 result_note 头部有一行
+   「检查: 通过 N 项，待人工 M 项（V15 …、V16 …）」，M>0 且没盖 manual_done_at 就是欠着的。
+   取最后一次出现的那行（重跑会追加多段 note）。回 ['pending'=>bool,'items'=>[...]]。 */
+function manual_checks_of($t){
+    $note=(string)($t['result_note']??'');
+    $items=[];
+    if(preg_match_all('/检查:[^\n]*待人工 (\d+) 项(?:（([^）]*)）)?/u',$note,$all,PREG_SET_ORDER)){
+        $last=$all[count($all)-1];
+        $n=(int)$last[1];
+        if($n>0){
+            $raw=isset($last[2])?trim($last[2]):'';
+            $items=$raw!==''?array_values(array_filter(array_map('trim',preg_split('/[、,，]/u',$raw)))):array_fill(0,$n,'（未命名检查项）');
+        }
+    }
+    $done=!empty($t['manual_done_at']);
+    return ['pending'=>($items&&!$done),'items'=>$items];
+}
+
 /* 人类视角的任务状态，GET /tasks 用，纯派生不入库。看板只问一件事：这张卡在等谁。
    human_state  wait_me（等人拍板）/ running（机器在跑）/ wait_ext（等外部）/ closed（结束）
    wait_reason  等我的一句话：待判 / 待放行 / 上次执行失败 / 落地失败已回滚 / 判定中
@@ -642,6 +664,9 @@ function attach_human_state($tasks,$cid){
             elseif($st==='review')$why='待放行';
             else $why=empty($t['review_effective'])?'待判':'待拍板';
         }
+        $mc=manual_checks_of($t);
+        $t['manual_checks']=$mc['items'];
+        $t['manual_pending']=$mc['pending'];
         $t['human_state']=$hs;
         $t['wait_reason']=$why;
         $t['fail_reason']=$failReason??'';
@@ -3907,12 +3932,110 @@ if($m==='GET'&&$ROUTE==='/attention'){
     foreach($fj->fetchAll() as $r){$r['id']=(int)$r['id'];$jobs[]=$r;}
     $pf=db()->prepare("SELECT COUNT(*) AS n FROM seo_facts WHERE client_id=? AND status='unconfirmed'");
     $pf->execute([$cid]);
+    /* 待人工补跑：apply 成功但有 deferred 验证项、且没人盖章的。done 的任务也在，这是它唯一的出口。 */
+    ensure_review_schema();
+    $mq=db()->prepare("SELECT id,title,priority,status,sprint,result_note,manual_done_at FROM seo_tasks WHERE client_id=? AND manual_done_at IS NULL AND result_note LIKE '%待人工%' ORDER BY $ord");
+    $mq->execute([$cid]);
+    $manual=[];
+    foreach($mq->fetchAll() as $r){
+        $mc=manual_checks_of($r);
+        if(!$mc['pending'])continue;
+        $manual[]=['id'=>(int)$r['id'],'title'=>$r['title'],'priority'=>$r['priority'],'status'=>$r['status'],'sprint'=>$r['sprint'],'items'=>$mc['items']];
+    }
     res(200,[
         'flagged_tasks'=>$ft->fetchAll(),
         'client_open'=>$co->fetchAll(),
         'failed_jobs'=>$jobs,
+        'manual_checks'=>$manual,
         'pending_facts_count'=>(int)$pf->fetch()['n']
     ]);
+}
+
+// POST /tasks/{id}/manual_done body { note } -> 人把 deferred 验证项补跑完了，盖章。note 必填，写跑了什么、结果如何。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/manual_done$#',$ROUTE,$mm)){
+    $u=auth_any();
+    ensure_review_schema();
+    $tid=(int)$mm[1];
+    $i=input();
+    $note=trim((string)($i['note']??''));
+    if($note==='')res(400,['error'=>'note required：写清补跑了哪几项、结果如何']);
+    if(mb_strlen($note,'UTF-8')>400)res(400,['error'=>'note over 400 chars']);
+    $g=db()->prepare("SELECT id,result_note,manual_done_at FROM seo_tasks WHERE id=?");
+    $g->execute([$tid]);
+    $t=$g->fetch();
+    if(!$t)res(404,['error'=>'Task not found']);
+    $mc=manual_checks_of($t);
+    if(!$mc['items'])res(400,['error'=>'这条任务没有待人工的验证项']);
+    if($t['manual_done_at'])res(409,['error'=>'已经盖过章：'.$t['manual_done_at']]);
+    db()->prepare("UPDATE seo_tasks SET manual_done_at=NOW(),manual_done_note=?,result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
+        ->execute([$note,'[manual-ok] '.$u['username'].'：'.$note,$tid]);
+    audit($u['username'],'seo_task_manual_done',(string)$tid,['note'=>$note,'items'=>$mc['items']]);
+    res(200,['ok'=>true]);
+}
+
+/* GET /overview -> 跨客户总览，worker token 或 admin 都能读。2026-08-29 W1：看板是任务状态唯一真相，
+   PJ 从这里派生待办，不再自己记一份。每客户：sprint 锚点与本期档号、任务（带 human_state、
+   manual_checks、预览链接、结束态证据），以及 attention 三类计数。只读，一次拉全。 */
+if($m==='GET'&&$ROUTE==='/overview'){
+    auth_any();
+    ensure_review_schema();
+    $days=14;
+    $today=new DateTime('today');
+    $out=[];
+    $cs=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id WHERE p.status='active' ORDER BY c.name");
+    foreach($cs->fetchAll() as $c){
+        $cid=(int)$c['client_id'];
+        $pq=db()->prepare("SELECT id,created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
+        $pq->execute([$cid]);
+        $pr=$pq->fetch();
+        $pq->closeCursor();
+        $anchor=($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null;
+        $cur=null;
+        if($anchor){
+            $a=new DateTime($anchor);
+            $n=(int)floor($today->diff($a)->days/$days)+1;
+            if($a>$today)$n=1;
+            $cur=max(1,min($n,6));
+        }
+        $tq=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
+        $tq->execute([$cid]);
+        $rows=attach_human_state(attach_review_state(attach_job_state($tq->fetchAll(),$cid),$cid),$cid);
+        $tasks=[];$nManual=0;$nWaitMe=0;$nRunning=0;
+        foreach($rows as $t){
+            $note=(string)($t['result_note']??'');
+            $pv='';
+            if(preg_match_all('/预览: (https?:\/\/\S+)/',$note,$pm))$pv=end($pm[1]);
+            $evidence='';
+            if($t['status']==='done'){
+                if(preg_match_all('/检查:[^\n]*/u',$note,$em))$evidence=end($em[0]);
+                elseif(preg_match('/\[(applied|dropped|merged|killed)\]/',$note,$km))$evidence='['.$km[1].'] 无检查行';
+                else $evidence='无证据';
+            }
+            $sn=null;
+            if(preg_match('/^S(\d+)$/i',trim((string)($t['sprint']??'')),$sm))$sn=(int)$sm[1];
+            if(!empty($t['manual_pending']))$nManual++;
+            if(($t['human_state']??'')==='wait_me')$nWaitMe++;
+            if(($t['human_state']??'')==='running')$nRunning++;
+            $tasks[]=[
+                'id'=>(int)$t['id'],'title'=>$t['title'],'sprint'=>$t['sprint'],'sprint_num'=>$sn,
+                'overdue'=>($cur!==null&&$sn!==null&&$sn<$cur&&($t['human_state']??'')!=='closed'),
+                'status'=>$t['status'],'priority'=>$t['priority'],'owner_type'=>$t['owner_type'],
+                'human_state'=>$t['human_state'],'wait_reason'=>$t['wait_reason'],'run_note'=>$t['run_note'],
+                'closed_kind'=>$t['closed_kind'],'round'=>$t['round'],
+                'manual_checks'=>$t['manual_checks'],'manual_pending'=>$t['manual_pending'],
+                'preview_url'=>$pv,'output_url'=>$t['output_url'],'evidence'=>$evidence,'updated_at'=>$t['updated_at']??null,
+            ];
+        }
+        $fj=db()->prepare("SELECT COUNT(*) AS n FROM agent_jobs WHERE client_id=? AND status='failed' AND finished_at>=DATE_SUB(NOW(),INTERVAL 7 DAY)");
+        $fj->execute([$cid]);
+        $out[]=[
+            'client_id'=>$cid,'name'=>$c['name'],'domain'=>$c['domain'],'platform'=>$c['platform'],
+            'plan_id'=>$pr?(int)$pr['id']:null,'sprint_anchor'=>$anchor,'sprint_days'=>$days,'current_sprint'=>$cur,
+            'counts'=>['tasks'=>count($tasks),'wait_me'=>$nWaitMe,'running'=>$nRunning,'manual_pending'=>$nManual,'failed_jobs_7d'=>(int)$fj->fetch()['n']],
+            'tasks'=>$tasks,
+        ];
+    }
+    res(200,['generated_at'=>date('Y-m-d H:i:s'),'clients'=>$out]);
 }
 
 // POST /plans/{id}/reject -> body.reason required
