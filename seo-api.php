@@ -518,6 +518,7 @@ function queue_review_job($cid,$ids,$by,$auditAction){
    按跨客户经验改成 v2 并出方向确认卡，人确认方向后 v2 的任务才进任务层判定（review_plan）。
    同一 plan 已有 queued/running 的就不重复排。回 job_id。 */
 function queue_plan_review_job($cid,$pid,$ids,$by){
+    ensure_job_types(); /* type 是 ENUM，先扩列再插，否则 'plan_review' 被截成空串（2026-08-29 job 195） */
     $q=db()->prepare("SELECT id,payload FROM agent_jobs WHERE client_id=? AND type='plan_review' AND status IN('queued','running') ORDER BY id DESC LIMIT 1");
     $q->execute([$cid]);
     $row=$q->fetch();
@@ -3494,6 +3495,22 @@ if($m==='GET'&&preg_match('#^/plans/(\d+)$#',$ROUTE,$mm)){
     $tq=db()->prepare("SELECT * FROM seo_tasks WHERE plan_id=? ORDER BY FIELD(sprint,'S1','S2','S3','S4','S5','S6'),FIELD(priority,'P0','P1','P2','P3'),id");
     $tq->execute([(int)$plan['id']]);
     res(200,['plan'=>$plan,'tasks'=>$tq->fetchAll()]);
+}
+
+// POST /plans/{id}/review (admin) -> 手动排一次方案层过闸。草稿才能过闸；用于重跑或给人工建的草稿过闸。
+if($m==='POST'&&preg_match('#^/plans/(\d+)/review$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    $pid=(int)$mm[1];
+    $g=db()->prepare("SELECT id,client_id,status FROM seo_plans WHERE id=?");
+    $g->execute([$pid]);
+    $plan=$g->fetch();
+    if(!$plan)res(404,['error'=>'Plan not found']);
+    if($plan['status']!=='draft')res(400,['error'=>'plan is '.$plan['status'].', only a draft can be reviewed']);
+    $tq=db()->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status='proposed'");
+    $tq->execute([$pid]);
+    $ids=array_map('intval',array_column($tq->fetchAll(),'id'));
+    $jid=queue_plan_review_job((int)$plan['client_id'],$pid,$ids,$u['username']);
+    res(200,['ok'=>true,'job_id'=>$jid]);
 }
 
 // POST /plans/{id}/review_result (worker) body { body, tasks:[...], changes:[...], card:"markdown" }
