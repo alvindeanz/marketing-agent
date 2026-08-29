@@ -1537,8 +1537,11 @@ async function runBlogTask(ctx, context, workspace, task) {
       'task ' + taskId + '：配图 ' + okCount + '/' + total + ' 已写回草稿' + (placed.ogImage ? '，封面 ' + placed.ogImage : '，封面缺') +
         (missing.length ? '，缺 ' + missing.join('、') : '') + '，重生成 ' + retries + ' 次'
     );
+    const soft = placed.results.filter((r) => r.soft);
     imageNote = '配图 ' + okCount + '/' + total + '。' +
       (placed.heroFallback ? '封面用站内素材兜底。' : '') +
+      (soft.length ? '其中 ' + soft.map((r) => r.slot).join('、') + ' 贴题偏弱末轮放过，请人工看一眼（' +
+        soft.map((r) => r.slot + ' ' + (r.softReasons || []).join('，')).join('；').slice(0, 300) + '）。' : '') +
       (missing.length ? '缺 ' + missing.join('、') + ' 待人工配图（FLUX 连续 ' + blogimages.MAX_ATTEMPTS + ' 次质检不过，最后原因：' +
         (placed.blocked || []).map((b) => b.slot + ' ' + ((b.failures || []).slice(-1)[0] || {}).reasons).join('；').slice(0, 300) + '）。' : '') +
       (big.length ? '超 200KB：' + big.join('、') + '，发布前需压缩。' : '');

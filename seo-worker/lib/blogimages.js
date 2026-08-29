@@ -127,8 +127,9 @@ function buildQcPrompt(opts) {
   const { imagePath, brief, attempt, keyword } = opts;
   const isHero = String(brief.slot) === 'hero';
   return [
-    '你是配图质检员。下面这张图是我们刚用 FLUX 生成的博客配图，你要判断它能不能直接放到客户站点上。',
-    '这一步替代的是人工目检，判错的代价是客户看到一张废图，所以宁可从严。',
+    '你是配图质检员。下面这张图是我们刚用 FLUX 生成的博客配图，你要判断它能不能进交付稿。',
+    '标准是「不出丑、不出错」，不是「完美复刻期望画面」。这张图后面还有人工把关，客户也会核验，',
+    '你只拦明显会让客户皱眉的问题。构图、光线、氛围和期望画面有出入，只要画面本身像样、看得出在讲这个主题，就放过。',
     '',
     '待检图片：' + imagePath,
     '用 Read 打开它，自己看，然后按下面三条检查逐条判定。',
@@ -146,18 +147,17 @@ function buildQcPrompt(opts) {
     '- 这一轮实际用的 FLUX prompt：' + brief.usedPrompt,
     '- 这是第 ' + attempt + ' 次生成' + (attempt > 1 ? '，前面几次已经因为质检不过被打回' : ''),
     '',
-    '三条检查，任何一条不过，整张图判 fail',
+    '三条检查，任何一条不过，整张图判 fail。三条都是「明显」才算，拿不准就 pass。',
     '1. 文字与伪文字（text_artifacts）',
-    '   图里不许出现任何文字、字母、数字、招牌、门头字、包装字、屏幕上的字、logo、水印。',
-    '   AI 生成图最常见的毛病就是糊成一团、看着像字但不是字的伪文字，看到就算 fail。',
-    '   看仔细：背景墙、包装盒、纸张、屏幕、地板压条这些地方最容易冒出伪文字。',
-    '2. 具象且贴题（subject_match）',
-    '   画面必须是相机能拍到的真实场景或实物，并且和"绑定的标题"讲的事情对得上，',
-    '   也要和"期望画面"大体一致。抽象隐喻、象征性构图、和主题无关的泛用 stock 画面、',
-    '   看不出在讲什么的空镜，都算 fail。',
+    '   fail 的是一眼能看到的成段文字、招牌门头字、大 logo、水印，以及糊成一团明显像字的伪文字块。',
+    '   卷尺刻度、纸张上细小模糊的纹理、包装上看不清的小字、远处招牌这种不放大看不出来的，不算。',
+    '2. 贴题（subject_match）',
+    '   fail 的是：抽象隐喻或象征性构图、和主题完全无关的泛用 stock 画面、看不出在讲什么的空镜、',
+    '   主体画成了另一种东西（要窗帘画成了浴帘这种）。',
+    '   「期望画面」只是参考：道具少一两样、场景换了房间、光线氛围不同、对比效果不够强，都不算 fail。',
     '3. 明显畸变（distortion）',
-    '   手指数量或形状不对、肢体扭曲、脸崩、透视崩坏、家具或地板结构不合理、',
-    '   纹理重复拼接出错。标准是"明显"，轻微不完美不算 fail。',
+    '   手指数量或形状不对、肢体扭曲、脸崩、透视崩坏、家具或地板结构明显不合理。',
+    '   产品细节不够精确（叶片形状、五金件长得不太像）这种要内行才看得出的，不算。',
     '',
     '输出格式：你的最终回复必须以一个 json 代码块结尾，块后面不许再有任何文字。',
     '```json',
@@ -487,6 +487,19 @@ async function runImageStage(ctx, opts) {
           attempts: attempt,
           prompt,
         };
+        break;
+      }
+      // 最后一轮只剩「贴题」不过而没有文字和畸变问题：放过，标 soft，卡上写明由人和客户把关。
+      // 2026-08-29 Alvin 定：配图标准调低，后面有人工和客户核验，客户反馈再查。
+      if (attempt === MAX_ATTEMPTS && verdict.text_artifacts === 'pass' && verdict.distortion === 'pass') {
+        let finalUrl = gen.url;
+        let finalBytes = dl.bytes;
+        if (dl.bytes > SIZE_WARN_BYTES) {
+          const c = await compressAndUpload(client, dest, path.join(tmpDir, slot + '-' + attempt + '-small.jpg'), log, label);
+          if (c) { finalUrl = c.url; finalBytes = c.bytes; }
+        }
+        passed = { slot, anchor: brief.anchor, alt: brief.alt, url: finalUrl, bytes: finalBytes, attempts: attempt, prompt, soft: true, softReasons: verdict.reasons };
+        log(label + '：贴题偏弱但无文字无畸变，末轮放过（soft），交人工与客户把关：' + verdict.reasons.join('；'));
         break;
       }
       failures.push({ attempt, image: gen.url, bytes: dl.bytes, reasons: verdict.reasons });
