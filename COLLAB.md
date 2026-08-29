@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-29 AIRA (ae) 登记：apply 涉及文件比对支持通配；只读审计 ops 放行即验收；Apollo 与 Ben's NZ 导入
+
+- 干了什么：#94 六步全过、线上已生效，却因 changeset 里上传接口生成的 assets/<ts>-<rand>-xxx.jpg 不等于方案声明的 assets/*-xxx.jpg 被判失败。`compareFiles` 现支持 `*`（单段，不跨 /），apply 单测加一条。#94 按落地态人工收单未重跑。另：`analysis_task()` 把 ops 全为只读审计（ga4-audit / gsc-audit）的任务视为分析任务，放行即验收，不再排 apply（#95 曾被误排，job 172 已作废）。Apollo（8）与 Ben's NZ（45）用新工具 `tools/import_package.js` 与 `tools/onboard_chain.js` 全量导入并跑完 pull_data 到 plan，各出 plan draft 11 与 12 条。
+- 坑：闸门「精确路径」对平台起名的产物天然误杀，方案作者写通配是对的，闸门要跟上。
+
 ### 2026-08-29 AIRA (ad) 登记：验证归机器，人只抽查
 
 - 干了什么：Alvin 定的：deferred 验证项不该等人。新 `/data/aira/tools/verify/verify.js`（playwright-core 接系统 Chrome，无头）：hscroll / jsonld / text / status / rrt。apply 的 ALLOWED_TOOLS 放行 `Bash(node /data/aira/tools/verify/verify.js:*)`，prompt 改为：能用它跑的不许标 deferred；deferred 只剩「要 Google 交互工具」（抽查项）和「要等 N 天」（到期 PJ 机器复验）。note 头部「待人工」改「待复验」，API 正则两种都认，卡片与例外队列文案同步。Kuddles #71 V15 V16 机器复验全过已盖章（RRT 机器进不去，抽查项）；#70 V6 那次 generate_lead 在标记前 1 分钟量级发生，keyEvents 计 0 属正常，脚本 `clients/kuddles/scripts/kud_task70_v6.js` 等下一次询盘再跑。
