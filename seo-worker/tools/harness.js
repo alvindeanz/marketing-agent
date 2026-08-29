@@ -97,7 +97,9 @@ async function report(all, sprint, retried) {
       const pv = (String(t.result_note || '').match(/预览: (\S+)/) || [])[1] || t.output_url || '';
       ready.push({ id: t.id, title: t.title, preview: pv });
       for (const q of humanDecisions(t.result_note)) blockers.push({ id: t.id, kind: '需要人定', text: q });
-      const img = String(t.result_note || '').match(/配图 (\d+)\/(\d+)/);
+      // note 每轮追加一段「要点」，配图计数取最后一次出现的
+      const imgAll = [...String(t.result_note || '').matchAll(/配图 (\d+)\/(\d+)/g)];
+      const img = imgAll.length ? imgAll[imgAll.length - 1] : null;
       if (img && Number(img[1]) < Number(img[2])) blockers.push({ id: t.id, kind: '待人工配图', text: '配图 ' + img[1] + '/' + img[2] + '，缺 ' + ((String(t.result_note).match(/缺 ([^（。]+?)待人工配图/) || [])[1] || '').trim() });
       if (t.manual_pending) blockers.push({ id: t.id, kind: '待人工验证', text: (t.manual_checks || []).filter((c) => !c.done).map((c) => c.text || c).join('；') });
       continue;
