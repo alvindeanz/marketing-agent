@@ -78,6 +78,7 @@ function runJob(job, lane) {
     let timedOut = false;
     let failure = null;
     let tokenUsage = 0;
+    let gotResult = false;
 
     function push(line) {
       buffer.push('[' + ts() + '] ' + line);
@@ -138,7 +139,7 @@ function runJob(job, lane) {
     child.on('message', (msg) => {
       if (!msg || typeof msg !== 'object') return;
       if (msg.t === 'log') push(msg.line);
-      else if (msg.t === 'result') tokenUsage = Number(msg.tokenUsage) || 0;
+      else if (msg.t === 'result') { gotResult = true; tokenUsage = Number(msg.tokenUsage) || 0; }
       else if (msg.t === 'error') failure = new Error(msg.stack || msg.message || 'runner error');
     });
 
@@ -156,6 +157,9 @@ function runJob(job, lane) {
         err = failure;
       } else if (code !== 0) {
         err = new Error('runner exited with code ' + code + (signal ? ' signal ' + signal : ''));
+      } else if (!gotResult) {
+        // exit 0 但 runner 没发 result：事件循环被掏空提前退出（unref 定时器之类），不是完成。
+        err = new Error('runner exited 0 without a result message (event loop drained early?)');
       }
       finalize(err);
     });

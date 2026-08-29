@@ -59,8 +59,10 @@ const FENCE_RE = /^\s*(```|~~~)/;
 const NON_PROSE_RE = /^\s*([-*+]\s+|\d+[.)]\s+|>|\||<|!\[|#{1,6}\s)/;
 
 function delay(ms) {
+  // 不 unref：FLUX 重试等待期间事件循环里可能只剩这个定时器，unref 会让 Node
+  // 直接以 exit 0 退出，listener 误判 done（2026-08-29 job 179，任务 110 正文丢失）。
   return new Promise((resolve) => {
-    setTimeout(resolve, ms).unref();
+    setTimeout(resolve, ms);
   });
 }
 
