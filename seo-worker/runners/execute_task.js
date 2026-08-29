@@ -1052,6 +1052,7 @@ async function reviewDraft(ctx, opts) {
     '{"verdict":"pass","issues":[]}',
     '```',
     '或 {"verdict":"revise","issues":["具体到段落或句子的修改要求，每条一句，最多 6 条"]}。',
+    '如果整篇选题和任务要求的主题或关键词簇不是一回事（写手自行改题），issues 第一条必须以「选题不符：」开头，这一条会让任务直接失败交人处理，不进改稿。',
     '只有真的必须改才 revise；措辞偏好不算。全中文，不用 emoji，不用破折号，字符串里不许有英文双引号。',
     '不要读工作目录里的文件，材料已经全在上面。',
   ].join('\n');
@@ -1346,6 +1347,10 @@ async function runBlogTask(ctx, context, workspace, task) {
   // ---- 审稿：一次审，一次定点修，不循环 ----
   let reviewNote = '';
   const review = await reviewDraft(ctx, { draft, clientRules, task, workspace, taskId });
+  // 选题跑偏不是改稿能救的：写手把任务要的主题换掉了（2026-08-29 #120 要费用指南写成量尺指南），
+  // 直接判任务失败让人看，不建草稿不配图，省一轮 FLUX 和一篇孤儿草稿。
+  const drift = (review.issues || []).find((x) => /^选题不符|选题与任务[^，。]*不符|范围变更|(自行|擅自)改题/.test(String(x)));
+  if (drift) throw new Error('task ' + taskId + '：审稿判定选题与任务不符，打回人工：' + drift);
   if (review.verdict === 'revise' && review.issues.length) {
     log('task ' + taskId + '：审稿要求修改 ' + review.issues.length + ' 处：' + review.issues.join(' | '));
     const fixPrompt = basePrompt +
