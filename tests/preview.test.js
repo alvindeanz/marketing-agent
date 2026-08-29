@@ -47,5 +47,13 @@ t('变更方案预览：老方案没有放行卡时整份折叠', () => {
   assert.ok(html.indexOf('取证一大堆') > html.indexOf('<details>'));
 });
 
+t('客户铁律回显：有就在正文前展开，没有就不出现', () => {
+  const md = '## 0. 放行卡\n\nx';
+  const withRules = P.renderDocPreview({ title: 'X', markdown: md, kind: '变更方案', taskId: 1, client: 'C', clientRules: '- 不提 thermal <b>' });
+  assert.ok(withRules.indexOf('客户铁律') > -1 && withRules.indexOf('不提 thermal &lt;b&gt;') > -1 && withRules.indexOf('客户铁律') < withRules.indexOf('放行卡'));
+  const without = P.renderDocPreview({ title: 'X', markdown: md, kind: '变更方案', taskId: 1, client: 'C' });
+  assert.ok(without.indexOf('客户铁律') === -1);
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

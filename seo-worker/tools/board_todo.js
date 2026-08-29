@@ -30,8 +30,34 @@ function line(t) {
   return '- ' + bits.filter(Boolean).join(' · ') + ' | ' + String(t.title || '').slice(0, 60);
 }
 
+/* 工具健康（W4）：仓库 HEAD 与 worker、api 的 DEPLOYED 比。漂移且部署记录超过 24 小时就报，
+   放在 TODO 最顶上，PJ 每次开工先看见。查不到就写查不到，不装没事。 */
+function deployDrift(board) {
+  const { execSync } = require('child_process');
+  const lines = [];
+  let head = '';
+  try { head = execSync('git rev-parse --short HEAD', { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8' }).trim(); } catch (e) { lines.push('- 仓库 HEAD 读不到：' + e.message); }
+  const stale = (dateStr) => {
+    const m = String(dateStr || '').match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
+    if (!m) return true;
+    return Date.now() - new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() > 24 * 3600 * 1000;
+  };
+  try {
+    const dep = fs.readFileSync('/data/aira/seo-worker/DEPLOYED', 'utf8');
+    const rev = (dep.match(/^rev (\S+)/m) || [])[1] || '';
+    const date = (dep.match(/^date (\S+)/m) || [])[1] || '';
+    if (head && rev && !head.startsWith(rev) && !rev.startsWith(head) && stale(date)) lines.push('- worker 线上 ' + rev + '（' + date + '）落后仓库 ' + head + ' 超过 24 小时，跑 ./deploy.sh worker');
+  } catch (e) { lines.push('- worker DEPLOYED 读不到：' + e.message); }
+  if (board.api_rev) {
+    if (head && !head.startsWith(board.api_rev) && !board.api_rev.startsWith(head) && stale(board.api_deployed)) lines.push('- api 线上 ' + board.api_rev + '（' + board.api_deployed + '）落后仓库 ' + head + ' 超过 24 小时，跑 ./deploy.sh api');
+  } else lines.push('- api 的 DEPLOYED-seo 读不到，看板版本不明');
+  return lines;
+}
+
 function render(board) {
   const out = [GEN_HEAD, '', '生成于 ' + board.generated_at + '，来源 GET /board。本段禁止手改。', ''];
+  const drift = deployDrift(board);
+  if (drift.length) out.push('工具健康（先处理）：', ...drift, '');
   for (const c of board.clients) {
     const cur = c.current_sprint;
     const k = c.counts || {};

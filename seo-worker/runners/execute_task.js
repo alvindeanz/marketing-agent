@@ -920,6 +920,13 @@ function previewLine(url) {
  */
 const RULES_PER_FILE = 1500;
 const RULES_TOTAL = 9000;
+/** 预览页顶部回显的客户铁律：只取客户 CLAUDE.md，截 1500 字。没有就空串。 */
+function clientRulesForPreview(workspace) {
+  try {
+    const f = path.join(String(workspace || ''), 'CLAUDE.md');
+    return fs.existsSync(f) ? truncate(fs.readFileSync(f, 'utf8').trim(), 1500) : '';
+  } catch (e) { return ''; }
+}
 function clientRulesBlock(cfg, workspace, log) {
   const slug = path.basename(String(workspace || ''));
   const parts = [];
@@ -1554,6 +1561,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     client: clientName,
     note: previewNote,
     previewUrl: publishedRevise ? '' : previewUrl,
+    clientRules: clientRulesForPreview(workspace),
   });
   const internalPreview = await publishPreview(ctx, workspace, taskId, pvHtml, log);
   const note = [
@@ -1611,6 +1619,7 @@ async function runOutlineOnly(ctx, opts) {
   const pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
     title: String(o.title || task.title), markdown: fs.readFileSync(file, 'utf8'), kind: '博客大纲', taskId,
     client: (shared && shared.siteBlock ? '' : '') || path.basename(workspace),
+    clientRules: clientRulesForPreview(workspace),
   }), log);
   const social = String(o.social_message || '').split(blogcheck.PREVIEW_TOKEN).join(pvUrl || '（大纲见附件）');
   const note = [
@@ -1830,6 +1839,7 @@ async function runOne(ctx, context, workspace, taskId) {
     title: task.title || 'task ' + taskId, markdown: output, kind: prepare ? '变更方案' : '分析报告', taskId,
     client: (context && context.client && context.client.name) || path.basename(workspace),
     note: prepare ? '这是待放行的变更方案，不是变更本身。放行后 apply 照它执行并回读验证。' : '分析型任务的产出是这份报告，同意 = 验收完成。',
+    clientRules: clientRulesForPreview(workspace),
   }), log);
   const note = previewLine(pvUrl) + (prepare
     ? buildTargetHeader(readTargetUrls(output)) +
@@ -1898,6 +1908,7 @@ module.exports = {
   planFiles,
   planCallSection,
   clientRulesBlock,
+  clientRulesForPreview,
   outlineGate,
   expandInPlaceSlug,
   buildOutlinePrompt,

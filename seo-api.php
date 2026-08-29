@@ -4074,7 +4074,14 @@ if($m==='GET'&&$ROUTE==='/board'){
             'tasks'=>$tasks,
         ];
     }
-    res(200,['generated_at'=>date('Y-m-d H:i:s'),'clients'=>$out]);
+    /* 看板自己的部署记录（deploy.sh api 写的 DEPLOYED-seo），PJ 的 board_todo 拿它和仓库 HEAD 比漂移。 */
+    $dep=@file_get_contents(__DIR__.'/DEPLOYED-seo');
+    $apiRev=null;$apiDate=null;
+    if($dep){
+        if(preg_match('/^rev (\S+)/m',$dep,$dm))$apiRev=$dm[1];
+        if(preg_match('/^date (\S+)/m',$dep,$dd))$apiDate=$dd[1];
+    }
+    res(200,['generated_at'=>date('Y-m-d H:i:s'),'api_rev'=>$apiRev,'api_deployed'=>$apiDate,'clients'=>$out]);
 }
 
 // POST /plans/{id}/reject -> body.reason required
