@@ -176,6 +176,16 @@ class Api {
    * -> { ok, written }. review_plan 的唯一写操作：把 fable 的判决落到任务行上，
    * 不改任何任务状态。状态改动只发生在人点「按推荐执行」之后的 admin 端点。
    */
+  /** GET /plans/{id} -> { plan, tasks }，plan_review 读草稿全文用。 */
+  async getPlan(id) {
+    return this.req('GET', '/plans/' + encodeURIComponent(id));
+  }
+
+  /** POST /plans/{id}/review_result body { body, tasks, changes, card } -> { plan_id, version, ids, closed, card_id } */
+  async postPlanReviewResult(id, body) {
+    return this.req('POST', '/plans/' + encodeURIComponent(id) + '/review_result', body);
+  }
+
   async postReviewResult(body) {
     return this.req('POST', '/tasks/review_result', body);
   }

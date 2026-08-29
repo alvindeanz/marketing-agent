@@ -30,6 +30,7 @@ const KNOWN_TYPES = [
   'ruling',
   'backfill_metrics',
   'chat',
+  'plan_review',
   'review_plan',
 ];
 

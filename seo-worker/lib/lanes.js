@@ -15,7 +15,7 @@
 
 const LANES = {
   heavy: ['pull_data', 'discover', 'plan', 'execute_task', 'apply_task', 'report', 'backfill_metrics'],
-  light: ['review_plan', 'ruling', 'feedback', 'chat', 'triage'],
+  light: ['review_plan', 'ruling', 'feedback', 'chat', 'triage', 'plan_review'],
 };
 
 function laneOf(type) {

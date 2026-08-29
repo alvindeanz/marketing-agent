@@ -49,6 +49,8 @@ const DEFAULTS = {
   // 任务判定：一批任务该不该做，按 specs/review_principles.md 判。一次判错就是
   // 一个不该做的任务进队列烧 10 分钟，或一个该做的被砍，所以给大模型。
   reviewModel: 'fable',
+  // 方案层过闸：整份方案按跨客户经验改成 v2 并出方向确认卡，一个客户一季度一次，给大模型。
+  planReviewModel: 'fable',
   // 任务线程（chat runner 的任务模式）。人在卡上跟它聊这个任务，它能直接改任务、重派、
   // 改判，落的是看板层动作，判断要稳，给大模型。普通收件箱会话仍走 chatModel。
   threadModel: 'fable',
@@ -153,6 +155,7 @@ function load() {
   cfg.rulingModel = String(cfg.rulingModel || DEFAULTS.rulingModel);
   cfg.chatModel = String(cfg.chatModel || DEFAULTS.chatModel);
   cfg.reviewModel = String(cfg.reviewModel || DEFAULTS.reviewModel);
+  cfg.planReviewModel = String(cfg.planReviewModel || DEFAULTS.planReviewModel);
   cfg.threadModel = String(cfg.threadModel || DEFAULTS.threadModel);
   cfg.blogReviewModel = String(cfg.blogReviewModel || DEFAULTS.blogReviewModel);
   cfg.lintRulesFile = String(cfg.lintRulesFile || DEFAULTS.lintRulesFile);

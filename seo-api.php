@@ -257,7 +257,7 @@ function ensure_job_types(){
     $done=true;
     /* backfill_metrics 加在这里的同时必须加进 seo-worker/runner_host.js 的
        KNOWN_TYPES，两边漏一边 worker 领到活直接崩。2026-08 apply_task 就是这么炸的。 */
-    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics','chat','review_plan'];
+    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics','chat','review_plan','plan_review'];
     $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='type'");
     $q->execute();
     $col=$q->fetch();
@@ -512,6 +512,59 @@ function queue_review_job($cid,$ids,$by,$auditAction){
     }
     fire_wake($jids[0]);
     return [$jids[0],false];
+}
+
+/* 方案层过闸（plan_review job，light 道，fable 一次）。plan job 刚落的草稿先过这一道：
+   按跨客户经验改成 v2 并出方向确认卡，人确认方向后 v2 的任务才进任务层判定（review_plan）。
+   同一 plan 已有 queued/running 的就不重复排。回 job_id。 */
+function queue_plan_review_job($cid,$pid,$ids,$by){
+    $q=db()->prepare("SELECT id,payload FROM agent_jobs WHERE client_id=? AND type='plan_review' AND status IN('queued','running') ORDER BY id DESC LIMIT 1");
+    $q->execute([$cid]);
+    $row=$q->fetch();
+    $q->closeCursor();
+    if($row){
+        $p=jdec($row['payload']);
+        if(is_array($p)&&(int)($p['plan_id']??0)===(int)$pid)return (int)$row['id'];
+    }
+    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'plan_review',?,'queued',?)")
+        ->execute([$cid,json_encode(['plan_id'=>(int)$pid,'task_ids'=>array_values($ids)],JSON_UNESCAPED_UNICODE),$by]);
+    $jid=(int)db()->lastInsertId();
+    audit($by,'seo_plan_review_auto',(string)$jid,['client_id'=>$cid,'plan_id'=>$pid,'task_ids'=>$ids]);
+    fire_wake($jid);
+    return $jid;
+}
+
+/* /tasks/bulk 与 /plans/{id}/review_result 共用的任务清洗，返回 [rows, null] 或 [null, 错误]。 */
+function tasks_bulk_clean($cid,$pid,$rows){
+    if(!is_array($rows)||!$rows)return [null,'tasks required'];
+    if(count($rows)>20)return [null,'batch too large, max 20 tasks'];
+    $clean=[];
+    foreach(array_values($rows) as $n=>$t){
+        if(!is_array($t))return [null,"task #$n: not an object"];
+        $title=trim((string)($t['title']??''));
+        if($title==='')return [null,"task #$n: title required"];
+        if(mb_strlen($title,'UTF-8')>255)return [null,"task #$n: title over 255 chars"];
+        $mod=(string)($t['module']??'');
+        if(!in_array($mod,['technical','onpage','content','local','offpage'],true))return [null,"task #$n: bad module"];
+        $own=(string)($t['owner_type']??'');
+        if(!in_array($own,['agency','client','agent'],true))return [null,"task #$n: bad owner_type"];
+        $sprint=(string)($t['sprint']??'');
+        if(mb_strlen($sprint,'UTF-8')>10)return [null,"task #$n: sprint over 10 chars"];
+        $pri=(string)($t['priority']??'P2');
+        if($pri==='')$pri='P2';
+        if(!in_array($pri,['P0','P1','P2','P3'],true))return [null,"task #$n: bad priority"];
+        $ops=(string)($t['ops']??'');
+        if(mb_strlen($ops,'UTF-8')>255)return [null,"task #$n: ops over 255 chars"];
+        $att=empty($t['attention'])?0:1;
+        $clean[]=[$cid,$pid,$sprint,$mod,$title,(string)($t['detail']??''),$own,$pri,$att,$ops];
+    }
+    return [$clean,null];
+}
+function tasks_bulk_insert($p,$clean){
+    $ids=[];
+    $ins=$p->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,'proposed','seo-worker')");
+    foreach($clean as $row){$ins->execute($row);$ids[]=(int)$p->lastInsertId();}
+    return $ids;
 }
 
 /* 博客任务的「放行」语义按阶段变：
@@ -1180,7 +1233,7 @@ function jobs_inflight_tasks($type){
    拆开的理由只有一个：判定不能排在 10 分钟的 execute 后面等。不在表里的类型归 heavy。 */
 define('JOB_LANES',[
     'heavy'=>['pull_data','discover','plan','execute_task','apply_task','report','backfill_metrics'],
-    'light'=>['review_plan','ruling','feedback','chat','triage'],
+    'light'=>['review_plan','ruling','feedback','chat','triage','plan_review'],
 ]);
 function job_lane($type){return in_array((string)$type,JOB_LANES['light'],true)?'light':'heavy';}
 /* 某条道的类型 IN 列表（SQL 片段，值来自常量不来自输入）。heavy 用「不在 light 里」表达，
@@ -2195,44 +2248,34 @@ if($m==='POST'&&$ROUTE==='/tasks/bulk'){
     $cid=(int)($i['client_id']??0);
     if(!$cid)res(400,['error'=>'client_id required']);
     $pid=array_key_exists('plan_id',$i)&&$i['plan_id']?(int)$i['plan_id']:null;
-    $rows=$i['tasks']??null;
-    if(!is_array($rows)||!$rows)res(400,['error'=>'tasks required']);
-    if(count($rows)>20)res(400,['error'=>'batch too large, max 20 tasks']);
-    $clean=[];
-    foreach(array_values($rows) as $n=>$t){
-        if(!is_array($t))res(400,['error'=>"task #$n: not an object"]);
-        $title=trim((string)($t['title']??''));
-        if($title==='')res(400,['error'=>"task #$n: title required"]);
-        if(mb_strlen($title,'UTF-8')>255)res(400,['error'=>"task #$n: title over 255 chars"]);
-        $mod=(string)($t['module']??'');
-        if(!in_array($mod,['technical','onpage','content','local','offpage'],true))res(400,['error'=>"task #$n: bad module"]);
-        $own=(string)($t['owner_type']??'');
-        if(!in_array($own,['agency','client','agent'],true))res(400,['error'=>"task #$n: bad owner_type"]);
-        $sprint=(string)($t['sprint']??'');
-        if(mb_strlen($sprint,'UTF-8')>10)res(400,['error'=>"task #$n: sprint over 10 chars"]);
-        $pri=(string)($t['priority']??'P2');
-        if($pri==='')$pri='P2';
-        if(!in_array($pri,['P0','P1','P2','P3'],true))res(400,['error'=>"task #$n: bad priority"]);
-        $ops=(string)($t['ops']??'');
-        if(mb_strlen($ops,'UTF-8')>255)res(400,['error'=>"task #$n: ops over 255 chars"]);
-        $att=empty($t['attention'])?0:1;
-        $clean[]=[$cid,$pid,$sprint,$mod,$title,(string)($t['detail']??''),$own,$pri,$att,$ops];
-    }
+    list($clean,$err)=tasks_bulk_clean($cid,$pid,$i['tasks']??null);
+    if($err)res(400,['error'=>$err]);
     $p=db();
     $ids=[];
     $p->beginTransaction();
     try{
-        $ins=$p->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,'proposed','seo-worker')");
-        foreach($clean as $row){$ins->execute($row);$ids[]=(int)$p->lastInsertId();}
+        $ids=tasks_bulk_insert($p,$clean);
         $p->commit();
     }catch(Exception $e){
         if($p->inTransaction())$p->rollBack();
         res(500,['error'=>'bulk insert failed']);
     }
     audit('seo-worker','seo_tasks_bulk',(string)$cid,['plan_id'=>$pid,'count'=>count($ids),'ids'=>$ids]);
-    /* plan 落的任务自动接一轮判定：人看到任务时就带着「该不该做」，批准这一步由判决的 do 隐含。 */
+    /* 门的选择：plan job 刚落的草稿（authored_by seo-worker）先过方案层 plan_review；
+       plan_review 出的 v2 任务和没有 plan 的散任务直接进任务层 review_plan。 */
+    $gate='review_plan';
+    if($pid){
+        $pq=db()->prepare("SELECT authored_by FROM seo_plans WHERE id=?");
+        $pq->execute([$pid]);
+        $pr=$pq->fetch();
+        if($pr&&(string)$pr['authored_by']==='seo-worker')$gate='plan_review';
+    }
+    if($gate==='plan_review'){
+        $rjid=queue_plan_review_job($cid,$pid,$ids,'seo-worker');
+        res(200,['ok'=>true,'ids'=>$ids,'plan_review_job_id'=>$rjid,'gate'=>'plan_review']);
+    }
     list($rjid,$rmerged)=queue_review_job($cid,$ids,'seo-worker','seo_tasks_review_auto');
-    res(200,['ok'=>true,'ids'=>$ids,'review_job_id'=>$rjid]);
+    res(200,['ok'=>true,'ids'=>$ids,'review_job_id'=>$rjid,'gate'=>'review_plan']);
 }
 
 // GET /context?client_id= -> single briefing payload for the LLM runner
@@ -3441,6 +3484,69 @@ if($m==='PUT'&&$ROUTE==='/profile'){
 }
 
 // GET /plans?client_id=
+// GET /plans/{id} -> 一条方案（含 body）。worker 的 plan_review 要读草稿全文，所以 auth_any。
+if($m==='GET'&&preg_match('#^/plans/(\d+)$#',$ROUTE,$mm)){
+    auth_any();
+    $g=db()->prepare("SELECT * FROM seo_plans WHERE id=?");
+    $g->execute([(int)$mm[1]]);
+    $plan=$g->fetch();
+    if(!$plan)res(404,['error'=>'Plan not found']);
+    $tq=db()->prepare("SELECT * FROM seo_tasks WHERE plan_id=? ORDER BY FIELD(sprint,'S1','S2','S3','S4','S5','S6'),FIELD(priority,'P0','P1','P2','P3'),id");
+    $tq->execute([(int)$plan['id']]);
+    res(200,['plan'=>$plan,'tasks'=>$tq->fetchAll()]);
+}
+
+// POST /plans/{id}/review_result (worker) body { body, tasks:[...], changes:[...], card:"markdown" }
+// 方案层过闸的落库：v1 草稿被 v2 取代（v1 状态 superseded，v1 的 proposed 任务按 merged 收掉），
+// v2 任务进任务层判定，方向确认卡进收件箱等人点「批准 v2」。一个事务，不留半截。
+if($m==='POST'&&preg_match('#^/plans/(\d+)/review_result$#',$ROUTE,$mm)){
+    auth_worker();
+    ensure_inbox_schema();
+    $pid=(int)$mm[1];
+    $i=input();
+    $g=db()->prepare("SELECT * FROM seo_plans WHERE id=?");
+    $g->execute([$pid]);
+    $v1=$g->fetch();
+    if(!$v1)res(404,['error'=>'Plan not found']);
+    if($v1['status']!=='draft')res(400,['error'=>'plan is '.$v1['status'].', only a draft can be reviewed']);
+    $cid=(int)$v1['client_id'];
+    $body=trim((string)($i['body']??''));
+    if($body==='')res(400,['error'=>'body required']);
+    $card=trim((string)($i['card']??''));
+    if($card==='')res(400,['error'=>'card required']);
+    if(mb_strlen($card,'UTF-8')>20000)res(400,['error'=>'card over 20000 chars']);
+    $changes=is_array($i['changes']??null)?array_slice($i['changes'],0,40):[];
+    $p=db();
+    $p->beginTransaction();
+    try{
+        $vq=$p->prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM seo_plans WHERE client_id=?");
+        $vq->execute([$cid]);
+        $ver=(int)$vq->fetch()['n'];
+        $p->prepare("INSERT INTO seo_plans(client_id,version,body,status,authored_by)VALUES(?,?,?,'draft','plan_review')")->execute([$cid,$ver,$body]);
+        $v2id=(int)$p->lastInsertId();
+        list($clean,$err)=tasks_bulk_clean($cid,$v2id,$i['tasks']??null);
+        if($err)throw new Exception($err);
+        $ids=tasks_bulk_insert($p,$clean);
+        /* v1 收口：草稿改 superseded，proposed 任务按 merged 关掉并指向 v2 */
+        $p->prepare("UPDATE seo_plans SET status='superseded',reject_reason=? WHERE id=?")->execute(['被 v'.$ver.' 取代（方案层过闸）',$pid]);
+        $oq=$p->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status='proposed'");
+        $oq->execute([$pid]);
+        $old=array_map('intval',array_column($oq->fetchAll(),'id'));
+        $p->commit();
+    }catch(Exception $e){
+        if($p->inTransaction())$p->rollBack();
+        res(400,['error'=>'review_result failed: '.$e->getMessage()]);
+    }
+    foreach($old as $tid)task_close($tid,'merged','方案层过闸并入 v'.$ver.'（plan #'.$v2id.'）','plan_review');
+    $cardBody='[plan:'.$v2id.'] '.$card;
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'digest',?,?,NULL,'open','seo-worker')")
+        ->execute([$cid,$cardBody,json_encode(inbox_refs_norm(['tasks'=>$ids]),JSON_UNESCAPED_UNICODE)]);
+    $cardId=(int)db()->lastInsertId();
+    list($rjid,$rm)=queue_review_job($cid,$ids,'plan_review','seo_tasks_review_auto');
+    audit('seo-worker','seo_plan_review_result',(string)$v2id,['client_id'=>$cid,'from'=>$pid,'tasks'=>$ids,'closed_v1'=>$old,'changes'=>count($changes),'card'=>$cardId]);
+    res(200,['ok'=>true,'plan_id'=>$v2id,'version'=>$ver,'ids'=>$ids,'closed'=>$old,'card_id'=>$cardId,'review_job_id'=>$rjid]);
+}
+
 if($m==='GET'&&$ROUTE==='/plans'){
     auth_admin();
     $cid=need_client();
@@ -3490,6 +3596,8 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/approve$#',$ROUTE,$mm)){
         if($p->inTransaction())$p->rollBack();
         res(500,['error'=>'approve failed']);
     }
+    /* 方向确认卡：批准 = 确认方向，收件箱里这张卡关掉 */
+    db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([(int)$plan['client_id'],'[plan:'.$pid.']%']);
     $excluded=$total-$approved;
     if($excluded<0)$excluded=0;
     audit($u['username'],'seo_plan_approve',(string)$pid,['client_id'=>(int)$plan['client_id'],'approved_count'=>$approved,'excluded_count'=>$excluded]);
@@ -4106,8 +4214,15 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/reject$#',$ROUTE,$mm)){
     if(!$plan)res(404,['error'=>'Plan not found']);
     db()->prepare("UPDATE seo_plans SET status='rejected',reject_reason=?,approved_by=? WHERE id=?")
         ->execute([$reason,$u['username'],$pid]);
-    audit($u['username'],'seo_plan_reject',(string)$pid,['client_id'=>(int)$plan['client_id'],'reason'=>$reason]);
-    res(200,['ok'=>true]);
+    /* 打回的方案，它带来的 proposed 任务一起关掉（killed 带原因），方向确认卡收掉。
+       原因会被 tools/experience_sync.js 抓进跨客户经验。 */
+    $oq=db()->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status='proposed'");
+    $oq->execute([$pid]);
+    $killed=[];
+    foreach($oq->fetchAll() as $r){ if(!task_close((int)$r['id'],'killed','方案 #'.$pid.' 被打回：'.$reason,$u['username']))$killed[]=(int)$r['id']; }
+    db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([(int)$plan['client_id'],'[plan:'.$pid.']%']);
+    audit($u['username'],'seo_plan_reject',(string)$pid,['client_id'=>(int)$plan['client_id'],'reason'=>$reason,'killed'=>$killed]);
+    res(200,['ok'=>true,'killed'=>$killed]);
 }
 
 // GET /tasks?client_id=
