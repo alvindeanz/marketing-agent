@@ -3973,10 +3973,10 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/manual_done$#',$ROUTE,$mm)){
     res(200,['ok'=>true]);
 }
 
-/* GET /overview -> 跨客户总览，worker token 或 admin 都能读。2026-08-29 W1：看板是任务状态唯一真相，
+/* GET /board -> 跨客户总览（/overview 已被单客户 Dashboard 占用），worker token 或 admin 都能读。2026-08-29 W1：看板是任务状态唯一真相，
    PJ 从这里派生待办，不再自己记一份。每客户：sprint 锚点与本期档号、任务（带 human_state、
    manual_checks、预览链接、结束态证据），以及 attention 三类计数。只读，一次拉全。 */
-if($m==='GET'&&$ROUTE==='/overview'){
+if($m==='GET'&&$ROUTE==='/board'){
     auth_any();
     ensure_review_schema();
     $days=14;
