@@ -519,8 +519,16 @@ function queue_review_job($cid,$ids,$by,$auditAction){
    草稿阶段（output_url 是预览链接）放行 = 发布，排 apply_task。
    2026-08-27 #88 在大纲阶段被当成 apply，去找变更方案文件当然没有。 */
 /* 分析型任务（没有 ops 的 agent 任务）产出是报告，进 review 后「同意」= 验收完成，不排 apply。 */
+/* 分析型任务：agent 任务且没有写操作。ops 为空，或 ops 全是只读审计类（能力表 agent_readonly：
+   worker 走分析模式直接出报告，不产方案），放行等于验收。2026-08-29 #95 教训：ga4-audit 被排进 apply。 */
+$READONLY_OPS=['ga4-audit','gsc-audit'];
 function analysis_task($t){
-    return ($t['owner_type']??'')==='agent'&&trim((string)($t['ops']??''))==='';
+    global $READONLY_OPS;
+    if(($t['owner_type']??'')!=='agent')return false;
+    $ops=array_values(array_filter(array_map('trim',explode(',',(string)($t['ops']??'')))));
+    if(!$ops)return true;
+    foreach($ops as $op){if(!in_array($op,$READONLY_OPS,true))return false;}
+    return true;
 }
 function blog_outline_stage($t){
     $ops=strtolower((string)($t['ops']??''));
