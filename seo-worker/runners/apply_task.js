@@ -344,9 +344,17 @@ function isPlatformSideFile(entry) {
  * 只记进 side；少了只记录（可能是中止前没走到）。
  * 返回 { extra, missing, side, text }，text 是给 note 头部「文件核对」那一行的一句话，没问题回空串。
  */
+// 声明里允许 * 通配（2026-08-29 #94 教训：上传接口给文件起名带时间戳与随机串，方案只能写
+// assets/*-og-home.jpg 这种，精确匹配会把合法产物当越界）。* 只匹配一段路径，不跨 /。
+function declaredMatcher(pattern) {
+  if (pattern.indexOf('*') === -1) return (p) => p === pattern;
+  const re = new RegExp('^' + pattern.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*') + '$');
+  return (p) => re.test(p);
+}
 function compareFiles(declared, touched) {
   const norm = (f) => String(f || '').trim().replace(/^\/+/, '');
-  const d = new Set((declared || []).map(norm).filter(Boolean));
+  const dList = [...new Set((declared || []).map(norm).filter(Boolean))];
+  const matchers = dList.map((pat) => ({ pat, test: declaredMatcher(pat), hit: false }));
   const entries = (touched || []).map((x) => (typeof x === 'string' ? { path: x } : x || {})).filter((e) => e.path);
   const extra = [];
   const side = [];
@@ -355,11 +363,12 @@ function compareFiles(declared, touched) {
     const p = norm(e.path);
     if (!p || seen.has(p)) continue;
     seen.add(p);
-    if (d.has(p)) continue;
+    const m = matchers.find((x) => x.test(p));
+    if (m) { m.hit = true; continue; }
     if (isPlatformSideFile(Object.assign({}, e, { path: p }))) side.push(p);
     else extra.push(p);
   }
-  const missing = [...d].filter((f) => !seen.has(f));
+  const missing = matchers.filter((x) => !x.hit).map((x) => x.pat);
   const bits = [];
   if (extra.length) bits.push('changeset 多出方案未声明的文件 ' + extra.join(', '));
   if (missing.length) bits.push('方案声明但未碰到 ' + missing.join(', '));

@@ -400,6 +400,14 @@ t('buildNoteHeader 带 changeset 行与文件核对行', () => {
   assert.ok(lines.some((l) => l === 'changeset: cs_1（1 文件: pages/index.html）'), lines.join(' | '));
   assert.ok(lines.some((l) => l.indexOf('文件核对: 方案声明但未碰到') === 0));
 });
+t('compareFiles：声明里的 * 通配匹配平台生成的文件名，且不跨目录', () => {
+  const r = A.compareFiles(['assets/*-og-home-sea-view.jpg', 'config.json'], ['assets/1787989752406-d3bg92-og-home-sea-view.jpg', 'config.json']);
+  assert.deepStrictEqual(r.extra, []);
+  assert.deepStrictEqual(r.missing, []);
+  const r2 = A.compareFiles(['assets/*.jpg'], ['assets/sub/x.jpg', 'pages/a.html']);
+  assert.deepStrictEqual(r2.extra.sort(), ['assets/sub/x.jpg', 'pages/a.html']);
+  assert.deepStrictEqual(r2.missing, ['assets/*.jpg']);
+});
 t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺文件清单各打回一次', () => {
   const ok = '## 2. API 调用序列\n步骤 1 PATCH /api/content/x/edit\n- 预期响应：200\n- 回读核对：GET elements 比对\n涉及文件：pages/index.html\n本方案不含 `POST /snapshots`，不碰 `/api/domains/*`、`/api/admin/*`。\n## 3. 变更预览\n附：v1 的 POST /api/content/x/snapshots 已删除';
   assert.deepStrictEqual(E.lintPlan(ok), []);
