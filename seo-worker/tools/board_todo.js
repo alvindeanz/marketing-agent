@@ -25,7 +25,7 @@ function line(t) {
     : (STATE_LABEL[t.human_state] || t.human_state) + (t.wait_reason ? ' ' + t.wait_reason : '') + (t.run_note ? ' ' + t.run_note : '');
   const bits = ['#' + t.id, t.sprint || '-', t.priority || '', st];
   if (t.overdue) bits.push('逾期');
-  if (t.manual_pending) bits.push('待人工: ' + (t.manual_checks || []).join('、'));
+  if (t.manual_pending) bits.push('待复验: ' + (t.manual_checks || []).join('、'));
   if (t.human_state === 'closed' && t.evidence && !/^检查:|^\[(accepted|dropped|merged|killed)\]/.test(t.evidence)) bits.push('证据: ' + t.evidence);
   return '- ' + bits.filter(Boolean).join(' · ') + ' | ' + String(t.title || '').slice(0, 60);
 }
@@ -69,7 +69,7 @@ function render(board) {
     const manual = tasks.filter((t) => t.manual_pending);
     const open = now.filter((t) => t.human_state !== 'closed');
     const closed = now.filter((t) => t.human_state === 'closed');
-    if (manual.length) { out.push('', '待人工补跑（盖章走看板「补跑完成」）：'); manual.forEach((t) => out.push(line(t))); }
+    if (manual.length) { out.push('', '待复验（到期用 /data/aira/tools/verify/verify.js 或数据脚本跑，结果贴进看板「复验完成」；Google 交互工具类只抽查）：'); manual.forEach((t) => out.push(line(t))); }
     if (open.length) { out.push('', '本期未结：'); open.forEach((t) => out.push(line(t))); }
     if (closed.length) { out.push('', '本期已结：'); closed.forEach((t) => out.push(line(t))); }
     if (later.length) out.push('', '下期及以后 ' + later.length + ' 条：' + later.map((t) => '#' + t.id + '(' + t.sprint + ')').join(' '));

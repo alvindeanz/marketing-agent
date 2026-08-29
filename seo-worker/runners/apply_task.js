@@ -22,7 +22,9 @@ const deliverables = require('../lib/deliverables');
 const { publishFile } = require('../lib/publish');
 const { ensureClientWorkspace, clientDirName, summarize, truncate, localYmd } = require('../lib/util');
 
-const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*)';
+// 2026-08-29：加机器补验工具。浏览器类检查（横滚、JSON-LD、页面文本、状态码）不再标待人工，worker 自己跑。
+const VERIFY_TOOL = '/data/aira/tools/verify/verify.js';
+const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*),Bash(node ' + VERIFY_TOOL + ':*)';
 const OUTPUT_DIRNAME = 'seo-agent-output';
 const CHANGE_PLAN_PREFIX = 'change-plan-task-';
 const STATUSES = ['success', 'aborted', 'failed'];
@@ -101,8 +103,15 @@ function buildPrompt(opts) {
     '3. 方案里写了拍快照或 GET 留档的前置步骤，必须先做，不许跳过。',
     '4. 全部步骤完成后，执行方案里"执行后验证"一节的每一条，逐条给出实际结果。',
     '5. 当场可验的验证项任何一条不通过，整体判为失败，并说明是否需要回滚、回滚到哪一步。',
-    '   当场无法验证的项（需要浏览器交互的官方工具、要等 N 天的收录跟进这类）不算失败，',
-    '   照实标成待人工，不许为了让结果好看把没跑的写成通过。',
+    '   下面这些不算「当场无法验证」，必须用机器补验工具跑，结果照实填：',
+    '   node ' + VERIFY_TOOL + ' hscroll <url> [宽度]     指定视口不横向滚动（手机默认 390）',
+    '   node ' + VERIFY_TOOL + ' jsonld <url> [@type]     页面 ld+json 可解析、无重复类型、指定类型存在且 url/image 零跳转 200、面包屑字段齐',
+    '   node ' + VERIFY_TOOL + ' text <url> <文本>        页面 HTML 含该文本',
+    '   node ' + VERIFY_TOOL + ' status <url> [码]       HTTP 状态码且零跳转',
+    '   每条输出一行 JSON（passed / note），把 note 原样抄进 checks 的 note。',
+    '   真正当场无法验证的只剩两类：要 Google 官方交互工具的（Rich Results Test 这种，机器进不去），',
+    '   和要等 N 天的（收录、数据侧生效）。这两类才标 deferred，且 note 里写清「几号之后复验」或「抽查项」。',
+    '   不许为了让结果好看把没跑的写成通过。',
     '',
     '输出：中文执行记录，按下面结构写',
     '',
@@ -142,7 +151,7 @@ function buildPrompt(opts) {
     '- checks：方案"执行后验证"一节的每一条各一项，顺序照方案。',
     '  name 用方案里的编号加标题，例如 "V3 禁区词清零"；',
     '  passed 是这一条实际过没过；',
-    '  deferred=true 表示这一条当场根本无法验证（需要浏览器的官方工具、要等 N 天的收录跟进这类），',
+    '  deferred=true 只给两类：要 Google 官方交互工具的，和要等 N 天的。能用机器补验工具跑的不许标 deferred。',
     '  deferred 项不计入成败，但 passed 仍要照实写（没跑就写 false）；',
     '  当场跑了但没过的项写 passed=false 且 deferred=false，这种项只要有一条，整体就是失败。',
     '- verification_passed：老字段，保留兼容，按当场可验的项是否全过来写。',
@@ -221,7 +230,7 @@ function checkSummary(judge) {
     parts.push('未通过 ' + judge.failed.length + ' 项（' + judge.failed.map((c) => c.name).join('、') + '）');
   }
   parts.push(
-    '待人工 ' +
+    '待复验 ' +
       judge.deferred.length +
       ' 项' +
       (judge.deferred.length ? '（' + judge.deferred.map((c) => c.name).join('、') + '）' : '')

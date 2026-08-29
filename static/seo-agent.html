@@ -999,10 +999,10 @@ function excSection(at){
     '<span class="plan-meta">'+(total?('共 '+total+' 项待处理'):'当前没有需要人工介入的事项')+'</span></div><div class="panel">';
   html+=excGroup('flagged','需人判断的任务',ft,ft.map(excTaskLine).join(''));
   html+=excGroup('client','客户待答',co,co.map(excTaskLine).join(''));
-  html+=excGroup('manual','待人工补跑的验证',mc,mc.map(t=>'<div class="exc-item">'+
+  html+=excGroup('manual','待复验（到期机器跑，人只抽查）',mc,mc.map(t=>'<div class="exc-item">'+
     '<span class="t">#'+t.id+' '+esc(t.title||'')+'</span>'+
     '<span class="muted">'+esc((t.items||[]).join('；'))+'</span>'+
-    '<button class="btn tiny ghost" onclick="manualDone('+t.id+')">补跑完成</button></div>').join(''));
+    '<button class="btn tiny ghost" onclick="manualDone('+t.id+')">复验完成</button></div>').join(''));
   html+=excGroup('jobs','失败 Job',fj,fj.map(j=>'<div class="exc-item">'+
     '<span class="t">#'+j.id+' '+(JOB_LABEL[j.type]||esc(j.type))+'</span>'+
     '<span class="muted">'+esc(j.created_at||'')+'</span>'+
@@ -3202,7 +3202,7 @@ function stateLine(t){
   if(t.status==='review'&&t.output_url)bits.push('<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出</a>');
   if(failed)bits.push('<button class="btn tiny ghost" onclick="showJobLog('+(t.job_state.job_id||0)+')">看日志</button>');
   /* apply 成功但有 deferred 验证项：机器跑不了的（Rich Results Test、手机横滚这类），人补跑完点盖章。done 的卡也显示，这是它唯一的出口。 */
-  if(t.manual_pending&&(t.manual_checks||[]).length)bits.push('<span class="st-fail" title="'+esc((t.manual_checks||[]).join('；'))+'">待人工 '+t.manual_checks.length+' 项</span><button class="btn tiny ghost" onclick="manualDone('+t.id+')">补跑完成</button>');
+  if(t.manual_pending&&(t.manual_checks||[]).length)bits.push('<span class="st-fail" title="'+esc((t.manual_checks||[]).join('；'))+'">待复验 '+t.manual_checks.length+' 项</span><button class="btn tiny ghost" onclick="manualDone('+t.id+')">复验完成</button>');
   let h='<div class="st '+hs+(t.closed_kind?(' '+t.closed_kind):'')+'">'+bits.join('')+'</div>';
   /* 失败原因单独一行红字：模型自己说的为什么，人不用翻日志就知道该改方案还是该修平台 */
   if(failed&&t.fail_reason)h+='<div class="st-why">原因：'+esc(t.fail_reason)+'</div>';

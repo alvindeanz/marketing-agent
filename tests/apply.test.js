@@ -232,7 +232,7 @@ t('四行齐全时按固定顺序组装，--- 收尾', () => {
     '改前存档: https://agencyreport.horntech-dev.com/reports/demo/qa/task-61-before.html'
   );
   assert.strictEqual(lines[2], '快照: task-61-pre');
-  assert.strictEqual(lines[3], '检查: 通过 2 项，待人工 2 项（V12 Rich Results Test、V13 收录跟进）');
+  assert.strictEqual(lines[3], '检查: 通过 2 项，待复验 2 项（V12 Rich Results Test、V13 收录跟进）');
   assert.strictEqual(lines[4], '---');
   assert.ok(h.endsWith('---\n'));
 });
@@ -255,7 +255,7 @@ t('失败时头部点名是哪条没过', () => {
       ],
     }),
   });
-  assert.ok(h.indexOf('检查: 通过 1 项，未通过 1 项（V3 禁区词清零），待人工 1 项（V13 收录跟进）') > -1);
+  assert.ok(h.indexOf('检查: 通过 1 项，未通过 1 项（V3 禁区词清零），待复验 1 项（V13 收录跟进）') > -1);
 });
 t('老格式没有 checks 时头部也写得出一行', () => {
   const okd = A.buildNoteHeader({ affectedUrls: [], judge: A.judgeChecks({ verification_passed: true }) });

@@ -629,7 +629,7 @@ function attach_review_state($tasks,$cid){
 function manual_checks_of($t){
     $note=(string)($t['result_note']??'');
     $items=[];
-    if(preg_match_all('/检查:[^\n]*待人工 (\d+) 项(?:（([^）]*)）)?/u',$note,$all,PREG_SET_ORDER)){
+    if(preg_match_all('/检查:[^\n]*待(?:人工|复验) (\d+) 项(?:（([^）]*)）)?/u',$note,$all,PREG_SET_ORDER)){
         $last=$all[count($all)-1];
         $n=(int)$last[1];
         if($n>0){
@@ -3965,9 +3965,10 @@ if($m==='GET'&&$ROUTE==='/attention'){
     foreach($fj->fetchAll() as $r){$r['id']=(int)$r['id'];$jobs[]=$r;}
     $pf=db()->prepare("SELECT COUNT(*) AS n FROM seo_facts WHERE client_id=? AND status='unconfirmed'");
     $pf->execute([$cid]);
-    /* 待人工补跑：apply 成功但有 deferred 验证项、且没人盖章的。done 的任务也在，这是它唯一的出口。 */
+    /* 待复验：apply 成功但有 deferred 验证项、且没盖章的。done 的任务也在，这是它唯一的出口。
+       2026-08-29 起 deferred 只剩两类：要 Google 交互工具的（抽查项）和要等 N 天的（到期由 PJ 用机器复验）。 */
     ensure_review_schema();
-    $mq=db()->prepare("SELECT id,title,priority,status,sprint,result_note,manual_done_at FROM seo_tasks WHERE client_id=? AND manual_done_at IS NULL AND result_note LIKE '%待人工%' ORDER BY $ord");
+    $mq=db()->prepare("SELECT id,title,priority,status,sprint,result_note,manual_done_at FROM seo_tasks WHERE client_id=? AND manual_done_at IS NULL AND (result_note LIKE '%待人工%' OR result_note LIKE '%待复验%') ORDER BY $ord");
     $mq->execute([$cid]);
     $manual=[];
     foreach($mq->fetchAll() as $r){
