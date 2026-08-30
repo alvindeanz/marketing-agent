@@ -57,8 +57,10 @@ function historyBlock(tasks, currentPlanId) {
     const note = String(t.result_note || '');
     const closed = (note.match(/\[(dropped|merged|killed)\][^\n]*/) || [])[0] || '';
     const override = t.review_override ? '人推翻为 ' + t.review_override + '：' + String(t.review_override_note || '') : '';
-    if (!closed && !override) continue;
-    rows.push('- #' + t.id + ' ' + truncate(String(t.title || ''), 60) + ' | ' + truncate(closed || override, 160));
+    // 已落地的也要给：模型不知道某页 5 天前刚整页重写，就会按旧数据再排一次重写（2026-08-29 Ben's AU #61 vs #133）。
+    const applied = String(t.status) === 'done' && !closed ? (note.match(/\[applied\][^\n]*/) || [])[0] || '' : '';
+    if (!closed && !override && !applied) continue;
+    rows.push('- #' + t.id + ' ' + truncate(String(t.title || ''), 60) + ' | ' + (applied ? '已落地 ' + truncate(applied, 160) : truncate(closed || override, 160)));
     if (rows.length >= MAX_HISTORY) break;
   }
   return rows.join('\n');
@@ -108,7 +110,7 @@ function buildPrompt(o) {
     '===== 全局交付规则摘要（所有客户通用）',
     o.globalRules || '（无）',
     '',
-    '===== 本客户历史方案的处置记录（以前被砍、被并、被人推翻的）',
+    '===== 本客户历史任务的处置记录（已落地的带日期，别对刚改过的页再排重写；被砍、被并、被人推翻的说明这家哪些路走不通）',
     o.history || '（无，首次导入）',
     '',
     '===== 现役方案还没做完的任务（批准 v2 时这些会被收掉，所以 v2 必须决定：吸收它就把它的任务号写进 from，不要它就在 changes 里 drop 并说明）',
