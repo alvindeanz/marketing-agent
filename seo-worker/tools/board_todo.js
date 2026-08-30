@@ -69,6 +69,7 @@ function render(board) {
     const manual = tasks.filter((t) => t.manual_pending);
     const open = now.filter((t) => t.human_state !== 'closed');
     const closed = now.filter((t) => t.human_state === 'closed');
+    for (const pp of (c.pending_plans || [])) out.push('', '待确认方案 v' + pp.version + '（plan #' + pp.plan_id + '）：' + pp.task_count + ' 条任务（S1 ' + pp.s1_count + ' 条）等你在方案区批准或打回，批准前不算本期活。');
     if (manual.length) { out.push('', '待复验（到期用 /data/aira/tools/verify/verify.js 或数据脚本跑，结果贴进看板「复验完成」；Google 交互工具类只抽查）：'); manual.forEach((t) => out.push(line(t))); }
     if (open.length) { out.push('', '本期未结：'); open.forEach((t) => out.push(line(t))); }
     if (closed.length) { out.push('', '本期已结：'); closed.forEach((t) => out.push(line(t))); }

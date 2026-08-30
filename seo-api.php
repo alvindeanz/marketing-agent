@@ -4181,8 +4181,22 @@ if($m==='GET'&&$ROUTE==='/board'){
         $tq=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
         $tq->execute([$cid]);
         $rows=attach_human_state(attach_review_state(attach_job_state($tq->fetchAll(),$cid),$cid),$cid);
-        $tasks=[];$nManual=0;$nWaitMe=0;$nRunning=0;
+        /* 方案状态：草稿方案（等人批准）的任务不算本期活，单列「待确认方案」；
+           被取代 / 打回的方案里已关掉的任务是过渡产物，不上看板（2026-08-29 W7 联调后 Ben's AU 冒出 12 条）。 */
+        $psq=db()->prepare("SELECT id,version,status FROM seo_plans WHERE client_id=?");
+        $psq->execute([$cid]);
+        $planStatus=[];foreach($psq->fetchAll() as $pl)$planStatus[(int)$pl['id']]=$pl;
+        $tasks=[];$nManual=0;$nWaitMe=0;$nRunning=0;$pendingPlans=[];$hiddenClosed=0;
         foreach($rows as $t){
+            $pl=$t['plan_id']?($planStatus[(int)$t['plan_id']]??null):null;
+            if($pl&&$pl['status']==='draft'){
+                $k=(int)$pl['id'];
+                if(!isset($pendingPlans[$k]))$pendingPlans[$k]=['plan_id'=>$k,'version'=>(int)$pl['version'],'task_count'=>0,'s1_count'=>0];
+                $pendingPlans[$k]['task_count']++;
+                if(strtoupper(trim((string)$t['sprint']))==='S1')$pendingPlans[$k]['s1_count']++;
+                continue;
+            }
+            if($pl&&in_array($pl['status'],['superseded','rejected'],true)&&$t['status']==='done'){$hiddenClosed++;continue;}
             $note=(string)($t['result_note']??'');
             $pv='';
             if(preg_match_all('/预览: (https?:\/\/\S+)/',$note,$pm))$pv=end($pm[1]);
@@ -4218,7 +4232,8 @@ if($m==='GET'&&$ROUTE==='/board'){
         $out[]=[
             'client_id'=>$cid,'name'=>$c['name'],'domain'=>$c['domain'],'platform'=>$c['platform'],
             'plan_id'=>$pr?(int)$pr['id']:null,'sprint_anchor'=>$anchor,'sprint_days'=>$days,'current_sprint'=>$cur,
-            'counts'=>['tasks'=>count($tasks),'wait_me'=>$nWaitMe,'running'=>$nRunning,'manual_pending'=>$nManual,'failed_jobs_7d'=>(int)$fj->fetch()['n']],
+            'counts'=>['tasks'=>count($tasks),'wait_me'=>$nWaitMe,'running'=>$nRunning,'manual_pending'=>$nManual,'failed_jobs_7d'=>(int)$fj->fetch()['n'],'hidden_closed'=>$hiddenClosed],
+            'pending_plans'=>array_values($pendingPlans),
             'tasks'=>$tasks,
         ];
     }
