@@ -599,7 +599,7 @@ function tasks_bulk_insert($p,$clean){
 /* 分析型任务（没有 ops 的 agent 任务）产出是报告，进 review 后「同意」= 验收完成，不排 apply。 */
 /* 分析型任务：agent 任务且没有写操作。ops 为空，或 ops 全是只读审计类（能力表 agent_readonly：
    worker 走分析模式直接出报告，不产方案），放行等于验收。2026-08-29 #95 教训：ga4-audit 被排进 apply。 */
-$READONLY_OPS=['ga4-audit','gsc-audit'];
+$READONLY_OPS=['ga4-audit','gsc-audit','keyword-direction'];
 function analysis_task($t){
     global $READONLY_OPS;
     if(($t['owner_type']??'')!=='agent')return false;
