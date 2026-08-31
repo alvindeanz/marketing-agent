@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-31 AIRA (al) 登记：方向卡反馈脚本参数读反同日二次复发（Louvresky #146），报告 execute 产线缺口
+
+- 干了什么：Louvresky paid 导入全链跑通（client 16 profile 三列、ads 180 天回填、快照、facts、#146 方向卡经闸A 至 review）。客户点卡上反馈按钮全部失败，定位为生成器无视 spec V3「提交脚本原样嵌入」自写了 XHR 版，token 与任务号读反（与同日 Ben's #145 事故同根因）。已手修线上与工作区文件，playwright 真点验证 200 落库，测试行已清。
+- 坑：spec 文字约束拦不住生成模型重写嵌入脚本，同一天两个客户各栽一次。字符串存在性检查验不出读取逻辑颠倒，验证必须真点。
+- 下一步/认领：**报告 Aiden（execute_task runner 是你的地界）**：建议把「交互 widget 由流水线注入固定已测脚本，模型只产 data-item 标记」从批 4 提前单独做；在此之前 execute 产出的带 card_feedback 的 HTML 建议加一道机械校验（grep 断言 taskId 取 t、token 取 k，或直接拒绝模型自带 script 块）。我可以出校验函数与测试，落进 runner 由你拍。
+
 ### 2026-08-29 AIRA (ae) 登记：apply 涉及文件比对支持通配；只读审计 ops 放行即验收；Apollo 与 Ben's NZ 导入
 
 - 干了什么：#94 六步全过、线上已生效，却因 changeset 里上传接口生成的 assets/<ts>-<rand>-xxx.jpg 不等于方案声明的 assets/*-xxx.jpg 被判失败。`compareFiles` 现支持 `*`（单段，不跨 /），apply 单测加一条。#94 按落地态人工收单未重跑。另：`analysis_task()` 把 ops 全为只读审计（ga4-audit / gsc-audit）的任务视为分析任务，放行即验收，不再排 apply（#95 曾被误排，job 172 已作废）。Apollo（8）与 Ben's NZ（45）用新工具 `tools/import_package.js` 与 `tools/onboard_chain.js` 全量导入并跑完 pull_data 到 plan，各出 plan draft 11 与 12 条。
