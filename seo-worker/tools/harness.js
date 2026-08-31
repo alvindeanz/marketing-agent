@@ -60,9 +60,14 @@ async function main() {
   let all = await tasks();
   const noVerdict = all.filter((t) => inScope(t) && t.status === 'proposed'
     && !t.review_effective && !t.review_pending && !(t.job_state && t.job_state.status)).map((t) => t.id);
-  if (noVerdict.length && !DRY) {
-    const r = await call('POST', '/tasks/review', { client_id: cid, task_ids: noVerdict.slice(0, 20) });
-    log('本期 ' + noVerdict.length + ' 条无判决，已排闸A（job ' + (r.job_id || '?') + '），等判定');
+  const pendingNow = all.filter((t) => inScope(t) && t.review_pending).map((t) => t.id);
+  if ((noVerdict.length || pendingNow.length) && !DRY) {
+    if (noVerdict.length) {
+      const r = await call('POST', '/tasks/review', { client_id: cid, task_ids: noVerdict.slice(0, 20) });
+      log('本期 ' + noVerdict.length + ' 条无判决，已排闸A（job ' + (r.job_id || '?') + '），等判定');
+    }
+    for (const id of pendingNow) if (!noVerdict.includes(id)) noVerdict.push(id);
+    if (pendingNow.length) log('另有 ' + pendingNow.length + ' 条判定在飞，一并等');
     const t1 = Date.now();
     for (;;) {
       await sleep(20000);
