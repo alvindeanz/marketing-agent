@@ -30,6 +30,13 @@ const MAX_GLOBAL_RULES = 60;
 const MAX_HISTORY = 30;
 const CHANGE_TYPES = ['keep', 'reword', 'split', 'merge', 'drop', 'add', 'move'];
 
+/* 原则与经验文件是判断的地基，读不到必须炸，不许带着占位符判（2026-08-31 指针硬化）。 */
+function readStrict(file, label) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { throw new Error(label + ' 读不到（' + file + '），不判：' + e.message); }
+  if (text.trim().length < 200) throw new Error(label + ' 内容异常（只有 ' + text.trim().length + ' 字），不判');
+  return text;
+}
 function readOr(file, fallback) {
   try { return fs.readFileSync(file, 'utf8'); } catch (e) { return fallback; }
 }
@@ -233,8 +240,8 @@ async function runWith(ctx, judge) {
 
   const judged = await judge({
     clientName: profile.name || (context.client && context.client.name) || profile.domain || '',
-    experience: readOr(EXPERIENCE_FILE, '（经验文件缺失）'),
-    principles: readOr(PRINCIPLES_FILE, ''),
+    experience: readStrict(EXPERIENCE_FILE, '方案经验文件'),
+    principles: readStrict(PRINCIPLES_FILE, '判定原则文件'),
     clientRules: clientRulesBlock(cfg, workspace, log),
     globalRules: globalRulesDigest(cfg),
     history: historyBlock(context.tasks || [], planId),
