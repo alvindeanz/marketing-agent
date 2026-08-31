@@ -254,6 +254,24 @@ function ensure_snapshot_sources(){
    Checked value by value rather than against one expected string, so a database
    sitting at any intermediate state (feedback added, triage not yet) heals in
    one ALTER. The list only ever grows, nothing is dropped. */
+/* seo_tasks.module 是 ENUM，同 agent_jobs.type 的坑：枚举没扩就插，MariaDB 非严格模式静默截成空串
+   （2026-08-31 任务 143 144 的 module=paid 丢失）。所有写 module 的入口先过这里。 */
+function ensure_task_module(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    $want=['technical','onpage','content','local','offpage','paid'];
+    $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_tasks' AND COLUMN_NAME='module'");
+    $q->execute();
+    $cur=(string)($q->fetch()['COLUMN_TYPE']??'');
+    $q->closeCursor();
+    foreach($want as $w)if(strpos($cur,"'".$w."'")===false){
+        $list=implode(',',array_map(function($x){return "'".$x."'";},$want));
+        db()->exec("ALTER TABLE seo_tasks MODIFY module ENUM($list) NOT NULL DEFAULT 'technical'");
+        return;
+    }
+}
+
 function ensure_job_types(){
     static $done=false;
     if($done)return;
@@ -567,6 +585,7 @@ function tasks_bulk_clean($cid,$pid,$rows){
     return [$clean,null];
 }
 function tasks_bulk_insert($p,$clean){
+    ensure_task_module();
     $ids=[];
     $ins=$p->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,'proposed','seo-worker')");
     foreach($clean as $row){$ins->execute($row);$ids[]=(int)$p->lastInsertId();}
@@ -4347,6 +4366,7 @@ if($m==='GET'&&$ROUTE==='/tasks'){
 
 // POST /tasks
 if($m==='POST'&&$ROUTE==='/tasks'){
+    ensure_task_module();
     $u=auth_admin();
     $i=input();
     $cid=(int)($i['client_id']??0);
