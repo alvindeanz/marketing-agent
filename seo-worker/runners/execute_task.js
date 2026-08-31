@@ -1868,10 +1868,29 @@ async function runOne(ctx, context, workspace, taskId) {
       // 卡片正文就是放行卡，人在看板上看完这段就能放；旧方案没有放行卡时退回截断摘要。
       (planReleaseCard(output) || '摘要：' + summarize(output, 400))
     : summarize(output, 500));
+  // 客户版产物：分析任务若在 workspace/reports/ 里产出了给客户看的 HTML（如关键词方向卡），
+  // 必须发布成公网 URL 并写进 note「客户版:」行。内部预览是给放行人看的壳，
+  // 两个链接绝不能混（2026-08-31 #145 内部壳被当客户版发给人，DEFECTS 有案）。
+  let clientLinks = '';
+  if (!prepare) {
+    try {
+      const rdir = path.join(workspace, 'reports');
+      const fresh = fs.existsSync(rdir) ? fs.readdirSync(rdir).filter((f) => f.endsWith('.html')
+        && output.indexOf(f) !== -1
+        && Date.now() - fs.statSync(path.join(rdir, f)).mtimeMs < 6 * 3600 * 1000) : [];
+      for (const f of fresh) {
+        const res = await publishFile(ctx.cfg, path.basename(workspace), '', f, path.join(rdir, f), log);
+        if (res && res.url) {
+          clientLinks += '客户版: ' + res.url + '\n';
+          log('task ' + taskId + '：客户版已发布 ' + res.url);
+        }
+      }
+    } catch (e) { log('task ' + taskId + '：客户版发布失败（卡上会缺客户版行）:: ' + e.message); }
+  }
   // Deliverables before the result: by the time the card shows up on the board
   // its downloads are already attached to it.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
-  await api.postTaskResult(taskId, { output_url: '', note });
+  await api.postTaskResult(taskId, { output_url: '', note: clientLinks + note });
   log(
     'task ' +
       taskId +
