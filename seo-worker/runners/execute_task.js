@@ -1881,7 +1881,8 @@ async function runOne(ctx, context, workspace, taskId) {
       for (const f of fresh) {
         const res = await publishFile(ctx.cfg, path.basename(workspace), '', f, path.join(rdir, f), log);
         if (res && res.url) {
-          clientLinks += '客户版: ' + res.url + '\n';
+          const fbTok = require('node:crypto').createHash('md5').update('cardfb' + taskId + ctx.cfg.serviceToken).digest('hex');
+          clientLinks += '客户版: ' + res.url + '?t=' + taskId + '&k=' + fbTok + '\n';
           log('task ' + taskId + '：客户版已发布 ' + res.url);
         }
       }
