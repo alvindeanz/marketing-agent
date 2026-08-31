@@ -45,6 +45,7 @@
 | A28 | 同一个数（如询盘数）在 hero KPI / KPI 卡 / 漏斗底 / 表格合计四处必须完全一致 | BENS | 否 |
 | A29 | 账户配置、出价机制、Primary/Secondary 设置这类后台细节不写进客户报告 | BENS | 否 |
 | A30 | 不出现 dash 分隔的同时，也不出现 `.callout` 之外的样式类混用（数字块 / 提示框两套 class 不交叉） | RCLAUDE, M:feedback_report_cstat_warn_class_collision | 否 |
+| A31 | 中文报告里，客户账户语料（keywords、search terms、campaign 名、网站）出现的产品与行业名词一律用英文原词，首次出现可括注中文说明（如「louvre roof（百叶顶）类搜索」），禁止自造中文翻译（百叶顶、百叶花架这类）。Google 机制词保持中文人话（如 Performance Max 写「自动投放广告」）。边界由客户语料定义 | M:feedback_zh_report_trade_terms_english, sales 2026-09-01 Louvresky 卡反馈, Alvin 确认全客户生效 | 方向卡渲染器强制（名称槽全中文即拒绝）；月报 reportlint 待加（COLLAB 交 Aiden） |
 
 ---
 

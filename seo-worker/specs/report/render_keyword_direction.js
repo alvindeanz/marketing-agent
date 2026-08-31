@@ -94,6 +94,13 @@ function validate(d) {
   for (const l of d.lights) {
     if (!['g', 'h', 'a'].includes(l.cls)) throw new Error('红绿灯 cls 只许 g/h/a: ' + l.name);
   }
+  // copy_rules A31：产品词用英文原词。失效形态是整卡被翻译成中文，
+  // 所以卡整体不变量：词族名与红绿灯名里一个拉丁词都没有即拒绝。
+  // 逐名对错（概念类词族可纯中文）靠规则层与放行人扫一眼，这里不误伤。
+  const hasLatin = (t) => /[A-Za-z]{2,}/.test(t);
+  if (!d.families.some((f) => hasLatin(f.name)) || !d.lights.some((l) => hasLatin(l.name))) {
+    throw new Error('词族名与红绿灯名全为中文：产品词应用英文原词（copy_rules A31），疑似整卡被翻译');
+  }
   const all = JSON.stringify(d);
   if (/<\s*script/i.test(all)) throw new Error('数据里不许出现 script');
   for (const bad of ['CPC', 'CTR', 'CVR', 'PMax', 'ROAS']) {
