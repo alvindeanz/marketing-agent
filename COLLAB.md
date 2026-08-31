@@ -26,6 +26,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 干了什么：#94 六步全过、线上已生效，却因 changeset 里上传接口生成的 assets/<ts>-<rand>-xxx.jpg 不等于方案声明的 assets/*-xxx.jpg 被判失败。`compareFiles` 现支持 `*`（单段，不跨 /），apply 单测加一条。#94 按落地态人工收单未重跑。另：`analysis_task()` 把 ops 全为只读审计（ga4-audit / gsc-audit）的任务视为分析任务，放行即验收，不再排 apply（#95 曾被误排，job 172 已作废）。Apollo（8）与 Ben's NZ（45）用新工具 `tools/import_package.js` 与 `tools/onboard_chain.js` 全量导入并跑完 pull_data 到 plan，各出 plan draft 11 与 12 条。
 - 坑：闸门「精确路径」对平台起名的产物天然误杀，方案作者写通配是对的，闸门要跟上。
 
+### 2026-08-31 AIRA (ah) 登记：paid 知识层落地（W8 批 2 前置）
+
+- 干了什么：specs 加 paid 四件：review_principles paid 段（六步诊断 SOP + 10 偏见 + 立场，Kira SOUL §6/§7 蒸馏）、plan_experience paid 段、capabilities/googleads.md（权限映射 + API 坑）、report/paid_section.md（客户报告五段式）。plan_review 的原则与经验文件改 readStrict（缺失或过短直接抛，不许占位符降级）。tests/specs.test.js 断言四件在场且带 PAID-*-V 标记。对话侧：/data/aira/skills/paid/SKILL.md 薄壳（零知识，按场景指向 specs），UserPromptSubmit hook（scripts/hook_paid_skill.py）命中 paid 词表注入加载提醒，Adspirer 第三方技能移入 skills/_disabled 防触发撞车。
+- 坑：Python re 的 \b 把 CJK 当词字符，「个campaign的」贴边不命中，词表边界要用 (?<![a-z0-9]) 这种 ASCII 专用 lookaround。
+
 ### 2026-08-29 AIRA (ag) 登记：W7 方案层过闸上线（plan_review），人只确认方向与抽查
 
 - 干了什么：plan job 落任务时 `/tasks/bulk` 按 plan 的 authored_by 选门：`seo-worker`（plan job）先排 `plan_review`（light 道，fable），`plan_review` 出的 v2 任务才排任务层 `review_plan`。`runners/plan_review.js` 输入草稿全文 + 任务 + 客户 CLAUDE.md 与 feedback 记忆 + `specs/plan_experience.md`（跨客户方案经验，新建）+ review_principles + `_global/feedback_*` description 摘要 + 本客户历史处置；输出 v2 正文 + 完整任务清单（带 from）+ changes + 方向确认卡。落库走 `POST /plans/{id}/review_result`（一个事务：v2 draft、任务 proposed、v1 superseded、v1 proposed 任务 merged 关掉、卡进收件箱 `[plan:ID]` 前缀）。`/plans/{id}/approve` = 确认方向并收卡；`/plans/{id}/reject` 现在会 killed 掉该方案 proposed 任务并收卡。`GET /plans/{id}` auth_any。`tools/onboard_chain.js` 跑完 plan 等 plan_review 并打卡；`tools/experience_sync.js` 把 review_override_note 与 plan reject_reason 抓进 plan_experience「待整理」段。`tests/plan_review.test.js`。
