@@ -3517,6 +3517,38 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     res(200,['ok'=>true]);
 }
 
+/* 方向卡客户反馈（2026-08-31 Alvin 定三选一：agree 同意按建议 / hold 保持不变继续观察 / other 其他反馈带文本）。
+   公开端点：卡在客户浏览器里直接 POST，无登录。防护：per-task token = md5('cardfb'+task_id+WORKER_TKN)，
+   写库限长，另外把摘要追进任务 note 供看板与 feedback 流程用。空文本的 other 视为 hold。 */
+if($m==='POST'&&$ROUTE==='/card_feedback'){
+    global $WORKER_TKN;
+    $i=input();
+    $tid=(int)($i['task_id']??0);
+    $tok=(string)($i['token']??'');
+    if(!$tid||!hash_equals(md5('cardfb'.$tid.$WORKER_TKN),$tok))res(403,['error'=>'bad token']);
+    $item=mb_substr(trim((string)($i['item']??'')),0,120,'UTF-8');
+    $choice=(string)($i['choice']??'');
+    if(!in_array($choice,['agree','hold','other','flag'],true))res(400,['error'=>'bad choice']);
+    $txt=mb_substr(trim((string)($i['text']??'')),0,2000,'UTF-8');
+    if($choice==='other'&&$txt==='')$choice='hold';
+    $g=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
+    $g->execute([$tid]);
+    if(!$g->fetch())res(404,['error'=>'task not found']);
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_card_feedback (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_id INT NOT NULL,
+        item VARCHAR(120) NOT NULL DEFAULT '',
+        choice VARCHAR(16) NOT NULL,
+        fb TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_card_fb_task (task_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb)VALUES(?,?,?,?)")->execute([$tid,$item,$choice,$txt]);
+    $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单'][$choice];
+    task_append_note($tid,'[客户反馈] '.($item!==''?($item.'：'):'').$label.($txt!==''?('：'.$txt):''));
+    res(200,['ok'=>true]);
+}
+
 // GET /plans?client_id=
 // GET /plans/{id} -> 一条方案（含 body）。worker 的 plan_review 要读草稿全文，所以 auth_any。
 if($m==='GET'&&preg_match('#^/plans/(\d+)$#',$ROUTE,$mm)){
