@@ -34,7 +34,7 @@ $DELIVERABLE_MAX_BYTES=5*1024*1024;
    routes for validation and by ensure_snapshot_sources() for the ENUM widen,
    so the two can never drift apart. Append only, never reorder or remove:
    dropping a value here would make the ALTER truncate existing rows. */
-define('SNAPSHOT_SOURCES',['ga4','gsc','semrush','discovery','content_registry']);
+define('SNAPSHOT_SOURCES',['ga4','gsc','semrush','discovery','content_registry','ads']);
 
 /* 日粒度时序表 seo_metrics_daily 允许的指标名，唯一权威清单。
    前端图表、worker 写入、GET /metrics 校验三处共用，永远不要在别处另抄一份。
