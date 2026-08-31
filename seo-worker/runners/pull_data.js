@@ -7,6 +7,7 @@ const { seoq, rootDomain } = require('../lib/seoq');
 const { reportWindow, safeJson } = require('../lib/util');
 const registry = require('../lib/registry');
 const metrics = require('../lib/metrics');
+const googleads = require('../lib/googleads');
 
 const GSC_SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly'];
 const GA4_SCOPES = ['https://www.googleapis.com/auth/analytics.readonly'];
@@ -546,6 +547,41 @@ async function pullContentRegistry(ctx, profile, win, gscData) {
   return { status: 'ok', total: reg.total };
 }
 
+// ---------------------------------------------------------------------------
+// google ads（paid 类目，profile.ads_customer_id 有值才拉；W8 批 1）
+// ---------------------------------------------------------------------------
+
+/**
+ * 账户日指标 + campaign 结构 + conversion actions，一个快照（source 'ads'）加五条日指标。
+ * 失败降级不拖垮 job：paid 数据缺一天，SEO 基线照常。
+ */
+async function pullAds(ctx, profile, win) {
+  const { log, api, job } = ctx;
+  const cid = String(profile.ads_customer_id || '').replace(/-/g, '');
+  if (!cid) { log('ads: profile 没有 ads_customer_id，跳过'); return null; }
+  log('ads: customer ' + cid + '，窗口 ' + win.start + ' 到 ' + win.end);
+  const daily = await googleads.dailyMetrics(cid, win);
+  log('ads: 日指标 ' + daily.length + ' 天');
+  let camps = [];
+  let convs = [];
+  try { camps = await googleads.campaigns(cid, win); } catch (e) { log('ads: campaigns 降级 :: ' + e.message); }
+  try { convs = await googleads.conversionActions(cid); } catch (e) { log('ads: conversion actions 降级 :: ' + e.message); }
+  const totals = daily.reduce((a, r) => { a.cost += r.cost; a.clicks += r.clicks; a.conversions += r.conversions; return a; }, { cost: 0, clicks: 0, conversions: 0 });
+  totals.cost = Math.round(totals.cost * 100) / 100;
+  const data = {
+    customer_id: cid,
+    fetched_at: new Date().toISOString(),
+    totals,
+    dates: daily,
+    campaigns: camps,
+    conversion_actions: convs,
+  };
+  await api.postSnapshot({ client_id: job.client_id, source: 'ads', period_start: win.start, period_end: win.end, data });
+  log('ads: snapshot posted，花费 ' + totals.cost + '，转化 ' + totals.conversions + '，campaign ' + camps.length + ' 个（含暂停）');
+  await metrics.postMetricRows(api, job.client_id, googleads.metricRows(daily), log);
+  return { totals, data };
+}
+
 /**
  * Refresh every source, honouring the snapshot cache. Shared with the plan
  * runner so a planning run always sits on top of current data.
@@ -624,6 +660,15 @@ async function refreshSources(ctx, opts = {}) {
   } else {
     const cachedSem = snapshotFor(latest, 'semrush');
     semrushData = cachedSem ? safeJson(cachedSem.data, null) : null;
+  }
+
+  skipped.ads = cacheCheck(cacheCtx, latest, 'ads').skip;
+  if (!skipped.ads) {
+    try {
+      await pullAds(ctx, profile, win);
+    } catch (e) {
+      log('ads: degraded, unexpected error :: ' + (e.stack || e.message));
+    }
   }
 
   // 时序写入。跑在三个源之后，读的全是刚才存下（或缓存里读回）的快照数据，

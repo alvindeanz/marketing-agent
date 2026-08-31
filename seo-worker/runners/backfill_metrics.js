@@ -22,6 +22,7 @@
 
 const { reportWindow, ymd } = require('../lib/util');
 const metrics = require('../lib/metrics');
+const googleads = require('../lib/googleads');
 
 const DEFAULT_DAYS = 180;
 const MAX_DAYS = 500;
@@ -52,7 +53,7 @@ async function run(ctx) {
 
   const wanted = Array.isArray(payload.sources) && payload.sources.length
     ? payload.sources.map((s) => String(s).toLowerCase())
-    : ['gsc', 'ga4'];
+    : ['gsc', 'ga4', 'ads'];
 
   const context = await api.getContext(job.client_id);
   const profile = (context && context.profile) || null;
@@ -145,6 +146,22 @@ async function run(ctx) {
   const inRange = rows.filter((r) => r.d >= win.start && r.d <= win.end);
   if (inRange.length !== rows.length) {
     log('丢弃 ' + (rows.length - inRange.length) + ' 行窗口外数据');
+  }
+
+  if (wanted.indexOf('ads') !== -1) {
+    const adsCid = String(profile.ads_customer_id || '').replace(/-/g, '');
+    if (!adsCid) {
+      log('ads: profile 没有 ads_customer_id，跳过');
+    } else {
+      try {
+        const daily = await googleads.dailyMetrics(adsCid, win);
+        for (const row of googleads.metricRows(daily)) rows.push(row);
+        log('ads: 日指标拿到 ' + daily.length + ' 天');
+      } catch (e) {
+        log('ads: 回填 FAILED :: ' + e.message);
+        errors.push('ads daily: ' + e.message);
+      }
+    }
   }
 
   const written = await metrics.postMetricRows(api, job.client_id, inRange, log);

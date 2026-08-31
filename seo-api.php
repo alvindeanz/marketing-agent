@@ -57,6 +57,9 @@ define('SNAPSHOT_SOURCES',['ga4','gsc','semrush','discovery','content_registry']
      ref_domains                           Semrush 引荐域总数
    排名与引荐域是"拉取当日一个点"，不是按日连续，无历史可回填。 */
 define('METRIC_NAMES',[
+    /* paid（渠道前缀 ads_ = Google；后续渠道用 bingads_ 这类自己的前缀，别复用 ads_）：
+       ads_cost 单位是账户币种的元（worker 从 cost_micros 换算），ads_conv_value 同币种。 */
+    'ads_cost','ads_clicks','ads_impressions','ads_conversions','ads_conv_value',
     'gsc_impressions','gsc_clicks','gsc_impressions_brand','gsc_clicks_brand',
     'ga4_sessions_organic','ga4_leads',
     'rank_top3','rank_top10','rank_top20','rank_tracked','ref_domains'
@@ -306,7 +309,9 @@ function ensure_metrics_schema(){
     if(!$has){
         db()->exec("ALTER TABLE seo_profiles ADD COLUMN brand_regex TEXT DEFAULT NULL AFTER target_keywords");
     }
-    foreach(['semrush_db'=>"VARCHAR(16) DEFAULT NULL",'workspace_dir'=>"VARCHAR(64) DEFAULT NULL"] as $col=>$ddl){
+    foreach(['semrush_db'=>"VARCHAR(16) DEFAULT NULL",'workspace_dir'=>"VARCHAR(64) DEFAULT NULL",
+             /* W8 批 0：services=seo/sem/both（sem 兼容别名，语义即 paid），owner=aira/kira 唯一写入方 */
+             'services'=>"VARCHAR(16) DEFAULT NULL",'ads_customer_id'=>"VARCHAR(20) DEFAULT NULL",'owner'=>"VARCHAR(32) DEFAULT NULL"] as $col=>$ddl){
         $c=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_profiles' AND COLUMN_NAME=?");
         $c->execute([$col]);
         $hit=$c->fetch();
@@ -1419,7 +1424,7 @@ if($ROUTE==='')$ROUTE='/';
 
 /* brand_regex 排在最后，是后加的列（见 ensure_metrics_schema）。留空表示
    "让 worker 自己从客户名或域名推"，不是"这个客户没有品牌词"。 */
-$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','business_goals','conversion_goals','notes','brand_regex'];
+$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','business_goals','conversion_goals','notes','brand_regex','services','ads_customer_id','owner'];
 
 /* =========================================================
    Worker endpoints (service token)
