@@ -1,13 +1,13 @@
 # 关键词方向卡规格（keyword-direction 任务的唯一产出契约）
 
-<!-- KEYWORD-DIRECTION-SPEC-V3：2026-08-31 客户版改写（Alvin 定）。这是给客户看的决策文档，
+<!-- KEYWORD-DIRECTION-SPEC-V4：2026-08-31 模板化（Alvin 定，Ben's AU S1 版式定为模板 v1）。V3 的客户版原则全部保留。这是给客户看的决策文档，
      不是分析文档。v1 的失败：口径声明开头劝退、术语裸奔、一表到底无分层、要客户动手的部分埋最后。
      读者优先级：客户老板 > sales > 我们自己。方法论与依据全部折叠或进附录，专业深度兜底不抢戏。 -->
 
-## 形态
+## 形态（V4 起：模板 + 数据，模型不写 HTML）
 
-单页 HTML，手机可读，浅色版式。文件名 `keyword_direction_{client}_{sprint}.html`，一 sprint 一版只增不改。
-随附逐词 CSV（否词、待确认名单），正文不放长表。
+产出分两层。**模型只产数据 JSON**，契约见同目录 `keyword_direction_data.schema.json`，文件名 `keyword_direction_{client}_{sprint}.data.json`。**HTML 由零 LLM 渲染器生成**：`node specs/report/render_keyword_direction.js <data.json> > keyword_direction_{client}_{sprint}.html`，模板 `keyword_direction_template.html`（版式与已测反馈脚本固定在里面，git 管版本，改版式 = 改模板发 commit，全客户下一张卡生效）。模型产出里出现任何 HTML 标签（<b>、<i> 之外）或 script，渲染器直接拒绝。
+单页 HTML，手机可读，浅色版式，一 sprint 一版只增不改。随附逐词 CSV（否词、待确认名单），正文不放长表。
 
 ## 语言铁律（每句都过）
 
@@ -34,7 +34,7 @@
 点击即自动保存，成功后按钮变实色加「已记录」。什么都不点 = 按建议执行（默认），卡上写明。
 挂起类名单（如疑似同行品牌词）做成可勾选清单加「保存勾选」按钮。最多 5 张卡。
 
-**反馈提交脚本（生成器原样嵌入，只改 data-item 值）**：token 与任务号从 URL 参数 t / k 读；POST `https://always.horntech-dev.com/seo-api.php/card_feedback`，body `{task_id,token,item,choice,text}`，choice 取 agree / hold / other / flag。纯 vanilla JS 无依赖；无 t/k 参数时按钮降级为纯展示。
+**反馈提交脚本（V4 起固定在模板里，模型碰不到）**：token 与任务号从 URL 参数 t / k 读（t=任务号，k=token）；POST `https://always.horntech-dev.com/seo-api.php/card_feedback`，body `{task_id,token,item,choice,text}`，choice 取 agree / hold / other / flag。无 t/k 参数时按钮降级为纯展示。模型只在数据 JSON 里给每张决策卡起 `item` 标识（小写字母数字下划线）。此设计源于 2026-08-31 两起参数读反事故：脚本经模型手一次就错一次，现在不经模型的手。
 
 ### 第三屏：每个词族一张小卡
 

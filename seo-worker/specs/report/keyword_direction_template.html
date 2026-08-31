@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{title}}</title>
+<style>
+:root{--bg:#f0f4f8;--surface:#fff;--surface2:#f6f9fc;--border:#e2e8f0;--primary:#0057b8;--primary-bg:#eff6ff;--green:#16a34a;--green-bg:#ecfdf5;--green-bd:#a7f3d0;--amber:#d97706;--amber-bg:#fffbeb;--amber-bd:#fcd34d;--grey:#475569;--text:#0f172a;--muted:#64748b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.75;font-size:15px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px}
+
+/* 第一屏 */
+header{background:var(--surface);border-bottom:3px solid var(--primary);padding:26px 0 24px}
+.badge{display:inline-block;padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.6px;background:var(--primary-bg);color:var(--primary);border:1px solid #bfdbfe;margin-bottom:11px}
+h1{font-size:1.42rem;font-weight:800;letter-spacing:-.3px;line-height:1.35}
+.period{font-size:13.5px;color:var(--muted);margin-top:3px}
+.oneline{margin:18px 0 20px;background:var(--primary-bg);border:1px solid #bfdbfe;border-left:5px solid var(--primary);border-radius:10px;padding:16px 20px}
+.oneline .lab{font-size:11px;font-weight:800;letter-spacing:.8px;color:var(--primary);display:block;margin-bottom:5px}
+.oneline .txt{font-size:19px;font-weight:800;color:#14396b;line-height:1.5;letter-spacing:-.2px}
+.bignums{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.bn{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:15px 16px;text-align:center}
+.bn .k{font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.3px;display:block;margin-bottom:4px}
+.bn .v{font-size:27px;font-weight:800;letter-spacing:-.8px;color:#14396b;line-height:1.2;font-variant-numeric:tabular-nums}
+.bn .u{font-size:13px;font-weight:700;color:var(--muted);margin-left:2px}
+.bn .s{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.55}
+.fineprint{margin-top:11px;font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 15px}
+.fineprint b{color:#334155}
+.fineprint p{margin-bottom:7px}
+.fineprint p:last-child{margin-bottom:0}
+.lights{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.lt{flex:1 1 150px;border-radius:9px;padding:11px 12px;line-height:1.5}
+.lt .n{display:block;font-size:13px;font-weight:800}
+.lt .st{display:block;font-size:11.5px;font-weight:700;margin-top:2px;opacity:.9}
+.lt.g{background:var(--green-bg);border:1px solid var(--green-bd);color:#065f46}
+.lt.h{background:#f1f5f9;border:1px solid #cbd5e1;color:#334155}
+.lt.a{background:var(--amber-bg);border:1px solid var(--amber-bd);color:#92400e}
+.legend{font-size:11.5px;color:var(--muted);margin-top:9px}
+
+/* 通用分节 */
+section{padding:28px 0;border-bottom:1px solid var(--border)}
+section:last-of-type{border-bottom:none}
+.shead{display:flex;align-items:center;margin-bottom:5px}
+.snum{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--primary-bg);color:var(--primary);font-size:12px;font-weight:800;margin-right:9px;flex:0 0 25px}
+h2{font-size:1.16rem;font-weight:800;letter-spacing:-.2px}
+.sdesc{color:var(--muted);font-size:13px;margin-bottom:16px;line-height:1.7}
+
+/* 决策卡 */
+.dec{background:var(--surface);border:1px solid var(--border);border-left:5px solid var(--primary);border-radius:10px;padding:17px 20px;margin-bottom:14px}
+.dec .q{font-size:15.5px;font-weight:800;line-height:1.55;margin-bottom:11px;color:#14396b}
+.dec .row{display:flex;gap:10px;margin-bottom:9px;font-size:13.5px;line-height:1.75}
+.dec .row .rl{flex:0 0 84px;font-size:11px;font-weight:800;letter-spacing:.4px;padding-top:4px}
+.dec .row.rec .rl{color:var(--green)}
+.dec .row.dl .rl{color:var(--amber)}
+.dec .row .rb{flex:1}
+.picks{margin-top:13px;border-top:1px solid var(--border);padding-top:12px}
+.picks .ph{font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px}
+.picks ul{list-style:none}
+.picks li{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px;line-height:1.6}
+.picks li:last-child{border-bottom:none}
+.picks input{margin-top:5px;width:16px;height:16px;flex:0 0 16px;accent-color:#0057b8}
+.picks .w{font-weight:700}
+.picks .m{color:var(--muted);font-size:12px}
+
+/* 反馈按钮 */
+.fb{margin-top:13px;border-top:1px solid var(--border);padding-top:12px}
+.fbrow{display:flex;gap:8px;flex-wrap:wrap}
+.fbb{font-family:inherit;font-size:13px;font-weight:700;line-height:1.4;padding:9px 15px;border-radius:8px;border:1px solid #bfdbfe;background:var(--primary-bg);color:var(--primary);cursor:pointer}
+.fbb:hover{background:#e0edff}
+.fbb.save{border-color:#cbd5e1;background:#f1f5f9;color:#334155;margin-top:10px}
+.fbb.done{background:var(--primary);border-color:var(--primary);color:#fff}
+.fbb.done.save{background:#334155;border-color:#334155;color:#fff}
+.fbb[disabled]{opacity:.65;cursor:default}
+.fbwrap{margin-top:10px;display:none}
+.fbwrap.open{display:block}
+.fbwrap textarea{width:100%;min-height:78px;font-family:inherit;font-size:13.5px;line-height:1.7;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical}
+.fbwrap textarea:focus{outline:none;border-color:#bfdbfe;background:#fff}
+.fbwrap .fbb{margin-top:8px}
+.fbmsg{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.65}
+.fbmsg.ok{color:#047857;font-weight:700}
+.fbmsg.err{color:#b45309;font-weight:700}
+.fb.off .fbb{opacity:.5;cursor:default}
+
+/* 词族小卡 */
+.fam{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:15px 18px;margin-bottom:11px}
+.fam .ft{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap}
+.fam .fn{font-size:15px;font-weight:800;line-height:1.4}
+.fam .fs{font-size:11.5px;font-weight:800;padding:2px 10px;border-radius:20px;white-space:nowrap}
+.fs.g{background:var(--green-bg);color:#047857;border:1px solid var(--green-bd)}
+.fs.h{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1}
+.fs.a{background:var(--amber-bg);color:#b45309;border:1px solid var(--amber-bd)}
+.fam .l{display:flex;gap:10px;font-size:13.5px;line-height:1.75;margin-bottom:6px}
+.fam .l .ll{flex:0 0 92px;font-size:11.5px;font-weight:800;color:var(--muted);padding-top:4px}
+.fam .l .lb{flex:1}
+details{margin-top:9px;border-top:1px solid var(--border);padding-top:9px}
+summary{font-size:12.5px;font-weight:700;color:var(--primary);cursor:pointer;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"展开 ";font-weight:400;color:var(--muted)}
+details[open] summary::before{content:"收起 "}
+details .body{font-size:12.5px;color:#475569;line-height:1.8;margin-top:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:11px 14px}
+
+/* 尾部 */
+.box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 19px;font-size:13.5px;line-height:1.85}
+.box.green{background:var(--green-bg);border-color:var(--green-bd);color:#065f46}
+.box p{margin-bottom:10px}
+.box p:last-child{margin-bottom:0}
+ol.find{list-style:none;counter-reset:f}
+ol.find li{counter-increment:f;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 17px 13px 45px;position:relative;margin-bottom:9px;font-size:13.5px;line-height:1.75}
+ol.find li::before{content:counter(f);position:absolute;left:15px;top:14px;width:21px;height:21px;border-radius:50%;background:var(--primary-bg);color:var(--primary);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.gloss{font-size:12px;color:#475569;line-height:1.85;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:12px 16px}
+.gloss dt{font-weight:800;color:#334155;display:inline}
+.gloss dd{display:inline;margin:0}
+.gloss div{margin-bottom:4px}
+.gloss div:last-child{margin-bottom:0}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:20px 0 26px;font-size:12px;color:var(--muted);line-height:1.85}
+footer b{color:#334155}
+@media(max-width:640px){
+  body{font-size:14px}
+  .wrap{padding:0 14px}
+  h1{font-size:1.2rem}
+  .oneline .txt{font-size:16.5px}
+  .bignums{grid-template-columns:1fr;gap:9px}
+  .bn{text-align:left;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .bn .k{margin-bottom:0}
+  .bn .v{font-size:23px}
+  .bn .s{flex:1 1 100%;margin-top:2px}
+  .lt{flex:1 1 100%}
+  .dec .row,.fam .l{flex-direction:column;gap:2px}
+  .dec .row .rl,.fam .l .ll{flex:none;padding-top:0}
+  .fbrow{flex-direction:column}
+  .fbb{width:100%}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">搜索广告 · 关键词方向</span>
+    <h1>{{title}}</h1>
+    <div class="period">{{period_label}}</div>
+
+    <div class="oneline">
+      <span class="lab">这一期的方向</span>
+      <span class="txt">{{oneline}}</span>
+    </div>
+
+    <div class="bignums">
+{{#bignums}}      <div class="bn">
+        <span class="k">{{k}}</span>
+        <span class="v">{{v}}{{#unit}}<span class="u"> {{unit}}</span>{{/unit}}</span>
+        <span class="s">{{s}}</span>
+      </div>
+{{/bignums}}    </div>
+
+    <div class="fineprint">
+{{#fineprint}}      <p>{{{.}}}</p>
+{{/fineprint}}    </div>
+
+    <div class="lights">
+{{#lights}}      <div class="lt {{cls}}"><span class="n">{{name}}</span><span class="st">{{state_label}}</span></div>
+{{/lights}}    </div>
+    <div class="legend">绿色是加大投入，灰色是维持现状，橙色是收缩。每一族的钱、成绩和下一步在第二节。</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="shead"><span class="snum">1</span><h2>需要您决定</h2></div>
+  <div class="sdesc">{{s1_desc}}</div>
+
+{{#decisions}}  <div class="dec">
+    <div class="q">{{q}}</div>
+    <div class="row"><span class="rl">情况</span><span class="rb">{{situation}}</span></div>
+    <div class="row rec"><span class="rl">我们的建议</span><span class="rb">{{recommendation}}</span></div>
+    <div class="row dl"><span class="rl">不回复</span><span class="rb">{{no_reply}}</span></div>
+{{#picks}}    <div class="picks">
+      <div class="ph">{{ph}}</div>
+      <ul>
+{{#entries}}        <li><label><input type="checkbox" data-kw="{{kw}}"></label><span><span class="w">{{label}}</span> <span class="m">{{note}}</span></span></li>
+{{/entries}}      </ul>
+      <button type="button" class="fbb save" data-item="{{save_item}}" data-role="flag">保存勾选</button>
+      <div class="fbmsg" data-role="msg-flag"></div>
+    </div>
+{{/picks}}    <div class="fb" data-item="{{item}}">
+      <div class="fbrow">
+        <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+        <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+        <button type="button" class="fbb" data-role="toggle">其他反馈</button>
+      </div>
+      <div class="fbwrap" data-role="wrap">
+        <textarea placeholder="{{textarea_hint}}"></textarea>
+        <button type="button" class="fbb" data-role="submit">提交反馈</button>
+      </div>
+      <div class="fbmsg" data-role="msg"></div>
+    </div>
+  </div>
+
+{{/decisions}}</section>
+
+<section>
+  <div class="shead"><span class="snum">2</span><h2>每一族搜索的成绩单</h2></div>
+  <div class="sdesc">{{s2_desc}}</div>
+
+{{#families}}  <div class="fam">
+    <div class="ft"><span class="fn">{{name}}</span><span class="fs {{cls}}">{{state_label}}</span></div>
+    <div class="l"><span class="ll">花了多少</span><span class="lb">{{spent}}</span></div>
+    <div class="l"><span class="ll">换来什么</span><span class="lb">{{got}}</span></div>
+    <div class="l"><span class="ll">接下来</span><span class="lb">{{next}}</span></div>
+    <details><summary>查看依据</summary><div class="body">{{evidence}}</div></details>
+  </div>
+
+{{/families}}</section>
+
+<section>
+  <div class="shead"><span class="snum">3</span><h2>本期挡掉哪些花冤枉钱的搜索</h2></div>
+  <div class="box">
+{{#negatives}}    <p>{{{.}}}</p>
+{{/negatives}}  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">4</span><h2>{{findings_title}}</h2></div>
+  <ol class="find">
+{{#findings}}    <li>{{{.}}}</li>
+{{/findings}}  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">5</span><h2>上期确认记录</h2></div>
+  <div class="box">
+{{#confirm}}    <p>{{{.}}}</p>
+{{/confirm}}  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">6</span><h2>名词解释</h2></div>
+  <div class="gloss">
+{{#glossary}}    <div><dt>{{term}}</dt><dd>：{{def}}</dd></div>
+{{/glossary}}  </div>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <b>{{title}}</b>，{{period_label}}。<br>
+    {{window_line}}<br>
+    {{attach_line}}
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var API = 'https://always.horntech-dev.com/seo-api.php/card_feedback';
+  var params = new URLSearchParams(window.location.search);
+  var taskId = parseInt(params.get('t'), 10);
+  var token = params.get('k');
+  var live = !!(token && taskId);
+
+  function msgEl(scope, role) { return scope.querySelector('[data-role="' + role + '"]'); }
+
+  if (!live) {
+    Array.prototype.forEach.call(document.querySelectorAll('.fb, .picks'), function (n) {
+      n.classList.add('off');
+      Array.prototype.forEach.call(n.querySelectorAll('.fbb'), function (b) { b.disabled = true; });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.fbmsg'), function (m) {
+      m.textContent = '当前是预览模式，按钮不能提交。请用我们发给您的那条链接打开本页，按钮就能用了。';
+    });
+    return;
+  }
+
+  function post(item, choice, text) {
+    return fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, token: token, item: item, choice: choice, text: text || '' })
+    }).then(function (res) {
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+      return true;
+    });
+  }
+
+  function stamp() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + ' 年 ' + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fb'), function (group) {
+    var item = group.getAttribute('data-item');
+    var msg = msgEl(group, 'msg');
+    var wrap = msgEl(group, 'wrap');
+    var toggle = msgEl(group, 'toggle');
+    var submit = msgEl(group, 'submit');
+    var buttons = group.querySelectorAll('.fbb[data-choice]');
+
+    function lock(active, label) {
+      Array.prototype.forEach.call(group.querySelectorAll('.fbb'), function (b) { b.classList.remove('done'); });
+      if (active) { active.classList.add('done'); }
+      msg.className = 'fbmsg ok';
+      msg.textContent = '已记录：' + label + '（' + stamp() + '）。想改主意就再点一次，以最后一次为准。';
+    }
+
+    function fire(btn, choice, text, label) {
+      btn.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在保存……';
+      post(item, choice, text).then(function () {
+        btn.disabled = false;
+        lock(btn, label);
+      }).catch(function () {
+        btn.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没保存成功，请过一会儿再点一次，或者直接回复邮件告诉我们。';
+      });
+    }
+
+    Array.prototype.forEach.call(buttons, function (btn) {
+      btn.addEventListener('click', function () {
+        fire(btn, btn.getAttribute('data-choice'), '', btn.textContent.trim());
+      });
+    });
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        wrap.classList.toggle('open');
+        if (wrap.classList.contains('open')) { wrap.querySelector('textarea').focus(); }
+      });
+    }
+
+    if (submit) {
+      submit.addEventListener('click', function () {
+        var box = wrap.querySelector('textarea');
+        var text = box.value.trim();
+        if (!text) {
+          fire(submit, 'hold', '', '保持不变，继续观察');
+          return;
+        }
+        fire(submit, 'other', text, '您的反馈已收到');
+      });
+    }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fbb[data-role="flag"]'), function (btn) {
+    var scope = btn.closest('.picks');
+    var msg = msgEl(scope, 'msg-flag');
+    btn.addEventListener('click', function () {
+      var picked = [];
+      Array.prototype.forEach.call(scope.querySelectorAll('input[type="checkbox"]'), function (cb) {
+        if (cb.checked) { picked.push(cb.getAttribute('data-kw')); }
+      });
+      btn.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在保存……';
+      post(btn.getAttribute('data-item'), 'flag', picked.join(', ')).then(function () {
+        btn.disabled = false;
+        btn.classList.add('done');
+        msg.className = 'fbmsg ok';
+        msg.textContent = picked.length
+          ? '已记录：您勾了 ' + picked.length + ' 个词（' + stamp() + '）。改了勾选再点一次保存，以最后一次为准。'
+          : '已记录：一个都不挡（' + stamp() + '）。改了勾选再点一次保存，以最后一次为准。';
+      }).catch(function () {
+        btn.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没保存成功，请过一会儿再点一次，或者直接回复邮件告诉我们。';
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
