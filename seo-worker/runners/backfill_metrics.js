@@ -143,11 +143,6 @@ async function run(ctx) {
 
   // 越界的行一律丢掉。理论上不会有，真出现了说明上游给了窗口外的日期，
   // 与其写进去污染时序，不如丢掉并记一句。
-  const inRange = rows.filter((r) => r.d >= win.start && r.d <= win.end);
-  if (inRange.length !== rows.length) {
-    log('丢弃 ' + (rows.length - inRange.length) + ' 行窗口外数据');
-  }
-
   if (wanted.indexOf('ads') !== -1) {
     const adsCid = String(profile.ads_customer_id || '').replace(/-/g, '');
     if (!adsCid) {
@@ -162,6 +157,11 @@ async function run(ctx) {
         errors.push('ads daily: ' + e.message);
       }
     }
+  }
+
+  const inRange = rows.filter((r) => r.d >= win.start && r.d <= win.end);
+  if (inRange.length !== rows.length) {
+    log('丢弃 ' + (rows.length - inRange.length) + ' 行窗口外数据');
   }
 
   const written = await metrics.postMetricRows(api, job.client_id, inRange, log);
