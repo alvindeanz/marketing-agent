@@ -319,7 +319,14 @@ function lintPlan(text) {
   }
   // 5. 涉及文件清单（全文找，可能写在第 2 节末尾或末尾 json）
   if (!/涉及文件/.test(t) && !/"files"\s*:/.test(t)) problems.push('方案没有列「涉及文件」清单，apply 无法和 changeset 比对');
-  // 6. 放行卡超长或夹带代码：人读的那一节退化成论文
+  // 6. 选择题必须收敛（review_principles：你来选，不许原样递给人）。
+  //    合法例外只有客户独有信息，写法必须是「等客户：xxx」；出现开放式「需要人定/你来定」直接打回。
+  {
+    const openQ = /(需要人定|请人工(决定|判断|拍板)|你来定|由人(决定|判断)|请团队(决定|定))/;
+    const hitLine = t.split('\n').find((l) => openQ.test(l) && !/等客户|客户独有|客户点头|客户确认/.test(l));
+    if (hitLine) problems.push('方案把选择题递给了人（' + hitLine.trim().slice(0, 60) + '）。按判定原则自己选并给理由；只有客户独有信息可以留，写成「等客户：要什么信息」');
+  }
+  // 7. 放行卡超长或夹带代码：人读的那一节退化成论文
   return problems.concat(lintReleaseCard(t));
 }
 

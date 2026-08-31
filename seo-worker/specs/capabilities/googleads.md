@@ -6,19 +6,21 @@
 
 ## 操作集与自主权限
 
+risk_class 是放行分级的输入（见 ../release_policy.md）：reversible 的 prepare 任务闸A 复审过即自动放行，其余人点。
+
 ### agent_apply（机器可直接执行，apply 阶段落地并回读）
-- negative-keyword-add：加否词（关键词级 / 共享否词表）。否词不放竞品牌名，除非客户点名。
-- ad-pause / adgroup-pause：暂停单条 ad 或单个 ad group。
-- keyword-bid-adjust：单关键词出价调整，幅度 ±20% 以内。
-- schedule-adjust：投放时段调整。
+- negative-keyword-add [risk_class: reversible]：加否词（关键词级 / 共享否词表）。否词不放竞品牌名，除非客户点名。
+- ad-pause / adgroup-pause [risk_class: reversible]：暂停单条 ad 或单个 ad group。
+- keyword-bid-adjust [risk_class: reversible]：单关键词出价调整，幅度 ±20% 以内。
+- schedule-adjust [risk_class: reversible]：投放时段调整。
 
 ### agent_prepare（只出方案，放行卡确认后执行）
-- budget-change：预算变动超当前日预算 20%。
-- campaign-pause：暂停整个 enabled campaign。
-- bidding-strategy-change：改出价策略。
-- campaign-create / adgroup-create / asset-create：新建任何东西。
-- ad-copy-rewrite：改 ad copy（文案是对外资产，走放行）。
-- conversion-goal-change：转化目标与权重调整。
+- budget-change [risk_class: spend]：预算变动超当前日预算 20%。
+- campaign-pause [risk_class: spend]：暂停整个 enabled campaign。
+- bidding-strategy-change [risk_class: spend]：改出价策略。
+- campaign-create / adgroup-create / asset-create [risk_class: spend]：新建任何东西。
+- ad-copy-rewrite [risk_class: external]：改 ad copy（文案是对外资产，走放行）。
+- conversion-goal-change [risk_class: irreversible]：转化目标与权重调整。
 
 ### human_only
 - 账单与 payments profile、账户级设置、账户开通与关停。

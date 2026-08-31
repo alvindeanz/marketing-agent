@@ -1,0 +1,41 @@
+{
+  "_doc": "放行分级政策（Alvin 拥有，Aira 起草）。risk_class 定义在各渠道能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行，deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
+  "version": 1,
+  "tiers": {
+    "reversible": "L0",
+    "spend": "L2",
+    "irreversible": "L2",
+    "external": "L2"
+  },
+  "l0_rules": {
+    "_doc": "L0 = 闸A 复审判 do 后自动放行，人月度抽查。任务必须满足：全部 ops 的 risk_class 都是 reversible；非博客（对外发布是 external）；非分析任务（验收要人看）。任一不满足走 L2 人点。",
+    "auto_release": true,
+    "audit": "monthly-sample"
+  },
+  "risk_class_by_op": {
+    "_doc": "op 到 risk_class 的映射。语义上这属于各渠道能力清单（清单里同步标注），此文件是服务端执行用的机器可读版，两处由 tests/specs.test.js 断言一致。",
+    "page-meta-update": "reversible",
+    "content-edit": "reversible",
+    "rewrite-page": "reversible",
+    "redirect-batch": "irreversible",
+    "gbp-update": "external",
+    "blog-draft": "external",
+    "image-generate": "reversible",
+    "negative-keyword-add": "reversible",
+    "ad-pause": "reversible",
+    "adgroup-pause": "reversible",
+    "keyword-bid-adjust": "reversible",
+    "schedule-adjust": "reversible",
+    "budget-change": "spend",
+    "campaign-pause": "spend",
+    "bidding-strategy-change": "spend",
+    "campaign-create": "spend",
+    "adgroup-create": "spend",
+    "asset-create": "spend",
+    "ad-copy-rewrite": "external",
+    "conversion-goal-change": "irreversible",
+    "gsc-audit": "reversible",
+    "ga4-audit": "reversible",
+    "ga4-config-update": "irreversible"
+  }
+}

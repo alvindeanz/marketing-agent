@@ -3774,8 +3774,35 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         ]);
         if($up->rowCount()>0)$written++;else $refused[]="row $n: task $tid not found for client";
     }
-    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
-    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused]);
+    /* 放行分级 L0（specs/release_policy.json，deploy.sh api 同机部署）：
+       待放行任务复审判 do，且全部 ops 的 risk_class 均为 reversible、非博客非分析，自动排 apply。
+       政策文件缺失或 op 不在表里一律按 L2 处理（默认从严）。2026-08-31 Alvin 拍板。 */
+    $auto=[];
+    $pol=@json_decode(@file_get_contents(__DIR__.'/release_policy.json'),true);
+    $rc=is_array($pol)&&isset($pol['risk_class_by_op'])?$pol['risk_class_by_op']:null;
+    $l0on=$rc&&!empty($pol['l0_rules']['auto_release']);
+    if($l0on)foreach($rows as $v){
+        if(!is_array($v)||(string)($v['verdict']??'')!=='do')continue;
+        $tid=(int)($v['task_id']??0);
+        if(!$tid)continue;
+        $tq=db()->prepare("SELECT * FROM seo_tasks WHERE id=? AND client_id=?");
+        $tq->execute([$tid,$cid]);
+        $t=$tq->fetch();
+        if(!$t||$t['status']!=='review')continue;
+        if(analysis_task($t)||blog_outline_stage($t))continue;
+        $ops=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
+        if(!$ops)continue; /* 无 ops 的任务说不清风险，走人 */
+        $allRev=true;
+        foreach($ops as $op){ if(($rc[$op]??'')!=='reversible'){$allRev=false;break;} }
+        if(!$allRev)continue;
+        list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],'release-policy-l0','seo_tasks_release');
+        if($aj){
+            task_append_note($tid,'[auto-release L0] 复审判 do 且全部操作可回滚，按放行政策自动放行（apply job '.$aj[0].'），月度抽查');
+            $auto[]=['task_id'=>$tid,'job_id'=>$aj[0]];
+        }
+    }
+    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
+    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto]);
 }
 
 // POST /tasks/{id}/review_override body { verdict, note } -> 人推翻 fable 的判决，理由必填。

@@ -97,10 +97,11 @@ api)
   echo "[1/3] 上传到 250:/tmp 并远端 php -l"
   sshpass -p "$BT_PASS" scp -o StrictHostKeyChecking=no seo-api.php "$BT:/tmp/seo-api.php.new"
   sshpass -p "$BT_PASS" scp -o StrictHostKeyChecking=no static/seo-agent.html "$BT:/tmp/seo-agent.html.new"
+  sshpass -p "$BT_PASS" scp -o StrictHostKeyChecking=no seo-worker/specs/release_policy.json "$BT:/tmp/release_policy.json.new"
   "${SSH_BT[@]}" "php -l /tmp/seo-api.php.new" || { echo "php -l 失败，线上未动"; exit 1; }
   echo "[2/3] 备份并落位"
   "${SSH_BT[@]}" "cp $BT_DIR/seo-api.php $BT_DIR/seo-api.php.bak-$TS && cp $BT_DIR/seo-agent.html $BT_DIR/seo-agent.html.bak-$TS \
-    && mv /tmp/seo-api.php.new $BT_DIR/seo-api.php && mv /tmp/seo-agent.html.new $BT_DIR/seo-agent.html"
+    && mv /tmp/seo-api.php.new $BT_DIR/seo-api.php && mv /tmp/seo-agent.html.new $BT_DIR/seo-agent.html && mv /tmp/release_policy.json.new $BT_DIR/release_policy.json"
   echo "[3/3] 哈希比对 + DEPLOYED 记录"
   for f in seo-api.php static/seo-agent.html; do
     L=$(md5 -q "$f" 2>/dev/null || md5sum "$f" | cut -d' ' -f1)

@@ -19,6 +19,7 @@ const argv = process.argv.slice(2);
 const cid = parseInt(argv[0], 10);
 const DRY = argv.includes('--dry');
 const NO_TODO = argv.includes('--no-todo');
+const IDS = (() => { const i = argv.indexOf('--ids'); return i === -1 ? null : String(argv[i + 1] || '').split(',').map((x) => parseInt(x, 10)).filter(Boolean); })();
 const POLL_MS = 45000;
 const BUDGET_MS = 3 * 60 * 60 * 1000;
 if (!cid || !TOKEN) { console.error('用法：SEO_AGENT_TOKEN=... node tools/harness.js <client_id> [--dry] [--no-todo]'); process.exit(2); }
@@ -51,11 +52,13 @@ async function main() {
   const bc = await boardClient();
   if (!bc) throw new Error('board 上没有 client ' + cid);
   const sprint = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
-  log(`${bc.name}（${cid}）本期 ${sprint}`);
+  log(`${bc.name}（${cid}）本期 ${sprint}` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
+  /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id */
+  const inScope = (t) => (IDS ? IDS.includes(t.id) : t.sprint === sprint);
 
   // 0.5 本期还没有判决的任务（含 later 自动挪期后清了判决的）先排一轮闸A，判完再拍板。
   let all = await tasks();
-  const noVerdict = all.filter((t) => t.sprint === sprint && t.status === 'proposed'
+  const noVerdict = all.filter((t) => inScope(t) && t.status === 'proposed'
     && !t.review_effective && !t.review_pending && !(t.job_state && t.job_state.status)).map((t) => t.id);
   if (noVerdict.length && !DRY) {
     const r = await call('POST', '/tasks/review', { client_id: cid, task_ids: noVerdict.slice(0, 20) });
@@ -71,7 +74,7 @@ async function main() {
   }
 
   // 1. 拍板：本期、有判决、未过期、还没动过的
-  const verdictIds = all.filter((t) => t.sprint === sprint && ['proposed', 'approved', 'blocked'].includes(t.status)
+  const verdictIds = all.filter((t) => inScope(t) && ['proposed', 'approved', 'blocked'].includes(t.status)
     && t.review_effective && !t.review_stale && !t.review_pending && !(t.job_state && t.job_state.status)
     && !(t.status === 'approved' && t.owner_type !== 'agent')).map((t) => t.id);
   if (verdictIds.length) {
@@ -89,7 +92,7 @@ async function main() {
   for (;;) {
     await sleep(POLL_MS);
     all = await tasks();
-    const mine = all.filter((t) => t.sprint === sprint);
+    const mine = all.filter(inScope);
     const running = mine.filter((t) => t.human_state === 'running');
     const lintFailed = mine.filter((t) => t.human_state === 'wait_me' && /lint 未过/.test(t.fail_reason || '') && !retried[t.id]);
     for (const t of lintFailed) {
@@ -102,10 +105,16 @@ async function main() {
     if (Date.now() - t0 > BUDGET_MS) { log('超过 3 小时预算，先收口'); break; }
   }
   await report(await tasks(), sprint, retried);
+  /* 收尾：把人推翻的判决与打回的方案抓进经验层，零 LLM */
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('node', [require('path').join(__dirname, 'experience_sync.js'), String(cid)], { env: process.env, timeout: 120000 }).toString().trim();
+    log('experience_sync：' + out.split('\n')[0]);
+  } catch (e) { log('experience_sync 失败（不影响本次）：' + String(e.message).slice(0, 120)); }
 }
 
 async function report(all, sprint, retried) {
-  const mine = all.filter((t) => t.sprint === sprint);
+  const mine = all.filter((t) => (IDS ? IDS.includes(t.id) : t.sprint === sprint));
   const blockers = [];
   const ready = [];
   for (const t of mine) {
