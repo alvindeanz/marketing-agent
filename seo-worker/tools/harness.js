@@ -53,8 +53,24 @@ async function main() {
   const sprint = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
   log(`${bc.name}（${cid}）本期 ${sprint}`);
 
-  // 1. 拍板：本期、有判决、未过期、还没动过的
+  // 0.5 本期还没有判决的任务（含 later 自动挪期后清了判决的）先排一轮闸A，判完再拍板。
   let all = await tasks();
+  const noVerdict = all.filter((t) => t.sprint === sprint && t.status === 'proposed'
+    && !t.review_effective && !t.review_pending && !(t.job_state && t.job_state.status)).map((t) => t.id);
+  if (noVerdict.length && !DRY) {
+    const r = await call('POST', '/tasks/review', { client_id: cid, task_ids: noVerdict.slice(0, 20) });
+    log('本期 ' + noVerdict.length + ' 条无判决，已排闸A（job ' + (r.job_id || '?') + '），等判定');
+    const t1 = Date.now();
+    for (;;) {
+      await sleep(20000);
+      all = await tasks();
+      const pending = all.filter((t) => noVerdict.includes(t.id) && !t.review_effective);
+      if (!pending.length) break;
+      if (Date.now() - t1 > 15 * 60 * 1000) { log('判定超 15 分钟未齐，先拍已有判决的'); break; }
+    }
+  }
+
+  // 1. 拍板：本期、有判决、未过期、还没动过的
   const verdictIds = all.filter((t) => t.sprint === sprint && ['proposed', 'approved', 'blocked'].includes(t.status)
     && t.review_effective && !t.review_stale && !t.review_pending && !(t.job_state && t.job_state.status)
     && !(t.status === 'approved' && t.owner_type !== 'agent')).map((t) => t.id);

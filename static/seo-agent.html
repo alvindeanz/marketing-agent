@@ -509,6 +509,10 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn" id="sc_current" onclick="setSprintScope('current')">本期</button>
             <button class="btn ghost" id="sc_near" onclick="setSprintScope('near')">30 天</button>
             <button class="btn ghost" id="sc_all" onclick="setSprintScope('all')">全部</button>
+            <span class="tb-sep"></span>
+            <button class="btn" id="ct_all" onclick="setCatScope('all')">全部类目</button>
+            <button class="btn ghost" id="ct_seo" onclick="setCatScope('seo')">SEO</button>
+            <button class="btn ghost" id="ct_paid" onclick="setCatScope('paid')">Paid</button>
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
               <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
@@ -754,6 +758,10 @@ let fbImgs={},fbUploading={},fbBlobs={},fbBlobBusy={};
 let blogSocial={};
 /* 任务视图筛选：默认藏起已完成，时间窗默认全部。只存内存，刷新即重置 */
 let showDone=false,taskDays=0,sprintScope='current';
+/* 类目切换：paid = module 为 paid 的任务，其余算 SEO。渠道不参与分类（W10：渠道只是执行地点）。 */
+let catScope='all';
+function taskCat(t){return String((t&&t.module)||'')==='paid'?'paid':'seo'}
+function setCatScope(v){catScope=v;renderLanes()}
 let lastOverview=null,lastAttention=null,excOpen={};
 let apprPlanId=0,apprTasks=[],apprPick={};
 /* 决策收件箱：全局跨客户流，客户过滤只是个筛子。裁决草稿按卡片 id 存内存，
@@ -3110,7 +3118,7 @@ function renderLanes(){
   let laterTotal=0,doneHiddenTotal=0;
   const laneHtml=[];const hiddenNames=[];
   LANES.forEach(lane=>{
-    const rows=tasksData.filter(t=>t.owner_type===lane.key);
+    const rows=tasksData.filter(t=>t.owner_type===lane.key&&(catScope==='all'||taskCat(t)===catScope));
     const afterDone=rows.filter(taskVisible);
     const vis=afterDone.filter(t=>withinScope(t,cur))
       .sort((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id));
@@ -3145,6 +3153,10 @@ function renderLanes(){
   ['current','near','all'].forEach(k=>{
     const b=document.getElementById('sc_'+k);
     if(b)b.className=(sprintScope===k)?'btn':'btn ghost';
+  });
+  ['all','seo','paid'].forEach(k=>{
+    const b=document.getElementById('ct_'+k);
+    if(b)b.className=(catScope===k)?'btn':'btn ghost';
   });
   const hint=document.getElementById('taskFilterHint');
   if(hint){

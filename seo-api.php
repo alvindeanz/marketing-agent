@@ -3948,8 +3948,20 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
             $done['drop']++;continue;
         }
         if($eff==='later'){
-            db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
-            task_append_note($tid,'[later] 判定延后：'.$why);
+            /* 2026-08-31 Alvin 定：判 later 的未开工任务自动挪到下一个 sprint，不留人工介入。
+               判决一并清空，到期由 harness 重新排判定（那时 facts 已更新，旧判决本来也过期）。 */
+            $sm=[];$moved=false;
+            if(preg_match('/^S(\d)$/i',trim((string)$t['sprint']),$sm)){
+                $next='S'.min((int)$sm[1]+1,9);
+                db()->prepare("UPDATE seo_tasks SET sprint=?,status='proposed',review_verdict=NULL,review_reason=NULL,review_evidence=NULL,review_adjust=NULL,review_merge_into=NULL,review_job_id=NULL,reviewed_at=NULL,review_text_hash=NULL,review_override=NULL,review_override_note=NULL WHERE id=?")
+                    ->execute([$next,$tid]);
+                task_append_note($tid,'[later] 判定延后，自动挪到 '.$next.'，到期重判：'.$why);
+                $moved=true;
+            }
+            if(!$moved){
+                db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
+                task_append_note($tid,'[later] 判定延后：'.$why);
+            }
             $done['later']++;continue;
         }
         if($eff==='merge'){
