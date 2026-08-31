@@ -3472,18 +3472,27 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     if($wd!==''&&!preg_match('/^[a-z0-9._-]{1,64}$/',$wd))res(400,['error'=>'workspace_dir 只允许小写字母数字和 . _ -']);
     $sdb=trim($vals['semrush_db']);
     if($sdb!==''&&!preg_match('/^[a-z]{2,8}$/',$sdb))res(400,['error'=>'semrush_db 应为 nz / au / us 这类小写库代号']);
-    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,semrush_db,workspace_dir,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    /* W8 批 0 的三列。services: seo=只做自然, sem/paid=只做投放, both=都做; 空串=还没定性(老客户默认按 seo 处理)。 */
+    $svc=trim($vals['services']);
+    if($svc!==''&&!in_array($svc,['seo','sem','paid','both'],true))res(400,['error'=>'services 取 seo / sem / paid / both']);
+    $acid=str_replace('-','',trim($vals['ads_customer_id']));
+    if($acid!==''&&!preg_match('/^\d{10}$/',$acid))res(400,['error'=>'ads_customer_id 应为 10 位数字（可带横杠）']);
+    $own=trim($vals['owner']);
+    if($own!==''&&!preg_match('/^[a-z0-9._-]{1,32}$/',$own))res(400,['error'=>'owner 只允许小写字母数字和 . _ -']);
+    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,semrush_db,workspace_dir,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang,services,ads_customer_id,owner)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON DUPLICATE KEY UPDATE platform=VALUES(platform),domain=VALUES(domain),ga4_property=VALUES(ga4_property),
             gsc_property=VALUES(gsc_property),semrush_project=VALUES(semrush_project),
             semrush_db=VALUES(semrush_db),workspace_dir=VALUES(workspace_dir),target_keywords=VALUES(target_keywords),
             brand_regex=VALUES(brand_regex),
             business_goals=VALUES(business_goals),conversion_goals=VALUES(conversion_goals),notes=VALUES(notes),
-            status=VALUES(status),report_lang=VALUES(report_lang)";
+            status=VALUES(status),report_lang=VALUES(report_lang),
+            services=VALUES(services),ads_customer_id=VALUES(ads_customer_id),owner=VALUES(owner)";
     db()->prepare($sql)->execute([
         $cid,$vals['platform'],$vals['domain'],$vals['ga4_property'],$vals['gsc_property'],
         $vals['semrush_project'],$sdb,$wd,$kwJson,$vals['brand_regex'],
-        $vals['business_goals'],$vals['conversion_goals'],$vals['notes'],$st,$lang
+        $vals['business_goals'],$vals['conversion_goals'],$vals['notes'],$st,$lang,
+        $svc,$acid,$own
     ]);
     audit($u['username'],'seo_profile_save',(string)$cid,['domain'=>$vals['domain'],'status'=>$st,'report_lang'=>$lang]);
     res(200,['ok'=>true]);
