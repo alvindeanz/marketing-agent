@@ -3793,7 +3793,8 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $ops=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
         if(!$ops)continue; /* 无 ops 的任务说不清风险，走人 */
         $allRev=true;
-        foreach($ops as $op){ if(($rc[$op]??'')!=='reversible'){$allRev=false;break;} }
+        $excl=isset($pol['l0_rules']['l0_exclude_ops']['ops'])&&is_array($pol['l0_rules']['l0_exclude_ops']['ops'])?$pol['l0_rules']['l0_exclude_ops']['ops']:[];
+        foreach($ops as $op){ if(($rc[$op]??'')!=='reversible'||in_array($op,$excl,true)){$allRev=false;break;} }
         if(!$allRev)continue;
         list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],'release-policy-l0','seo_tasks_release');
         if($aj){

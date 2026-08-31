@@ -36,6 +36,26 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | gbp-update | agent_prepare | GBP 资料修改、类目、发帖、问答维护 |
 <!-- PLANNING_VIEW_END -->
 
+<!-- RISK_CLASS_START：放行分级输入（见 ../release_policy.md），与 release_policy.json 一致由 specs 测试断言 -->
+## risk_class（放行分级）
+
+- page-meta-update: reversible
+- content-edit: reversible
+- page-rewrite: reversible（L0 排除：整页覆盖影响面大）
+- page-rebuild: reversible（L0 排除）
+- redirect-batch: reversible
+- blog-draft: external
+- blog-publish: external
+- image-generate: reversible
+- styles-fragment: reversible（L0 排除：全站样式）
+- gtm-edit: reversible（L0 排除：追踪链路）
+- ga4-config-update: irreversible
+- gbp-update: external
+- gsc-audit: reversible
+- ga4-audit: reversible
+<!-- RISK_CLASS_END -->
+
+
 规划阶段只读上面这张表。下面的细节只给 execute 和 apply 阶段。
 
 ## 全局风险注记，写死不可绕过
