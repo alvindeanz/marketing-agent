@@ -26,6 +26,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 干了什么：#94 六步全过、线上已生效，却因 changeset 里上传接口生成的 assets/<ts>-<rand>-xxx.jpg 不等于方案声明的 assets/*-xxx.jpg 被判失败。`compareFiles` 现支持 `*`（单段，不跨 /），apply 单测加一条。#94 按落地态人工收单未重跑。另：`analysis_task()` 把 ops 全为只读审计（ga4-audit / gsc-audit）的任务视为分析任务，放行即验收，不再排 apply（#95 曾被误排，job 172 已作废）。Apollo（8）与 Ben's NZ（45）用新工具 `tools/import_package.js` 与 `tools/onboard_chain.js` 全量导入并跑完 pull_data 到 plan，各出 plan draft 11 与 12 条。
 - 坑：闸门「精确路径」对平台起名的产物天然误杀，方案作者写通配是对的，闸门要跟上。
 
+### 2026-08-31 AIRA (ak) 登记：W11 第一批落地（放行分级 L0 / 选择题 lint / harness 升级）
+
+- 干了什么：specs/release_policy.json（服务端执行权威，deploy.sh api 随 seo-api.php 部署到 250）+ release_policy.md（文档）+ googleads.md 每 op 标 risk_class，三处一致由 tests/specs.test.js 断言。seo-api 的 /tasks/review_result 落判决后跑 L0 自动放行：待放行任务复审判 do 且全部 ops reversible、非博客非分析 → 自动排 apply_task，note 记 [auto-release L0]，audit 带 auto_release 清单；政策缺失或 op 未登记默认 L2。execute_task 的 lintPlan 加「选择题必须收敛」规则（开放式「需要人定」打回，客户独有信息写「等客户：」）。harness 加 --ids（跨 sprint 指定任务）与收尾自动 experience_sync。
+- 坑：L0 判定读的是 250 本机的 release_policy.json，改政策必须走 deploy.sh api，直接改仓库不部署等于没改（DEPLOYED 漂移检测会报）。
+
 ### 2026-08-31 AIRA (aj) 登记：W8 批 3 两单方案交付（Ben's AU paid），转化口径定案
 
 - 干了什么：Alvin 定转化口径（Primary 只留 Quote Submit 与 Calls from ads；WFQL 是 gclid OCI 回传不记录；本地动作与 Store visits 全 Secondary），落 fact ads.google.conversion_scope 与客户 CLAUDE.md Paid 段。#143 转化口径整理方案（13 条改动：6 动作降 Secondary + 7 条 campaign 级 goal；官方转化 170→84 属口径修正；执行脚本备好 dry-run 过，放行后人工 --apply）与 #144 否词方案（87 天窗口实测，新增 11 条零误伤否词月省约 A$24；账户否词卫生本来就好，大钱在 PMax 品牌流量约 A$574/月，列成需客户决策两步方案）都到待放行。module 加 paid（api 三处 + plan.js）。任务视图删掉未来 sprint 折叠行，视野只认 本期/30天/全部 三档。
