@@ -258,7 +258,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .appr-item .t{flex:1;min-width:0;font-size:12.5px;color:#cbd5e1;word-break:break-word}
 
 /* Swimlanes */
-.lanes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start}
+.lanes{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:12px;align-items:start}
 .lane.wait_me{border-color:#78350f}.lane.wait_me .lane-head{background:#1a1408}
 .st{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px;margin-top:5px;color:#94a3b8}
 .st .st-tag{font-weight:700;padding:1px 8px;border-radius:5px;font-size:11px}
@@ -516,7 +516,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
               <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
-              <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="Agency 与 Client 泳道常年为空，隐藏后 Agent 泳道撑满宽度">隐藏空泳道</button>
+              <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="人工泳道常年为空时隐藏，Agent 泳道撑满宽度">隐藏空泳道</button>
               <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
                 <option value="0">全部时间</option>
                 <option value="7">近 7 天</option>
@@ -734,7 +734,8 @@ const API='/seo-api.php';
 const PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','brand_regex','business_goals','conversion_goals','notes'];
 const TASK_STATUSES=['proposed','approved','in_progress','review','blocked','done'];
 const OWNERS=['agency','client','agent'];
-const LANES=[{key:'agency',name:'Agency 团队'},{key:'client',name:'Client 客户'},{key:'agent',name:'Agent 机器'}];
+/* 2026-08-31 Alvin 定：agency 与 client 合并为「人工」泳道（联系客户也是我们人工介入）。数据层 owner_type 三分不变，只在展示层合并。 */
+const LANES=[{key:'human',name:'人工',keys:['agency','client']},{key:'agent',name:'Agent 机器',keys:['agent']}];
 const JOB_LABEL={discover:'摸底',pull_data:'拉数据',backfill_metrics:'回填历史数据',plan:'规划方案',execute_task:'执行任务',apply_task:'落地改动',report:'生成报告',feedback:'解析反馈',triage:'Fable 巡检',review_plan:'Fable 判定'};
 const FB_SOURCE_LABEL={manual:'团队判断',client:'客户原话'};
 const FB_STATUS={pending:{cls:'queued',name:'待解析'},parsed:{cls:'done',name:'已解析'},failed:{cls:'failed',name:'解析失败'}};
@@ -3118,14 +3119,14 @@ function renderLanes(){
   let laterTotal=0,doneHiddenTotal=0;
   const laneHtml=[];const hiddenNames=[];
   LANES.forEach(lane=>{
-    const rows=tasksData.filter(t=>t.owner_type===lane.key&&(catScope==='all'||taskCat(t)===catScope));
+    const rows=tasksData.filter(t=>lane.keys.indexOf(t.owner_type)!==-1&&(catScope==='all'||taskCat(t)===catScope));
     const afterDone=rows.filter(taskVisible);
     const vis=afterDone.filter(t=>withinScope(t,cur))
       .sort((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id));
     const later=afterDone.length-vis.length;
     const doneHidden=rows.length-afterDone.length;
     laterTotal+=later;doneHiddenTotal+=doneHidden;
-    let body=vis.map(t=>taskCard(t,lane.key)).join('');
+    let body=vis.map(t=>taskCard(t,t.owner_type)).join('');
     if(!body)body='<div class="lane-empty">'+(later?'本期没有任务。':(doneHidden?'只有已结束任务，已按当前筛选隐藏。':'暂无任务。'))+'</div>';
     const waitMe=vis.filter(t=>hsOf(t)==='wait_me').length;
     const html='<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
@@ -3133,7 +3134,7 @@ function renderLanes(){
       (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' 已结束)</span>':'')+
 
       '</span></div><div class="lane-body">'+body+'</div></div>';
-    const empty=!vis.length&&!later;
+    const empty=!vis.length; /* 只看本视图可见的卡；未来任务本来就不显示，不算数（2026-08-31 Agency 空泳道藏不掉的修复） */
     if(hideEmptyLanes&&empty)hiddenNames.push(lane.name);
     else laneHtml.push(html);
   });
