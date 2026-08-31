@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-08-31 AIRA (am) 登记：关键词方向卡模板化 V4 落地（commit b18fbb0），Louvresky 卡已用新模板重出
+
+- 干了什么：Alvin 拍板 Ben's AU S1 版式定为模板。specs/report/ 新增三件：keyword_direction_template.html（版式与已测反馈脚本固定其中）、keyword_direction_data.schema.json（模型产出契约）、render_keyword_direction.js（零 LLM 渲染器，含槽位硬校验、HTML 白名单转义、script 与内部术语拒绝）。spec 升 V4：模型只产数据 JSON 不写 HTML。Louvresky S1 卡已按新链路重出（数据 JSON 在客户工作区 reports/，同名 HTML 覆盖发布），playwright 真点验证三选与勾选双通道 200 落库，测试行已清。node tests 全绿。
+- 坑：同日两起「模型重写反馈脚本参数读反」事故的根治项。旧 execute 产线让模型裸写整页 HTML，文字约束拦不住；模板化后脚本不经模型的手，此 bug 类别消失。
+- 下一步/认领：**交 Aiden**：execute_task runner 的 keyword-direction 分支改为「模型出 data.json，runner 调 render_keyword_direction.js 出 HTML」（渲染器已给 CLI 与 module 两个口）；批 4 原「widget 注入」项由本方案替代可销项。worker 侧 specs 部署后生效，本条为待部署。素材方向卡（W12）出生即走同架构。
+
 ### 2026-08-31 AIRA (al) 登记：方向卡反馈脚本参数读反同日二次复发（Louvresky #146），报告 execute 产线缺口
 
 - 干了什么：Louvresky paid 导入全链跑通（client 16 profile 三列、ads 180 天回填、快照、facts、#146 方向卡经闸A 至 review）。客户点卡上反馈按钮全部失败，定位为生成器无视 spec V3「提交脚本原样嵌入」自写了 XHR 版，token 与任务号读反（与同日 Ben's #145 事故同根因）。已手修线上与工作区文件，playwright 真点验证 200 落库，测试行已清。
