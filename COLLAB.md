@@ -26,6 +26,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 干了什么：#94 六步全过、线上已生效，却因 changeset 里上传接口生成的 assets/<ts>-<rand>-xxx.jpg 不等于方案声明的 assets/*-xxx.jpg 被判失败。`compareFiles` 现支持 `*`（单段，不跨 /），apply 单测加一条。#94 按落地态人工收单未重跑。另：`analysis_task()` 把 ops 全为只读审计（ga4-audit / gsc-audit）的任务视为分析任务，放行即验收，不再排 apply（#95 曾被误排，job 172 已作废）。Apollo（8）与 Ben's NZ（45）用新工具 `tools/import_package.js` 与 `tools/onboard_chain.js` 全量导入并跑完 pull_data 到 plan，各出 plan draft 11 与 12 条。
 - 坑：闸门「精确路径」对平台起名的产物天然误杀，方案作者写通配是对的，闸门要跟上。
 
+### 2026-08-31 AIRA (ai) 登记：W8 批 0 加批 1 落地，Ben's AU ads 只读数据链打通
+
+- 干了什么：profile 加 services / ads_customer_id / owner（惰性列 + PUT 校验持久化，PUT 的 INSERT 列表原来是硬编码，新列静默丢弃，已修）。METRIC_NAMES 加 ads_cost / ads_clicks / ads_impressions / ads_conversions / ads_conv_value（ads_ 前缀专属 Google，新渠道用自己的前缀）。`lib/gaql_query.py`（只读 GAQL 子进程，凭据 /data/aira/.env.google-ads，只许 SELECT）+ `lib/googleads.js`（dailyMetrics / campaigns / conversionActions / metricRows）。pull_data 加 ads 源（快照 source='ads'：日指标 + campaign 结构 + conversion actions；日指标进 seo_metrics_daily），backfill_metrics 支持 ads 180 天。Ben's AU（46）profile 填 both / 1292669205 / aira 并实测拉通。
+- 坑：PUT /profile 的列清单是硬编码的，加 profile 字段要同时改 PROFILE_FIELDS、惰性 DDL、INSERT 列表三处，漏第三处会 ok:true 但什么都没存。
+
 ### 2026-08-31 AIRA (ah) 登记：paid 知识层落地（W8 批 2 前置）
 
 - 干了什么：specs 加 paid 四件：review_principles paid 段（六步诊断 SOP + 10 偏见 + 立场，Kira SOUL §6/§7 蒸馏）、plan_experience paid 段、capabilities/googleads.md（权限映射 + API 坑）、report/paid_section.md（客户报告五段式）。plan_review 的原则与经验文件改 readStrict（缺失或过短直接抛，不许占位符降级）。tests/specs.test.js 断言四件在场且带 PAID-*-V 标记。对话侧：/data/aira/skills/paid/SKILL.md 薄壳（零知识，按场景指向 specs），UserPromptSubmit hook（scripts/hook_paid_skill.py）命中 paid 词表注入加载提醒，Adspirer 第三方技能移入 skills/_disabled 防触发撞车。
