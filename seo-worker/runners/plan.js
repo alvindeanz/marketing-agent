@@ -25,7 +25,7 @@ const capabilities = require('../lib/capabilities');
 const { refreshSources } = require('./pull_data');
 const { truncate, safeJson } = require('../lib/util');
 
-const MODULES = ['technical', 'onpage', 'content', 'local', 'offpage'];
+const MODULES = ['technical', 'onpage', 'content', 'local', 'offpage', 'paid'];
 const OWNER_TYPES = ['agency', 'client', 'agent'];
 const SPRINTS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];

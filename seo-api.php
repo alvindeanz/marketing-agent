@@ -551,7 +551,7 @@ function tasks_bulk_clean($cid,$pid,$rows){
         if($title==='')return [null,"task #$n: title required"];
         if(mb_strlen($title,'UTF-8')>255)return [null,"task #$n: title over 255 chars"];
         $mod=(string)($t['module']??'');
-        if(!in_array($mod,['technical','onpage','content','local','offpage'],true))return [null,"task #$n: bad module"];
+        if(!in_array($mod,['technical','onpage','content','local','offpage','paid'],true))return [null,"task #$n: bad module"];
         $own=(string)($t['owner_type']??'');
         if(!in_array($own,['agency','client','agent'],true))return [null,"task #$n: bad owner_type"];
         $sprint=(string)($t['sprint']??'');
@@ -789,7 +789,7 @@ function task_fields_clean($i,$opts=[]){
     if(mb_strlen($title,'UTF-8')>255)return [null,'title over 255 chars'];
     $mod=(string)($i['module']??'technical');
     if($mod==='')$mod='technical';
-    if(!in_array($mod,['technical','onpage','content','local','offpage'],true))return [null,'bad module'];
+    if(!in_array($mod,['technical','onpage','content','local','offpage','paid'],true))return [null,'bad module'];
     $own=(string)($i['owner_type']??'agency');
     if($own==='')$own='agency';
     if(!in_array($own,['agency','client','agent'],true))return [null,'bad owner_type'];
@@ -4339,7 +4339,7 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
         $sets[]='owner_type=?';$args[]=$i['owner_type'];
     }
     if(isset($i['module'])){
-        if(!in_array($i['module'],['technical','onpage','content','local','offpage'],true))res(400,['error'=>'bad module']);
+        if(!in_array($i['module'],['technical','onpage','content','local','offpage','paid'],true))res(400,['error'=>'bad module']);
         $sets[]='module=?';$args[]=$i['module'];
     }
     if(isset($i['priority'])){
