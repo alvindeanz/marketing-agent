@@ -2904,7 +2904,7 @@ async function addTask(){
   loadTasks();loadClients(true);
 }
 
-var sprintAnchor=null,sprintDays=14,sprintOpen={};
+var sprintAnchor=null,sprintDays=14;
 async function loadTasks(){
   const d=await api('/tasks?client_id='+curId);
   if(fail(d,'任务载入失败'))return;
@@ -3075,10 +3075,8 @@ function withinScope(t,cur){
   if(sprintScope==='all')return true;
   const n=sprintNum(t);
   if(n===null)return true; // 没有 S 标签的任务永远算本期
-  if(sprintOpen[n])return true; // 人点开了那一期
   return n<=scopeHorizon(cur);
 }
-function toggleSprint(n){sprintOpen[n]=!sprintOpen[n];renderLanes()}
 function setSprintScope(v){sprintScope=v;renderLanes()}
 function widenSprintScope(){
   sprintScope=sprintScope==='current'?'near':'all';
@@ -3113,21 +3111,12 @@ function renderLanes(){
     const doneHidden=rows.length-afterDone.length;
     laterTotal+=later;doneHiddenTotal+=doneHidden;
     let body=vis.map(t=>taskCard(t,lane.key)).join('');
-    if(!body)body='<div class="lane-empty">'+(later?'本期没有任务，都排在后面的 sprint。':(doneHidden?'只有已结束任务，已按当前筛选隐藏。':'暂无任务。'))+'</div>';
-    if(later){
-      /* 下期按 S 号折叠成一行，点开看，不自动浮上来 */
-      const by={};
-      afterDone.filter(t=>!withinScope(t,cur)).forEach(t=>{const n=sprintNum(t);by[n]=(by[n]||0)+1});
-      Object.keys(by).sort((a,b)=>a-b).forEach(n=>{
-        const r=sprintRange(Number(n));
-        body+='<div class="lane-more" onclick="toggleSprint('+n+')" title="点开这一期">S'+n+(r?('（'+r.label+'）'):'')+' · '+by[n]+' 个任务，点击展开</div>';
-      });
-    }
+    if(!body)body='<div class="lane-empty">'+(later?'本期没有任务。':(doneHidden?'只有已结束任务，已按当前筛选隐藏。':'暂无任务。'))+'</div>';
     const waitMe=vis.filter(t=>hsOf(t)==='wait_me').length;
     const html='<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
       '<span class="lane-count">'+vis.length+(waitMe?' <span style="color:#fbbf24">等我 '+waitMe+'</span>':'')+
       (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' 已结束)</span>':'')+
-      (later?' <span class="lane-hidden">(+'+later+' 后续)</span>':'')+
+
       '</span></div><div class="lane-body">'+body+'</div></div>';
     const empty=!vis.length&&!later;
     if(hideEmptyLanes&&empty)hiddenNames.push(lane.name);
