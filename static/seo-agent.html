@@ -3073,6 +3073,13 @@ function scopeHorizon(cur){
 }
 function withinScope(t,cur){
   if(sprintScope==='all')return true;
+  /* 排期只管「还没开工」的任务。已经出了方案等放行、在跑、执行失败等重试的，
+     是当下的活，不管排在哪个 sprint 都必须可见，否则待放行卡会凭空消失
+     （2026-08-31 paid #143 #144 排 S2 被藏，Alvin 找不到）。 */
+  if(t.status==='review'||t.status==='in_progress')return true;
+  const hs=hsOf(t);
+  if(hs==='running')return true;
+  if(hs==='wait_me'&&/失败/.test(String(t.wait_reason||'')))return true;
   const n=sprintNum(t);
   if(n===null)return true; // 没有 S 标签的任务永远算本期
   return n<=scopeHorizon(cur);
