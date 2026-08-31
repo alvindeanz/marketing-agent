@@ -4384,6 +4384,7 @@ if($m==='POST'&&$ROUTE==='/tasks'){
 // PATCH /tasks/{id}
 if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     $u=auth_admin();
+    ensure_task_module();
     $tid=(int)$mm[1];
     $i=input();
     $chk=db()->prepare("SELECT id FROM seo_tasks WHERE id=?");
