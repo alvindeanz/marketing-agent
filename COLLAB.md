@@ -26,6 +26,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 干了什么：#94 六步全过、线上已生效，却因 changeset 里上传接口生成的 assets/<ts>-<rand>-xxx.jpg 不等于方案声明的 assets/*-xxx.jpg 被判失败。`compareFiles` 现支持 `*`（单段，不跨 /），apply 单测加一条。#94 按落地态人工收单未重跑。另：`analysis_task()` 把 ops 全为只读审计（ga4-audit / gsc-audit）的任务视为分析任务，放行即验收，不再排 apply（#95 曾被误排，job 172 已作废）。Apollo（8）与 Ben's NZ（45）用新工具 `tools/import_package.js` 与 `tools/onboard_chain.js` 全量导入并跑完 pull_data 到 plan，各出 plan draft 11 与 12 条。
 - 坑：闸门「精确路径」对平台起名的产物天然误杀，方案作者写通配是对的，闸门要跟上。
 
+### 2026-08-31 AIRA (aj) 登记：W8 批 3 两单方案交付（Ben's AU paid），转化口径定案
+
+- 干了什么：Alvin 定转化口径（Primary 只留 Quote Submit 与 Calls from ads；WFQL 是 gclid OCI 回传不记录；本地动作与 Store visits 全 Secondary），落 fact ads.google.conversion_scope 与客户 CLAUDE.md Paid 段。#143 转化口径整理方案（13 条改动：6 动作降 Secondary + 7 条 campaign 级 goal；官方转化 170→84 属口径修正；执行脚本备好 dry-run 过，放行后人工 --apply）与 #144 否词方案（87 天窗口实测，新增 11 条零误伤否词月省约 A$24；账户否词卫生本来就好，大钱在 PMax 品牌流量约 A$574/月，列成需客户决策两步方案）都到待放行。module 加 paid（api 三处 + plan.js）。任务视图删掉未来 sprint 折叠行，视野只认 本期/30天/全部 三档。
+- 坑：1) paid 任务走 analysis 模式，方案文件是 task-{id}-时间戳.md，闸A 复审的 attachChangePlans 只认 change-plan-task-{id}.md，判「方案文件缺失」降 later，放行由人看预览决定，批 4 修路径兼容。2) result_note 单条 1000 字上限，长摘要靠预览页与交付文件。3) Ads 搜索词报告随 campaign 重建清零（本账户最早 2026-06-05），窗口标称 180 天实际按数据说话。
+
 ### 2026-08-31 AIRA (ai) 登记：W8 批 0 加批 1 落地，Ben's AU ads 只读数据链打通
 
 - 干了什么：profile 加 services / ads_customer_id / owner（惰性列 + PUT 校验持久化，PUT 的 INSERT 列表原来是硬编码，新列静默丢弃，已修）。METRIC_NAMES 加 ads_cost / ads_clicks / ads_impressions / ads_conversions / ads_conv_value（ads_ 前缀专属 Google，新渠道用自己的前缀）。`lib/gaql_query.py`（只读 GAQL 子进程，凭据 /data/aira/.env.google-ads，只许 SELECT）+ `lib/googleads.js`（dailyMetrics / campaigns / conversionActions / metricRows）。pull_data 加 ads 源（快照 source='ads'：日指标 + campaign 结构 + conversion actions；日指标进 seo_metrics_daily），backfill_metrics 支持 ads 180 天。Ben's AU（46）profile 填 both / 1292669205 / aira 并实测拉通。
