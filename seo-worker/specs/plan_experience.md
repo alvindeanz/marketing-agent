@@ -39,3 +39,4 @@ review_principles.md 管「单个任务该不该做」，这份管「整份方�
 - 低量账户（月转化不足 30）的方案主线是漏斗前端：落地页、QS、搜索词，不是出价策略。
 - 与 organic 协同写进方案：SEO 已进前 3 的词，paid 出价下调或转竞品防守；search terms 里的高意图词反哺 SEO 选题清单。
 - 素材与 copy 类任务一任务一个 ad group 批次，和博客一任务一篇同理，合并任务产线只交付一半。
+- 每个 paid 客户每 sprint 排一条 keyword-direction 任务（关键词方向卡）：analysis 型，产出 HTML 方向卡供 sales 与客户确认方向，反馈经任务线程回 facts，下一 sprint 的词表与否词包必须引用上期确认结论。（2026-08-31 Alvin 定）

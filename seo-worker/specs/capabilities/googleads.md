@@ -22,6 +22,9 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 - ad-copy-rewrite [risk_class: external]：改 ad copy（文案是对外资产，走放行）。
 - conversion-goal-change [risk_class: irreversible]：转化目标与权重调整。
 
+### analysis（一步出报告，不走 prepare/apply）
+- keyword-direction [risk_class: reversible]：关键词方向卡。四块：主打词族加保持降、否词与排除方向、搜索词新发现、待客户确认项（每条带默认立场）。规格见 ../report/keyword_direction_spec.md，验收人是 sales。
+
 ### human_only
 - 账单与 payments profile、账户级设置、账户开通与关停。
 

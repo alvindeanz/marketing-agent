@@ -49,6 +49,7 @@
     "page-rebuild": "reversible",
     "blog-publish": "external",
     "styles-fragment": "reversible",
-    "gtm-edit": "reversible"
+    "gtm-edit": "reversible",
+    "keyword-direction": "reversible"
   }
 }
