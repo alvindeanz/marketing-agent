@@ -779,14 +779,15 @@ t('渲染：排名分布块出现且计数正确，词表为空时整块消失',
   const html2 = R.renderReport(empty, null, {});
   assert.strictEqual(html2.indexOf('目标词排名分布'), -1);
 });
-t('渲染：七个模块各带一个三选项反馈组件，右下角全局留言，脚本指向 report_feedback', () => {
+t('渲染：反馈组件只在下月计划一处，两选项，右下角全局留言，脚本指向 report_feedback', () => {
   const html = R.renderReport(fakePack(), null, {});
-  for (const item of ['ga4', 'channels', 'funnel', 'rankings', 'pages', 'work', 'next']) {
-    assert.ok(html.indexOf('<div class="fb" data-item="' + item + '">') > -1, item + ' 缺反馈组件');
-  }
-  assert.strictEqual((html.match(/class="fb" data-item=/g) || []).length, 7, '反馈组件必须恰好 7 个');
-  // 三选项文案与 paid 方向卡一致（Alvin 2026-09-01 定），别改回自造文案
-  assert.ok(html.indexOf('>同意按建议执行<') > -1 && html.indexOf('>保持不变，继续观察<') > -1 && html.indexOf('>其他反馈<') > -1, '三选项文案必须与方向卡一致');
+  // Alvin 2026-09-01 定：只在 next 一处放表态，别的 section 不讲计划，放了没意义
+  assert.strictEqual((html.match(/class="fb" data-item=/g) || []).length, 1, '反馈组件必须恰好 1 个');
+  assert.ok(html.indexOf('<div class="fb" data-item="next">') > -1, '反馈组件必须在 next 一节');
+  assert.ok(html.indexOf('关于我们下个月的工作计划，您的看法是') > -1, '引导语必须是 Alvin 定的那句');
+  // 两选项：同意按建议执行 / 其他反馈；中间的 hold 已删，别加回来
+  assert.ok(html.indexOf('>同意按建议执行<') > -1 && html.indexOf('>其他反馈<') > -1, '两选项文案沿用方向卡');
+  assert.strictEqual(html.indexOf('data-choice="hold"'), -1, 'hold 按钮已删，不许回来');
   assert.strictEqual(html.indexOf('请联系我'), -1, '不许出现自造的按钮文案');
   assert.ok(html.indexOf('id="floatfb"') > -1, '缺全局浮动留言');
   assert.ok(html.indexOf('seo-api.php/report_feedback') > -1, '脚本要指向 report_feedback 端点');
