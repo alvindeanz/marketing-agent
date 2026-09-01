@@ -4634,8 +4634,61 @@ if($m==='POST'&&$ROUTE==='/reports'){
     $s=db()->prepare("INSERT INTO seo_reports(client_id,period_type,period_start,period_end,version,url,html_path,facts_pack,narrative_status,created_by)VALUES(?,?,?,?,?,?,?,?,?,?)");
     $s->execute([$cid,$ptype,$ps,$pe,$ver,$url,$hp,$pack,$ns,(string)($i['created_by']??'seo-worker')]);
     $id=(int)db()->lastInsertId();
+    /* 落库后把反馈参数拼进 url：报告页脚本靠 ?r=&k= 激活反馈按钮，token 与
+       /report_feedback 的校验同源。看板和邮件里转发的就是这条带参链接，
+       裸链接照样能打开，只是按钮进预览模式。id 要先 INSERT 才有，所以补一笔 UPDATE。 */
+    global $WORKER_TKN;
+    $fburl=$url.(strpos($url,'?')===false?'?':'&').'r='.$id.'&k='.md5('reportfb'.$id.$WORKER_TKN);
+    db()->prepare("UPDATE seo_reports SET url=? WHERE id=?")->execute([$fburl,$id]);
     audit('seo-worker','seo_report_add',(string)$id,['client_id'=>$cid,'period_start'=>$ps,'version'=>$ver,'narrative_status'=>$ns]);
-    res(200,['ok'=>true,'id'=>$id,'version'=>$ver]);
+    res(200,['ok'=>true,'id'=>$id,'version'=>$ver,'url'=>$fburl]);
+}
+
+/* 月报客户反馈（2026-09-01 Alvin 定：每个模块三选项 + 全局浮动留言，走方向卡同款机制）。
+   公开端点：报告在客户浏览器里直接 POST，无登录。防护：per-report token =
+   md5('reportfb'+report_id+WORKER_TKN)，写库限长；摘要追进报告 note，看板版本列表直接可见。 */
+if($m==='POST'&&$ROUTE==='/report_feedback'){
+    global $WORKER_TKN;
+    ensure_reports_schema();
+    $i=input();
+    $rid=(int)($i['report_id']??0);
+    $tok=(string)($i['token']??'');
+    if(!$rid||!hash_equals(md5('reportfb'.$rid.$WORKER_TKN),$tok))res(403,['error'=>'bad token']);
+    $item=mb_substr(trim((string)($i['item']??'')),0,120,'UTF-8');
+    $choice=(string)($i['choice']??'');
+    if(!in_array($choice,['ok','question','other'],true))res(400,['error'=>'bad choice']);
+    $txt=mb_substr(trim((string)($i['text']??'')),0,2000,'UTF-8');
+    if($choice==='other'&&$txt==='')res(400,['error'=>'text required']);
+    $g=db()->prepare("SELECT id,note FROM seo_reports WHERE id=?");
+    $g->execute([$rid]);
+    $rep=$g->fetch();
+    if(!$rep)res(404,['error'=>'report not found']);
+    ensure_report_feedback_schema();
+    db()->prepare("INSERT INTO seo_report_feedback(report_id,item,choice,fb)VALUES(?,?,?,?)")->execute([$rid,$item,$choice,$txt]);
+    $label=['ok'=>'已阅认可','question'=>'有疑问','other'=>'留言'][$choice];
+    $line='[客户反馈 '.date('m-d H:i').'] '.($item!==''?($item.'：'):'').$label.($txt!==''?('：'.mb_substr($txt,0,120,'UTF-8')):'');
+    $note=trim((string)($rep['note']??''));
+    $new=($note===''?$line:$note."\n".$line);
+    /* note 只是看板速览，塞不下就只留表记录（表才是全量真相）。 */
+    if(mb_strlen($new,'UTF-8')<=1800)db()->prepare("UPDATE seo_reports SET note=? WHERE id=?")->execute([$new,$rid]);
+    res(200,['ok'=>true]);
+}
+
+// GET /reports/{id}/feedback -> 一份报告收到的全部客户反馈，新的在前。
+if($m==='GET'&&preg_match('#^/reports/(\d+)/feedback$#',$ROUTE,$mm)){
+    auth_any();
+    ensure_reports_schema();
+    ensure_report_feedback_schema();
+    $rid=(int)$mm[1];
+    $chk=db()->prepare("SELECT id FROM seo_reports WHERE id=?");
+    $chk->execute([$rid]);
+    if(!$chk->fetch())res(404,['error'=>'Report not found']);
+    $s=db()->prepare("SELECT id,item,choice,fb,created_at FROM seo_report_feedback WHERE report_id=? ORDER BY id DESC");
+    $s->execute([$rid]);
+    $rows=$s->fetchAll();
+    foreach($rows as &$r)$r['id']=(int)$r['id'];
+    unset($r);
+    res(200,['ok'=>true,'report_id'=>$rid,'feedback'=>$rows]);
 }
 
 // GET /reports?client_id= -> 列全部版本，新的周期在前、同周期新版本在前。
@@ -4658,6 +4711,22 @@ if($m==='GET'&&$ROUTE==='/reports'){
     }
     unset($r);
     res(200,['ok'=>true,'reports'=>$rows]);
+}
+
+/* 月报反馈表。惰性建，POST /report_feedback 与 GET /reports/{id}/feedback 共用。 */
+function ensure_report_feedback_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_report_feedback (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        report_id INT NOT NULL,
+        item VARCHAR(120) NOT NULL DEFAULT '',
+        choice VARCHAR(16) NOT NULL,
+        fb TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_report_fb (report_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 
 // GET /reports/{id}/pack -> 单独取 facts pack。固定后缀 /pack 的正则写在

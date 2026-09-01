@@ -148,6 +148,13 @@
 
 ---
 
+## 10B. 客户反馈组件（2026-09-01 加，Alvin 定）
+
+- 七个 section 各带一个三选项反馈条（已阅认可 / 有疑问 / 其他意见带文本），右下角全局浮动「留言给我们」。**组件与提交脚本固定在模板里，不经模型**（方向卡两起脚本被改写事故的同款根治）。
+- 身份：报告 URL 带 `?r={report_id}&k={token}`，token = md5('reportfb'+id+WORKER_TKN)，由 POST /reports 落库时服务端拼进存的 url，看板与邮件转发的就是带参链接；裸链接打开进预览模式（按钮禁用加降级文案）。
+- 提交：POST /report_feedback（公开端点，token 门），choice 取 ok / question / other（other 必须带文本），item 为 section 键或 global_note。落 seo_report_feedback 表（全量真相），摘要追进 seo_reports.note（看板版本列表速览，超 1800 字只留表）。读取：GET /reports/{id}/feedback（auth_any）。
+- 内部同事的意见走任务线程，不要点客户按钮：按钮记录一律按客户意见处理。
+
 ## 11. 渲染后必做的校验
 
 1. `python3 /data/aira/clients/report/scripts/report_lint.py --check <file.html>`，exit 0 才算通过。

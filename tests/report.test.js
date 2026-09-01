@@ -779,6 +779,17 @@ t('渲染：排名分布块出现且计数正确，词表为空时整块消失',
   const html2 = R.renderReport(empty, null, {});
   assert.strictEqual(html2.indexOf('目标词排名分布'), -1);
 });
+t('渲染：七个模块各带一个三选项反馈组件，右下角全局留言，脚本指向 report_feedback', () => {
+  const html = R.renderReport(fakePack(), null, {});
+  for (const item of ['ga4', 'channels', 'funnel', 'rankings', 'pages', 'work', 'next']) {
+    assert.ok(html.indexOf('<div class="fb" data-item="' + item + '">') > -1, item + ' 缺反馈组件');
+  }
+  assert.strictEqual((html.match(/class="fb" data-item=/g) || []).length, 7, '反馈组件必须恰好 7 个');
+  assert.ok(html.indexOf('id="floatfb"') > -1, '缺全局浮动留言');
+  assert.ok(html.indexOf('seo-api.php/report_feedback') > -1, '脚本要指向 report_feedback 端点');
+  assert.ok(html.indexOf("params.get('r')") > -1 && html.indexOf("params.get('k')") > -1, '脚本要从 r 与 k 参数取身份');
+  assert.ok(html.indexOf('预览模式') > -1, '无参数打开要有预览模式降级文案');
+});
 t('渲染：带 yoy 与分布块的成品过 lintReport', () => {
   const html = R.renderReport(fakePack({ yoy: fakeYoy() }), fakeNarrative(), {});
   const res = L.lintReport(html);

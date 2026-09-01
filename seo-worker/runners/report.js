@@ -412,7 +412,9 @@ async function run(ctx) {
     log('服务端版本号为 v' + finalVersion + '，本地副本已改名，远端文件名保持 ' + filename);
   }
 
-  log('报告 v' + finalVersion + ' 完成，链接 ' + published.url);
+  // 服务端落库时会把反馈参数（?r=&k=）拼进 url，交付用它；拿不到再退回裸链接。
+  const finalUrl = (saved && saved.url) || published.url;
+  log('报告 v' + finalVersion + ' 完成，链接 ' + finalUrl);
   return { tokenUsage: 0 };
 }
 
