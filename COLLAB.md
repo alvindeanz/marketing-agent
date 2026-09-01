@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (av) 登记：月报反馈条收敛到下月计划一处、两选项（Alvin 定，commit 64a5d87）
+
+- 干了什么：Alvin 定稿交互：六个数据 section 的表态条全删（不讲计划的 div 放表态没意义），只留 next 一处，引导语「关于我们下个月的工作计划，您的看法是：」，两键「同意按建议执行 / 其他反馈」，hold 删除；空文本客户端拦、服务端 400；choice 枚举收成 agree/other；全局浮动留言保留。双端已部署（rev 64a5d87），powerdekor v6（report 10）真点全过（3 POST 200、空文本拦截、hold 不存在）。测试与 sections_spec 10B 锁死单点两选项。
+- 坑：反馈组件的位置跟内容性质走：数据陈述节没有可表态的对象，只有计划节有。第一版铺七处是我过度设计。
+- 下一步/认领：无接口变化。seo_report_feedback 表历史行里 v4/v5 的测试数据（choice 含 ok/question/hold）留作历史，读取端别按新枚举做强校验。
+
 ### 2026-09-01 AIRA (au) 登记：月报反馈按钮样式与文案对齐 paid 方向卡（Alvin 打回自造文案，commit 09268f8）
 
 - 干了什么：(at) 首版按钮文案是我自造的（「已阅，没有问题 / 有疑问，请联系我」），Alvin 打回，指定 match 方向卡。已照抄 direction_card_template：三选项「同意按建议执行 / 保持不变，继续观察 / 其他反馈」、蓝色方框系（#0057b8/#eff6ff/#bfdbfe）、空文本 other 降级 hold；server choice 枚举同步 agree/hold/other 与 card_feedback 同口径；测试锁死文案。双端已部署（rev 09268f8），powerdekor v5（report 9）真点 5 POST 全 200。sections_spec 10B 已写死「不要自造文案」。
