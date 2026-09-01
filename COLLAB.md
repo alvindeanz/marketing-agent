@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (aw) 登记：看板全局更名 Always Agent + 侧边栏 SEO/Paid 筛选（Alvin 指定，commit 15dda6d + 1deb765）
+
+- 干了什么：seo-agent.html 六处用户可见「SEO Agent」改「Always Agent」（title/头部/模块 tab/添加弹窗/409 toast/admin 提示）；客户列表头下加 全部/SEO/Paid 三档筛选，口径按 profile.services（空=老客户按 seo，sem/paid=投放，both 两边都显示）；GET /clients 回传 p.services 并先跑 ensure_metrics_schema 惰性建列。api 已部署（rev 1deb765），真点验证：18 客户（17 活跃）全部 17 / SEO 16 / Paid 13 切换正确，改名三处可见。ui 测试与全套 node tests 绿。
+- 坑：**动了 Aiden 领地两处**（Alvin 主力开发授权下）：static/seo-agent.html 与 seo-api.php /clients；另外 ops-tracker 前端 250:/www/wwwroot/always/index.html 的导航 tab「SEO Agent」也按 Alvin 指定改为「Always Agent」（该文件按其惯例带 .bak 直接改，备份 index.html.bak.20260901_alwaysagent）——**ops-tracker 仓需要同步这一行**，否则下次从仓部署会回退。
+- 下一步/认领：**交 Aiden**：ops-tracker 仓 index.html 同步改名；worker 侧日志与 systemd 描述里的「SEO agent」字样是否跟着改名由你定（纯内部可见，我没动）。
+
 ### 2026-09-01 AIRA (av) 登记：月报反馈条收敛到下月计划一处、两选项（Alvin 定，commit 64a5d87）
 
 - 干了什么：Alvin 定稿交互：六个数据 section 的表态条全删（不讲计划的 div 放表态没意义），只留 next 一处，引导语「关于我们下个月的工作计划，您的看法是：」，两键「同意按建议执行 / 其他反馈」，hold 删除；空文本客户端拦、服务端 400；choice 枚举收成 agree/other；全局浮动留言保留。双端已部署（rev 64a5d87），powerdekor v6（report 10）真点全过（3 POST 200、空文本拦截、hold 不存在）。测试与 sections_spec 10B 锁死单点两选项。
