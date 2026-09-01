@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "素材方向卡数据契约 V1（与词卡同构槽位，模型只产本 JSON，HTML 由 render_creative_direction.js 出）",
+  "type": "object",
+  "required": [
+    "title",
+    "period_label",
+    "oneline",
+    "bignums",
+    "fineprint",
+    "lights",
+    "s1_desc",
+    "decisions",
+    "s2_desc",
+    "families",
+    "negatives",
+    "findings_title",
+    "findings",
+    "confirm",
+    "glossary",
+    "window_line",
+    "attach_line"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "客户名 + 搜索广告关键词方向"
+    },
+    "period_label": {
+      "type": "string",
+      "description": "本期周期，日期写法，如 2026 年 8 月 31 日至 9 月 13 日期"
+    },
+    "oneline": {
+      "type": "string",
+      "maxLength": 60,
+      "description": "一句话素材方向，sales 可照念"
+    },
+    "bignums": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "k",
+          "v",
+          "s"
+        ],
+        "properties": {
+          "k": {
+            "type": "string"
+          },
+          "v": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "s": {
+            "type": "string",
+            "description": "数字下方一行；第二个大数字是最能带询价的那条广告，s 里放它的标题原文"
+          }
+        }
+      }
+    },
+    "fineprint": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "口径说明段落，允许 <b>；第一段讲询价只算什么，第二段讲电话等观察项"
+    },
+    "lights": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "state_label",
+          "cls"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "ad group 人话名；产品词用英文原词（copy_rules A31）"
+          },
+          "state_label": {
+            "type": "string"
+          },
+          "cls": {
+            "enum": [
+              "g",
+              "h",
+              "a"
+            ],
+            "description": "g 换上新文案或加投 h 保持 a 收缩或清理"
+          }
+        }
+      }
+    },
+    "s1_desc": {
+      "type": "string",
+      "description": "第一节引言：几件事、默认做法、截止日期"
+    },
+    "decisions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": [
+          "q",
+          "situation",
+          "recommendation",
+          "no_reply",
+          "item",
+          "textarea_hint"
+        ],
+        "properties": {
+          "q": {
+            "type": "string"
+          },
+          "situation": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "no_reply": {
+            "type": "string"
+          },
+          "item": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{1,60}$",
+            "description": "card_feedback 的 item 标识"
+          },
+          "textarea_hint": {
+            "type": "string"
+          },
+          "picks": {
+            "type": "object",
+            "required": [
+              "ph",
+              "save_item",
+              "entries"
+            ],
+            "properties": {
+              "ph": {
+                "type": "string"
+              },
+              "save_item": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,60}$"
+              },
+              "entries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kw",
+                    "label",
+                    "note"
+                  ],
+                  "properties": {
+                    "kw": {
+                      "type": "string",
+                      "description": "机器用词面"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "展示词面"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "决策卡三类：新文案措辞逐条确认（文案全文进卡）、零曝光素材清理勾选名单（picks，默认清）、pin 测试方案"
+    },
+    "s2_desc": {
+      "type": "string"
+    },
+    "families": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "cls",
+          "state_label",
+          "spent",
+          "got",
+          "next",
+          "evidence"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "广告的人话名：ad group 英文名加「的广告」，多条时带一二编号"
+          },
+          "cls": {
+            "enum": [
+              "g",
+              "h",
+              "a"
+            ]
+          },
+          "state_label": {
+            "type": "string"
+          },
+          "spent": {
+            "type": "string"
+          },
+          "got": {
+            "type": "string"
+          },
+          "next": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "折叠层：窗口、点击数、对照、现测日期"
+          }
+        }
+      },
+      "description": "每条在投广告一张小卡：花了多少/换来什么/接下来怎么做，依据折叠"
+    },
+    "negatives": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "素材清理段落：零曝光素材汇总、清理原因、每月影响，允许 <b>"
+    },
+    "findings_title": {
+      "type": "string",
+      "description": "如 三条新发现"
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "string"
+      }
+    },
+    "confirm": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "上期确认记录段落；首版写首版无上期结论"
+    },
+    "glossary": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": [
+          "term",
+          "def"
+        ],
+        "properties": {
+          "term": {
+            "type": "string"
+          },
+          "def": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "本卡概念一句话解释；Ad Strength 类评级不出现（立场 2）"
+    },
+    "window_line": {
+      "type": "string",
+      "description": "页脚数据窗口一行"
+    },
+    "attach_line": {
+      "type": "string",
+      "description": "页脚随附文件一行，无附件写 随附文件：无"
+    }
+  }
+}

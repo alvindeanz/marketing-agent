@@ -1,9 +1,7 @@
 'use strict';
 // 关键词方向卡渲染器回归：A31 不变量、script 拒绝、widget 原样注入。
 const assert = require('assert');
-const path = require('path');
 const { renderCard, validate } = require('../seo-worker/specs/report/render_keyword_direction.js');
-const TPL = path.join(__dirname, '../seo-worker/specs/report/keyword_direction_template.html');
 
 function base() {
   return {
@@ -20,7 +18,7 @@ function base() {
 }
 
 // 1) 正常数据渲染，widget 原样在
-const html = renderCard(base(), TPL);
+const html = renderCard(base());
 assert(html.includes("parseInt(params.get('t'), 10)") && html.includes("params.get('k')"), 'widget 必须原样注入');
 assert(html.includes('card_feedback'), '提交端点在');
 

@@ -6,7 +6,7 @@
 
 ## 形态（V4 起：模板 + 数据，模型不写 HTML）
 
-产出分两层。**模型只产数据 JSON**，契约见同目录 `keyword_direction_data.schema.json`，文件名 `keyword_direction_{client}_{sprint}.data.json`。**HTML 由零 LLM 渲染器生成**：`node specs/report/render_keyword_direction.js <data.json> > keyword_direction_{client}_{sprint}.html`，模板 `keyword_direction_template.html`（版式与已测反馈脚本固定在里面，git 管版本，改版式 = 改模板发 commit，全客户下一张卡生效）。模型产出里出现任何 HTML 标签（<b>、<i> 之外）或 script，渲染器直接拒绝。
+产出分两层。**模型只产数据 JSON**，契约见同目录 `keyword_direction_data.schema.json`，文件名 `keyword_direction_{client}_{sprint}.data.json`。**HTML 由零 LLM 渲染器生成**：`node specs/report/render_keyword_direction.js <data.json> > keyword_direction_{client}_{sprint}.html`，模板 `direction_card_template.html`（方向卡通用模板，词卡与素材卡共用；版式与已测反馈脚本固定在里面，git 管版本，改版式 = 改模板发 commit，全客户下一张卡生效）。模型产出里出现任何 HTML 标签（<b>、<i> 之外）或 script，渲染器直接拒绝。
 单页 HTML，手机可读，浅色版式，一 sprint 一版只增不改。随附逐词 CSV（否词、待确认名单），正文不放长表。
 
 ## 语言铁律（每句都过）
