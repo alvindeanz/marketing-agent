@@ -191,6 +191,23 @@ function computePeriod(opts) {
   };
 }
 
+/**
+ * 同比周期：去年同一个自然月。只对整月报告成立，月中出报的契约是
+ * 只与上月同窗环比、不做同比（README 周期规则），传 partial 进来返回 null。
+ */
+function yoyPeriodOf(per) {
+  if (!per || per.partial) return null;
+  const start = addMonths(per.start, -12);
+  if (!start) return null;
+  const p = splitYmd(start);
+  return {
+    start,
+    end: monthEndOf(start),
+    label: p.y + '年' + p.m + '月（全月）',
+    short: '去年' + p.m + '月',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 纯函数：环比
 // ---------------------------------------------------------------------------
@@ -290,6 +307,18 @@ function clusterWeightedPosition(rows, keyword) {
     if (Number.isFinite(pos) && imp > 0) weighted += pos * imp;
   }
   if (out.impressions > 0) out.pos = round1(weighted / out.impressions);
+  return out;
+}
+
+/**
+ * 目标词按位次分档计数。field 传 'prev' 时按 prev_pos 分档，
+ * 给排名分布图的两期对照用。rows 是 rankings.rows 形状的数组。
+ */
+function bandCounts(rows, field) {
+  const out = { top10: 0, p11_20: 0, p21_plus: 0, none: 0 };
+  for (const r of rows || []) {
+    out[rankBand(field === 'prev' ? r && r.prev_pos : r && r.pos)] += 1;
+  }
   return out;
 }
 
@@ -1054,10 +1083,16 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       total: rankRows.length,
       top10: rankRows.filter((r) => r.band === 'top10').length,
       p11_20: rankRows.filter((r) => r.band === 'p11_20').length,
+      p21_plus: rankRows.filter((r) => r.band === 'p21_plus').length,
       improved: rankRows.filter((r) => r.delta !== null && r.delta < 0).length,
       declined: rankRows.filter((r) => r.delta !== null && r.delta > 0).length,
       no_exposure: rankRows.filter((r) => r.band === 'none').length,
     },
+    // 上期同一批词的分档计数，排名分布图的对照列。
+    summary_prev: (() => {
+      const c = bandCounts(rankRows, 'prev');
+      return { top10: c.top10, p11_20: c.p11_20, p21_plus: c.p21_plus, no_exposure: c.none };
+    })(),
     near_page1: rankRows
       .filter((r) => r.pos !== null && r.pos > 10 && r.pos <= 15)
       .sort((a, b) => a.pos - b.pos)
@@ -1069,6 +1104,60 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       .slice(0, 8)
       .map((r) => ({ keyword: r.keyword, pos: r.pos, prev_pos: r.prev_pos, impressions: r.impressions })),
   };
+
+  // ---- 同比（去年同月） ----
+  // 只对整月报告做：月中出报的契约是同窗环比、不做同比。GSC 保留约 16 个月
+  // 数据，去年同月在窗口内；GA4 更久。两个源在去年同期都是零，多半是站点
+  // 或数据源当时还没接入，这时同比没有对照意义，整块置空并进 gaps。
+  let yoy = null;
+  const yoyPer = yoyPeriodOf(per);
+  if (yoyPer) {
+    try {
+      let yoyGsc = null;
+      if (gscProperty) {
+        yoyGsc = await gscTotals(cfg, gscProperty, yoyPer, spamRegex);
+        inputs.gsc_calls += 1;
+      }
+      let yoyOrganic = null;
+      if (ga4Property) {
+        const yoyCh = await ga4Channels(ctx, ga4Property, yoyPer);
+        const yoyEv = await ga4ChannelEvents(ctx, ga4Property, yoyPer, LEAD_EVENTS);
+        inputs.ga4_calls += 2;
+        const org = yoyCh.filter((c) => isOrganicChannel(c.channel));
+        yoyOrganic = {
+          sessions: org.reduce((a, r) => a + (Number(r.sessions) || 0), 0),
+          new_users: org.reduce((a, r) => a + (Number(r.new_users) || 0), 0),
+          leads: yoyEv
+            .filter((r) => isOrganicChannel(r.channel) && LEAD_EVENTS.indexOf(r.event) !== -1)
+            .reduce((a, r) => a + r.count, 0),
+        };
+      }
+      const noGscData = !yoyGsc || (yoyGsc.clicks === 0 && yoyGsc.impressions === 0);
+      const noGa4Data = !yoyOrganic || yoyOrganic.sessions === 0;
+      if (noGscData && noGa4Data) {
+        gaps.push('去年同期（' + yoyPer.label + '）两个数据源都没有数据，多半是站点或数据源当时未接入，本期不做同比');
+      } else {
+        const orgCurY = (ga4.organic && ga4.organic.cur) || null;
+        yoy = {
+          period: yoyPer,
+          gsc: noGscData ? null : yoyGsc,
+          ga4_organic: noGa4Data ? null : yoyOrganic,
+          delta: {
+            clicks_pct: !noGscData && gsc.cur ? round3(pctDelta(gsc.cur.clicks, yoyGsc.clicks)) : null,
+            impressions_pct: !noGscData && gsc.cur ? round3(pctDelta(gsc.cur.impressions, yoyGsc.impressions)) : null,
+            position: !noGscData && gsc.cur ? round1(posDelta(gsc.cur.position, yoyGsc.position)) : null,
+            sessions_pct: !noGa4Data && orgCurY ? round3(pctDelta(orgCurY.sessions, yoyOrganic.sessions)) : null,
+            new_users_pct: !noGa4Data && orgCurY ? round3(pctDelta(orgCurY.new_users, yoyOrganic.new_users)) : null,
+            leads_pct: !noGa4Data && orgCurY ? round3(pctDelta(orgCurY.leads, yoyOrganic.leads)) : null,
+          },
+        };
+        say('yoy: 取到去年同期 ' + yoyPer.start + ' 至 ' + yoyPer.end + ' 的对照数据');
+      }
+    } catch (e) {
+      gaps.push('去年同期数据未取到（' + String(e.message || e).slice(0, 120) + '），本期不做同比');
+      say('yoy: 取数失败，本期不做同比：' + e.message);
+    }
+  }
 
   // ---- 趋势 ----
   const months = monthsBack(ymOf(per.start), TREND_MONTHS);
@@ -1222,6 +1311,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     },
     gsc,
     ga4,
+    // 去年同月对照。月中出报、去年无数据、取数失败时为 null，缘由在 gaps。
+    yoy,
     rankings,
     trend,
     work,
@@ -1270,6 +1361,8 @@ module.exports = {
   queryTokens,
   clusterWeightedPosition,
   rankBand,
+  bandCounts,
+  yoyPeriodOf,
   classifyWork,
   isOrganicChannel,
   isMergeableChannel,

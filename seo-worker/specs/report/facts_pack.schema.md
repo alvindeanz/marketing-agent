@@ -32,10 +32,17 @@ JSON 对象，全部字段由 lib/factspack.js 计算，模型只读。数值一
     },
     "landing_pages": [{"path":"/","sessions":0,"prev_sessions":null,"delta":null}]   // 自然搜索前 10
   },
+  "yoy": {                                                                     // 去年同月对照。月中出报（partial）不做同比、去年两源全零、取数失败时整块为 null，缘由进 gaps
+    "period": {"start":"2025-08-01","end":"2025-08-31","label":"2025年8月（全月）","short":"去年8月"},
+    "gsc": {"clicks":0,"impressions":0,"ctr":0.0,"position":0.0},               // 去年同月全零时为 null
+    "ga4_organic": {"sessions":0,"new_users":0,"leads":0},                      // 去年同月 sessions 为零时为 null
+    "delta": {"clicks_pct":0.0,"impressions_pct":0.0,"position":0.0,"sessions_pct":0.0,"new_users_pct":0.0,"leads_pct":0.0}   // 本期 vs 去年同月，position 负数 = 提升
+  },
   "rankings": {                                                                // profile.target_keywords 逐词
     "method": "按查询簇曝光加权的 GSC 平均位次，簇 = 归一化后包含该词全部 token 的查询",
     "rows": [{"keyword":"sheer curtains","pos":0.0,"prev_pos":null,"delta":null,"impressions":0,"clicks":0,"is_brand":false,"band":"top10"}],   // band: top10 | p11_20 | p21_plus | none
-    "summary": {"total":40,"top10":0,"p11_20":0,"improved":0,"declined":0,"no_exposure":0},
+    "summary": {"total":40,"top10":0,"p11_20":0,"p21_plus":0,"improved":0,"declined":0,"no_exposure":0},
+    "summary_prev": {"top10":0,"p11_20":0,"p21_plus":0,"no_exposure":0},        // 同一批词按 prev_pos 分档，排名分布图的对照列
     "near_page1": [{"keyword":"","pos":0.0}],                                  // pos 10 至 15
     "declined_with_volume": [{"keyword":"","pos":0.0,"prev_pos":0.0,"impressions":0}]
   },
@@ -63,6 +70,7 @@ JSON 对象，全部字段由 lib/factspack.js 计算，模型只读。数值一
 ## 计算规则
 
 - 环比 delta_pct = (cur - prev) / prev，prev 为 0 时 null；位次 delta = cur - prev（负数是提升，渲染层写「提升 N 位」）。
+- 同比（yoy）只对整月报告计算，窗口 = 去年同一个自然月的完整月；月中出报沿用「只同窗环比、不做同比」的既有契约，yoy 为 null。去年同期 GSC 点击曝光全零且 GA4 sessions 为零视为不可比（站点或数据源当时未接入），yoy 置 null 并写进 gaps，绝不拿零基期算出千百个百分点吓客户。
 - 目标词位次：查询归一化（小写、去标点、连字符与空格归一），簇 = 包含目标词全部 token 的查询；位次 = Σ(position × impressions) / Σ(impressions)；簇零曝光则 pos=null、band=none，渲染写「本月无曝光」，不写 0。
 - 品牌判定用 profile.brand_regex。
 - 工作量分类关键词：onpage（title、meta、内链、页面优化、精校、重写、page）、content（博客、文章、选题、blog）、tech（301、sitemap、schema、收录、审计、redirect、索引）、link（外链、backlink、disavow）、report（报告、分析、数据、清单）。done 任务取 result_note 带 [applied] 或 ops 含 publish/apply 类的；大事记取 kind 为 apply/publish/config 的；同分类同主题合并留给模型（pack 保留原始条目）。

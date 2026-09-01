@@ -686,6 +686,99 @@ t('pack 缺 meta 直接抛错', () => {
   assert.throws(() => R.renderReport({}, null, {}), /没有 meta/);
 });
 
+/* ---------- 同比与排名分布 ---------- */
+section('同比与排名分布');
+
+function fakeYoy() {
+  return {
+    period: { start: '2025-07-01', end: '2025-07-31', label: '2025年7月（全月）', short: '去年7月' },
+    gsc: { clicks: 800, impressions: 40000, ctr: 0.02, position: 18.5 },
+    ga4_organic: { sessions: 600, new_users: 480, leads: 12 },
+    delta: { clicks_pct: 0.5, impressions_pct: 0.3, position: -4.3, sessions_pct: 0.5, new_users_pct: 0.458, leads_pct: 1 },
+  };
+}
+
+t('yoyPeriodOf：整月给去年同月完整月，月中出报返回 null', () => {
+  const p = F.yoyPeriodOf({ start: '2026-07-01', end: '2026-07-31', partial: false });
+  assert.strictEqual(p.start, '2025-07-01');
+  assert.strictEqual(p.end, '2025-07-31');
+  assert.strictEqual(p.short, '去年7月');
+  assert.strictEqual(F.yoyPeriodOf({ start: '2026-08-01', end: '2026-08-29', partial: true }), null);
+  assert.strictEqual(F.yoyPeriodOf(null), null);
+});
+t('yoyPeriodOf：二月边界压到目标月最后一天', () => {
+  const p = F.yoyPeriodOf({ start: '2026-02-01', partial: false });
+  assert.strictEqual(p.start, '2025-02-01');
+  assert.strictEqual(p.end, '2025-02-28');
+});
+t('bandCounts：本期按 pos、prev 按 prev_pos 分档', () => {
+  const rows = fakePack().rankings.rows;
+  const cur = F.bandCounts(rows);
+  assert.deepStrictEqual(cur, { top10: 2, p11_20: 0, p21_plus: 0, none: 1 });
+  const prev = F.bandCounts(rows, 'prev');
+  assert.deepStrictEqual(prev, { top10: 2, p11_20: 1, p21_plus: 0, none: 0 });
+});
+t('kpiYoy：有 yoy 时给同比行，位次类写提升', () => {
+  const pack = fakePack({ yoy: fakeYoy() });
+  const clicks = R.kpiYoy(pack, 'gsc_clicks');
+  assert.strictEqual(clicks.delta, '+50.0%');
+  assert.strictEqual(clicks.prev_value, '800');
+  assert.strictEqual(clicks.short, '去年7月');
+  const pos = R.kpiYoy(pack, 'gsc_position');
+  assert.ok(pos.delta.indexOf('提升') > -1, '位次同比要写提升，实际：' + pos.delta);
+});
+t('kpiYoy：无 yoy、同比无该源、合计类指标都返回 null', () => {
+  assert.strictEqual(R.kpiYoy(fakePack(), 'gsc_clicks'), null);
+  const noGsc = fakePack({ yoy: Object.assign(fakeYoy(), { gsc: null }) });
+  assert.strictEqual(R.kpiYoy(noGsc, 'gsc_clicks'), null);
+  assert.ok(R.kpiYoy(noGsc, 'ga4_sessions_organic'), 'GA4 侧有数照给');
+  assert.strictEqual(R.kpiYoy(fakePack({ yoy: fakeYoy() }), 'channels_sessions'), null);
+});
+t('buildRankDist：四档计数、对照与占比条', () => {
+  const d = R.buildRankDist(fakePack());
+  assert.strictEqual(d.total, 3);
+  assert.strictEqual(d.bands.length, 4);
+  const top10 = d.bands[0];
+  assert.strictEqual(top10.count, 2);
+  assert.strictEqual(top10.prev_count, 2);
+  assert.strictEqual(top10.delta_text, '持平');
+  const none = d.bands[3];
+  assert.strictEqual(none.count, 1);
+  assert.strictEqual(none.prev_count, 0);
+  assert.strictEqual(none.delta_text, '+1');
+  assert.strictEqual(none.delta_color, '#dc2626');
+  assert.ok(Math.abs(top10.width_pct - 66.7) < 0.01);
+});
+t('buildRankDist：词表为空整块不出', () => {
+  const pack = fakePack();
+  pack.rankings.rows = [];
+  const d = R.buildRankDist(pack);
+  assert.strictEqual(d.total, 0);
+});
+t('渲染：有 yoy 时页眉与 KPI 卡出现同比，无 yoy 时全文不见同比', () => {
+  const withYoy = R.renderReport(fakePack({ yoy: fakeYoy() }), null, {});
+  assert.ok(withYoy.indexOf('同比对比 2025年7月（全月）') > -1, '页眉要有同比标注');
+  assert.ok(withYoy.indexOf('vs 去年7月') > -1, 'KPI 卡要有同比行');
+  assert.ok(withYoy.indexOf('同比 ') > -1, 'hero 卡要有同比 note');
+  const noYoy = R.renderReport(fakePack(), null, {});
+  assert.strictEqual(noYoy.indexOf('同比'), -1, '无 yoy 时不许出现同比字样');
+});
+t('渲染：排名分布块出现且计数正确，词表为空时整块消失', () => {
+  const html = R.renderReport(fakePack(), null, {});
+  assert.ok(html.indexOf('目标词排名分布') > -1);
+  assert.ok(html.indexOf('共 3 个目标词') > -1);
+  const empty = fakePack();
+  empty.rankings.rows = [];
+  empty.rankings.summary.total = 0;
+  const html2 = R.renderReport(empty, null, {});
+  assert.strictEqual(html2.indexOf('目标词排名分布'), -1);
+});
+t('渲染：带 yoy 与分布块的成品过 lintReport', () => {
+  const html = R.renderReport(fakePack({ yoy: fakeYoy() }), fakeNarrative(), {});
+  const res = L.lintReport(html);
+  assert.ok(res.ok, '成品 lint 要过，命中：' + JSON.stringify(res.hits));
+});
+
 /* ---------- 发布层 ---------- */
 section('发布层');
 t('slug 与文件名只放白名单字符', () => {

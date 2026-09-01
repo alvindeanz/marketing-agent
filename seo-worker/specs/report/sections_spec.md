@@ -27,6 +27,7 @@
 - **纯数字渲染**：hero_kpis 全部。
 - **需要模型写**：仅 `hero_headline`，一句话，**不超过 16 个中文字**，概括本月最强的正向信号（例：自然流量与搜索点击双双走强）。
 - **规则**：hero KPI 优先选正向指标；本月哪些指标好就上哪四个，**槽位不固定**（见「两版差异」）。排名类的 note 写「提升 N 位」，绝不写「收紧」。
+- **同比（2026-09 加）**：pack 有 `yoy` 节点时，每张 hero 卡在环比 note 下加一行「同比 ±%」，页眉信息条加「同比对比 {去年同月}（全月）」；`yoy` 为 null（月中出报、新站、取数失败）时同比相关块整块不出现，全零基期不做同比（见 facts_pack.schema）。纯数字渲染，模型不参与。
 
 ## 2. nav（锚点导航，非编号 section）
 
@@ -38,7 +39,7 @@
 
 - **用途**：自然搜索渠道核心指标 + 全周期趋势图。
 - **字段**：
-  - `ga4_kpis_row1[3]` / `ga4_kpis_row2[3]`，各 `{value,label,prev_value,delta,delta_color}`。默认六个位置：Organic Sessions、Organic New Users、GSC 平均排名、Organic Orders、GSC 曝光、Organic Revenue。
+  - `ga4_kpis_row1[3]` / `ga4_kpis_row2[3]`，各 `{value,label,prev_value,delta,delta_color,yoy_delta,yoy_delta_color,yoy_prev_value,yoy_short}`。默认六个位置：Organic Sessions、Organic New Users、GSC 平均排名、Organic Orders、GSC 曝光、Organic Revenue。yoy_* 四个字段来自 pack.yoy（去年同月），为 null 时卡片上同比行不出现。
   - `trend_months[]` / `trend_values[]`（见骨架末尾注释）、`trend_range_label`、`trend_subtitle`。
   - `ga4_callouts[]`，1 至 3 条。
 - **纯数字渲染**：六张 KPI 卡、趋势图。
@@ -72,7 +73,8 @@
 ## 6. `#rankings` 目标关键词排名追踪（Section 4）
 
 - **用途**：固定目标词表的排名连续性追踪。
-- **字段**：`keyword_rows[]{keyword,prev_pos,pos,delta_text,delta_color,pos_color,impressions,is_brand}`、`rankings_callouts[2]`。
+- **字段**：`keyword_rows[]{keyword,prev_pos,pos,delta_text,delta_color,pos_color,impressions,is_brand}`、`rankings_callouts[2]`、`rank_dist[4]{label,color,bar_color,count,prev_count,delta_text,delta_color,width_pct}` 加 `rank_dist_total`。
+- **排名分布（2026-09 加）**：sdesc 与关键词表之间加一块「目标词排名分布」：四档（1 至 10 / 11 至 20 / 21 以后 / 本月无曝光）计数加占比条，每档带 vs 上月的增减。分档配色与关键词表一致；变化的好坏色只对首尾两档表态（进前十变多是绿、无曝光变多是红），中间两档灰。词表为空时整块不渲染。纯数字渲染，由 `buildRankDist` 从 rankings.rows 现算，模型不参与。
 - **纯数字渲染**：整张表。分档配色规则：本月排名前 10 用 `#16a34a`，11 至 20 用 `#2563eb`，20 名以后用 `var(--muted)`；变化列变好 `#16a34a`、变差 `#dc2626`、无排名用 `class="pos-same"` 且文案写「本月无曝光」或「新进榜」。
 - **需要模型写**：
   - `rankings_sdesc`：**100 至 180 字**。必须交代：目标词数量、排名按查询簇曝光加权的算法、「本月曝光」的定义、三档配色图例、以及裸头词「本月无曝光」的解释（多数是精确匹配掉样本，不是站点无流量）。

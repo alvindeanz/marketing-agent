@@ -13,6 +13,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { rankBand } = require('./factspack');
+
 const TEMPLATE_DIR = path.join(__dirname, '..', 'specs', 'report');
 
 // 漏斗三步的配色，与模板里 nth-child 的顶边颜色一致。
@@ -255,6 +257,60 @@ function kpiValues(pack, key) {
   }
 }
 
+/**
+ * 一个 KPI 的同比对照。pack.yoy 缺失、该指标去年没数、指标本身没有
+ * 同比语义（占比与合计类）时返回 null，模板据此整行不出现。
+ */
+function kpiYoy(pack, key) {
+  const yoy = pack && pack.yoy;
+  if (!yoy || !yoy.period) return null;
+  const def = KPI_DEFS[key];
+  const vals = def ? kpiValues(pack, key) : null;
+  if (!def || !vals) return null;
+  const g = yoy.gsc || null;
+  const o = yoy.ga4_organic || null;
+  let prev;
+  switch (key) {
+    case 'gsc_clicks':
+      prev = g && g.clicks;
+      break;
+    case 'gsc_impressions':
+      prev = g && g.impressions;
+      break;
+    case 'gsc_ctr':
+      prev = g && g.ctr;
+      break;
+    case 'gsc_position':
+      prev = g && g.position;
+      break;
+    case 'ga4_sessions_organic':
+      prev = o && o.sessions;
+      break;
+    case 'ga4_new_users':
+      prev = o && o.new_users;
+      break;
+    case 'leads':
+      prev = o && o.leads;
+      break;
+    default:
+      return null;
+  }
+  if (prev === null || prev === undefined || prev === false) return null;
+  let d;
+  let prevValue;
+  if (def.kind === 'pos') {
+    d = deltaPosition(vals.cur, prev);
+    prevValue = fmtPos(prev);
+  } else if (def.kind === 'pct') {
+    d = deltaPp(vals.cur, prev);
+    prevValue = fmtPct(prev);
+  } else {
+    d = deltaCount(vals.cur, prev);
+    prevValue = fmtInt(prev);
+  }
+  return { delta: d.text, delta_color: d.color, prev_value: prevValue, short: yoy.period.short };
+}
+
 function kpiCard(pack, key) {
   const def = KPI_DEFS[key];
   const vals = def ? kpiValues(pack, key) : null;
@@ -343,7 +399,16 @@ function buildHeroKpis(pack, narrative) {
       cards.push(c);
     }
   }
-  return cards.map((c) => ({ value: c.value, label: c.label, note: c.note }));
+  return cards.map((c) => {
+    const y = kpiYoy(pack, c.key);
+    return {
+      value: c.value,
+      label: c.label,
+      note: c.note,
+      // 有同比就在环比下面加一行，没有整行不出现（新站、月中出报都走这支）。
+      yoy_note: y ? '同比 ' + y.delta : null,
+    };
+  });
 }
 
 function buildGa4Cards(pack) {
@@ -357,15 +422,68 @@ function buildGa4Cards(pack) {
   ];
   const cards = order.map((k) => kpiCard(pack, k)).filter(Boolean);
   const shortLabel = pack.meta.compare.short;
-  const decorate = (c) => ({
-    value: c.value,
-    label: c.label,
-    delta: c.delta,
-    delta_color: c.delta_color,
-    prev_value: c.prev_value,
-    prev_period_short: shortLabel,
-  });
+  const decorate = (c) => {
+    const y = kpiYoy(pack, c.key);
+    return {
+      value: c.value,
+      label: c.label,
+      delta: c.delta,
+      delta_color: c.delta_color,
+      prev_value: c.prev_value,
+      prev_period_short: shortLabel,
+      yoy_delta: y ? y.delta : null,
+      yoy_delta_color: y ? y.delta_color : null,
+      yoy_prev_value: y ? y.prev_value : null,
+      yoy_short: y ? y.short : null,
+    };
+  };
   return { row1: cards.slice(0, 3).map(decorate), row2: cards.slice(3, 6).map(decorate) };
+}
+
+// 排名分布四档的画法：档位颜色与关键词表的分档配色一致，
+// 变化列的好坏方向只对首尾两档表态（进前十是好，无曝光变多是坏），
+// 中间两档涨跌本身说不清好坏，一律灰。
+const RANK_DIST_DEFS = [
+  { key: 'top10', label: '第 1 至 10 名', color: GREEN, bar_color: GREEN, good: 'up' },
+  { key: 'p11_20', label: '第 11 至 20 名', color: BLUE, bar_color: BLUE, good: null },
+  { key: 'p21_plus', label: '第 21 名以后', color: '#64748b', bar_color: '#94a3b8', good: null },
+  { key: 'none', label: '本月无曝光', color: '#94a3b8', bar_color: '#cbd5e1', good: 'down' },
+];
+
+/** 目标词排名分布：两期分档计数加占比条。词表为空时 total 为 0，整块不渲染。 */
+function buildRankDist(pack) {
+  const rows = (pack.rankings && pack.rankings.rows) || [];
+  const total = rows.length;
+  if (!total) return { total: 0, bands: [] };
+  const cur = { top10: 0, p11_20: 0, p21_plus: 0, none: 0 };
+  const prev = { top10: 0, p11_20: 0, p21_plus: 0, none: 0 };
+  for (const r of rows) {
+    cur[rankBand(r.pos)] += 1;
+    prev[rankBand(r.prev_pos)] += 1;
+  }
+  const bands = RANK_DIST_DEFS.map((d) => {
+    const c = cur[d.key];
+    const p = prev[d.key];
+    const diff = c - p;
+    let deltaText = '持平';
+    let deltaColor = MUTED;
+    if (diff !== 0) {
+      deltaText = (diff > 0 ? '+' : '') + diff;
+      if (d.good === 'up') deltaColor = diff > 0 ? GREEN : RED;
+      else if (d.good === 'down') deltaColor = diff > 0 ? RED : GREEN;
+    }
+    return {
+      label: d.label,
+      color: d.color,
+      bar_color: d.bar_color,
+      count: c,
+      prev_count: p,
+      delta_text: deltaText,
+      delta_color: deltaColor,
+      width_pct: Math.round((c / total) * 1000) / 10,
+    };
+  });
+  return { total, bands };
 }
 
 function buildChannelRows(pack) {
@@ -681,6 +799,7 @@ function renderReport(pack, narrative, opts = {}) {
   // （v1 时数字条按原始条目算出 3 项，正文却列了 5 条）。
   const workItems = buildWorkItems(pack, n);
   const workCount = (label) => String(workItems.filter((w) => w.cat_label === label).length);
+  const rankDist = buildRankDist(pack);
 
   const data = {
     client_name: meta.client_name,
@@ -701,6 +820,9 @@ function renderReport(pack, narrative, opts = {}) {
       .join(' &nbsp;·&nbsp; '),
     hero_headline: (n && n.hero_headline) || '本期搜索表现与工作进展汇总',
     hero_kpis: buildHeroKpis(pack, n),
+    // 页眉与 KPI 卡的同比标注。pack.yoy 为 null 时（月中出报、新站、
+    // 取数失败）这些字段都是 null，模板里同比相关的块整块不出现。
+    yoy_label: pack.yoy && pack.yoy.period ? pack.yoy.period.label : null,
     nav_items: [
       { anchor: 'ga4', label: '流量概览' },
       { anchor: 'channels', label: '全渠道' },
@@ -764,6 +886,8 @@ function renderReport(pack, narrative, opts = {}) {
     ),
     keyword_rows: buildKeywordRows(pack),
     rankings_callouts: calloutList(n && n.rankings_callouts, ['green', 'yellow']),
+    rank_dist: rankDist.bands,
+    rank_dist_total: rankDist.total,
 
     pages_sdesc: paragraphs(
       sdesc('pages_sdesc', '数据来自 GA4 自然搜索渠道的落地页访问，对比 ' + meta.compare.label + '。')
@@ -820,8 +944,10 @@ module.exports = {
   buildChannelRows,
   buildWorkItems,
   buildNextItems,
+  buildRankDist,
   kpiCard,
   kpiValues,
+  kpiYoy,
   fmtInt,
   fmtPct,
   fmtPos,

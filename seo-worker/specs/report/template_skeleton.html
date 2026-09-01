@@ -123,11 +123,11 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
       <span class="hdr-badge">{{period_label}}</span>
     </div>
     <h1>SEO Monthly Report<br><em>{{hero_headline}}</em></h1>
-    <p class="hdr-desc">{{site_domain}} &nbsp;·&nbsp; {{market}} &nbsp;·&nbsp; {{platform}} &nbsp;·&nbsp; {{vertical}} &nbsp;·&nbsp; 数据周期：{{period_label}}&nbsp;·&nbsp; 环比对比 {{prev_period_label}}</p>
+    <p class="hdr-desc">{{site_domain}} &nbsp;·&nbsp; {{market}} &nbsp;·&nbsp; {{platform}} &nbsp;·&nbsp; {{vertical}} &nbsp;·&nbsp; 数据周期：{{period_label}}&nbsp;·&nbsp; 环比对比 {{prev_period_label}}{{#yoy_label}}&nbsp;·&nbsp; 同比对比 {{yoy_label}}{{/yoy_label}}</p>
     <div class="hkpis">
-      <!-- row:hero_kpi ×4，正向指标优先，rank 类的 note 写「提升 N 位」 -->
+      <!-- row:hero_kpi ×4，正向指标优先，rank 类的 note 写「提升 N 位」；yoy_note 只在有同比数据时出现 -->
       {{#hero_kpis}}
-      <div><div class="hk-val" style="color:#a78bfa">{{value}}</div><div class="hk-lbl">{{label}}</div><div class="hk-note">{{note}}</div></div>
+      <div><div class="hk-val" style="color:#a78bfa">{{value}}</div><div class="hk-lbl">{{label}}</div><div class="hk-note">{{note}}</div>{{#yoy_note}}<div class="hk-note">{{yoy_note}}</div>{{/yoy_note}}</div>
       {{/hero_kpis}}
     </div>
   </div>
@@ -152,13 +152,13 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
   <div class="g3">
     <!-- row:kpi_card ×3（第一排） -->
     {{#ga4_kpis_row1}}
-    <div class="card"><div class="kv">{{value}}</div><div class="kl">{{label}}</div><div class="kn"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> vs {{prev_period_short}}（{{prev_value}}）</div></div>
+    <div class="card"><div class="kv">{{value}}</div><div class="kl">{{label}}</div><div class="kn"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> vs {{prev_period_short}}（{{prev_value}}）</div>{{#yoy_delta}}<div class="kn"><span style="color:{{yoy_delta_color}};font-weight:600">{{yoy_delta}}</span> vs {{yoy_short}}（{{yoy_prev_value}}）</div>{{/yoy_delta}}</div>
     {{/ga4_kpis_row1}}
   </div>
   <div class="g3" style="margin-top:14px">
     <!-- row:kpi_card ×3（第二排） -->
     {{#ga4_kpis_row2}}
-    <div class="card"><div class="kv">{{value}}</div><div class="kl">{{label}}</div><div class="kn"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> vs {{prev_period_short}}（{{prev_value}}）</div></div>
+    <div class="card"><div class="kv">{{value}}</div><div class="kl">{{label}}</div><div class="kn"><span style="color:{{delta_color}};font-weight:600">{{delta}}</span> vs {{prev_period_short}}（{{prev_value}}）</div>{{#yoy_delta}}<div class="kn"><span style="color:{{yoy_delta_color}};font-weight:600">{{yoy_delta}}</span> vs {{yoy_short}}（{{yoy_prev_value}}）</div>{{/yoy_delta}}</div>
     {{/ga4_kpis_row2}}
   </div>
 
@@ -277,6 +277,22 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
   <div class="stag">Section {{sec_rankings_num}}</div>
   <div class="sec-head"><span class="sec-num">{{sec_rankings_num}}</span><h2 class="stitle">目标关键词排名追踪</h2></div>
   <p class="sdesc">{{{rankings_sdesc}}}</p>
+
+  <!-- 排名分布：四档计数与两期对照，数字直出不经模型；词表为空时整块不渲染 -->
+  {{#rank_dist_total}}
+  <div class="card" style="margin-bottom:16px">
+    <div class="chart-title">目标词排名分布</div>
+    <div class="chart-sub">共 {{rank_dist_total}} 个目标词，按本月位次分档，对照 {{prev_period_short}}</div>
+    <div style="display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--surface2);margin-bottom:16px">
+      {{#rank_dist}}{{#count}}<div style="width:{{width_pct}}%;background:{{bar_color}}"></div>{{/count}}{{/rank_dist}}
+    </div>
+    <div style="display:flex;gap:32px;flex-wrap:wrap">
+      {{#rank_dist}}
+      <div><div style="font-size:22px;font-weight:800;color:{{color}}">{{count}}</div><div style="font-size:12px;color:var(--muted)">{{label}}</div><div style="font-size:12px;font-weight:600;color:{{delta_color}}">{{delta_text}} vs {{prev_period_short}}（{{prev_count}}）</div></div>
+      {{/rank_dist}}
+    </div>
+  </div>
+  {{/rank_dist_total}}
 
   <div class="card" style="padding:0;overflow:hidden">
     <table class="tbl">
