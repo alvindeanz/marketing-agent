@@ -3289,7 +3289,9 @@ if($m==='GET'&&$ROUTE==='/clients'){
        before the counts below are read. CREATE TABLE IF NOT EXISTS on an
        already migrated database is a no-op. */
     ensure_inbox_schema();
-    $s=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id ORDER BY FIELD(p.status,'active','archived'),c.name");
+    /* services 是惰性列（ensure_metrics_schema 补），侧边栏 SEO/Paid 筛选靠它。 */
+    ensure_metrics_schema();
+    $s=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status,p.services FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id ORDER BY FIELD(p.status,'active','archived'),c.name");
     $rows=$s->fetchAll();
     $tasks=[];
     foreach(db()->query("SELECT client_id,COUNT(*) AS n FROM seo_tasks WHERE status IN('proposed','in_progress','review') GROUP BY client_id")->fetchAll() as $r)$tasks[$r['client_id']]=(int)$r['n'];
