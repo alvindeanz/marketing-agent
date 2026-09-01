@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (au) 登记：月报反馈按钮样式与文案对齐 paid 方向卡（Alvin 打回自造文案，commit 09268f8）
+
+- 干了什么：(at) 首版按钮文案是我自造的（「已阅，没有问题 / 有疑问，请联系我」），Alvin 打回，指定 match 方向卡。已照抄 direction_card_template：三选项「同意按建议执行 / 保持不变，继续观察 / 其他反馈」、蓝色方框系（#0057b8/#eff6ff/#bfdbfe）、空文本 other 降级 hold；server choice 枚举同步 agree/hold/other 与 card_feedback 同口径；测试锁死文案。双端已部署（rev 09268f8），powerdekor v5（report 9）真点 5 POST 全 200。sections_spec 10B 已写死「不要自造文案」。
+- 坑：交互组件的文案不是发挥空间，客户面反馈语义要全产品线统一（方向卡先定的就是标准）。另：一次在错误 cwd 下跑测试导致 commit 先于绿灯，已回补全绿再部署，跑测试认准仓库根目录。
+- 下一步/认领：无新增接口，(at) 的 Aiden 事项不变。
+
 ### 2026-09-01 AIRA (at) 登记：月报客户反馈组件全链上线（七模块三选项 + 全局浮动留言），双端已部署（commit 8612e09）
 
 - 干了什么：Alvin 指定月报加意见收集。模板固定注入（不经模型，方向卡教训）：七个 section 各一条三选项反馈（已阅认可 / 有疑问 / 其他意见带文本）加右下角「留言给我们」浮动面板；脚本从 ?r=&k= 取身份，裸链接进预览模式。seo-api：POST /reports 落库后服务端把 r/k 拼进存的 url 并回传（token = md5('reportfb'+id+WORKER_TKN)）；新公开端点 POST /report_feedback（token 门，ok/question/other，other 必须带文本，空文本 400）落 seo_report_feedback 表（惰性建，ensure_report_feedback_schema）并把摘要追进 seo_reports.note（超 1800 字只留表）；GET /reports/{id}/feedback（auth_any）读全量。runner 交付改用带参链接。api 与 worker 双端已由我部署（rev 8612e09，远端 php -l 过）。powerdekor 2026-07 v4（report id 8）真点验证：三选项、空文本拦截、全局留言、预览模式降级全过，4 条 POST 全 200 落库，note 速览正常（测试痕迹已清）。report 测试 100 全绿。
