@@ -1,5 +1,5 @@
 <?php
-/* HornTech Ops Tracker - SEO Agent API
+/* HornTech Ops Tracker - Always Agent API
    Deployed to /www/wwwroot/always/seo-api.php
    Two auth layers:
      - dashboard endpoints: JWT from mini.php /login, role must be admin
