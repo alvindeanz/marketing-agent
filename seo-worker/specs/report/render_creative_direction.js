@@ -14,6 +14,8 @@ const TITLES = {
   s3_title: '本期清理哪些没在干活的素材',
   s5_title: '上期确认记录',
   s6_title: '名词解释',
+  s3_item: 'creative_cleanup_plan',
+  s3_hint: '例如：哪些素材想保留、清理节奏想放缓。留空提交等于保持不变。',
 };
 
 function validate(d) {

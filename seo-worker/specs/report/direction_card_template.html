@@ -150,6 +150,17 @@ details.seat[open]{padding-bottom:4px}
 .glosssum::after{content:" 点开查看";font-weight:400;font-size:12px;color:var(--muted)}
 .glosswrap[open] .glosssum::after{content:""}
 .gloss{margin-top:10px}
+
+/* 全局浮动留言 */
+.floatfb{position:fixed;right:18px;bottom:18px;z-index:50;font-family:inherit}
+.floatfb-btn{font-family:inherit;font-size:13px;font-weight:800;padding:11px 18px;border-radius:24px;border:none;background:var(--primary);color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,60,130,.28)}
+.floatfb-btn:hover{background:#0a4fa3}
+.floatfb-panel{display:none;position:absolute;right:0;bottom:52px;width:300px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:0 8px 30px rgba(15,23,42,.18)}
+.floatfb.open .floatfb-panel{display:block}
+.floatfb-title{font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px;line-height:1.5}
+.floatfb-panel textarea{width:100%;min-height:90px;font-family:inherit;font-size:13px;line-height:1.6;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical}
+.floatfb-panel textarea:focus{outline:none;border-color:#bfdbfe;background:#fff}
+.floatfb-panel .fbb{margin-top:8px;width:100%}
 </style>
 </head>
 <body>
@@ -234,7 +245,20 @@ details.seat[open]{padding-bottom:4px}
   <div class="shead"><span class="snum">3</span><h2>{{s3_title}}</h2></div>
   <div class="box">
 {{#negatives}}    <p>{{{.}}}</p>
-{{/negatives}}  </div>
+{{/negatives}}    <div class="fb" data-item="{{s3_item}}">
+      <div class="ph" style="font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px">对这一节的整体方案，您可以直接表态：</div>
+      <div class="fbrow">
+        <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+        <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+        <button type="button" class="fbb" data-role="toggle">其他反馈</button>
+      </div>
+      <div class="fbwrap" data-role="wrap">
+        <textarea placeholder="{{s3_hint}}"></textarea>
+        <button type="button" class="fbb" data-role="submit">提交反馈</button>
+      </div>
+      <div class="fbmsg" data-role="msg"></div>
+    </div>
+  </div>
 </section>
 
 
@@ -253,6 +277,17 @@ details.seat[open]{padding-bottom:4px}
   </details>
 </section>
 
+</div>
+
+
+<div class="floatfb" id="floatfb">
+  <button type="button" class="floatfb-btn" data-role="float-open">留言给我们</button>
+  <div class="floatfb-panel" data-role="float-panel">
+    <div class="floatfb-title">整份文件的任何意见，写在这里直接发给我们</div>
+    <textarea data-role="float-text" placeholder="想到什么写什么：数字看不懂、方向不同意、想约通话，都可以。"></textarea>
+    <button type="button" class="fbb" data-role="float-send">发送留言</button>
+    <div class="fbmsg" data-role="float-msg"></div>
+  </div>
 </div>
 
 <footer>
@@ -275,9 +310,9 @@ details.seat[open]{padding-bottom:4px}
   function msgEl(scope, role) { return scope.querySelector('[data-role="' + role + '"]'); }
 
   if (!live) {
-    Array.prototype.forEach.call(document.querySelectorAll('.fb, .picks'), function (n) {
+    Array.prototype.forEach.call(document.querySelectorAll('.fb, .picks, .floatfb'), function (n) {
       n.classList.add('off');
-      Array.prototype.forEach.call(n.querySelectorAll('.fbb'), function (b) { b.disabled = true; });
+      Array.prototype.forEach.call(n.querySelectorAll('.fbb, .floatfb-btn'), function (b) { b.disabled = true; });
     });
     Array.prototype.forEach.call(document.querySelectorAll('.fbmsg'), function (m) {
       m.textContent = '当前是预览模式，按钮不能提交。客户请用我们发出的那条链接打开本页；团队同事的意见请走任务线程，本页按钮的记录会被当作客户意见处理。';
@@ -382,6 +417,34 @@ details.seat[open]{padding-bottom:4px}
       });
     });
   });
+
+  (function () {
+    var box = document.getElementById('floatfb');
+    if (!box) { return; }
+    var openBtn = box.querySelector('[data-role="float-open"]');
+    var panel = box.querySelector('[data-role="float-panel"]');
+    var text = box.querySelector('[data-role="float-text"]');
+    var send = box.querySelector('[data-role="float-send"]');
+    var msg = box.querySelector('[data-role="float-msg"]');
+    openBtn.addEventListener('click', function () { box.classList.toggle('open'); if (box.classList.contains('open')) { text.focus(); } });
+    send.addEventListener('click', function () {
+      var v = text.value.trim();
+      if (!v) { msg.className = 'fbmsg err'; msg.textContent = '留言是空的，写一句再发。'; return; }
+      send.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在发送……';
+      post('global_note', 'other', v).then(function () {
+        send.disabled = false;
+        text.value = '';
+        msg.className = 'fbmsg ok';
+        msg.textContent = '已发给我们（' + stamp() + '）。还有想说的可以继续写。';
+      }).catch(function () {
+        send.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没发出去，请过一会儿再试，或直接回复邮件。';
+      });
+    });
+  })();
 })();
 </script>
 </body>

@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (aq) 登记：方向卡模板加两个反馈组件（词表手术节表态按钮 + 右下角全局浮动留言）
+
+- 干了什么：Alvin 指定两处交互。模板 v2 追加：S3 词表手术节尾整体表态按钮组（复用既有 .fb 绑定零新 JS，data-item 由渲染器给默认值 keyword_plan / creative_cleanup_plan，模型侧零改动）；右下角浮动「留言给我们」（固定定位面板，item=global_note choice=other 走 card_feedback，空文本客户端拦截，预览态禁用）。两卡重渲染部署，playwright 真点全过（S3 表态 200、浮动留言 200、预览态 disabled），测试行已清。
+- 坑：无。widget 仍全部固定在模板里不经模型。
+- 下一步/认领：global_note 与 s3 表态的蒸馏归属（落 facts 前缀）随批 4 一起定；浮动留言的通知面（sales 怎么第一时间看到新留言）待设计，现阶段靠任务 note。
+
 ### 2026-09-01 AIRA (ap) 登记：方向卡减法版（模板 v2）+ 词表手术节上线，Louvresky 两卡重渲染为内部测试页
 
 - 干了什么：Alvin 定减法方向。模板 v2：红绿灯与词族卡合并成席位表手风琴、口径收一行折叠、砍新发现节、词汇表折叠；schema V2（去 lights/findings，加 scope_line 与 families.brief，模型少产两个槽）；kd spec V5 第三节扩「词表手术：挡移加」。Louvresky 实例：移 166 词（59 主系列暂停候选 + 107 试验系列单列）、加 50 词（26 条带过转化，louvretec 等竞品牌词标敏感待客户确认），两份 CSV 随卡发布。两卡（#146 #147）重渲染部署，真点验证过，页高降约三成。

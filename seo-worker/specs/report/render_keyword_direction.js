@@ -13,6 +13,8 @@ const TITLES = {
   s3_title: '本期词表手术：挡、移、加',
   s5_title: '上期确认记录',
   s6_title: '名词解释',
+  s3_item: 'keyword_plan',
+  s3_hint: '例如：哪些词不想停、想优先加哪些、否词有顾虑。留空提交等于保持不变。',
 };
 
 function validate(d) {
