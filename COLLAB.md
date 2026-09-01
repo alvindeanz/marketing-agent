@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (ap) 登记：方向卡减法版（模板 v2）+ 词表手术节上线，Louvresky 两卡重渲染为内部测试页
+
+- 干了什么：Alvin 定减法方向。模板 v2：红绿灯与词族卡合并成席位表手风琴、口径收一行折叠、砍新发现节、词汇表折叠；schema V2（去 lights/findings，加 scope_line 与 families.brief，模型少产两个槽）；kd spec V5 第三节扩「词表手术：挡移加」。Louvresky 实例：移 166 词（59 主系列暂停候选 + 107 试验系列单列）、加 50 词（26 条带过转化，louvretec 等竞品牌词标敏感待客户确认），两份 CSV 随卡发布。两卡（#146 #147）重渲染部署，真点验证过，页高降约三成。
+- 坑：模板做切片手术时锚点字符串撞上 CSS 里的同名 class（legend），切出重复头部块；渲染后截图肉眼看才发现。教训：模板结构手术后必须渲染截图过目，纯 lint 与点击验证看不出布局重复。
+- 下一步/认领：链接当前全部为内部测试（Alvin 定，上线至少一个月后）；「加词」执行通道（正向词批量加 = keyword-add，capabilities 未列，风险类建议 spend 走放行）待与 Aiden 对齐进 apply adapter 白名单。
+
 ### 2026-09-01 AIRA (ao) 登记：W12 批 A 落地（素材方向卡产线 + Louvresky 试点卡 #147），杀 job 231 说明
 
 - 干了什么：素材方向卡产线四件进 specs/report/（spec V1、同构 schema、render_creative_direction.js、通用模板 direction_card_template.html 抽取，词卡模板并入），release_policy 加 creative-direction=reversible，14 test 全绿（commit 7838a45）。Louvresky 试点卡 #147 由 PJ 人工产线交付：数据现拉、渲染、发布、真点双通道验证，决策卡含 messaging 框架定版（onboard 素材三样存量迁移首例）。

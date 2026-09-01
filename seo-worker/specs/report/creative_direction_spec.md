@@ -1,6 +1,6 @@
 # 素材方向卡规格（creative-direction 任务的唯一产出契约）
 
-<!-- CREATIVE-DIRECTION-SPEC-V1：2026-09-01（Alvin 拍板 W12 批 A）。词卡的姊妹卡：
+<!-- CREATIVE-DIRECTION-SPEC-V2：2026-09-01 随词卡减法版同步（共用模板 v2：席位表手风琴、scope_line、无独立新发现节、词汇表折叠）。V1 内容其余不变。词卡的姊妹卡：
      广告素材（文案与资产）的客户版决策文档。读者优先级：客户老板 > sales > 我们自己。
      与词卡同构：模板 direction_card_template.html、widget、A31 全部继承，出生即模板化，
      模型只产数据 JSON 不写 HTML。 -->

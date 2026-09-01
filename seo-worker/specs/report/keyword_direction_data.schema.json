@@ -7,15 +7,13 @@
     "period_label",
     "oneline",
     "bignums",
+    "scope_line",
     "fineprint",
-    "lights",
     "s1_desc",
     "decisions",
     "s2_desc",
     "families",
     "negatives",
-    "findings_title",
-    "findings",
     "confirm",
     "glossary",
     "window_line",
@@ -69,36 +67,7 @@
       "items": {
         "type": "string"
       },
-      "description": "口径说明段落，允许 <b>；第一段讲询价只算什么，第二段讲电话等观察项"
-    },
-    "lights": {
-      "type": "array",
-      "maxItems": 8,
-      "items": {
-        "type": "object",
-        "required": [
-          "name",
-          "state_label",
-          "cls"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "词族人话名；产品与行业名词用英文原词（copy_rules A31），如 louvre roof 类搜索"
-          },
-          "state_label": {
-            "type": "string"
-          },
-          "cls": {
-            "enum": [
-              "g",
-              "h",
-              "a"
-            ],
-            "description": "g 加大 h 保持 a 收缩"
-          }
-        }
-      }
+      "description": "口径与共同归因的完整说明段落（折叠层，scope_line 是它的一行摘要），允许 <b>"
     },
     "s1_desc": {
       "type": "string",
@@ -193,13 +162,14 @@
       "items": {
         "type": "object",
         "required": [
-          "name",
           "cls",
           "state_label",
           "spent",
           "got",
           "next",
-          "evidence"
+          "evidence",
+          "name",
+          "brief"
         ],
         "properties": {
           "name": {
@@ -228,6 +198,11 @@
           "evidence": {
             "type": "string",
             "description": "折叠层：窗口、点击数、对照、现测日期"
+          },
+          "brief": {
+            "type": "string",
+            "maxLength": 60,
+            "description": "席位表折叠态的一句话理由，60 字内"
           }
         }
       }
@@ -238,17 +213,6 @@
         "type": "string"
       },
       "description": "否词与止血段落，允许 <b>"
-    },
-    "findings_title": {
-      "type": "string",
-      "description": "如 三条新发现"
-    },
-    "findings": {
-      "type": "array",
-      "maxItems": 3,
-      "items": {
-        "type": "string"
-      }
     },
     "confirm": {
       "type": "array",
@@ -283,6 +247,11 @@
     "attach_line": {
       "type": "string",
       "description": "页脚随附文件一行，无附件写 随附文件：无"
+    },
+    "scope_line": {
+      "type": "string",
+      "maxLength": 80,
+      "description": "第一屏口径一行：询价只算什么，一句话；详情进 fineprint 折叠层"
     }
   }
 }
