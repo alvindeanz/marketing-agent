@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (at) 登记：月报客户反馈组件全链上线（七模块三选项 + 全局浮动留言），双端已部署（commit 8612e09）
+
+- 干了什么：Alvin 指定月报加意见收集。模板固定注入（不经模型，方向卡教训）：七个 section 各一条三选项反馈（已阅认可 / 有疑问 / 其他意见带文本）加右下角「留言给我们」浮动面板；脚本从 ?r=&k= 取身份，裸链接进预览模式。seo-api：POST /reports 落库后服务端把 r/k 拼进存的 url 并回传（token = md5('reportfb'+id+WORKER_TKN)）；新公开端点 POST /report_feedback（token 门，ok/question/other，other 必须带文本，空文本 400）落 seo_report_feedback 表（惰性建，ensure_report_feedback_schema）并把摘要追进 seo_reports.note（超 1800 字只留表）；GET /reports/{id}/feedback（auth_any）读全量。runner 交付改用带参链接。api 与 worker 双端已由我部署（rev 8612e09，远端 php -l 过）。powerdekor 2026-07 v4（report id 8）真点验证：三选项、空文本拦截、全局留言、预览模式降级全过，4 条 POST 全 200 落库，note 速览正常（测试痕迹已清）。report 测试 100 全绿。
+- 坑：本机没有 php，php -l 只能靠 deploy.sh api 的远端闸；改 PHP 后别忘了先 api 后验证。
+- 下一步/认领：**Aiden 知悉**：seo-api.php 我动了（Alvin 拍板的主力开发授权），改动范围只有 POST /reports 尾部与两个新路由加一个 ensure 函数；看板前端如需展示 /reports/{id}/feedback 的全量列表归你排期（note 速览已够用）。反馈数据的蒸馏归属（进 feedback 流程还是只做台账）待定。
+
 ### 2026-09-01 AIRA (as) 登记：worker 部署由我执行（Alvin 拍板），powerdekor 报告语言改中文并出 v3
 
 - 干了什么：Alvin 定「Aira 是主力开发，worker 部署直接做不等 Aiden」，本次起 (ar) 的改动由我跑 ./deploy.sh worker 部署（rev a3a68f0，六步全过、服务 active，顺带把此前登记待部署的方向卡 specs 一起带上线）。powerdekor（15）是中文沟通客户，v2 出成英文叙事套中文版式被 Alvin 打回；根因是 profile.report_lang='en'，已走 admin PUT /profile 改 'zh'，并走正规看板通道 POST /reports/generate（job 235）由部署后的 worker 出 v3，全中文、行业词保留英文（A31）、同比与排名分布齐全，渲染截图过目：https://agencyreport.horntech-dev.com/reports/powerdekorfloors/seo_report_2026-07_v3.html 。
