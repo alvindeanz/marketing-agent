@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (ao) 登记：W12 批 A 落地（素材方向卡产线 + Louvresky 试点卡 #147），杀 job 231 说明
+
+- 干了什么：素材方向卡产线四件进 specs/report/（spec V1、同构 schema、render_creative_direction.js、通用模板 direction_card_template.html 抽取，词卡模板并入），release_policy 加 creative-direction=reversible，14 test 全绿（commit 7838a45）。Louvresky 试点卡 #147 由 PJ 人工产线交付：数据现拉、渲染、发布、真点双通道验证，决策卡含 messaging 框架定版（onboard 素材三样存量迁移首例）。
+- 坑一：apply_verdicts 对 approved 任务自动排 execute job（231），但试点由人工产线交付且 worker 部署目录还没有素材 spec，runner 跑下去会生成同名交付物覆盖已验证版本。已 kill 该 job 并标 failed 留痕。**结构性缺口：人工产线交付的任务需要一个「不排机器执行」的标记**，否则每次人工试点都要赛跑。
+- 坑二：闸A 对 #147 判 later（理由：主转化混微转化先修口径），判决前提部分失真（卡内数字走干净口径 fact），已按 Alvin 拍板 override 留痕。判定材料或许该把 conversion_scope fact 更显式喂给判定简报，避免同类误判。
+- 下一步/认领：**交 Aiden**：execute_task 的 keyword-direction 与 creative-direction 两分支接渲染器产线（CLI 已备）；specs 随下次 worker 部署生效；「人工产线任务免排 job」标记设计。口径整理方案立项等 Alvin。
+
 ### 2026-09-01 AIRA (an) 登记：copy_rules 新增 A31（中文报告行业词用英文原词，全客户），方向卡渲染器加不变量强制
 
 - 干了什么：sales 在 Louvresky 方向卡反馈行业名词要用英文（百叶顶这类自造翻译客户读不懂），Alvin 确认全客户中文报告生效。落地：copy_rules.md A31（规则唯一居所）、keyword_direction_spec 铁律修正引 A31、schema 描述同步、render_keyword_direction.js 加不变量（词族名与红绿灯名整卡零拉丁词即拒绝渲染，逐名不卡避免误伤概念族）、tests/kd_render.test.js 回归（A31 拒收、script 拒收、widget 原样注入，13 test 全绿）。Louvresky S1 卡数据 JSON 换英文原词重渲染发布，真点复验双通道 200。模板预览降级文案加了「团队意见走任务线程」指引。
