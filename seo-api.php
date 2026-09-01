@@ -4656,16 +4656,18 @@ if($m==='POST'&&$ROUTE==='/report_feedback'){
     if(!$rid||!hash_equals(md5('reportfb'.$rid.$WORKER_TKN),$tok))res(403,['error'=>'bad token']);
     $item=mb_substr(trim((string)($i['item']??'')),0,120,'UTF-8');
     $choice=(string)($i['choice']??'');
-    if(!in_array($choice,['ok','question','other'],true))res(400,['error'=>'bad choice']);
+    /* 三选项与 card_feedback 同一套口径（Alvin 2026-09-01 定：月报按钮 match 方向卡）。
+       空文本的 other 与方向卡一样降级成 hold。 */
+    if(!in_array($choice,['agree','hold','other'],true))res(400,['error'=>'bad choice']);
     $txt=mb_substr(trim((string)($i['text']??'')),0,2000,'UTF-8');
-    if($choice==='other'&&$txt==='')res(400,['error'=>'text required']);
+    if($choice==='other'&&$txt==='')$choice='hold';
     $g=db()->prepare("SELECT id,note FROM seo_reports WHERE id=?");
     $g->execute([$rid]);
     $rep=$g->fetch();
     if(!$rep)res(404,['error'=>'report not found']);
     ensure_report_feedback_schema();
     db()->prepare("INSERT INTO seo_report_feedback(report_id,item,choice,fb)VALUES(?,?,?,?)")->execute([$rid,$item,$choice,$txt]);
-    $label=['ok'=>'已阅认可','question'=>'有疑问','other'=>'留言'][$choice];
+    $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈'][$choice];
     $line='[客户反馈 '.date('m-d H:i').'] '.($item!==''?($item.'：'):'').$label.($txt!==''?('：'.mb_substr($txt,0,120,'UTF-8')):'');
     $note=trim((string)($rep['note']??''));
     $new=($note===''?$line:$note."\n".$line);

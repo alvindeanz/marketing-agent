@@ -114,27 +114,28 @@ section:last-child{border-bottom:none;padding-bottom:48px}
 
 
 /* 反馈组件：流水线固定注入，不经模型。三选项 + 其他意见文本 + 右下角全局留言 */
-.fb{margin-top:22px;border-top:1px dashed var(--border);padding-top:14px}
-.fbq{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px}
+.fb{margin-top:22px;border-top:1px solid var(--border);padding-top:12px}
+.fbq{font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px}
 .fbrow{display:flex;gap:8px;flex-wrap:wrap}
-.fbb{font-family:inherit;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:18px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer}
-.fbb:hover{border-color:#c4b5fd;color:var(--primary);background:var(--primary-bg)}
-.fbb.done{background:var(--primary);border-color:var(--primary);color:#fff}
+.fbb{font-family:inherit;font-size:13px;font-weight:700;line-height:1.4;padding:9px 15px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#0057b8;cursor:pointer}
+.fbb:hover{background:#e0edff}
+.fbb.done{background:#0057b8;border-color:#0057b8;color:#fff}
+.fbb[disabled]{opacity:.65;cursor:default}
 .fb.off .fbb,.floatfb.off .floatfb-btn{opacity:.5;cursor:default}
 .fbwrap{display:none;margin-top:10px}
 .fbwrap.open{display:block}
-.fbwrap textarea,.floatfb-panel textarea{width:100%;min-height:80px;font-family:inherit;font-size:13px;line-height:1.6;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical;box-sizing:border-box}
-.fbwrap textarea:focus,.floatfb-panel textarea:focus{outline:none;border-color:#c4b5fd;background:#fff}
+.fbwrap textarea,.floatfb-panel textarea{width:100%;min-height:78px;font-family:inherit;font-size:13.5px;line-height:1.7;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical;box-sizing:border-box}
+.fbwrap textarea:focus,.floatfb-panel textarea:focus{outline:none;border-color:#bfdbfe;background:#fff}
 .fbwrap .fbb{margin-top:8px}
-.fbmsg{font-size:12px;margin-top:8px;color:var(--muted)}
-.fbmsg.ok{color:var(--green)}
-.fbmsg.err{color:var(--red)}
+.fbmsg{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.65}
+.fbmsg.ok{color:#047857;font-weight:700}
+.fbmsg.err{color:#b45309;font-weight:700}
 .floatfb{position:fixed;right:18px;bottom:18px;z-index:200;font-family:inherit}
-.floatfb-btn{font-family:inherit;font-size:13px;font-weight:700;padding:11px 18px;border-radius:24px;border:none;background:var(--primary);color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(76,29,149,.3)}
-.floatfb-btn:hover{background:#7c3aed}
+.floatfb-btn{font-family:inherit;font-size:13px;font-weight:800;padding:11px 18px;border-radius:24px;border:none;background:#0057b8;color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,60,130,.28)}
+.floatfb-btn:hover{background:#0a4fa3}
 .floatfb-panel{display:none;position:absolute;right:0;bottom:52px;width:300px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:0 8px 30px rgba(15,23,42,.18)}
 .floatfb.open .floatfb-panel{display:block}
-.floatfb-title{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:8px;line-height:1.5}
+.floatfb-title{font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px;line-height:1.5}
 .floatfb-panel .fbb{margin-top:8px;width:100%}
 footer{background:var(--surface2);border-top:1px solid var(--border);padding:24px 36px;text-align:center;font-size:12px;color:var(--muted)}
 @media(max-width:768px){.wrap,.nav{padding-left:16px;padding-right:16px}.g2,.g3{grid-template-columns:repeat(2,1fr)}.hkpis{gap:24px}.hk-val{font-size:1.5rem}.funnel-wrap{flex-direction:column}.funnel-arrow{transform:rotate(90deg)}}
@@ -207,15 +208,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <!-- 反馈组件（固定注入，不经模型）-->
   <div class="fb" data-item="ga4">
-    <div class="fbq">这一节的内容，您可以直接反馈：</div>
+    <div class="fbq">对这一节的内容与建议，您可以直接表态：</div>
     <div class="fbrow">
-      <button type="button" class="fbb" data-choice="ok">已阅，没有问题</button>
-      <button type="button" class="fbb" data-choice="question">有疑问，请联系我</button>
-      <button type="button" class="fbb" data-role="toggle">其他意见</button>
+      <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+      <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+      <button type="button" class="fbb" data-role="toggle">其他反馈</button>
     </div>
     <div class="fbwrap" data-role="wrap">
-      <textarea placeholder="对这一节的数字或结论有任何想法，写在这里"></textarea>
-      <button type="button" class="fbb" data-role="submit">提交</button>
+      <textarea placeholder="对这一节的数字或建议有任何想法，写在这里直接发给我们"></textarea>
+      <button type="button" class="fbb" data-role="submit">提交反馈</button>
     </div>
     <div class="fbmsg" data-role="msg"></div>
   </div>
@@ -258,15 +259,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <!-- 反馈组件（固定注入，不经模型）-->
   <div class="fb" data-item="channels">
-    <div class="fbq">这一节的内容，您可以直接反馈：</div>
+    <div class="fbq">对这一节的内容与建议，您可以直接表态：</div>
     <div class="fbrow">
-      <button type="button" class="fbb" data-choice="ok">已阅，没有问题</button>
-      <button type="button" class="fbb" data-choice="question">有疑问，请联系我</button>
-      <button type="button" class="fbb" data-role="toggle">其他意见</button>
+      <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+      <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+      <button type="button" class="fbb" data-role="toggle">其他反馈</button>
     </div>
     <div class="fbwrap" data-role="wrap">
-      <textarea placeholder="对这一节的数字或结论有任何想法，写在这里"></textarea>
-      <button type="button" class="fbb" data-role="submit">提交</button>
+      <textarea placeholder="对这一节的数字或建议有任何想法，写在这里直接发给我们"></textarea>
+      <button type="button" class="fbb" data-role="submit">提交反馈</button>
     </div>
     <div class="fbmsg" data-role="msg"></div>
   </div>
@@ -330,15 +331,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <!-- 反馈组件（固定注入，不经模型）-->
   <div class="fb" data-item="funnel">
-    <div class="fbq">这一节的内容，您可以直接反馈：</div>
+    <div class="fbq">对这一节的内容与建议，您可以直接表态：</div>
     <div class="fbrow">
-      <button type="button" class="fbb" data-choice="ok">已阅，没有问题</button>
-      <button type="button" class="fbb" data-choice="question">有疑问，请联系我</button>
-      <button type="button" class="fbb" data-role="toggle">其他意见</button>
+      <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+      <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+      <button type="button" class="fbb" data-role="toggle">其他反馈</button>
     </div>
     <div class="fbwrap" data-role="wrap">
-      <textarea placeholder="对这一节的数字或结论有任何想法，写在这里"></textarea>
-      <button type="button" class="fbb" data-role="submit">提交</button>
+      <textarea placeholder="对这一节的数字或建议有任何想法，写在这里直接发给我们"></textarea>
+      <button type="button" class="fbb" data-role="submit">提交反馈</button>
     </div>
     <div class="fbmsg" data-role="msg"></div>
   </div>
@@ -395,15 +396,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <!-- 反馈组件（固定注入，不经模型）-->
   <div class="fb" data-item="rankings">
-    <div class="fbq">这一节的内容，您可以直接反馈：</div>
+    <div class="fbq">对这一节的内容与建议，您可以直接表态：</div>
     <div class="fbrow">
-      <button type="button" class="fbb" data-choice="ok">已阅，没有问题</button>
-      <button type="button" class="fbb" data-choice="question">有疑问，请联系我</button>
-      <button type="button" class="fbb" data-role="toggle">其他意见</button>
+      <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+      <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+      <button type="button" class="fbb" data-role="toggle">其他反馈</button>
     </div>
     <div class="fbwrap" data-role="wrap">
-      <textarea placeholder="对这一节的数字或结论有任何想法，写在这里"></textarea>
-      <button type="button" class="fbb" data-role="submit">提交</button>
+      <textarea placeholder="对这一节的数字或建议有任何想法，写在这里直接发给我们"></textarea>
+      <button type="button" class="fbb" data-role="submit">提交反馈</button>
     </div>
     <div class="fbmsg" data-role="msg"></div>
   </div>
@@ -448,15 +449,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <!-- 反馈组件（固定注入，不经模型）-->
   <div class="fb" data-item="pages">
-    <div class="fbq">这一节的内容，您可以直接反馈：</div>
+    <div class="fbq">对这一节的内容与建议，您可以直接表态：</div>
     <div class="fbrow">
-      <button type="button" class="fbb" data-choice="ok">已阅，没有问题</button>
-      <button type="button" class="fbb" data-choice="question">有疑问，请联系我</button>
-      <button type="button" class="fbb" data-role="toggle">其他意见</button>
+      <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+      <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+      <button type="button" class="fbb" data-role="toggle">其他反馈</button>
     </div>
     <div class="fbwrap" data-role="wrap">
-      <textarea placeholder="对这一节的数字或结论有任何想法，写在这里"></textarea>
-      <button type="button" class="fbb" data-role="submit">提交</button>
+      <textarea placeholder="对这一节的数字或建议有任何想法，写在这里直接发给我们"></textarea>
+      <button type="button" class="fbb" data-role="submit">提交反馈</button>
     </div>
     <div class="fbmsg" data-role="msg"></div>
   </div>
@@ -494,15 +495,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <!-- 反馈组件（固定注入，不经模型）-->
   <div class="fb" data-item="work">
-    <div class="fbq">这一节的内容，您可以直接反馈：</div>
+    <div class="fbq">对这一节的内容与建议，您可以直接表态：</div>
     <div class="fbrow">
-      <button type="button" class="fbb" data-choice="ok">已阅，没有问题</button>
-      <button type="button" class="fbb" data-choice="question">有疑问，请联系我</button>
-      <button type="button" class="fbb" data-role="toggle">其他意见</button>
+      <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+      <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+      <button type="button" class="fbb" data-role="toggle">其他反馈</button>
     </div>
     <div class="fbwrap" data-role="wrap">
-      <textarea placeholder="对这一节的数字或结论有任何想法，写在这里"></textarea>
-      <button type="button" class="fbb" data-role="submit">提交</button>
+      <textarea placeholder="对这一节的数字或建议有任何想法，写在这里直接发给我们"></textarea>
+      <button type="button" class="fbb" data-role="submit">提交反馈</button>
     </div>
     <div class="fbmsg" data-role="msg"></div>
   </div>
@@ -532,15 +533,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <!-- 反馈组件（固定注入，不经模型）-->
   <div class="fb" data-item="next">
-    <div class="fbq">这一节的内容，您可以直接反馈：</div>
+    <div class="fbq">对这一节的内容与建议，您可以直接表态：</div>
     <div class="fbrow">
-      <button type="button" class="fbb" data-choice="ok">已阅，没有问题</button>
-      <button type="button" class="fbb" data-choice="question">有疑问，请联系我</button>
-      <button type="button" class="fbb" data-role="toggle">其他意见</button>
+      <button type="button" class="fbb" data-choice="agree">同意按建议执行</button>
+      <button type="button" class="fbb" data-choice="hold">保持不变，继续观察</button>
+      <button type="button" class="fbb" data-role="toggle">其他反馈</button>
     </div>
     <div class="fbwrap" data-role="wrap">
-      <textarea placeholder="对这一节的数字或结论有任何想法，写在这里"></textarea>
-      <button type="button" class="fbb" data-role="submit">提交</button>
+      <textarea placeholder="对这一节的数字或建议有任何想法，写在这里直接发给我们"></textarea>
+      <button type="button" class="fbb" data-role="submit">提交反馈</button>
     </div>
     <div class="fbmsg" data-role="msg"></div>
   </div>
@@ -664,7 +665,7 @@ new Chart(document.getElementById('sessionsChart'),{
       Array.prototype.forEach.call(n.querySelectorAll('.fbb, .floatfb-btn'), function (b) { b.disabled = true; });
     });
     Array.prototype.forEach.call(document.querySelectorAll('.fbmsg'), function (m) {
-      m.textContent = '当前是预览模式，按钮不能提交。客户请用我们发出的那条链接打开本页；团队同事的意见请走内部渠道，本页按钮的记录会被当作客户意见处理。';
+      m.textContent = '当前是预览模式，按钮不能提交。客户请用我们发出的那条链接打开本页；团队同事的意见请走任务线程，本页按钮的记录会被当作客户意见处理。';
     });
     return;
   }
@@ -733,11 +734,10 @@ new Chart(document.getElementById('sessionsChart'),{
         var box = wrap.querySelector('textarea');
         var text = box.value.trim();
         if (!text) {
-          msg.className = 'fbmsg err';
-          msg.textContent = '意见是空的，写一句再提交。';
+          fire(submit, 'hold', '', '保持不变，继续观察');
           return;
         }
-        fire(submit, 'other', text, '您的意见已收到');
+        fire(submit, 'other', text, '您的反馈已收到');
       });
     }
   });

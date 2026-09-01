@@ -785,6 +785,9 @@ t('渲染：七个模块各带一个三选项反馈组件，右下角全局留�
     assert.ok(html.indexOf('<div class="fb" data-item="' + item + '">') > -1, item + ' 缺反馈组件');
   }
   assert.strictEqual((html.match(/class="fb" data-item=/g) || []).length, 7, '反馈组件必须恰好 7 个');
+  // 三选项文案与 paid 方向卡一致（Alvin 2026-09-01 定），别改回自造文案
+  assert.ok(html.indexOf('>同意按建议执行<') > -1 && html.indexOf('>保持不变，继续观察<') > -1 && html.indexOf('>其他反馈<') > -1, '三选项文案必须与方向卡一致');
+  assert.strictEqual(html.indexOf('请联系我'), -1, '不许出现自造的按钮文案');
   assert.ok(html.indexOf('id="floatfb"') > -1, '缺全局浮动留言');
   assert.ok(html.indexOf('seo-api.php/report_feedback') > -1, '脚本要指向 report_feedback 端点');
   assert.ok(html.indexOf("params.get('r')") > -1 && html.indexOf("params.get('k')") > -1, '脚本要从 r 与 k 参数取身份');
