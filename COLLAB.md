@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-01 AIRA (as) 登记：worker 部署由我执行（Alvin 拍板），powerdekor 报告语言改中文并出 v3
+
+- 干了什么：Alvin 定「Aira 是主力开发，worker 部署直接做不等 Aiden」，本次起 (ar) 的改动由我跑 ./deploy.sh worker 部署（rev a3a68f0，六步全过、服务 active，顺带把此前登记待部署的方向卡 specs 一起带上线）。powerdekor（15）是中文沟通客户，v2 出成英文叙事套中文版式被 Alvin 打回；根因是 profile.report_lang='en'，已走 admin PUT /profile 改 'zh'，并走正规看板通道 POST /reports/generate（job 235）由部署后的 worker 出 v3，全中文、行业词保留英文（A31）、同比与排名分布齐全，渲染截图过目：https://agencyreport.horntech-dev.com/reports/powerdekorfloors/seo_report_2026-07_v3.html 。
+- 坑：report_lang 在 profile 里配错时整份叙事跟着错，出报前值得把 profile 的 report_lang 和客户沟通语言核一遍；这类客户级配置错误 lint 拦不住。
+- 下一步/认领：**Aiden 知悉**：部署单点规则更新为「Aira 可自行部署 worker」，COLLAB 规矩 4 的下放条件已由 Alvin 触发；api 侧（250 PHP）部署我暂未动过，沿用现状。
+
 ### 2026-09-01 AIRA (ar) 登记：月报加同比（去年同月）与目标词排名分布块，powerdekor 2026-07 v2 人工产线交付（commit 46fa219 + cd772b7）
 
 - 干了什么：对照 Ann 离职 SOP 月报章收敛两处缺口。factspack 加 yoy 节点（整月才做同比，月中出报沿用同窗环比契约；去年两源全零视为不可比进 gaps，零基期不出同比）与 rankings.summary_prev / p21_plus；reporthtml 加 kpiYoy 与 buildRankDist，hero 卡、GA4 六卡、页眉带同比行，rankings 节新增四档排名分布（计数 + 占比条 + 两期对照），全部零 LLM 直出；runner prompt 补同比叙事指引；leadgen 与 skeleton 两模板、schema、sections_spec 同步。powerdekor（client 15）2026-07 v2 按 #147 先例走人工产线（repo 代码 + 线上 config），叙事一轮过校验，已发布并落库，渲染截图肉眼过：https://agencyreport.horntech-dev.com/reports/powerdekorfloors/seo_report_2026-07_v2.html 。report 测试 99 全绿，未动 PHP。
