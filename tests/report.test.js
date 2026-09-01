@@ -711,6 +711,12 @@ t('yoyPeriodOf：二月边界压到目标月最后一天', () => {
   assert.strictEqual(p.start, '2025-02-01');
   assert.strictEqual(p.end, '2025-02-28');
 });
+t('round 系列吃到 null 回 null，不把「无百分比」写成零变化', () => {
+  assert.strictEqual(F.round1(null), null);
+  assert.strictEqual(F.round2(undefined), null);
+  assert.strictEqual(F.round4(''), null);
+  assert.strictEqual(F.round1(0), 0, '真零照样是零');
+});
 t('bandCounts：本期按 pos、prev 按 prev_pos 分档', () => {
   const rows = fakePack().rankings.rows;
   const cur = F.bandCounts(rows);

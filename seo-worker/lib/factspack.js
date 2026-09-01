@@ -331,23 +331,30 @@ function rankBand(pos) {
   return 'p21_plus';
 }
 
+// round 系列对 null 必须回 null：Number(null) 是 0，不挡的话
+// 「pctDelta 上期为 0 回 null」会被静默改写成 0，把「没有百分比可言」
+// 变成「零变化」（2026-09-01 powerdekor v2 的 yoy.leads_pct 踩到）。
 function round1(n) {
+  if (n === null || n === undefined || n === '') return null;
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v * 10) / 10 : null;
 }
 
 function round2(n) {
+  if (n === null || n === undefined || n === '') return null;
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
 }
 
 function round4(n) {
+  if (n === null || n === undefined || n === '') return null;
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v * 10000) / 10000 : null;
 }
 
 /** 环比比例统一保留三位小数（即百分数一位小数），叙事与 KPI 卡才不会一个写 11.69% 一个写 11.7%。 */
 function round3(n) {
+  if (n === null || n === undefined || n === '') return null;
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null;
 }
