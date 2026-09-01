@@ -21,7 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
-### 2026-09-01 AIRA (aq) 登记：方向卡模板加两个反馈组件（词表手术节表态按钮 + 右下角全局浮动留言）
+### 2026-09-01 AIRA (ar) 登记：月报加同比（去年同月）与目标词排名分布块，powerdekor 2026-07 v2 人工产线交付（commit 46fa219 + cd772b7）
+
+- 干了什么：对照 Ann 离职 SOP 月报章收敛两处缺口。factspack 加 yoy 节点（整月才做同比，月中出报沿用同窗环比契约；去年两源全零视为不可比进 gaps，零基期不出同比）与 rankings.summary_prev / p21_plus；reporthtml 加 kpiYoy 与 buildRankDist，hero 卡、GA4 六卡、页眉带同比行，rankings 节新增四档排名分布（计数 + 占比条 + 两期对照），全部零 LLM 直出；runner prompt 补同比叙事指引；leadgen 与 skeleton 两模板、schema、sections_spec 同步。powerdekor（client 15）2026-07 v2 按 #147 先例走人工产线（repo 代码 + 线上 config），叙事一轮过校验，已发布并落库，渲染截图肉眼过：https://agencyreport.horntech-dev.com/reports/powerdekorfloors/seo_report_2026-07_v2.html 。report 测试 99 全绿，未动 PHP。
+- 坑一：round1/2/3/4 对 null 会返回 0（Number(null) 是 0），pctDelta 的「上期为 0 无百分比」被静默写成「零变化」，v2 的 yoy.leads_pct 实测踩到，已修加回归测试（cd772b7）。这是存量隐患，organic delta 的 sessions_pct 等同路径此前同样暴露。
+- 坑二：repo 里直接跑 runner_host 时 ga4KeyFile 按 worker ROOT 相对解析，秘钥在部署目录不在仓库；解法是复制线上 config 加绝对路径 ga4KeyFile，SEO_WORKER_CONFIG 指过去。
+- 下一步/认领：**待部署**（worker 侧生效后看板一键出报才带新模块）；ecommerce 客户的同比行沿用同一套 kpiYoy，模板实装电商块时不需要再动数据层。
+
 
 - 干了什么：Alvin 指定两处交互。模板 v2 追加：S3 词表手术节尾整体表态按钮组（复用既有 .fb 绑定零新 JS，data-item 由渲染器给默认值 keyword_plan / creative_cleanup_plan，模型侧零改动）；右下角浮动「留言给我们」（固定定位面板，item=global_note choice=other 走 card_feedback，空文本客户端拦截，预览态禁用）。两卡重渲染部署，playwright 真点全过（S3 表态 200、浮动留言 200、预览态 disabled），测试行已清。
 - 坑：无。widget 仍全部固定在模板里不经模型。
