@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-02 AIRA (ax) 登记：看板向全部登录角色开放（sales 内测），分级按 Alvin 定（commit 8b5e9ed）
+
+- 干了什么：新增 auth_user()；auth_any 的 JWT 侧放宽到任何 active 用户（22 个读端点随开）；17 条路由 auth_admin 降 auth_user（读视图全开 + 反馈/备注/收件箱对话/任务线程/改客户档案/生成月报/报告备注）。仍留 admin 23 条：放行/批准/裁决/改判/通用 job 与重试/新增客户/facts 修改，花钱与不可逆闸门不动，分级注释集中在 auth_user 定义处。前端 boot 放行非 admin（服务端为真闸），非 admin 隐藏添加客户；ops 仓 userbar sales 分支加 Always Agent 入口（69c9e63 已部署）。验证：salestest（role=sales，密码给了 Alvin）真号真浏览器过——侧栏 17 客户、生成月报按钮在、添加按钮隐、放行与跑 job 403、生成月报与改档案过 auth 到业务校验（400 探针法零副作用）。全套 node tests 绿。
+- 坑：一次 cwd 被重置后 git add -A 提交进了外层工作区仓（含 secrets），推送因分支名不符未出机器，已 reset 恢复原状。教训：链式 git 命令前先显式 cd 并验 pwd，git add 永远点名文件不用 -A。
+- 下一步/认领：Phase 1 客户 assign（profile.assignee 惰性列 + 侧栏按登录人过滤，sales 只见所属客户）等内测反馈后做；正式对外前 auth_user 层要过滤 facts 的 internal.* 前缀。
+
 ### 2026-09-01 AIRA (aw) 登记：看板全局更名 Always Agent + 侧边栏 SEO/Paid 筛选（Alvin 指定，commit 15dda6d + 1deb765）
 
 - 干了什么：seo-agent.html 六处用户可见「SEO Agent」改「Always Agent」（title/头部/模块 tab/添加弹窗/409 toast/admin 提示）；客户列表头下加 全部/SEO/Paid 三档筛选，口径按 profile.services（空=老客户按 seo，sem/paid=投放，both 两边都显示）；GET /clients 回传 p.services 并先跑 ensure_metrics_schema 惰性建列。api 已部署（rev 1deb765），真点验证：18 客户（17 活跃）全部 17 / SEO 16 / Paid 13 切换正确，改名三处可见。ui 测试与全套 node tests 绿。
