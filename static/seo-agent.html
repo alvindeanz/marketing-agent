@@ -33,6 +33,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sb-filter{display:flex;gap:6px;padding:2px 12px 8px}
 .sb-f{font:inherit;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;border:1px solid var(--border,#2a3242);background:transparent;color:var(--muted,#8b96a8);cursor:pointer}
 .sb-f.on{background:#2f4d80;border-color:#3d64a8;color:#dbe6f5}
+.nonadmin .sb-add{display:none}
 .sb-add{background:transparent;border:1px solid #2d3748;color:#94a3b8;border-radius:6px;font-size:12px;padding:2px 9px;cursor:pointer;line-height:1.5}
 .sb-add:hover{border-color:#475569;color:#e2e8f0}
 .sb-row{display:flex;align-items:center;gap:6px;padding:7px 9px;border-radius:8px;cursor:pointer;margin-bottom:2px;border:1px solid transparent}
@@ -4196,13 +4197,12 @@ function toggleLog(id){openLogs[id]=!openLogs[id];renderJobs()}
 /* ================= 启动 ================= */
 window.addEventListener('hashchange',router);
 
+const IS_ADMIN=getRole()==='admin';
 function boot(){
   if(!token){location.href='/';return}
-  if(getRole()!=='admin'){
-    document.getElementById('denyView').classList.remove('hidden');
-    document.getElementById('appView').classList.add('hidden');
-    return;
-  }
+  /* 2026-09-02 sales 开放：全部登录角色可进。服务端是真正的闸
+     （放行/批准/跑 job/新增客户仍 admin），非 admin 点到会收 403 提示。 */
+  if(!IS_ADMIN)document.body.classList.add('nonadmin');
   document.getElementById('appView').classList.remove('hidden');
   loadClients(false);
   setInterval(()=>{

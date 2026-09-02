@@ -123,12 +123,30 @@ function auth_worker(){
     return ['username'=>'seo-worker','role'=>'seo_worker'];
 }
 /* Either layer: read-only endpoints the dashboard and the runner both need. */
+/* 任何 active 登录用户（admin/editor/viewer/sales/sales_manager 都行）。
+   2026-09-02 Alvin 定的 sales 开放分级：读全开；反馈、备注、收件箱对话、
+   改客户档案、生成月报对所有登录用户开放；放行/批准/裁决/跑通用 job/
+   新增客户 仍 admin（花钱与不可逆的闸门不动）。分级落点见各路由的
+   auth_user()/auth_admin() 调用，动过要同步这段注释。 */
+function auth_user(){
+    $t=bearer();
+    if(!$t)res(401,['error'=>'No auth']);
+    $u=jwt_dec($t);
+    if(!$u)res(401,['error'=>'Bad token']);
+    $s=db()->prepare("SELECT active,role FROM users WHERE username=?");
+    $s->execute([$u['username']??'']);
+    $r=$s->fetch();
+    if($r&&!(int)$r['active'])res(403,['error'=>'Account disabled']);
+    if($r)$u['role']=$r['role']??($u['role']??'');
+    return $u;
+}
 function auth_any(){
     global $WORKER_TKN;
     $t=bearer();
     if(!$t)res(401,['error'=>'No auth']);
     if(hash_equals($WORKER_TKN,$t))return ['username'=>'seo-worker','role'=>'seo_worker'];
-    return auth_admin();
+    /* 读端点对全部登录用户开放（2026-09-02 sales 开放）；此前这里要求 admin。 */
+    return auth_user();
 }
 
 /* Nudge the worker on the ros box. Best effort: the worker also polls. */
@@ -1533,7 +1551,7 @@ if($m==='GET'&&$ROUTE==='/jobs/queue'){
 // PATCH /jobs/{id} -> worker progress: status / log_append / token_usage
 // GET /jobs/{id} -> 一条 job 连同完整日志，任务卡上「看日志」用。admin 层。
 if($m==='GET'&&preg_match('#^/jobs/(\d+)$#',$ROUTE,$mm)){
-    auth_admin();
+    auth_user();
     $g=db()->prepare("SELECT j.*,c.name AS client_name FROM agent_jobs j LEFT JOIN clients c ON c.id=j.client_id WHERE j.id=?");
     $g->execute([(int)$mm[1]]);
     $job=$g->fetch();
@@ -2833,7 +2851,7 @@ if($m==='GET'&&preg_match('#^/inbox/(\d+)$#',$ROUTE,$mm)){
 // a card filed against nobody in particular can still be about this client's
 // tasks, and hiding it would hide a decision somebody has to make.
 if($m==='GET'&&$ROUTE==='/inbox'){
-    auth_admin();
+    auth_user();
     ensure_inbox_schema();
     $lim=(int)($_GET['limit']??60);
     if($lim<1)$lim=60;
@@ -2971,7 +2989,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/resolve$#',$ROUTE,$mm)){
 // 放在 GET /inbox/{id} 前面无所谓，那条是 (\d+)，chats 落不进去，
 // 但顺序上摆在一起更好读。
 if($m==='GET'&&$ROUTE==='/inbox/chats'){
-    auth_admin();
+    auth_user();
     ensure_inbox_schema();
     $lim=(int)($_GET['limit']??50);
     if($lim<1)$lim=50;
@@ -3033,7 +3051,7 @@ if($m==='GET'&&$ROUTE==='/inbox/chats'){
 // body { client_id, title?, text }，一次请求做三件事：建根、写第一条人消息、
 // 排 chat job。标题不给就从第一句话截一段，人懒得起名是常态。
 if($m==='POST'&&$ROUTE==='/inbox/chat'){
-    $u=auth_admin();
+    $u=auth_user();
     ensure_inbox_schema();
     ensure_job_types();
     $i=input();
@@ -3065,7 +3083,7 @@ if($m==='POST'&&$ROUTE==='/inbox/chat'){
 // 同一个会话已经有 job 在跑时直接 409：一次一轮，人等回复再说下一句，
 // 两句并发进来模型看到的历史是半截的，回复只会更差。
 if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
-    $u=auth_admin();
+    $u=auth_user();
     ensure_inbox_schema();
     ensure_job_types();
     $rootId=(int)$mm[1];
@@ -3202,7 +3220,7 @@ function task_thread_view($root){
 
 // POST /tasks/{id}/thread -> 取或建这个任务的线程，回完整视图。
 if($m==='POST'&&preg_match('#^/tasks/(\d+)/thread$#',$ROUTE,$mm)){
-    $u=auth_admin();
+    $u=auth_user();
     ensure_inbox_schema();
     $tid=(int)$mm[1];
     $tq=db()->prepare("SELECT id,client_id,title FROM seo_tasks WHERE id=?");
@@ -3284,7 +3302,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
 
 // GET /clients -> console sidebar: every onboarded client plus its counters
 if($m==='GET'&&$ROUTE==='/clients'){
-    auth_admin();
+    auth_user();
     /* The sidebar carries the decision inbox badge, so the table has to exist
        before the counts below are read. CREATE TABLE IF NOT EXISTS on an
        already migrated database is a no-op. */
@@ -3360,7 +3378,7 @@ if($m==='POST'&&$ROUTE==='/clients'){
 
 // GET /overview?client_id= -> everything the Dashboard view needs, one call
 if($m==='GET'&&$ROUTE==='/overview'){
-    auth_admin();
+    auth_user();
     $cid=need_client();
     $cl=db()->prepare("SELECT id,name FROM clients WHERE id=?");
     $cl->execute([$cid]);
@@ -3429,7 +3447,7 @@ if($m==='GET'&&$ROUTE==='/overview'){
 
 // GET /profile?client_id=
 if($m==='GET'&&$ROUTE==='/profile'){
-    auth_admin();
+    auth_user();
     /* brand_regex 是惰性加的列，控制台要能编辑它，所以读之前先保证列存在。 */
     ensure_metrics_schema();
     $cid=need_client();
@@ -3445,7 +3463,7 @@ if($m==='GET'&&$ROUTE==='/profile'){
 
 // PUT /profile (upsert, merges onto the existing row)
 if($m==='PUT'&&$ROUTE==='/profile'){
-    $u=auth_admin();
+    $u=auth_user();
     $i=input();
     $cid=(int)($i['client_id']??0);
     if(!$cid)res(400,['error'=>'client_id required']);
@@ -3634,7 +3652,7 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/review_result$#',$ROUTE,$mm)){
 }
 
 if($m==='GET'&&$ROUTE==='/plans'){
-    auth_admin();
+    auth_user();
     $cid=need_client();
     $s=db()->prepare("SELECT * FROM seo_plans WHERE client_id=? ORDER BY version DESC,id DESC");
     $s->execute([$cid]);
@@ -4084,7 +4102,7 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
 // nobody submits just sits there, which is the cheap tradeoff for pasting.
 // The stored MIME comes from finfo, never from the client's Content-Type.
 if($m==='POST'&&$ROUTE==='/feedback_upload'){
-    $u=auth_admin();
+    $u=auth_user();
     if(!isset($_FILES['file'])){
         /* An oversized POST is discarded by PHP before this script runs, which
            leaves both $_FILES and $_POST empty. Say so instead of "no file". */
@@ -4126,7 +4144,7 @@ if($m==='POST'&&$ROUTE==='/feedback_upload'){
 // The row is stored raw and a feedback job is queued to parse it. No dedup on
 // purpose: several notes on one task may legitimately queue up.
 if($m==='POST'&&preg_match('#^/tasks/(\d+)/feedback$#',$ROUTE,$mm)){
-    $u=auth_admin();
+    $u=auth_user();
     ensure_feedback_schema();
     $tid=(int)$mm[1];
     $i=input();
@@ -4181,7 +4199,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/feedback$#',$ROUTE,$mm)){
 // GET /tasks/{id}/feedback -> the note history for one task, newest first.
 // text is cut to 500 chars: this feeds a card, not an archive.
 if($m==='GET'&&preg_match('#^/tasks/(\d+)/feedback$#',$ROUTE,$mm)){
-    auth_admin();
+    auth_user();
     ensure_feedback_schema();
     $tid=(int)$mm[1];
     $s=db()->prepare("SELECT id,client_id,task_id,source,status,parsed_note,job_id,created_by,created_at,parsed_at,images,
@@ -4384,7 +4402,7 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/reject$#',$ROUTE,$mm)){
 // 每行还挂一个 job_state，任务卡上直接看得到「排队第几 / 在跑 / 上次失败」，
 // 不用前端拿 job 列表反查。两块都是一次 SQL 拉全量再在 PHP 里挂，不做每卡一查。
 if($m==='GET'&&$ROUTE==='/tasks'){
-    auth_admin();
+    auth_user();
     $cid=need_client();
     ensure_review_schema();
     $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
@@ -4559,7 +4577,7 @@ if($m==='POST'&&preg_match('#^/jobs/(\d+)/retry$#',$ROUTE,$mm)){
 // 与 POST /jobs 同级，去重规矩也一样：同客户同类型在跑就 409，一个客户同一时刻
 // 只能有一份报告在生成。不改 POST /jobs 本体，那条路留给通用触发。
 if($m==='POST'&&$ROUTE==='/reports/generate'){
-    $u=auth_admin();
+    $u=auth_user();
     ensure_reports_schema();
     /* workspace_dir 这一列是 ensure_metrics_schema() 惰性补上去的，
        没跑过它的库里直接 SELECT 会抛异常变成 500，所以先调一次。 */
@@ -4750,7 +4768,7 @@ if($m==='GET'&&preg_match('#^/reports/(\d+)/pack$#',$ROUTE,$mm)){
 // PATCH /reports/{id} -> 人加一句备注、或标记已发送。只有这两个字段可改：
 // 周期、版本、链接都是生成时的事实，改它们等于伪造，要换内容就再生成一版。
 if($m==='PATCH'&&preg_match('#^/reports/(\d+)$#',$ROUTE,$mm)){
-    $u=auth_admin();
+    $u=auth_user();
     ensure_reports_schema();
     $rid=(int)$mm[1];
     $i=input();
