@@ -21,9 +21,9 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
-### 2026-09-02 AIRA (ay) 登记：给 Aiden 新 PJ 的 MA 背景交接包已放 share
+### 2026-09-02 AIRA (ay) 登记：给 Aiden 新 PJ 的 MA 背景交接包已放 share（+实操手册）
 
-- 干了什么：`/mnt/share/aira/to-aiden-ma-background-20260902.md`——仓库入场顺序、部署双端现状（部署已非单点，发版前先 check 先 pull）、近两周增量摘要（(ar) 至 (ax)）、硬规矩速记、以及他手上 Sammichelle(23) 导入所需的全部指针（GA4 288505724、已迁 WF 域名未切、report_lang 先核对沟通语言）。
+- 干了什么：`/mnt/share/aira/to-aiden-ma-background-20260902.md`（背景）与 `to-aiden-ma-client-ops-20260902.md`（客户导入三件套流程、日常操作端点、坑速查表）——仓库入场顺序、部署双端现状（部署已非单点，发版前先 check 先 pull）、近两周增量摘要（(ar) 至 (ax)）、硬规矩速记、以及他手上 Sammichelle(23) 导入所需的全部指针（GA4 288505724、已迁 WF 域名未切、report_lang 先核对沟通语言）。
 - 下一步/认领：Sammichelle 导入归 Aiden；我不动 23。
 
 ### 2026-09-02 AIRA (ax) 登记：看板向全部登录角色开放（sales 内测），分级按 Alvin 定（commit 8b5e9ed）
