@@ -3228,7 +3228,8 @@ function stateLine(t){
   else if(sprintAnchor&&sn!==null&&sn>currentSprint(tasksData)&&hs!=='closed')bits.push('<span class="muted">S'+sn+' 下期</span>');
   const pv=String(t.result_note||'').match(/预览: (https?:\/\/\S+)/g);
   if(pv&&pv.length){const u=pv[pv.length-1].replace(/^预览: /,'');bits.push('<a href="'+esc(u)+'" target="_blank" rel="noopener" style="font-weight:700">预览</a>')}
-  if(t.status==='review'&&t.output_url)bits.push('<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出</a>');
+  /* 有产出链接就显示，不限 review：人工产线的交付（如客户确认页）在 proposed 阶段就有正式链接要给 sales 用。 */
+  if(t.output_url)bits.push('<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener">产出</a>');
   if(failed)bits.push('<button class="btn tiny ghost" onclick="showJobLog('+(t.job_state.job_id||0)+')">看日志</button>');
   /* apply 成功但有 deferred 验证项：机器跑不了的（Rich Results Test、手机横滚这类），人补跑完点盖章。done 的卡也显示，这是它唯一的出口。 */
   if(t.manual_pending&&(t.manual_checks||[]).length)bits.push('<span class="st-fail" title="'+esc((t.manual_checks||[]).join('；'))+'">待复验 '+t.manual_checks.length+' 项</span><button class="btn tiny ghost" onclick="manualDone('+t.id+')">复验完成</button>');
