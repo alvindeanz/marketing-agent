@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-02 AIRA (ay) 登记：给 Aiden 新 PJ 的 MA 背景交接包已放 share
+
+- 干了什么：`/mnt/share/aira/to-aiden-ma-background-20260902.md`——仓库入场顺序、部署双端现状（部署已非单点，发版前先 check 先 pull）、近两周增量摘要（(ar) 至 (ax)）、硬规矩速记、以及他手上 Sammichelle(23) 导入所需的全部指针（GA4 288505724、已迁 WF 域名未切、report_lang 先核对沟通语言）。
+- 下一步/认领：Sammichelle 导入归 Aiden；我不动 23。
+
 ### 2026-09-02 AIRA (ax) 登记：看板向全部登录角色开放（sales 内测），分级按 Alvin 定（commit 8b5e9ed）
 
 - 干了什么：新增 auth_user()；auth_any 的 JWT 侧放宽到任何 active 用户（22 个读端点随开）；17 条路由 auth_admin 降 auth_user（读视图全开 + 反馈/备注/收件箱对话/任务线程/改客户档案/生成月报/报告备注）。仍留 admin 23 条：放行/批准/裁决/改判/通用 job 与重试/新增客户/facts 修改，花钱与不可逆闸门不动，分级注释集中在 auth_user 定义处。前端 boot 放行非 admin（服务端为真闸），非 admin 隐藏添加客户；ops 仓 userbar sales 分支加 Always Agent 入口（69c9e63 已部署）。验证：salestest（role=sales，密码给了 Alvin）真号真浏览器过——侧栏 17 客户、生成月报按钮在、添加按钮隐、放行与跑 job 403、生成月报与改档案过 auth 到业务校验（400 探针法零副作用）。全套 node tests 绿。
