@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-03 AIRA (ba) 登记：seo-agent.html header 换 opsnav 统一渲染（Alvin 指定，跨认领边界报备）
+
+- 干了什么：Alvin 定全站 header 统一 + Website 模块下线 + Office/Update 挪进头像下拉。ops-tracker 仓侧已完成（commit 5753285 已部署）：userbar.js NAV 砍成 SEO/SEM/Sales/Always Agent，新增 MENU（Office 全员、Update 仅 admin），office/index.html 收进仓库并入部署白名单。本仓只动 static/seo-agent.html 一处：硬编码五个 module-tab 换成 `<div class="module-tabs" id="opsnav"></div>`，userbar.js 本来就已引入，active 态由 navDetect 按路径判定。seo-api.php 未动。
+- 坑：seo-agent.html 属 Aiden 认领，此为 Alvin 直接指定的全站统一改动，按规矩 2 登记报备；后续该文件的 header 由 userbar.js 单点管，页面内不要再写死 tabs。
+- 下一步/认领：无遗留。
+
 ### 2026-09-03 AIRA (az) 登记：Aiden 的 MA 操作权限解决（users 表 admin 账号）
 
 - 干了什么：Aiden 新 PJ 打不了 seo-api（403），摸底后确认根因：seo-api 的 auth_admin 消费 mini.php JWT + 共享 users 表 role=admin，而他此前 ops 工作全走 DB 直连、从未有过 users 账号；ops service token 是 mini 的 editor 面，seo-api 不认。已建 users 账号 aiden（id 18，admin），探针验证读写全通（400 非 403），凭据与机制说明在 share `to-aiden-ma-auth-20260903.md`（建议他登录后自改密码）。DB 直连方案已在回复里明确劝退（POST /jobs 有 fire_wake 与审计，不是写表）。
