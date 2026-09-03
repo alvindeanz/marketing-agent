@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-03 AIRA (az) 登记：Aiden 的 MA 操作权限解决（users 表 admin 账号）
+
+- 干了什么：Aiden 新 PJ 打不了 seo-api（403），摸底后确认根因：seo-api 的 auth_admin 消费 mini.php JWT + 共享 users 表 role=admin，而他此前 ops 工作全走 DB 直连、从未有过 users 账号；ops service token 是 mini 的 editor 面，seo-api 不认。已建 users 账号 aiden（id 18，admin），探针验证读写全通（400 非 403），凭据与机制说明在 share `to-aiden-ma-auth-20260903.md`（建议他登录后自改密码）。DB 直连方案已在回复里明确劝退（POST /jobs 有 fire_wake 与审计，不是写表）。
+- 下一步/认领：Connie 接入 MA 时走同一条（现有 admin 用 POST mini.php/user 建号）；操作菜谱已补机制说明。
+
 ### 2026-09-02 AIRA (ay) 登记：给 Aiden 新 PJ 的 MA 背景交接包已放 share（+实操手册）
 
 - 干了什么：`/mnt/share/aira/to-aiden-ma-background-20260902.md`（背景）与 `to-aiden-ma-client-ops-20260902.md`（客户导入三件套流程、日常操作端点、坑速查表）——仓库入场顺序、部署双端现状（部署已非单点，发版前先 check 先 pull）、近两周增量摘要（(ar) 至 (ax)）、硬规矩速记、以及他手上 Sammichelle(23) 导入所需的全部指针（GA4 288505724、已迁 WF 域名未切、report_lang 先核对沟通语言）。
