@@ -2860,7 +2860,7 @@ if($m==='GET'&&$ROUTE==='/inbox'){
        chat_user / chat_agent 的父行很容易被 limit 截掉，混进来就是一堆
        挂不上线程的碎片。 */
     $chatIn=implode(',',array_map(function($k){return "'".$k."'";},CHAT_KINDS));
-    $where=["i.kind NOT IN ($chatIn)"];$args=[];
+    $where=["i.kind NOT IN ($chatIn)"];$args=[];$cid=0;
     if(isset($_GET['client_id'])&&$_GET['client_id']!==''){
         $cid=(int)$_GET['client_id'];
         if($cid>0){$where[]='(i.client_id=? OR i.client_id IS NULL)';$args[]=$cid;}
@@ -2878,7 +2878,14 @@ if($m==='GET'&&$ROUTE==='/inbox'){
     $items=[];
     foreach($s->fetchAll() as $r)$items[]=inbox_row_out($r);
     $oc=db()->query("SELECT COUNT(*) AS n FROM seo_inbox WHERE kind='digest' AND status='open'")->fetch();
-    res(200,['items'=>$items,'open_count'=>(int)$oc['n']]);
+    /* 带 client_id 过滤时同口径回一个该客户（含跨客户 NULL 卡）的待裁决数，前端客户模式的角标用它 */
+    $occ=null;
+    if($cid>0){
+        $s2=db()->prepare("SELECT COUNT(*) AS n FROM seo_inbox WHERE kind='digest' AND status='open' AND (client_id=? OR client_id IS NULL)");
+        $s2->execute([$cid]);
+        $occ=(int)$s2->fetch()['n'];
+    }
+    res(200,['items'=>$items,'open_count'=>(int)$oc['n'],'open_count_client'=>$occ]);
 }
 
 // POST /inbox/{id}/ruling -> a human answers one digest in their own words.

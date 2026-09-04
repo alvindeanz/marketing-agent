@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-04 AIRA (bf) 登记：收件箱按客户隔离（Alvin 指定，跨认领边界报备）
+
+- 干了什么：决策收件箱分两种模式。客户页收件箱 tab = 客户模式（默认）：决策流硬锁当前客户加跨客户 NULL 卡，下拉隐藏，角标显示本客户待裁决数；侧栏「决策收件箱」= 全局总台：全客户流水加下拉筛选，标题标明（全局总台），对话区隐藏（对话本来就是单客户的）。两模式一键互切（ibScope 按钮），换客户或离开视图自动回客户模式。API 侧 GET /inbox 带 client_id 时新增 open_count_client 返回字段（向后兼容）。对话 session 本来就按 client_id 隔离，零改动。全套 node tests 14/14 绿。
+- 坑：根因是 inboxClient 过滤默认 0 且不跟 curId 联动，进任何客户的收件箱都看到全局流。数据层无串味，纯展示层问题。
+- 下一步/认领：无遗留。
+
 ### 2026-09-04 AIRA (be) 登记：WP 与 Shopify 平台车道试点交接包已放 share（试点归 Aiden，Alvin 指定）
 
 - 干了什么：`/mnt/share/aira/to-aiden-platform-pilot-wp-shopify-20260904.md`。内容：三个共性缺口（specs/capabilities 清单 + registry 枚举器 + notes 凭据文件约定）、WP 试点 kiaorakids(37) 的访问细节（自定义登录 URL、cookie+nonce 流、凭据在客户 .secrets.env、词表空）、Shopify 试点 sungait(51) 与 2026 接入路线（partner custom distribution app + collaborator 安装拿不过期 offline token，老 shpat 路线已废）、机制红线。原「非 WebForger 平台适配」在我认领面，现按 Alvin 指定移交试点，跑通后认领归属再议。

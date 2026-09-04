@@ -450,7 +450,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
     <!-- 决策收件箱 -->
     <div id="v_inbox" class="hidden">
       <!-- 对话：按客户跟 opus 聊，聊出来的活变成任务草案，人点立项才落看板 -->
-      <div class="sec">
+      <div class="sec" id="chSec">
         <div class="sec-head">
           <div class="sec-title">对话</div>
           <div class="tb-group">
@@ -471,10 +471,11 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
       <div class="sec">
         <div class="sec-head">
-          <div class="sec-title">决策收件箱</div>
+          <div class="sec-title" id="ibTitle">决策收件箱</div>
           <div class="tb-group">
             <span class="plan-meta" id="ibMeta"></span>
             <select class="tb-select" id="ibClient" onchange="setInboxClient(this.value)"></select>
+            <button class="btn ghost" id="ibScope" onclick="setInboxGlobal(!inboxGlobal)">全局视图</button>
             <button class="btn ghost" id="ibOpenBtn" onclick="toggleInboxOpen()">只看待裁决</button>
             <button class="btn ghost" onclick="loadInbox()">刷新</button>
           </div>
@@ -777,7 +778,8 @@ let lastOverview=null,lastAttention=null,excOpen={};
 let apprPlanId=0,apprTasks=[],apprPick={};
 /* 决策收件箱：全局跨客户流，客户过滤只是个筛子。裁决草稿按卡片 id 存内存，
    刷新会重画卡片，草稿从这里补回去，不会被自动刷新吃掉。 */
-let inboxData=[],inboxOpenTotal=0,inboxClient=0,inboxOnlyOpen=false,inboxDraft={};
+/* inboxGlobal=false（默认）：决策流硬过滤到当前客户，防串味；true：侧栏总台模式，全客户流水加下拉筛选 */
+let inboxData=[],inboxOpenTotal=0,inboxOpenClient=null,inboxClient=0,inboxOnlyOpen=false,inboxDraft={},inboxGlobal=false;
 /* 收件箱对话：会话按当前客户过滤，会话详情 5 秒轮询一次等 opus 回复，
    会话关掉或者离开这个视图就把轮询停掉，别让它在后台空转。
    chatSpawned 记这一轮点过立项的草案（key 是 消息id:序号），刷新后靠系统行补回来。 */
@@ -856,6 +858,7 @@ function router(){
     fbOpen={};fbDraft={};fbSource={};fbComplete={};fbHist={};fbImgs={};fbUploading={};
     releaseFbBlobs();
     tasksData=[];jobsData=[];factsData=[];lastOverview=null;lastAttention=null;
+    inboxGlobal=false;inboxClient=0; /* 换客户回到本客户模式，防止上一家的全局筛选串过来 */
     chReset();
     insReset();
     repReset();
@@ -884,8 +887,8 @@ function render(){
 }
 
 function loadView(){
-  /* 会话轮询只在收件箱视图里跑，切走就停 */
-  if(curView!=='inbox')chStop();
+  /* 会话轮询只在收件箱视图里跑，切走就停；离开收件箱同时退出全局模式，下次从 tab 进来还是本客户 */
+  if(curView!=='inbox'){chStop();inboxGlobal=false}
   if(curView==='dash')loadOverview();
   else if(curView==='inbox')loadInbox();
   else if(curView==='plan')loadPlans();
@@ -2482,14 +2485,22 @@ function gotoInbox(){
   const first=clientsData.filter(c=>c.status==='active')[0]||clientsData[0];
   const id=curId||(first?first.client_id:0);
   if(!id){toast('还没有客户，先添加一个',true);return}
-  inboxClient=0;
+  /* 侧栏入口 = 全局总台；客户页的收件箱 tab 走默认的本客户模式 */
+  inboxGlobal=true;inboxClient=0;
+  if(curView==='inbox'){loadInbox();return}
   navTo(id,'inbox');
+}
+function setInboxGlobal(g){
+  inboxGlobal=!!g;
+  inboxClient=inboxGlobal?0:curId;
+  loadInbox();
 }
 function setInboxClient(v){inboxClient=parseInt(v,10)||0;loadInbox()}
 function toggleInboxOpen(){inboxOnlyOpen=!inboxOnlyOpen;loadInbox()}
 function setInboxDraft(id,v){inboxDraft[id]=v}
 
 async function loadInbox(){
+  if(!inboxGlobal)inboxClient=curId; /* 客户模式硬锁当前客户，别的客户的卡进不来 */
   let q='/inbox?limit=60';
   if(inboxClient)q+='&client_id='+inboxClient;
   if(inboxOnlyOpen)q+='&status=open';
@@ -2497,6 +2508,7 @@ async function loadInbox(){
   if(fail(d,'收件箱载入失败'))return;
   inboxData=d.items||[];
   inboxOpenTotal=d.open_count||0;
+  inboxOpenClient=(d.open_count_client==null?null:d.open_count_client);
   renderInbox();
   renderSidebar();
   loadChats();
@@ -2560,8 +2572,16 @@ function ibDigestCard(r,kids){
 }
 
 function renderInbox(){
+  /* 两种模式：客户模式（默认）流里只有当前客户加跨客户卡，无下拉；全局模式是侧栏总台，全客户加下拉筛选 */
+  const title=document.getElementById('ibTitle');
+  if(title)title.textContent=inboxGlobal?'决策收件箱（全局总台）':'决策收件箱';
+  const scope=document.getElementById('ibScope');
+  if(scope)scope.textContent=inboxGlobal?'只看当前客户':'全局视图';
+  const chSec=document.getElementById('chSec');
+  if(chSec)chSec.classList.toggle('hidden',inboxGlobal); /* 全局模式藏对话区，对话永远是单客户的事 */
   const sel=document.getElementById('ibClient');
   if(sel){
+    sel.style.display=inboxGlobal?'':'none';
     sel.innerHTML='<option value="0">全部客户</option>'+
       clientsData.map(c=>'<option value="'+c.client_id+'"'+(c.client_id===inboxClient?' selected':'')+'>#'+c.client_id+' '+esc(c.name)+'</option>').join('');
   }
@@ -2570,7 +2590,9 @@ function renderInbox(){
   const meta=document.getElementById('ibMeta');
   if(meta){
     const openHere=inboxData.filter(r=>r.kind==='digest'&&r.status==='open').length;
-    meta.textContent='本页 '+inboxData.length+' 条消息，待裁决 '+openHere+' 张，全局待裁决 '+inboxOpenTotal+' 张';
+    meta.textContent=inboxGlobal
+      ? ('本页 '+inboxData.length+' 条消息，待裁决 '+openHere+' 张，全局待裁决 '+inboxOpenTotal+' 张')
+      : ('本客户待裁决 '+(inboxOpenClient==null?openHere:inboxOpenClient)+' 张，全局 '+inboxOpenTotal+' 张（侧栏「决策收件箱」进总台）');
   }
   const box=document.getElementById('ibStream');
   if(!box)return;
