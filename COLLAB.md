@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-04 AIRA (bc) 登记：Dashboard 数据洞察加「自然/投放」渠道页签（Alvin 指定，跨认领边界报备）
+
+- 干了什么：seo-agent.html 洞察区加渠道子页签。services 为 sem/paid/both 的客户出「投放」页：六卡（花费/点击/转化/转化价值/ROAS/CPA，CPA 配色反转）、花费与转化双轴趋势（复用动作标注）、付费 CTR 与点击转化率周线、口径脚注（Ads 全部 conversion actions 合计，与 GA4 分开看）。数据走现有 ads_* 五列与 GET /metrics，**后端零改动**。纯函数（insPaidBody 等）全进 INSIGHTS-PURE 区，insights.test.js 加「投放洞察」一节（100/100），全套 node tests 14/14 绿。insBody 加可选第七参 tabsHtml（不传时输出不变），insKpiHtml 加可选 cls 参。
+- 坑：多渠道预留用列前缀（INS_PAID_CHANNELS，ads_=Google，后续 meta_/bingads_ 加行）；口径红线在注释里：跨渠道花费可加总、转化不得加总。services=seo 客户（含自投 Ads 的 sungait）界面零变化。
+- 下一步/认领：二期按 conversion_action_category 拆 PURCHASE 列（动 googleads.js + 指标白名单三处 + 惰性 DDL）；我们管投放的客户（sdalu、benscurtains 两站、haakaa、cngwigs）profile 补 ads_customer_id 并回填。
+
 ### 2026-09-04 AIRA (bb) 登记：月报 GSC 汇总口径修正 + 出报自动核对覆盖天数（commit 1378e1b、f56ce9a，worker 已部署）
 
 - 干了什么（一）：factspack 的 GSC 汇总一直把 metrics.spamFilterGroups 的 query 维度 excludingRegex 挂在无维度汇总查询上。GSC 对低曝光查询做匿名化，匿名行没有 query 维度值，任何挂在 query 上的过滤器都会连带把整批匿名行排除，于是每个客户的点击与曝光都被系统性砍掉一截。改成汇总与 page 维度先取全量、垃圾词用 includingRegex 单独取一次再相减，位次按曝光重新加权；query 维度本来就不含匿名行，保持 excludingRegex 不变。metrics.js 属你认领，没动，修复落在 report 模块自己的取数层。

@@ -345,6 +345,13 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 .ins-gran{display:flex;gap:2px;background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:2px}
 .ins-gran button{padding:4px 12px;border-radius:6px;border:none;background:transparent;color:#64748b;font-size:11.5px;cursor:pointer;font-weight:500;font-family:inherit}
 .ins-gran button.on{background:#3b82f6;color:#fff}
+/* 渠道子页签（自然/投放）：贴着标题放，把右侧工具组推到最右 */
+.ins-chan{margin-right:auto}
+.ins-kpis.six{grid-template-columns:repeat(6,1fr)}
+@media(max-width:1180px){.ins-kpis.six{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:700px){.ins-kpis.six{grid-template-columns:repeat(2,1fr)}}
+.ins-rates.two{grid-template-columns:repeat(2,1fr)}
+@media(max-width:900px){.ins-rates.two{grid-template-columns:1fr}}
 .ins-chart{position:relative;width:100%}
 .ins-chart svg{width:100%;height:auto;display:block}
 .ins-hit{cursor:crosshair}
@@ -1612,11 +1619,13 @@ function insDeltaHtml(c){
   var d=c.d||{};
   if(d.dir==='na')return '<span class="na">无对比基数</span>';
   var ar=d.dir==='up'?'▲':(d.dir==='down'?'▼':'●');
+  /* inv 卡（如 CPA）：涨是坏事，配色反转但箭头照实画 */
+  var cls=c.inv?(d.dir==='up'?'down':(d.dir==='down'?'up':d.dir)):d.dir;
   var num=c.pp?(Math.abs(d.pp).toFixed(2)+' pp'):(Math.abs(d.pct).toFixed(1)+'%');
-  return '<span class="'+d.dir+'">'+ar+' '+num+'</span>';
+  return '<span class="'+cls+'">'+ar+' '+num+'</span>';
 }
-function insKpiHtml(k){
-  var out='<div class="ins-kpis">',i,c;
+function insKpiHtml(k,cls){
+  var out='<div class="ins-kpis'+(cls?' '+cls:'')+'">',i,c;
   for(i=0;i<k.cards.length;i++){
     c=k.cards[i];
     out+='<div class="kpi"><div class="k">'+insEsc(c.name)+'</div>'+
@@ -1695,17 +1704,30 @@ function insHasAny(m){
   return false;
 }
 
-/* insBody：整个洞察区的 HTML。给定 metrics/events/gran/today 就完全确定，可在 node 里断言。 */
-function insBody(metrics,events,gran,today,note,backfillQueued){
-  var m=metrics||{},i;
-  var head='<div class="sec"><div class="sec-head"><div class="sec-title">数据洞察</div><div class="tb-group">'+
+/* 洞察区公共头：标题 + 渠道子页签（tabsHtml，可为空串）+ 备注 + 回填按钮 + 粒度切换。
+   自然与投放两个 body 共用，别在各自里另抄一份。 */
+function insHeadHtml(tabsHtml,note,backfillQueued,gran){
+  var out='<div class="sec"><div class="sec-head"><div class="sec-title">数据洞察</div>'+(tabsHtml||'')+'<div class="tb-group">'+
     (note?'<span class="plan-meta">'+insEsc(note)+'</span>':'')+
     (backfillQueued
       ? '<button class="btn ghost tiny" disabled>已入队，稍后刷新</button>'
       : '<button class="btn ghost tiny" onclick="fireBackfill(this)">回填历史数据</button>')+
-    '<div class="ins-gran">';
-  for(i=0;i<INS_GRAN.length;i++)head+='<button class="'+(INS_GRAN[i].k===gran?'on':'')+'" onclick="setInsGran(\''+INS_GRAN[i].k+'\')">'+INS_GRAN[i].n+'</button>';
-  head+='</div></div></div>';
+    '<div class="ins-gran">',i;
+  for(i=0;i<INS_GRAN.length;i++)out+='<button class="'+(INS_GRAN[i].k===gran?'on':'')+'" onclick="setInsGran(\''+INS_GRAN[i].k+'\')">'+INS_GRAN[i].n+'</button>';
+  return out+'</div></div></div>';
+}
+/* 渠道子页签。只有 services 开了投放（sem/paid/both）的客户才由调用方传进来。 */
+function insChanTabsHtml(chan){
+  return '<div class="ins-gran ins-chan">'+
+    '<button class="'+(chan==='seo'?'on':'')+'" onclick="setInsChan(\'seo\')">自然</button>'+
+    '<button class="'+(chan==='paid'?'on':'')+'" onclick="setInsChan(\'paid\')">投放</button>'+
+    '</div>';
+}
+
+/* insBody：整个洞察区的 HTML。给定 metrics/events/gran/today 就完全确定，可在 node 里断言。 */
+function insBody(metrics,events,gran,today,note,backfillQueued,tabsHtml){
+  var m=metrics||{},i;
+  var head=insHeadHtml(tabsHtml,note,backfillQueued,gran);
   if(!insHasAny(m))return head+'<div class="panel">'+insEmptyBox('还没有回填任何指标数据。等 GSC / GA4 / Semrush 的拉数据任务跑完，这里会出现趋势、逐层转化率和排名分档。')+'</div></div>';
 
   var buckets=insBuckets(gran,today);
@@ -1747,6 +1769,85 @@ function insBody(metrics,events,gran,today,note,backfillQueued){
     '</div></div>';
 
   return main+rates+bottom;
+}
+
+/* ================= 投放（paid）洞察 =================
+   列前缀即渠道（ads_ = Google），后续渠道（meta_ / bingads_ / pin_）往 INS_PAID_CHANNELS
+   加行并映射到同样五个核心指标：花费 / 曝光 / 点击 / 转化 / 转化价值。
+   口径红线：跨渠道花费可加总，转化各渠道独立归因不得加总。一期单渠道用不到，
+   多渠道汇总视图实现时必须遵守。 */
+var INS_PAID_CHANNELS=[{prefix:'ads',name:'Google'}];
+var INS_PAID_COLOR={cost:'#fbbf24',conv:'#4ade80',ctr:'#38bdf8',cvr:'#f59e0b'};
+
+function insPaidHasAny(m){
+  var keys=['ads_cost','ads_clicks','ads_impressions','ads_conversions','ads_conv_value'],i;
+  for(i=0;i<keys.length;i++){if(((m||{})[keys[i]]||[]).length)return true}
+  return false;
+}
+/* 金额展示：三位数以上不带小数，小额保留两位（CPA 常在两位数以内） */
+function insFmtMoney(v){
+  if(v==null||!isFinite(v))return '--';
+  return v>=100?insFmtNum(Math.round(v)):(Math.round(v*100)/100).toFixed(2);
+}
+function insPaidKpiCards(metrics,gran,today){
+  var m=metrics||{},P=insKpiPeriod(gran,today);
+  function g(k,r){return insSumRange(m[k]||[],r.from,r.to)}
+  var co=g('ads_cost',P.cur),cop=g('ads_cost',P.prev);
+  var ck=g('ads_clicks',P.cur),ckp=g('ads_clicks',P.prev);
+  var cv=g('ads_conversions',P.cur),cvp=g('ads_conversions',P.prev);
+  var va=g('ads_conv_value',P.cur),vap=g('ads_conv_value',P.prev);
+  var roasC=co.sum>0?va.sum/co.sum:null,roasP=cop.sum>0?vap.sum/cop.sum:null;
+  var cpaC=cv.sum>0?co.sum/cv.sum:null,cpaP=cvp.sum>0?cop.sum/cvp.sum:null;
+  return {period:P,cards:[
+    {key:'cost',name:'花费',has:co.has,val:co.sum,txt:insFmtMoney(co.sum),d:insDelta(co.sum,cop.sum),pp:false},
+    {key:'pclicks',name:'点击',has:ck.has,val:ck.sum,txt:insFmtNum(ck.sum),d:insDelta(ck.sum,ckp.sum),pp:false},
+    {key:'conv',name:'转化',has:cv.has,val:cv.sum,txt:insFmtMoney(cv.sum),d:insDelta(cv.sum,cvp.sum),pp:false},
+    {key:'value',name:'转化价值',has:va.has,val:va.sum,txt:insFmtMoney(va.sum),d:insDelta(va.sum,vap.sum),pp:false},
+    {key:'roas',name:'ROAS',has:roasC!=null,val:roasC,txt:roasC==null?'--':roasC.toFixed(2),d:insDelta(roasC,roasP),pp:false},
+    {key:'cpa',name:'CPA',has:cpaC!=null,val:cpaC,txt:insFmtMoney(cpaC),d:insDelta(cpaC,cpaP),pp:false,inv:true}
+  ]};
+}
+function insPaidRateSeries(metrics,buckets){
+  var m=metrics||{};
+  var im=insAgg(m.ads_impressions||[],buckets,'sum');
+  var cl=insAgg(m.ads_clicks||[],buckets,'sum');
+  var cv=insAgg(m.ads_conversions||[],buckets,'sum');
+  function div(a,b){var o=[],i;for(i=0;i<a.length;i++)o.push(b[i]>0?a[i]/b[i]:null);return o}
+  return {ctr:div(cl,im),cvr:div(cv,cl)};
+}
+/* insPaidBody：投放页签的完整 HTML。与 insBody 同约定：纯函数，node 可断言。 */
+function insPaidBody(metrics,events,gran,today,note,backfillQueued,tabsHtml){
+  var m=metrics||{},i;
+  var head=insHeadHtml(tabsHtml,note,backfillQueued,gran);
+  if(!insPaidHasAny(m))return head+'<div class="panel">'+insEmptyBox('还没有回填投放指标。确认「档案」里已填 Google Ads 客户 ID（ads_customer_id），然后点右上角「回填历史数据」，这里会出现花费、转化与 ROAS。')+'</div></div>';
+  var buckets=insBuckets(gran,today),labels=[];
+  for(i=0;i<buckets.length;i++)labels.push(buckets[i].label);
+  var evb=insEventsToBuckets(insGroupEventsByDay(events),buckets);
+  var cost=insAgg(m.ads_cost||[],buckets,'sum');
+  var conv=insAgg(m.ads_conversions||[],buckets,'sum');
+  if(gran==='d90'){cost=insSmooth(cost,7);conv=insSmooth(conv,7)}
+  var kpi=insPaidKpiCards(m,gran,today);
+  var main=head+'<div class="panel">'+insKpiHtml(kpi,'six')+
+    insLegendHtml([{name:'花费（右轴）',color:INS_PAID_COLOR.cost},{name:'转化（左轴）',color:INS_PAID_COLOR.conv}],true)+
+    insChart({w:920,h:280,labels:labels,events:evb,
+      empty:'当前粒度下还没有投放数据。',
+      series:[
+        {name:'花费',color:INS_PAID_COLOR.cost,values:cost,axis:'r',width:1.8},
+        {name:'转化',color:INS_PAID_COLOR.conv,values:conv,axis:'l',width:2.2}
+      ]})+
+    (gran==='d90'?'<div class="plan-meta" style="margin-top:6px">90 天视图走 7 日移动平均，抹掉周末锯齿看方向。</div>':'')+
+    '</div></div>';
+  var wb=insBuckets('week',today),wl=[],j;
+  for(j=0;j<wb.length;j++)wl.push(wb[j].label);
+  var wev=insEventsToBuckets(insGroupEventsByDay(events),wb);
+  var r=insPaidRateSeries(m,wb);
+  var rates='<div class="sec"><div class="sec-head"><div class="sec-title">投放转化率</div>'+
+    '<span class="plan-meta">近 13 个完整自然周，分母为零的周跳过不画</span></div><div class="ins-rates two">'+
+    insRateCardHtml({name:'付费 CTR',sub:'点击 / 曝光',color:INS_PAID_COLOR.ctr,values:r.ctr,labels:wl,events:wev})+
+    insRateCardHtml({name:'点击转化率',sub:'转化 / 点击',color:INS_PAID_COLOR.cvr,values:r.cvr,labels:wl,events:wev})+
+    '</div></div>';
+  var foot='<div class="sec"><div class="plan-meta">口径：转化为 Google Ads 全部 conversion actions 合计，金额为账户币种。与 GA4 的会话与线索口径分开看，别拿两边的数互相对账。</div></div>';
+  return main+rates+foot;
 }
 
 /* ---- Mock：种子固定，node 里跑出来和浏览器里一模一样 ---- */
@@ -1812,6 +1913,24 @@ function insMockMetrics(opt){
   if(noBrand){delete out.gsc_impressions_brand;delete out.gsc_clicks_brand}
   return out;
 }
+function insMockPaidMetrics(opt){
+  opt=opt||{};
+  var today=opt.today||'2026-08-24',days=opt.days||180,rnd=insRng(opt.seed||99887);
+  var out={ads_cost:[],ads_clicks:[],ads_impressions:[],ads_conversions:[],ads_conv_value:[]};
+  var i,d,t,impr,ctr,clicks,cpc,cost,cvr,conv;
+  for(i=days-1;i>=0;i--){
+    d=insShift(today,-i-1);t=(days-i)/days;
+    impr=Math.round(2200+2600*t*(0.8+rnd()*0.4));
+    ctr=0.05+0.02*rnd();clicks=Math.round(impr*ctr);
+    cpc=0.9+0.5*rnd();cost=Math.round(clicks*cpc*100)/100;
+    cvr=0.02+0.02*t*(0.5+rnd());conv=Math.round(clicks*cvr*100)/100;
+    if(rnd()<0.04)continue; /* 缺日空洞，同 SEO mock */
+    out.ads_impressions.push({d:d,v:impr});out.ads_clicks.push({d:d,v:clicks});
+    out.ads_cost.push({d:d,v:cost});out.ads_conversions.push({d:d,v:conv});
+    out.ads_conv_value.push({d:d,v:Math.round(conv*(60+40*rnd())*100)/100});
+  }
+  return out;
+}
 /* INSIGHTS-PURE-END */
 
 /* ---- 以下是有状态的部分：取数、缓存、渲染挂载、悬停绑定 ---- */
@@ -1821,6 +1940,7 @@ var INS_USE_MOCK=false;
 var INS_DAYS=300;            /* 拉数窗口，够月粒度 6 个完整月加一个对比月 */
 var INS_REFRESH_MS=120000;   /* 洞察区自己的刷新节流，别跟着 15 秒轮询一起重拉 */
 var INS_METRIC_LIST='gsc_impressions,gsc_clicks,gsc_impressions_brand,gsc_clicks_brand,ga4_sessions_organic,ga4_leads,rank_top3,rank_top10,rank_top20,rank_tracked';
+var INS_PAID_METRIC_LIST='ads_cost,ads_clicks,ads_impressions,ads_conversions,ads_conv_value';
 
 /* 数据锚点：真实日期往回退 3 天。GSC 延迟 2 到 3 天、GA4 延迟 1 天，
    尾部那几天后端还没回填，缺日补零会在曲线末尾砸出一个坑，看起来像流量崩了。
@@ -1830,12 +1950,16 @@ function insToday(){
   var d=new Date(Date.now()-INS_LAG_DAYS*86400000),m=d.getMonth()+1,q=d.getDate();
   return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(q<10?'0':'')+q;
 }
-var insState={client:0,gran:'day',today:insToday(),metrics:null,events:[],loading:false,error:'',at:0,ver:0};
+var insState={client:0,gran:'day',chan:null,today:insToday(),metrics:null,events:[],loading:false,error:'',at:0,ver:0};
+
+/* 当前客户与投放开关：services 是 sem/paid/both 才出「投放」页签，其余客户界面零变化 */
+function insCurClient(){var i;for(i=0;i<clientsData.length;i++){if(clientsData[i].client_id===curId)return clientsData[i]}return null}
+function insSvcPaid(c){var v=String((c&&c.services)||'').toLowerCase();return v==='sem'||v==='paid'||v==='both'}
 /* 回填按下过就按客户记住，免得洞察区一重画按钮又活过来让人重复点 */
 var insBackfillQueued={};
 
 function insReset(){
-  insState.client=0;insState.metrics=null;insState.events=[];
+  insState.client=0;insState.metrics=null;insState.events=[];insState.chan=null;
   insState.loading=false;insState.error='';insState.at=0;insState.ver++;
 }
 
@@ -1867,6 +1991,13 @@ function setInsGran(g){
 }
 window.setInsGran=setInsGran;
 
+function setInsChan(ch){
+  if(ch!=='seo'&&ch!=='paid')return;
+  insState.chan=ch;
+  renderInsights();
+}
+window.setInsChan=setInsChan;
+
 async function loadInsights(force){
   if(!curId)return;
   if(insState.loading)return;
@@ -1878,13 +2009,14 @@ async function loadInsights(force){
   var today=insToday(),from=insShift(today,-INS_DAYS),to=today;
   try{
     if(INS_USE_MOCK){
-      insState.metrics=insMockMetrics({today:today,days:180});
+      insState.metrics=Object.assign(insMockMetrics({today:today,days:180}),insMockPaidMetrics({today:today,days:180}));
       insState.events=insMockEvents({today:today,days:180}).events;
       insState.error='';
     }else{
       var q='client_id='+curId+'&from='+from+'&to='+to;
+      var ml=insSvcPaid(insCurClient())?INS_METRIC_LIST+','+INS_PAID_METRIC_LIST:INS_METRIC_LIST;
       var both=await Promise.all([
-        api('/metrics?'+q+'&metrics='+encodeURIComponent(INS_METRIC_LIST)),
+        api('/metrics?'+q+'&metrics='+encodeURIComponent(ml)),
         api('/events?'+q)
       ]);
       var md=both[0],ed=both[1];
@@ -1912,7 +2044,11 @@ async function loadInsights(force){
 function renderInsights(){
   var box=document.getElementById('insWrap');
   if(!box)return;
-  var sig=curId+'|'+insState.gran+'|'+insState.ver;
+  var c=insCurClient(),paidOn=insSvcPaid(c);
+  if(!paidOn)insState.chan='seo';
+  /* 默认落点：纯投放客户直接落投放页，both 落自然页 */
+  else if(insState.chan==null)insState.chan=(String((c&&c.services)||'').toLowerCase()==='both')?'seo':'paid';
+  var sig=curId+'|'+insState.gran+'|'+insState.chan+'|'+insState.ver;
   if(box.getAttribute('data-sig')===sig)return;
   box.setAttribute('data-sig',sig);
   if(!insState.metrics){
@@ -1923,7 +2059,10 @@ function renderInsights(){
   var note=insState.error
     ? insState.error
     : ('数据截至 '+insState.today+(INS_USE_MOCK?'（演示数据）':''));
-  box.innerHTML=insBody(insState.metrics,insState.events,insState.gran,insState.today,note,!!insBackfillQueued[curId]);
+  var tabs=paidOn?insChanTabsHtml(insState.chan):'';
+  box.innerHTML=insState.chan==='paid'
+    ? insPaidBody(insState.metrics,insState.events,insState.gran,insState.today,note,!!insBackfillQueued[curId],tabs)
+    : insBody(insState.metrics,insState.events,insState.gran,insState.today,note,!!insBackfillQueued[curId],tabs);
   insBind(box);
 }
 

@@ -26,6 +26,8 @@ const EXPORTS = [
   'insPath', 'insIsolated', 'insEmptyBox', 'insChart', 'insStack',
   'insDeltaHtml', 'insKpiHtml', 'insLegendHtml', 'insRateCardHtml', 'insRankHtml',
   'insBrandHtml', 'insHasAny', 'insBody', 'insRng', 'insMockEvents', 'insMockMetrics',
+  'insHeadHtml', 'insChanTabsHtml', 'insPaidHasAny', 'insFmtMoney', 'insPaidKpiCards',
+  'insPaidRateSeries', 'insPaidBody', 'insMockPaidMetrics', 'INS_PAID_CHANNELS', 'INS_PAID_COLOR',
   'INS_COLOR', 'INS_EVENT_COLOR', 'INS_EVENT_NAME', 'INS_GRAN',
   'repGran', 'repBuckets', 'repKpiPeriod', 'linkifyText',
   'qsElapsedMin', 'qsStripText'
@@ -789,6 +791,81 @@ t('qsStripText 空队列回空串，没有 task_id 的 job 显示类型名', () 
   const q = { running: [{ id: 9, client_name: 'QK', type: 'pull_data', elapsed_sec: 30 }], queued: [] };
   assert.strictEqual(P.qsStripText(q, {}, { pull_data: '拉数据' }, null),
     '队列：运行中 #9 QK · 拉数据（不到 1 分钟）');
+});
+
+/* ---------- 投放（paid）洞察 ---------- */
+section('投放洞察');
+t('insFmtMoney 大额取整千分位，小额两位小数', () => {
+  assert.strictEqual(P.insFmtMoney(12345.67), P.insFmtNum(12346));
+  assert.strictEqual(P.insFmtMoney(23.456), '23.46');
+  assert.strictEqual(P.insFmtMoney(99.999), '100.00');
+  assert.strictEqual(P.insFmtMoney(null), '--');
+});
+t('insPaidKpiCards 六张卡：ROAS=价值/花费，CPA=花费/转化，CPA 标 inv', () => {
+  const m = {
+    ads_cost: [{ d: '2026-08-20', v: 100 }, { d: '2026-07-20', v: 200 }],
+    ads_clicks: [{ d: '2026-08-20', v: 50 }],
+    ads_conversions: [{ d: '2026-08-20', v: 4 }, { d: '2026-07-20', v: 4 }],
+    ads_conv_value: [{ d: '2026-08-20', v: 500 }, { d: '2026-07-20', v: 600 }],
+  };
+  const k = P.insPaidKpiCards(m, 'day', TODAY);
+  const by = {};
+  k.cards.forEach((c) => { by[c.key] = c; });
+  assert.strictEqual(by.cost.val, 100);
+  assert.strictEqual(by.roas.val, 5);            // 500 / 100
+  assert.strictEqual(by.roas.txt, '5.00');
+  assert.strictEqual(by.cpa.val, 25);            // 100 / 4
+  assert.strictEqual(by.cpa.inv, true);
+  assert.strictEqual(by.pclicks.val, 50);
+  // 环比窗口（近 30 天 vs 前 30 天）：前窗花费 200 转化 4 -> CPA 50 -> 本期 25 是 down
+  assert.strictEqual(by.cpa.d.dir, 'down');
+});
+t('insPaidKpiCards 零花费 ROAS 为 null 不除零', () => {
+  const k = P.insPaidKpiCards({ ads_conv_value: [{ d: '2026-08-20', v: 500 }] }, 'day', TODAY);
+  const roas = k.cards.filter((c) => c.key === 'roas')[0];
+  assert.strictEqual(roas.has, false);
+  assert.strictEqual(roas.txt, '--');
+});
+t('insDeltaHtml inv 卡配色反转但箭头照实：CPA 上涨显红色▲', () => {
+  const h = P.insDeltaHtml({ has: true, inv: true, d: { dir: 'up', pct: 10 }, pp: false });
+  assert.ok(h.indexOf('class="down"') > -1, 'CPA 涨要用坏消息配色');
+  assert.ok(h.indexOf('▲') > -1, '箭头方向不许骗人');
+});
+t('insPaidBody 空数据走引导空态，提到 ads_customer_id', () => {
+  const h = P.insPaidBody({}, [], 'day', TODAY, '', false, '');
+  assert.ok(h.indexOf('ads_customer_id') > -1);
+  assert.ok(h.indexOf('NaN') === -1);
+});
+t('insPaidBody 有数据出六卡与花费/转化图，四粒度不出 NaN', () => {
+  const m = P.insMockPaidMetrics({ today: TODAY, days: 180 });
+  ['day', 'week', 'month', 'd90'].forEach((g) => {
+    const h = P.insPaidBody(m, [], g, TODAY, '', false, '');
+    assert.ok(h.indexOf('花费') > -1 && h.indexOf('ROAS') > -1 && h.indexOf('CPA') > -1, g + ' 缺卡');
+    assert.ok(h.indexOf('<svg') > -1, g + ' 缺图');
+    assert.ok(h.indexOf('NaN') === -1 && h.indexOf('undefined') === -1, g + ' 出了 NaN/undefined');
+  });
+});
+t('insPaidBody 事件标注与口径脚注在', () => {
+  const m = P.insMockPaidMetrics({ today: TODAY, days: 180 });
+  const ev = P.insMockEvents({ today: TODAY, days: 180 }).events;
+  const h = P.insPaidBody(m, ev, 'week', TODAY, '', false, '');
+  assert.ok(h.indexOf('动作标注') > -1);
+  assert.ok(h.indexOf('conversion actions 合计') > -1, '口径脚注必须在');
+});
+t('insChanTabsHtml 高亮唯一，insBody 第七参把页签塞进头部', () => {
+  const tabs = P.insChanTabsHtml('paid');
+  assert.ok(tabs.indexOf('>投放</button>') > -1 && tabs.indexOf('>自然</button>') > -1);
+  assert.strictEqual((tabs.match(/class="on"/g) || []).length, 1);
+  const m = P.insMockMetrics({ today: TODAY, days: 180 });
+  const h = P.insBody(m, [], 'week', TODAY, '', false, tabs);
+  assert.ok(h.indexOf('ins-chan') > -1, 'tabsHtml 要出现在洞察头部');
+  const h2 = P.insBody(m, [], 'week', TODAY, '', false);
+  assert.ok(h2.indexOf('ins-chan') === -1, '不传 tabsHtml 时头部不变');
+});
+t('insPaidHasAny 只认 ads_ 前缀五指标', () => {
+  assert.strictEqual(P.insPaidHasAny({ gsc_clicks: [{ d: '2026-08-20', v: 1 }] }), false);
+  assert.strictEqual(P.insPaidHasAny({ ads_cost: [{ d: '2026-08-20', v: 1 }] }), true);
+  assert.strictEqual(P.insPaidHasAny({}), false);
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
