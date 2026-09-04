@@ -311,12 +311,27 @@ function kpiYoy(pack, key) {
   return { delta: d.text, delta_color: d.color, prev_value: prevValue, short: yoy.period.short };
 }
 
+/**
+ * 这个 KPI 该看哪个数据源的覆盖天数。计数类指标的环比会被对比期天数直接扭曲，
+ * 位次、点击率、转化率这类比值不会，所以只有计数类需要按天数归一。
+ */
+function kpiCoverage(pack, key) {
+  const node = key.indexOf('gsc_') === 0 ? pack.gsc : pack.ga4;
+  const cov = node && node.coverage;
+  const prev = cov && cov.prev;
+  if (!prev || !prev.short || !(prev.days > 0) || !(prev.span > 0)) return null;
+  return prev;
+}
+
 function kpiCard(pack, key) {
   const def = KPI_DEFS[key];
   const vals = def ? kpiValues(pack, key) : null;
   if (!def || !vals) return null;
   let value;
   let d;
+  // 对比期是残月时，计数类指标按天数折算成整周期再比，卡片上标「日均」。
+  // 不折算就会出现正文写日均、头卡写总量的自相矛盾（kuddles 2026-08 v1 的原样）。
+  const shortPrev = def.kind === 'pos' || def.kind === 'pct' ? null : kpiCoverage(pack, key);
   if (def.kind === 'pos') {
     value = fmtPos(vals.cur);
     d = deltaPosition(vals.cur, vals.prev);
@@ -325,9 +340,12 @@ function kpiCard(pack, key) {
     d = deltaPp(vals.cur, vals.prev);
   } else {
     value = fmtInt(vals.cur);
-    d = deltaCount(vals.cur, vals.prev);
+    const base = shortPrev ? (Number(vals.prev) * shortPrev.span) / shortPrev.days : vals.prev;
+    d = deltaCount(vals.cur, base);
+    if (shortPrev) d = { text: d.text + '（日均）', color: d.color };
   }
-  const prevValue = def.kind === 'pos' ? fmtPos(vals.prev) : def.kind === 'pct' ? fmtPct(vals.prev) : fmtInt(vals.prev);
+  let prevValue = def.kind === 'pos' ? fmtPos(vals.prev) : def.kind === 'pct' ? fmtPct(vals.prev) : fmtInt(vals.prev);
+  if (shortPrev) prevValue = prevValue + '，仅 ' + shortPrev.days + ' 天';
   return { key, label: def.label, value, note: d.text, delta: d.text, delta_color: d.color, prev_value: prevValue };
 }
 

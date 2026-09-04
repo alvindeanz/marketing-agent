@@ -699,6 +699,24 @@ t('人工覆盖的询盘数会同时改漏斗底与封面，四处一致', () =>
   const card = R.kpiCard(pack, 'leads');
   assert.strictEqual(card.value, '31');
 });
+t('对比期残月时计数类 KPI 按日均折算并标注天数，比值类不动', () => {
+  const pack = fakePack();
+  pack.gsc.cur = { clicks: 102, impressions: 2723, ctr: 0.0375, position: 15.6 };
+  pack.gsc.prev = { clicks: 56, impressions: 1323, ctr: 0.0423, position: 12.0 };
+  pack.gsc.coverage = { cur: { days: 31, span: 31, short: false }, prev: { days: 21, span: 31, short: true } };
+  const clicks = R.kpiCard(pack, 'gsc_clicks');
+  // 总量是 +82.1%，按 21 天折算成整月后只有 +23.4%
+  assert.strictEqual(clicks.value, '102');
+  assert.strictEqual(clicks.delta, '+23.4%（日均）');
+  assert.strictEqual(clicks.prev_value, '56，仅 21 天');
+  // 位次是均值，不受天数影响，照旧
+  const pos = R.kpiCard(pack, 'gsc_position');
+  assert.strictEqual(pos.delta, '回落 3.6 位');
+  assert.strictEqual(pos.prev_value, '12.0');
+  // 覆盖完整时完全按老路径走
+  pack.gsc.coverage.prev.short = false;
+  assert.strictEqual(R.kpiCard(pack, 'gsc_clicks').delta, '+82.1%');
+});
 t('渠道表列出访问、询盘与询盘占比，合计取渠道行', () => {
   const c = R.buildChannelRows(fakePack());
   assert.strictEqual(c.total_sessions, '1,000');
