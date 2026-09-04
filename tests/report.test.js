@@ -931,6 +931,26 @@ t('喂给模型的 pack 不含内部追溯字段', () => {
   const p = R2.packForPrompt(fakePack());
   assert.strictEqual(p.pack_inputs, undefined);
 });
+t('出报人写的 instructions 会进 prompt，不写就不出现这一段', () => {
+  const bare = R2.buildPrompt(fakePack());
+  assert.ok(bare.indexOf('本期出报人另有口径要求') === -1);
+  const pack = fakePack();
+  pack.meta.instructions = '本月只用日均口径说环比。';
+  const prompt = R2.buildPrompt(pack);
+  assert.ok(prompt.indexOf('本期出报人另有口径要求') > -1);
+  assert.ok(prompt.indexOf('本月只用日均口径说环比。') > -1);
+});
+t('对比期残月会在铁律里点名改日均口径', () => {
+  const pack = fakePack();
+  pack.gsc.coverage = { cur: { days: 31, span: 31, short: false }, prev: { days: 21, span: 31, short: true } };
+  const prompt = R2.buildPrompt(pack);
+  assert.ok(prompt.indexOf('搜索表现对比期只有 21 天数据') > -1);
+  assert.ok(prompt.indexOf('日均口径') > -1);
+  assert.ok(prompt.indexOf('翻倍') > -1);
+  // 覆盖完整时不加这一条
+  pack.gsc.coverage.prev.short = false;
+  assert.ok(R2.buildPrompt(pack).indexOf('对比期的数据并不完整') === -1);
+});
 
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

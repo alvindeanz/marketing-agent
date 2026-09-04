@@ -59,7 +59,43 @@ function headerBlock(pack) {
       '11. 本期是月中出报，全文必须写明「截至 ' + meta.period.through_day + ' 日，本月尚未结束」，环比只与上月同一时段比，不做同比。'
     );
   }
+  const short = shortCoverage(pack);
+  if (short.length) {
+    lines.push(
+      '12. 对比期的数据并不完整（' +
+        short.join('；') +
+        '）。总量环比因此天然虚高，点击、曝光、访问、询盘一类的环比一律改用日均口径描述，标题与本月信号里不得出现「翻倍」「双双大涨」这类由残缺基数得出的说法，并在流量概览一节写明对比期缺了多少天。'
+    );
+  }
   return lines.join('\n');
+}
+
+/**
+ * 对比期里哪些数据源不是整周期。
+ * 残月当基数会把虚高的环比写成客户看得见的结论，所以直接进铁律，不只放在 gaps 里。
+ */
+function shortCoverage(pack) {
+  const out = [];
+  for (const [name, node] of [
+    ['搜索表现', pack.gsc && pack.gsc.coverage],
+    ['网站分析', pack.ga4 && pack.ga4.coverage],
+  ]) {
+    const p = node && node.prev;
+    if (p && p.short) out.push(name + '对比期只有 ' + p.days + ' 天数据，周期本身 ' + p.span + ' 天');
+  }
+  return out;
+}
+
+/** 出报人给这一期的额外要求。以前只被拿去解析询盘覆盖值，正文一直没进 prompt。 */
+function instructionsBlock(pack) {
+  const s = String((pack.meta && pack.meta.instructions) || '').trim();
+  if (!s) return '';
+  return [
+    '',
+    '本期出报人另有口径要求，优先级高于上面的通用写法，与铁律冲突时以铁律为准：',
+    s,
+    '这段要求只写给你看，不要原样抄进报告正文。',
+  ].join('\n');
 }
 
 /** 客户专属禁区，逐条列给模型。 */
@@ -118,6 +154,7 @@ function packForPrompt(pack) {
 function buildPrompt(pack) {
   return [
     headerBlock(pack),
+    instructionsBlock(pack),
     '',
     factsBlock(pack),
     '',

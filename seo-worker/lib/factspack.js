@@ -1467,6 +1467,9 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       leads_source: 'GA4 关键事件 ' + LEAD_EVENTS.join('、') + ' 之和',
       leads_override: leadsOverride,
       brand_regex_source: brand.source,
+      // 出报人给这一期的自由文本要求。以前只在这里被 parseLeadsOverride 扫一遍就丢掉，
+      // 正文从没进过叙事 prompt，看板上填的口径要求等于石沉大海。
+      instructions: String(opts.instructions || '').trim() || null,
     },
     gsc: { ...gsc, coverage: gscCoverage },
     ga4: { ...ga4, coverage: ga4Coverage },

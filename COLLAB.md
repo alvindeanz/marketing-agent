@@ -21,6 +21,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-04 AIRA (bb) 登记：月报 GSC 汇总口径修正 + 出报自动核对覆盖天数（commit 1378e1b、f56ce9a，worker 已部署）
+
+- 干了什么（一）：factspack 的 GSC 汇总一直把 metrics.spamFilterGroups 的 query 维度 excludingRegex 挂在无维度汇总查询上。GSC 对低曝光查询做匿名化，匿名行没有 query 维度值，任何挂在 query 上的过滤器都会连带把整批匿名行排除，于是每个客户的点击与曝光都被系统性砍掉一截。改成汇总与 page 维度先取全量、垃圾词用 includingRegex 单独取一次再相减，位次按曝光重新加权；query 维度本来就不含匿名行，保持 excludingRegex 不变。metrics.js 属你认领，没动，修复落在 report 模块自己的取数层。
+- 实测影响（三家已出过报告的客户全查了）：kuddles 2026-08 真实 102 点击 / 2723 曝光，旧口径 45 / 1339，少报 56% 与 51%；**benscurtains AU 2026-08（已定稿 v3）真实 1149 / 98578，旧口径 596 / 78324，少报 48% 与 21%，该站根本没有垃圾词，纯属被匿名行牵连**；powerdekor 2026-07 该站确有 73291 次垃圾点击（正则本来就是为它加的），正确扣除后应是 3242 / 48879，旧口径只报 1283 / 27979。**已出的这几版报告数字全部偏低，重出与否请 Alvin 定，我不擅自动别的客户的交付物。**
+- 干了什么（二）：新增出报前的覆盖天数核对。gscDayCount 与 ga4DayCount 各多打一次日维度查询，覆盖率低于周期九成即判残月，对比期残月直接进 gaps 并点名环比必须改日均口径，天数挂在 pack 的 gsc.coverage 与 ga4.coverage 上。起因是 kuddles 8 月报：GSC 从 2026-07-11 才回填（7 月 21 天）、GA4 从 07-13 才开始收（19 天），按总量算会话涨 24%，按日均算实际是跌的，两个数据源起始日还不一样。每客户每次出报多 4 次 API 调用。
+- 坑：这类「有维度求和 vs 无维度总量」的差异 2026-09-03 已经在 benscurtainsnz 的手工月报脚本上被抓到过一次（少报 41%），当时只修了那个脚本，没有回头查流水线，两天后在自动化侧原样复发。以后发现取数口径缺陷，当天要把所有取数入口扫一遍。
+- 测试：node tests 全套绿（report.test.js 103 -> 108，新增反垃圾扣除三条与覆盖天数五条）。php 本机没装，seo-api.php 未改动。
+- 下一步/认领：无接口变化，pack 只增字段不减字段。benscurtains 与 powerdekor 的旧版报告要不要重出交 Alvin。
+
 ### 2026-09-03 AIRA (ba) 登记：seo-agent.html header 换 opsnav 统一渲染（Alvin 指定，跨认领边界报备）
 
 - 干了什么：Alvin 定全站 header 统一 + Website 模块下线 + Office/Update 挪进头像下拉。ops-tracker 仓侧已完成（commit 5753285 已部署）：userbar.js NAV 砍成 SEO/SEM/Sales/Always Agent，新增 MENU（Office 全员、Update 仅 admin），office/index.html 收进仓库并入部署白名单。本仓只动 static/seo-agent.html 一处：硬编码五个 module-tab 换成 `<div class="module-tabs" id="opsnav"></div>`，userbar.js 本来就已引入，active 态由 navDetect 按路径判定。seo-api.php 未动。
