@@ -739,6 +739,15 @@ t('残月折算同时作用于渠道卡与漏斗，正文和控件不会各说�
   // 总量持平的一步，按日均看其实是掉的，备注要跟着改口
   assert.strictEqual(f.rows[1].delta, '-38.7%（日均）');
   assert.strictEqual(f.rows[1].note, '环比回落');
+  // 落地页表的变化列同样折算，但每行不缀天数，免得表被撑吵
+  pack.ga4.landing_pages = [
+    { path: '/', sessions: 83, prev_sessions: 44 },
+    { path: '/locations/', sessions: 4, prev_sessions: null },
+  ];
+  const pages = R.buildPageRows(pack);
+  assert.strictEqual(pages[0].delta, '+15.6%（日均）');
+  assert.strictEqual(pages[0].prev_sessions, '44');
+  assert.strictEqual(pages[1].delta, '新进榜');
 });
 t('渠道表列出访问、询盘与询盘占比，合计取渠道行', () => {
   const c = R.buildChannelRows(fakePack());

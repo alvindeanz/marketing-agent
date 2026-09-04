@@ -666,11 +666,12 @@ function buildKeywordRows(pack) {
 
 function buildPageRows(pack) {
   const rows = (pack.ga4 && pack.ga4.landing_pages) || [];
+  const shortPrev = shortPrevCoverage(pack, 'ga4');
   return rows.map((r, i) => {
     let delta = '新进榜';
     let color = MUTED;
     if (r.prev_sessions !== null && r.prev_sessions !== undefined) {
-      const d = deltaCount(r.sessions, r.prev_sessions);
+      const d = deltaCountCovered(r.sessions, r.prev_sessions, shortPrev);
       delta = d.text;
       color = d.color;
     }
@@ -678,6 +679,8 @@ function buildPageRows(pack) {
       rank: i + 1,
       path: r.path,
       sessions: fmtInt(r.sessions),
+      // 每行都缀「仅 N 天」会把表撑得很吵，天数在本节说明里讲一次就够，
+      // 这里只保证变化列是折算后的口径。
       prev_sessions: r.prev_sessions === null || r.prev_sessions === undefined ? '新增' : fmtInt(r.prev_sessions),
       delta,
       delta_color: color,
