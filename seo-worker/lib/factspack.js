@@ -670,6 +670,78 @@ async function gscByDimension(cfg, property, range, dimension, spamRegex) {
 }
 
 // ---------------------------------------------------------------------------
+// 周期覆盖天数：环比能不能按总量说
+// ---------------------------------------------------------------------------
+
+/**
+ * 一个周期里两个数据源各自真的有几天数据。
+ *
+ * 新站或刚接入数据源的客户，GSC 与 GA4 的起始日往往还不一样（kuddles：GSC 从
+ * 2026-07-11 回填、GA4 从 07-13 开始收），拿这种残月当环比基数会把「本月涨了
+ * 24%」写进客户报告，按日均算其实是跌的。这里只负责把天数摆出来，怎么措辞交给
+ * 叙事层，但覆盖不足会进 gaps，报告里就不会假装那是个完整的对比期。
+ */
+function spanDays(range) {
+  const a = Date.parse(String(range.start) + 'T00:00:00Z');
+  const b = Date.parse(String(range.end) + 'T00:00:00Z');
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+const COVERAGE_MIN_RATIO = 0.9;
+
+function buildCoverage(range, days) {
+  const span = spanDays(range);
+  const d = Number(days) || 0;
+  return {
+    days: d,
+    span,
+    ratio: span > 0 ? round3(d / span) : null,
+    short: span > 0 && d < Math.ceil(span * COVERAGE_MIN_RATIO),
+  };
+}
+
+async function gscDayCount(cfg, property, range) {
+  const res = await gscQuery(cfg, property, {
+    startDate: range.start,
+    endDate: range.end,
+    dimensions: ['date'],
+    rowLimit: 1000,
+  });
+  return ((res && res.rows) || []).length;
+}
+
+async function ga4DayCount(ctx, propertyId, range) {
+  const rows = await ga4Report(ctx, propertyId, {
+    dateRanges: [{ startDate: range.start, endDate: range.end }],
+    dimensions: [{ name: 'date' }],
+    metrics: [{ name: 'sessions' }],
+  });
+  return rows.filter((r) => (Number(r.sessions) || 0) > 0).length;
+}
+
+function coverageGaps(source, per, cur, prev) {
+  const out = [];
+  const shape = (c) => c.days + ' 天数据，周期本身 ' + c.span + ' 天';
+  if (cur && cur.short) {
+    out.push(source + ' 本期（' + per.label + '）只有 ' + shape(cur) + '，本期总量并非整周期口径');
+  }
+  if (prev && prev.short) {
+    out.push(
+      source +
+        ' 对比期（' +
+        per.compare.label +
+        '）只有 ' +
+        shape(prev) +
+        '，' +
+        source +
+        ' 的总量环比会虚高，点击、曝光、会话一类的环比必须改用日均口径，并在报告里写明对比期缺天数'
+    );
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // 取数：GA4
 // ---------------------------------------------------------------------------
 
@@ -945,6 +1017,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   let prevQueryRows = [];
   let curPageRows = [];
   let prevPageRows = [];
+  let gscCoverage = null;
+  let ga4Coverage = null;
   if (gscProperty) {
     say('gsc: 拉本期 ' + per.start + ' 至 ' + per.end + '，对比期 ' + per.compare.start + ' 至 ' + per.compare.end);
     const curTotals = await gscTotals(cfg, gscProperty, per, spamRegex);
@@ -953,7 +1027,16 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     prevQueryRows = await gscByDimension(cfg, gscProperty, per.compare, 'query', spamRegex);
     curPageRows = await gscByDimension(cfg, gscProperty, per, 'page', spamRegex);
     prevPageRows = await gscByDimension(cfg, gscProperty, per.compare, 'page', spamRegex);
-    inputs.gsc_calls = 6;
+    gscCoverage = {
+      cur: buildCoverage(per, await gscDayCount(cfg, gscProperty, per)),
+      prev: buildCoverage(per.compare, await gscDayCount(cfg, gscProperty, per.compare)),
+    };
+    for (const g of coverageGaps('GSC', per, gscCoverage.cur, gscCoverage.prev)) gaps.push(g);
+    say(
+      'gsc: 覆盖天数 本期 ' + gscCoverage.cur.days + '/' + gscCoverage.cur.span +
+        '，对比期 ' + gscCoverage.prev.days + '/' + gscCoverage.prev.span
+    );
+    inputs.gsc_calls = 8;
     inputs.gsc_query_rows = curQueryRows.length;
     inputs.gsc_page_rows = curPageRows.length;
     say('gsc: query 本期 ' + curQueryRows.length + ' 行、对比期 ' + prevQueryRows.length + ' 行；page 本期 ' + curPageRows.length + ' 行');
@@ -1021,7 +1104,16 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const prevEv = await ga4ChannelEvents(ctx, ga4Property, per.compare, wantEvents);
     const curLp = await ga4LandingPages(ctx, ga4Property, per);
     const prevLp = await ga4LandingPages(ctx, ga4Property, per.compare);
-    inputs.ga4_calls = 6;
+    ga4Coverage = {
+      cur: buildCoverage(per, await ga4DayCount(ctx, ga4Property, per)),
+      prev: buildCoverage(per.compare, await ga4DayCount(ctx, ga4Property, per.compare)),
+    };
+    for (const g of coverageGaps('GA4', per, ga4Coverage.cur, ga4Coverage.prev)) gaps.push(g);
+    say(
+      'ga4: 覆盖天数 本期 ' + ga4Coverage.cur.days + '/' + ga4Coverage.cur.span +
+        '，对比期 ' + ga4Coverage.prev.days + '/' + ga4Coverage.prev.span
+    );
+    inputs.ga4_calls = 8;
 
     const leadsByChannel = (rows) => {
       const m = new Map();
@@ -1376,8 +1468,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       leads_override: leadsOverride,
       brand_regex_source: brand.source,
     },
-    gsc,
-    ga4,
+    gsc: { ...gsc, coverage: gscCoverage },
+    ga4: { ...ga4, coverage: ga4Coverage },
     // 去年同月对照。月中出报、去年无数据、取数失败时为 null，缘由在 gaps。
     yoy,
     rankings,
@@ -1425,6 +1517,9 @@ module.exports = {
   posDelta,
   ppDelta,
   spamIncludeGroups,
+  spanDays,
+  buildCoverage,
+  coverageGaps,
   subtractSpamTotals,
   normalizeQuery,
   queryTokens,

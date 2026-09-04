@@ -267,6 +267,37 @@ t('垃圾量大于等于全量时原样返回，不出负数', () => {
   assert.deepStrictEqual(out, all);
 });
 
+/* ---------- 周期覆盖天数 ---------- */
+section('周期覆盖天数');
+t('spanDays 含首尾', () => {
+  assert.strictEqual(F.spanDays({ start: '2026-08-01', end: '2026-08-31' }), 31);
+  assert.strictEqual(F.spanDays({ start: '2026-07-01', end: '2026-07-31' }), 31);
+  assert.strictEqual(F.spanDays({ start: '2026-08-05', end: '2026-08-01' }), 0);
+});
+t('覆盖天数够就不判残月，差一天也不判', () => {
+  const c = F.buildCoverage({ start: '2026-08-01', end: '2026-08-31' }, 30);
+  assert.strictEqual(c.short, false);
+  assert.strictEqual(c.span, 31);
+});
+t('数据源中途接入的残月会被判出来', () => {
+  const c = F.buildCoverage({ start: '2026-07-01', end: '2026-07-31' }, 21);
+  assert.strictEqual(c.short, true);
+  assert.strictEqual(c.days, 21);
+});
+t('对比期残月进 gaps 且点名要改日均口径', () => {
+  const per = { label: '2026年8月（全月）', compare: { label: 'vs 7月（全月）' } };
+  const g = F.coverageGaps('GSC', per, F.buildCoverage({ start: '2026-08-01', end: '2026-08-31' }, 31),
+    F.buildCoverage({ start: '2026-07-01', end: '2026-07-31' }, 21));
+  assert.strictEqual(g.length, 1);
+  assert.ok(g[0].includes('21 天'));
+  assert.ok(g[0].includes('日均'));
+});
+t('两期都完整时不产生 gaps', () => {
+  const per = { label: 'x', compare: { label: 'y' } };
+  const full = F.buildCoverage({ start: '2026-08-01', end: '2026-08-31' }, 31);
+  assert.deepStrictEqual(F.coverageGaps('GA4', per, full, full), []);
+});
+
 /* ---------- 查询归一化与簇加权 ---------- */
 section('查询归一化与簇加权位次');
 t('normalizeQuery 归一大小写、连字符与标点', () => {
