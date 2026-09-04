@@ -33,6 +33,11 @@ class Api {
     return res && res.job ? res.job : null;
   }
 
+  /** POST /jobs/reap -> 启动收尸：把上一世遗留的 running 孤儿行判 failed，返回 {reaped:[ids]} */
+  async reapJobs() {
+    return this.req('POST', '/jobs/reap', {});
+  }
+
   /** PATCH /jobs/{id} body { status?, log_append?, token_usage? } */
   async patchJob(id, body) {
     return this.req('PATCH', '/jobs/' + encodeURIComponent(id), body);

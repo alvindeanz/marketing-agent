@@ -385,8 +385,19 @@ server.listen(cfg.wakePort, cfg.bindHost, () => {
       'min, lanes ' +
       LANE_NAMES.join('+')
   );
-  // Startup drain: pick up anything queued while the worker was down.
-  drain('startup');
+  // Startup reap then drain. Reap first: this worker is the only executor, so a
+  // 'running' row at boot is always an orphan from a previous life (deploy
+  // restart, crash, OOM). Recovery must not depend on the dying process having
+  // cooperated (2026-09-04 job390 zombie). Reap failure does not block the
+  // drain: better to run jobs past a zombie row than to run nothing.
+  api
+    .reapJobs()
+    .then((r) => {
+      const ids = (r && Array.isArray(r.reaped) && r.reaped) || [];
+      if (ids.length) log('startup reap: ' + ids.length + ' orphaned running job(s) -> failed: #' + ids.join(' #'));
+    })
+    .catch((e) => log('startup reap failed :: ' + e.message))
+    .finally(() => drain('startup'));
 });
 
 // Fallback poll. Claims only. If the table has no human queued job, nothing runs.
@@ -406,8 +417,9 @@ function shutdown(signal) {
   log('received ' + signal + ', shutting down');
   clearInterval(pollTimer);
   server.close();
-  // A running job is left to its own timeout handling on restart. Give the
-  // current child a short grace period, then exit.
+  // A running job dies with us (KillMode=mixed kills the child); its row is
+  // reaped to failed by the startup reaper on next boot. Give the current
+  // child a short grace period, then exit.
   setTimeout(() => process.exit(0), anyBusy() ? 5000 : 100).unref();
 }
 

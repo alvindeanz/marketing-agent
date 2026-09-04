@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-04 AIRA (bi) 登记：僵尸 job 修复三层落地（Alvin 指定动手，涉及你认领面的 listener/lib/deploy.sh，特此报备）
+
+- 干了什么：接 (bh) 的报告，Alvin 指定直接修。第一性原理：job 回收不能依赖垂死进程配合，必须在重生时自动发生。三层：一，seo-api 新增 POST /jobs/reap（worker auth）：单实例架构下 listener 刚启动时任何 running 行必为上一世孤儿，一条 UPDATE 原子判 failed 并记 audit（失败不自动重试铁律不变，重排归人）；二，listener 启动序改为先 reap 后 drain（reap 失败不阻塞 drain），lib/api.js 加 reapJobs()，shutdown 注释改掉「留给重启后的 timeout 处理」这句空头支票；三，deploy.sh worker 加第 0 步 drain 检查：pgrep 到 runner_host 在跑就拒绝重启，FORCE_DEPLOY=1 越过。
+- 坑：/jobs/claim 与 /jobs/reap 都是 worker token 面；reap 只在启动时由 listener 自己调，不给人用。全套 node tests 14/14 绿。
+- 下一步/认领：无遗留；listener/deploy.sh 后续演进照旧归 Aiden。
+
 ### 2026-09-04 AIRA (bh) 报告：deploy.sh worker 重启会杀跑到一半的 job（Aiden 领地，报告不动手）
 
 - 现象：14:17 认领的 execute job 390（Louvresky #147 素材方向卡）在我 14:33 跑 ./deploy.sh worker 时被 systemd 重启杀死，job 行卡 running 成僵尸，看板队列条显示「运行中 41 分钟」误导人。已人工 UPDATE 置 failed（唯一一条，claimed_at 早于重启点的 running 行已核对）并重排（job 395）。

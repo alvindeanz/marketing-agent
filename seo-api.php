@@ -4549,6 +4549,25 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     res(200,['ok'=>true]);
 }
 
+/* POST /jobs/reap -> worker 启动收尸（2026-09-04 job390 僵尸事故的修复）。
+   第一性原理：job 的回收不能依赖认领它的进程活着来交代（deploy 重启、崩溃、OOM
+   都会让它死无对证），必须在下一次重生时自动发生。worker 是单实例，listener 刚
+   启动、还没认领任何东西时，库里任何 running 行都必然是上一世的孤儿，一条
+   UPDATE 原子回收成 failed。失败 job 不自动重试的铁律不变，重排归人。 */
+if($m==='POST'&&$ROUTE==='/jobs/reap'){
+    auth_worker();
+    $ids=[];
+    foreach(db()->query("SELECT id FROM agent_jobs WHERE status='running'")->fetchAll() as $r)$ids[]=(int)$r['id'];
+    if($ids){
+        $in=implode(',',array_fill(0,count($ids),'?'));
+        $note="\n[".gmdate('Y-m-d H:i:s')."Z] [reaped] worker 重启收尸：认领进程已死，判 failed。失败 job 不自动重试，需要的话人工重排";
+        db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE id IN ($in) AND status='running'")
+            ->execute(array_merge([$note],$ids));
+        audit('seo-worker','seo_jobs_reaped','',['ids'=>$ids]);
+    }
+    res(200,['ok'=>true,'reaped'=>$ids]);
+}
+
 // POST /jobs -> queue one job, 409 if the same client+type is already in flight
 // 例外是 execute_task 带 task_ids 数组：任务是工作单位，勾几个任务就建几个 job，
 // 每个 job 的 payload 只装一个 task_id（runner 现有解析不变），各自吃满 30 分钟预算，
