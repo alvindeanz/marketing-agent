@@ -40,3 +40,6 @@ review_principles.md 管「单个任务该不该做」，这份管「整份方�
 - 与 organic 协同写进方案：SEO 已进前 3 的词，paid 出价下调或转竞品防守；search terms 里的高意图词反哺 SEO 选题清单。
 - 素材与 copy 类任务一任务一个 ad group 批次，和博客一任务一篇同理，合并任务产线只交付一半。
 - 每个 paid 客户每 sprint 排一条 keyword-direction 任务（关键词方向卡）：analysis 型，产出 HTML 方向卡供 sales 与客户确认方向，反馈经任务线程回 facts，下一 sprint 的词表与否词包必须引用上期确认结论。（2026-08-31 Alvin 定）
+
+## 待整理（experience_sync 自动追加，整理后删）
+- [task#147 ] fable 判 later（账户主转化混微转化一起出价，按付费原则先整理转化口径，等 Alvin 拍板口径方案再成卡），人改 do：Alvin 2026-09-01 拍板 W12 批 A 试点（Louvresky 素材卡）。判决前提部分不成立：卡内询价数字全按 fact ads.google.conversion_scope 两表单干净口径，未用被污染的官方转化列；素材决策（文案更换、零曝光清理、pin 试验）不依赖出价口径。判决中的真问题（口径整理方案立项）单独报 Alvin 决策，不阻塞本卡。
