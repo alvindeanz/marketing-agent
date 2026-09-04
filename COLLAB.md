@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-04 AIRA (bg) 登记：facts 版本账 + 会话抽 facts 开闸（Alvin 定的同事自助方案 P0，跨认领边界报备）
+
+- 干了什么：目标是同事走看板会话替代 Discord 问答，前置两件。一，facts 版本账：新表 seo_facts_history（惰性 DDL），三个写入口（POST /facts、PATCH /facts/{id}、裁决白名单动作）统一过 fact_history_snapshot()，记前值、改动人、来源坐标（feedback:{id}/worker/api/ruling:{inbox}/revert:{hid}）；新增 POST /facts/{id}/revert（admin）一键揭回上一版，回滚本身也进账。纯后台，无任何前台界面，抽查与回滚归 admin/agent。二，普通会话开闸抽 facts：/inbox/{id}/chat 去掉任务线程 guard，task_id=0 加 payload.chat_root；feedback.js 接受无任务反馈（跳任务查找、按字面抽取）；/tasks/0/feedback_result 只更新反馈行不碰任务。会话区 UI 文案加一句「说的客户事实会入档」。
+- 坑：facts 版本化先于开闸上线（先修堤再放水）；/facts_history 大事记导入维持覆盖式幂等未接版本账（history.event.* 自描述，故意的）。feedback.js 属 Aiden 认领的 runners，改动最小面已登记。全套 node tests 14/14 绿。
+- 下一步/认领：P1 同事试点 + Discord 通知桥（opus 回复与任务草案 DM 提醒）归我，试点后再看多轮放宽。
+
 ### 2026-09-04 AIRA (bf) 登记：收件箱按客户隔离（Alvin 指定，跨认领边界报备）
 
 - 干了什么：决策收件箱分两种模式。客户页收件箱 tab = 客户模式（默认）：决策流硬锁当前客户加跨客户 NULL 卡，下拉隐藏，角标显示本客户待裁决数；侧栏「决策收件箱」= 全局总台：全客户流水加下拉筛选，标题标明（全局总台），对话区隐藏（对话本来就是单客户的）。两模式一键互切（ibScope 按钮），换客户或离开视图自动回客户模式。API 侧 GET /inbox 带 client_id 时新增 open_count_client 返回字段（向后兼容）。对话 session 本来就按 client_id 隔离，零改动。全套 node tests 14/14 绿。

@@ -1664,9 +1664,12 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/feedback_result$#',$ROUTE,$mm)){
     if($summary==='')res(400,['error'=>'summary required']);
     db()->prepare("UPDATE seo_feedback SET status='parsed',parsed_note=?,parsed_at=NOW() WHERE id=?")
         ->execute([$summary,$fid]);
-    db()->prepare("UPDATE seo_tasks SET result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
-        ->execute(['[反馈] '.$summary,$tid]);
-    $complete=!empty($i['complete']);
+    /* task_id=0 是普通会话的反馈（无关联任务）：只落 seo_feedback，不碰任务也不办结 */
+    if($tid>0){
+        db()->prepare("UPDATE seo_tasks SET result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
+            ->execute(['[反馈] '.$summary,$tid]);
+    }
+    $complete=!empty($i['complete'])&&$tid>0;
     if($complete){
         $err=task_close($tid,'accepted','按反馈认定完成：'.$summary);
         if($err)$complete=false;
@@ -2397,6 +2400,35 @@ if($m==='GET'&&$ROUTE==='/facts'){
 //         client), land confirmed, and may overwrite a confirmed fact.
 // admin:  free choice, defaults to manual + confirmed.
 // Accepts one fact, or a batch under body.facts for the discover runner.
+/* ---- facts 版本账（2026-09-04 Alvin 定）----
+   每次改写前存前值，写入口三处（POST /facts、PATCH /facts/{id}、裁决白名单动作）全部过
+   fact_history_snapshot()。查询与回滚都在后台（SQL / POST /facts/{id}/revert），
+   前台无界面：同事看不到，上帝视角抽查与回滚由 admin/agent 操作。 */
+function ensure_facts_history_schema(){
+    static $done=false;if($done)return;$done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_facts_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        fact_id INT NOT NULL,
+        client_id INT NOT NULL,
+        fact_key VARCHAR(100) NOT NULL,
+        old_value TEXT DEFAULT NULL,
+        old_source VARCHAR(16) DEFAULT NULL,
+        old_status VARCHAR(16) DEFAULT NULL,
+        new_value TEXT DEFAULT NULL,
+        changed_by VARCHAR(64) NOT NULL DEFAULT '',
+        origin VARCHAR(200) NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_sfh_fact (fact_id,id),
+        KEY idx_sfh_client (client_id,id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+/* $old=null 表示新建。origin 是来源坐标：feedback:{id} / worker / api / ruling:{inbox} / revert:{history_id} */
+function fact_history_snapshot($factId,$cid,$key,$old,$newValue,$user,$origin){
+    ensure_facts_history_schema();
+    db()->prepare("INSERT INTO seo_facts_history(fact_id,client_id,fact_key,old_value,old_source,old_status,new_value,changed_by,origin)VALUES(?,?,?,?,?,?,?,?,?)")
+        ->execute([$factId,$cid,$key,$old?($old['value']??null):null,$old?($old['source']??null):null,$old?($old['status']??null):null,$newValue,$user,$origin]);
+}
+
 if($m==='POST'&&$ROUTE==='/facts'){
     $a=auth_any();
     $isWorker=($a['role']==='seo_worker');
@@ -2439,9 +2471,10 @@ if($m==='POST'&&$ROUTE==='/facts'){
         }
         $clean[]=['key'=>$key,'value'=>(string)($f['value']??''),'source'=>$src,'status'=>$st];
     }
-    $look=db()->prepare("SELECT id,status,source FROM seo_facts WHERE client_id=? AND fact_key=?");
+    $look=db()->prepare("SELECT id,value,status,source FROM seo_facts WHERE client_id=? AND fact_key=?");
     $upd=db()->prepare("UPDATE seo_facts SET value=?,source=?,status=?,updated_by=? WHERE id=?");
     $ins=db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)VALUES(?,?,?,?,?,?)");
+    $origin=$fbRow?('feedback:'.$fbId):($isWorker?'worker':'api');
     $out=[];
     foreach($clean as $f){
         $look->execute([$cid,$f['key']]);
@@ -2455,11 +2488,14 @@ if($m==='POST'&&$ROUTE==='/facts'){
             continue;
         }
         if($ex){
+            fact_history_snapshot((int)$ex['id'],$cid,$f['key'],$ex,$f['value'],$a['username'],$origin);
             $upd->execute([$f['value'],$f['source'],$f['status'],$a['username'],(int)$ex['id']]);
             $out[]=['fact_key'=>$f['key'],'id'=>(int)$ex['id'],'skipped'=>false];
         }else{
             $ins->execute([$cid,$f['key'],$f['value'],$f['source'],$f['status'],$a['username']]);
-            $out[]=['fact_key'=>$f['key'],'id'=>(int)db()->lastInsertId(),'skipped'=>false];
+            $nid=(int)db()->lastInsertId();
+            fact_history_snapshot($nid,$cid,$f['key'],null,$f['value'],$a['username'],$origin);
+            $out[]=['fact_key'=>$f['key'],'id'=>$nid,'skipped'=>false];
         }
     }
     $skipped=count(array_filter($out,function($r){return $r['skipped'];}));
@@ -2475,7 +2511,7 @@ if($m==='PATCH'&&preg_match('#^/facts/(\d+)$#',$ROUTE,$mm)){
     $u=auth_admin();
     $fid=(int)$mm[1];
     $i=input();
-    $chk=db()->prepare("SELECT id,client_id,fact_key FROM seo_facts WHERE id=?");
+    $chk=db()->prepare("SELECT id,client_id,fact_key,value,source,status FROM seo_facts WHERE id=?");
     $chk->execute([$fid]);
     $ex=$chk->fetch();
     if(!$ex)res(404,['error'=>'Fact not found']);
@@ -2490,11 +2526,40 @@ if($m==='PATCH'&&preg_match('#^/facts/(\d+)$#',$ROUTE,$mm)){
         $sets[]='source=?';$args[]=$i['source'];
     }
     if(!$sets)res(400,['error'=>'nothing to update']);
+    fact_history_snapshot($fid,(int)$ex['client_id'],$ex['fact_key'],$ex,isset($i['value'])?(string)$i['value']:$ex['value'],$u['username'],'api');
     $sets[]='updated_by=?';$args[]=$u['username'];
     $args[]=$fid;
     db()->prepare("UPDATE seo_facts SET ".implode(',',$sets)." WHERE id=?")->execute($args);
     audit($u['username'],'seo_fact_update',(string)$fid,['client_id'=>(int)$ex['client_id'],'fact_key'=>$ex['fact_key'],'patch'=>$i]);
     res(200,['ok'=>true]);
+}
+
+/* POST /facts/{id}/revert -> 把一条 fact 揭回上一版（或 body.history_id 指定那一版改写前的值）。
+   admin 后台操作，前台无入口；回滚本身也进版本账与 audit，回滚的回滚同样可行。 */
+if($m==='POST'&&preg_match('#^/facts/(\d+)/revert$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_facts_history_schema();
+    $fid=(int)$mm[1];
+    $q=db()->prepare("SELECT id,client_id,fact_key,value,source,status FROM seo_facts WHERE id=?");
+    $q->execute([$fid]);
+    $f=$q->fetch();
+    if(!$f)res(404,['error'=>'Fact not found']);
+    $i=input();
+    $hid=(int)($i['history_id']??0);
+    if($hid){
+        $h=db()->prepare("SELECT * FROM seo_facts_history WHERE id=? AND fact_id=?");
+        $h->execute([$hid,$fid]);
+    }else{
+        $h=db()->prepare("SELECT * FROM seo_facts_history WHERE fact_id=? AND old_value IS NOT NULL ORDER BY id DESC LIMIT 1");
+        $h->execute([$fid]);
+    }
+    $hr=$h->fetch();
+    if(!$hr||$hr['old_value']===null)res(404,['error'=>'没有可回滚的历史版本（新建 fact 无前值，要删走 PATCH 置空）']);
+    fact_history_snapshot($fid,(int)$f['client_id'],$f['fact_key'],$f,$hr['old_value'],$u['username'],'revert:'.$hr['id']);
+    db()->prepare("UPDATE seo_facts SET value=?,source=?,status=?,updated_by=? WHERE id=?")
+        ->execute([$hr['old_value'],$hr['old_source']?:$f['source'],$hr['old_status']?:$f['status'],$u['username'],$fid]);
+    audit($u['username'],'seo_fact_revert',(string)$fid,['history_id'=>(int)$hr['id'],'fact_key'=>$f['fact_key'],'client_id'=>(int)$f['client_id']]);
+    res(200,['ok'=>true,'fact_key'=>$f['fact_key'],'restored_value'=>$hr['old_value']]);
 }
 
 /* =========================================================
@@ -2794,17 +2859,19 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/actions$#',$ROUTE,$mm)){
                 $out['message']='这张卡片跨了多个客户，说不清这条 fact 该记给谁，未执行，请到档案页手工添加';
                 $results[]=$out;continue;
             }
-            $look=db()->prepare("SELECT id FROM seo_facts WHERE client_id=? AND fact_key=?");
+            $look=db()->prepare("SELECT id,value,source,status FROM seo_facts WHERE client_id=? AND fact_key=?");
             $look->execute([$cid,$key]);
             $ex=$look->fetch();
             $look->closeCursor();
             if($ex){
+                fact_history_snapshot((int)$ex['id'],$cid,$key,$ex,$val,$by,'ruling:'.$did);
                 db()->prepare("UPDATE seo_facts SET value=?,source='manual',status='confirmed',updated_by=? WHERE id=?")
                     ->execute([$val,$by,(int)$ex['id']]);
                 $out['message']='fact「'.$key.'」已更新为「'.mb_substr($val,0,120,'UTF-8').'」（人工确认）';
             }else{
                 db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)VALUES(?,?,?,'manual','confirmed',?)")
                     ->execute([$cid,$key,$val,$by]);
+                fact_history_snapshot((int)db()->lastInsertId(),$cid,$key,null,$val,$by,'ruling:'.$did);
                 $out['message']='fact「'.$key.'」已新建为「'.mb_substr($val,0,120,'UTF-8').'」（人工确认）';
             }
             $out['ok']=true;
@@ -3117,16 +3184,17 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
     $msgRefs=($imgs||$src==='client')?['images'=>$imgs,'source'=>$src]:null;
     $msgId=chat_msg_insert($root,'chat_user',$text===''?'（见截图）':$text,$u['username'],$msgRefs);
     $jid=chat_job_queue($root,$msgId,$u['username']);
-    /* 任务线程：人说的每一句同时投一条反馈走 feedback job 抽 facts。线程是反馈的容器，
-       学习回路不因为换了界面而断。 */
+    /* 人说的每一句同时投一条反馈走 feedback job 抽 facts，学习回路不因为换了界面而断。
+       任务线程挂任务 id；普通会话 task_id=0，payload 带 chat_root 供 runner 与版本账溯源
+       （2026-09-04 起普通会话也抽，同事口述的客户情报不再丢在聊天记录里）。 */
     $fbId=0;
-    if($rootRefs['tasks']){
+    {
         ensure_feedback_schema();
-        $ftid=(int)$rootRefs['tasks'][0];
+        $ftid=$rootRefs['tasks']?(int)$rootRefs['tasks'][0]:0;
         db()->prepare("INSERT INTO seo_feedback(client_id,task_id,source,`text`,images,status,created_by)VALUES(?,?,?,?,?,'pending',?)")
             ->execute([(int)$root['client_id'],$ftid,$src,$text,$imgs?json_encode($imgs):null,$u['username']]);
         $fbId=(int)db()->lastInsertId();
-        $fpayload=json_encode(['task_id'=>$ftid,'feedback_id'=>$fbId,'source'=>$src,'text'=>$text,'images'=>$imgs,'complete_on_parse'=>false],JSON_UNESCAPED_UNICODE);
+        $fpayload=json_encode(['task_id'=>$ftid,'feedback_id'=>$fbId,'source'=>$src,'text'=>$text,'images'=>$imgs,'complete_on_parse'=>false,'chat_root'=>$rootId],JSON_UNESCAPED_UNICODE);
         db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'feedback',?,'queued',?)")
             ->execute([(int)$root['client_id'],$fpayload,$u['username']]);
         $fjid=(int)db()->lastInsertId();

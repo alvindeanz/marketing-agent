@@ -36,6 +36,8 @@ const KNOWN_NAMESPACES = ['biz', 'local', 'product', 'policy', 'gbp'];
 const SOURCE_LABEL = { manual: '团队判断', client: '客户原话' };
 
 function taskBlock(task) {
+  // 普通会话的反馈没有关联任务：情报按字面抽，别拿任务上下文去猜
+  if (!task) return '（无关联任务：这条反馈来自客户会话，人直接口述的情报，按字面抽取）';
   const rows = ['任务 id：' + task.id, '标题：' + (task.title || '(无标题)')];
   if (task.status) rows.push('当前状态：' + task.status);
   if (task.owner_type) rows.push('负责方：' + task.owner_type);
@@ -196,7 +198,9 @@ async function run(ctx) {
     .map((n) => String(n || ''))
     .filter((n) => IMAGE_NAME_RE.test(n));
 
-  if (!taskId) throw new Error('feedback job has no payload.task_id');
+  const chatRoot = Number(payload.chat_root) || 0;
+  // task_id=0 且带 chat_root 是普通会话的反馈（2026-09-04 起会话情报也抽 facts），合法
+  if (!taskId && !chatRoot) throw new Error('feedback job has no payload.task_id');
   if (!feedbackId) throw new Error('feedback job has no payload.feedback_id');
   // A screenshot on its own is a valid note, so text is only mandatory when
   // there is nothing else in the payload.
@@ -225,9 +229,14 @@ async function run(ctx) {
   const profile = (context && context.profile) || null;
   if (!profile) throw new Error('context returned no profile for client_id ' + job.client_id);
   const tasks = (context && Array.isArray(context.tasks) && context.tasks) || [];
-  const task = tasks.find((t) => String(t.id) === String(taskId)) || null;
-  if (!task) {
-    throw new Error('task ' + taskId + ' not found in context for client_id ' + job.client_id);
+  let task = null;
+  if (taskId) {
+    task = tasks.find((t) => String(t.id) === String(taskId)) || null;
+    if (!task) {
+      throw new Error('task ' + taskId + ' not found in context for client_id ' + job.client_id);
+    }
+  } else {
+    log('feedback ' + feedbackId + ': 来自会话 #' + chatRoot + '，无关联任务，按字面抽取');
   }
 
   const workspace = ensureClientWorkspace(profile, cfg);
