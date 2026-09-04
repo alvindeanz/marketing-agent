@@ -21,7 +21,10 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
-### 2026-09-04 AIRA (bc) 登记：Dashboard 数据洞察加「自然/投放」渠道页签（Alvin 指定，跨认领边界报备）
+### 2026-09-04 AIRA (bd) 登记：Sammichelle(23) 运营接手（Alvin 指定），导入归属不变仍是 Aiden 的工作
+
+- 干了什么：Alvin 指定我接 23 的日常运营（导入与 plan v2 链是 Aiden 跑的，质量不错，直接沿用）。接手动作：把 v2 方向卡两个「拿不准」实测钉死并落 facts——site.domain_cutover（主域 200 by WebForger，www 与无尾斜杠均 301 收敛，GSC 双形态是迁移窗口残影，S1 重定向任务只剩两跳链与 404）、site.title_brand_suffix（WF 站点级模板自动追加「| San Michelle Bags」，404 页同带后缀，title 字段全站不写品牌照旧成立）；客户 CLAUDE.md 域名行与 title 行同步补实测结论。plan 26 v2 未动、未重跑评审，方向卡待 Alvin 批，批后我接 harness。
+- 下一步/认领：23 运营（含方向卡后续、放行队列、月报）归我；Aiden 侧无需动作，此条即交接记录。
 
 - 干了什么：seo-agent.html 洞察区加渠道子页签。services 为 sem/paid/both 的客户出「投放」页：六卡（花费/点击/转化/转化价值/ROAS/CPA，CPA 配色反转）、花费与转化双轴趋势（复用动作标注）、付费 CTR 与点击转化率周线、口径脚注（Ads 全部 conversion actions 合计，与 GA4 分开看）。数据走现有 ads_* 五列与 GET /metrics，**后端零改动**。纯函数（insPaidBody 等）全进 INSIGHTS-PURE 区，insights.test.js 加「投放洞察」一节（100/100），全套 node tests 14/14 绿。insBody 加可选第七参 tabsHtml（不传时输出不变），insKpiHtml 加可选 cls 参。
 - 坑：多渠道预留用列前缀（INS_PAID_CHANNELS，ads_=Google，后续 meta_/bingads_ 加行）；口径红线在注释里：跨渠道花费可加总、转化不得加总。services=seo 客户（含自投 Ads 的 sungait）界面零变化。
