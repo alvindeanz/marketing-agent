@@ -242,6 +242,31 @@ t('runner 的默认周期是上一个完整自然月', () => {
   assert.strictEqual(R2.defaultPeriodStart('2026-01-05'), '2025-12-01');
 });
 
+/* ---------- GSC 反垃圾口径 ---------- */
+section('GSC 反垃圾扣除口径');
+t('垃圾词过滤器用 includingRegex 单查，不挂到汇总查询上', () => {
+  const g = F.spamIncludeGroups('(jack|jek)\\s?toto');
+  assert.strictEqual(g.length, 1);
+  assert.strictEqual(g[0].filters[0].dimension, 'query');
+  assert.strictEqual(g[0].filters[0].operator, 'includingRegex');
+  assert.strictEqual(F.spamIncludeGroups(''), undefined);
+});
+t('全量减垃圾：点击曝光相减，位次按曝光重新加权', () => {
+  const all = { clicks: 102, impressions: 2723, ctr: 0.0375, position: 15.6 };
+  const spam = { clicks: 2, impressions: 200, ctr: 0.01, position: 40 };
+  const out = F.subtractSpamTotals(all, spam);
+  assert.strictEqual(out.clicks, 100);
+  assert.strictEqual(out.impressions, 2523);
+  // (15.6*2723 - 40*200) / 2523
+  assert.strictEqual(out.position, 13.7);
+  assert.strictEqual(out.ctr, 0.0396);
+});
+t('垃圾量大于等于全量时原样返回，不出负数', () => {
+  const all = { clicks: 5, impressions: 10, ctr: 0.5, position: 9 };
+  const out = F.subtractSpamTotals(all, { clicks: 9, impressions: 10, ctr: 0.9, position: 9 });
+  assert.deepStrictEqual(out, all);
+});
+
 /* ---------- 查询归一化与簇加权 ---------- */
 section('查询归一化与簇加权位次');
 t('normalizeQuery 归一大小写、连字符与标点', () => {

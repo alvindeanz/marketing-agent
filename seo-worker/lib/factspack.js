@@ -573,40 +573,100 @@ function parseLeadsOverride(instructions) {
 // 取数：GSC
 // ---------------------------------------------------------------------------
 
-async function gscTotals(cfg, property, range, spamRegex) {
-  const res = await gscQuery(cfg, property, {
-    startDate: range.start,
-    endDate: range.end,
-    dimensions: [],
-    dimensionFilterGroups: spamFilterGroups(spamRegex),
-    rowLimit: 1,
-  });
-  const row = ((res && res.rows) || [])[0] || {};
+/**
+ * 反垃圾正则只能用「先取全量再减去垃圾」的方式扣，不能直接挂到汇总查询上。
+ *
+ * GSC 把曝光过低的查询匿名化，匿名行没有 query 维度值，所以任何挂在 query 上的
+ * 过滤器（哪怕是 excludingRegex）都会连带把这批行整个排除掉。小站上匿名查询占
+ * 一半以上，结果就是汇总数字被腰斩。实测 kuddles 2026 年 8 月：不挂过滤器
+ * 102 点击 / 2723 曝光，挂上 metrics.spamFilterGroups 只剩 45 / 1339。
+ *
+ * 正确口径：全量查一次，垃圾词用 includingRegex 单独查一次，两者相减。
+ * 位次是按曝光加权的均值，所以扣除后要按曝光重新加权。
+ */
+function spamIncludeGroups(regex) {
+  if (!regex) return undefined;
+  return [
+    {
+      groupType: 'and',
+      filters: [{ dimension: 'query', operator: 'includingRegex', expression: regex }],
+    },
+  ];
+}
+
+function subtractSpamTotals(all, spam) {
+  const impressions = all.impressions - spam.impressions;
+  const clicks = all.clicks - spam.clicks;
+  if (!(impressions > 0) || !(clicks >= 0)) return all;
+  const weighted = all.position * all.impressions - spam.position * spam.impressions;
   return {
-    clicks: Number(row.clicks) || 0,
-    impressions: Number(row.impressions) || 0,
-    ctr: round4(row.ctr) || 0,
-    position: round1(row.position) || 0,
+    clicks,
+    impressions,
+    ctr: round4(clicks / impressions),
+    position: round1(weighted / impressions),
   };
 }
 
+async function gscTotals(cfg, property, range, spamRegex) {
+  const read = async (groups) => {
+    const res = await gscQuery(cfg, property, {
+      startDate: range.start,
+      endDate: range.end,
+      dimensions: [],
+      dimensionFilterGroups: groups,
+      rowLimit: 1,
+    });
+    const row = ((res && res.rows) || [])[0] || {};
+    return {
+      clicks: Number(row.clicks) || 0,
+      impressions: Number(row.impressions) || 0,
+      ctr: round4(row.ctr) || 0,
+      position: round1(row.position) || 0,
+    };
+  };
+  const all = await read(undefined);
+  if (!spamRegex) return all;
+  const spam = await read(spamIncludeGroups(spamRegex));
+  if (!(spam.impressions > 0)) return all;
+  return subtractSpamTotals(all, spam);
+}
+
 async function gscByDimension(cfg, property, range, dimension, spamRegex) {
-  const res = await gscQuery(cfg, property, {
-    startDate: range.start,
-    endDate: range.end,
-    dimensions: [dimension],
-    dimensionFilterGroups: spamFilterGroups(spamRegex),
-    rowLimit: GSC_ROW_LIMIT,
-  });
-  return ((res && res.rows) || []).map((r) => ({
-    key: String((r.keys || [])[0] || ''),
-    query: String((r.keys || [])[0] || ''),
-    page: String((r.keys || [])[0] || ''),
-    clicks: Number(r.clicks) || 0,
-    impressions: Number(r.impressions) || 0,
-    ctr: Number(r.ctr) || 0,
-    position: Number(r.position) || 0,
-  }));
+  // query 维度本来就不含匿名行，excludingRegex 在这里是安全且直接的。
+  // 其余维度（page）要走全量减垃圾，否则同样丢掉匿名查询贡献的那一半。
+  const onQuery = dimension === 'query';
+  const read = async (groups) => {
+    const res = await gscQuery(cfg, property, {
+      startDate: range.start,
+      endDate: range.end,
+      dimensions: [dimension],
+      dimensionFilterGroups: groups,
+      rowLimit: GSC_ROW_LIMIT,
+    });
+    return ((res && res.rows) || []).map((r) => ({
+      key: String((r.keys || [])[0] || ''),
+      query: String((r.keys || [])[0] || ''),
+      page: String((r.keys || [])[0] || ''),
+      clicks: Number(r.clicks) || 0,
+      impressions: Number(r.impressions) || 0,
+      ctr: Number(r.ctr) || 0,
+      position: Number(r.position) || 0,
+    }));
+  };
+  if (onQuery) return read(spamFilterGroups(spamRegex));
+  const all = await read(undefined);
+  if (!spamRegex) return all;
+  const spam = await read(spamIncludeGroups(spamRegex));
+  if (!spam.length) return all;
+  const spamByKey = new Map(spam.map((r) => [r.key, r]));
+  return all
+    .map((r) => {
+      const s = spamByKey.get(r.key);
+      if (!s) return r;
+      const t = subtractSpamTotals(r, s);
+      return { ...r, clicks: t.clicks, impressions: t.impressions, ctr: t.ctr, position: t.position };
+    })
+    .filter((r) => r.impressions > 0 || r.clicks > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1364,6 +1424,8 @@ module.exports = {
   absDelta,
   posDelta,
   ppDelta,
+  spamIncludeGroups,
+  subtractSpamTotals,
   normalizeQuery,
   queryTokens,
   clusterWeightedPosition,
