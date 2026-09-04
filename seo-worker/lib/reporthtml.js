@@ -312,15 +312,35 @@ function kpiYoy(pack, key) {
 }
 
 /**
- * 这个 KPI 该看哪个数据源的覆盖天数。计数类指标的环比会被对比期天数直接扭曲，
- * 位次、点击率、转化率这类比值不会，所以只有计数类需要按天数归一。
+ * 对比期是不是残月。计数类指标的环比会被对比期天数直接扭曲，位次、点击率、
+ * 转化率这类比值不会，所以只有计数类需要按天数归一。source 取 'gsc' 或 'ga4'。
  */
-function kpiCoverage(pack, key) {
-  const node = key.indexOf('gsc_') === 0 ? pack.gsc : pack.ga4;
-  const cov = node && node.coverage;
-  const prev = cov && cov.prev;
+function shortPrevCoverage(pack, source) {
+  const node = source === 'gsc' ? pack && pack.gsc : pack && pack.ga4;
+  const prev = node && node.coverage && node.coverage.prev;
   if (!prev || !prev.short || !(prev.days > 0) || !(prev.span > 0)) return null;
   return prev;
+}
+
+/** 对比期残月时，把对比值折算成整周期应有的量。 */
+function coveredBase(prev, shortPrev) {
+  if (!shortPrev) return prev;
+  return (Number(prev) * shortPrev.span) / shortPrev.days;
+}
+
+/** 计数类环比。对比期残月时先折算成整周期，文案标「日均」。 */
+function deltaCountCovered(cur, prev, shortPrev) {
+  const d = deltaCount(cur, coveredBase(prev, shortPrev));
+  return shortPrev ? { text: d.text + '（日均）', color: d.color } : d;
+}
+
+/** 对比值后面补一句「仅 N 天」，免得读者以为那是整月数字。 */
+function withDayNote(text, shortPrev) {
+  return shortPrev ? text + '，仅 ' + shortPrev.days + ' 天' : text;
+}
+
+function kpiCoverage(pack, key) {
+  return shortPrevCoverage(pack, key.indexOf('gsc_') === 0 ? 'gsc' : 'ga4');
 }
 
 function kpiCard(pack, key) {
@@ -340,12 +360,10 @@ function kpiCard(pack, key) {
     d = deltaPp(vals.cur, vals.prev);
   } else {
     value = fmtInt(vals.cur);
-    const base = shortPrev ? (Number(vals.prev) * shortPrev.span) / shortPrev.days : vals.prev;
-    d = deltaCount(vals.cur, base);
-    if (shortPrev) d = { text: d.text + '（日均）', color: d.color };
+    d = deltaCountCovered(vals.cur, vals.prev, shortPrev);
   }
   let prevValue = def.kind === 'pos' ? fmtPos(vals.prev) : def.kind === 'pct' ? fmtPct(vals.prev) : fmtInt(vals.prev);
-  if (shortPrev) prevValue = prevValue + '，仅 ' + shortPrev.days + ' 天';
+  prevValue = withDayNote(prevValue, shortPrev);
   return { key, label: def.label, value, note: d.text, delta: d.text, delta_color: d.color, prev_value: prevValue };
 }
 
@@ -529,23 +547,25 @@ function buildChannelKpis(pack) {
   if (!total || !org.cur) return [];
   const shareCur = total.sessions > 0 ? org.cur.sessions / total.sessions : null;
   const sharePrev = total.prev_sessions > 0 ? org.prev.sessions / total.prev_sessions : null;
-  const dTotal = deltaCount(total.sessions, total.prev_sessions);
-  const dLeads = deltaCount(total.leads, total.prev_leads);
+  const shortPrev = shortPrevCoverage(pack, 'ga4');
+  const dTotal = deltaCountCovered(total.sessions, total.prev_sessions, shortPrev);
+  const dLeads = deltaCountCovered(total.leads, total.prev_leads, shortPrev);
   const dShare = deltaPp(shareCur, sharePrev);
+  const vsNote = withDayNote('vs ' + pack.meta.compare.short, shortPrev);
   return [
     {
       value: fmtInt(total.sessions),
       label: '全渠道访问',
       delta: dTotal.text,
       delta_color: dTotal.color,
-      note: 'vs ' + pack.meta.compare.short,
+      note: vsNote,
     },
     {
       value: fmtInt(total.leads),
       label: '全渠道询盘',
       delta: dLeads.text,
       delta_color: dLeads.color,
-      note: 'vs ' + pack.meta.compare.short,
+      note: vsNote,
     },
     {
       value: shareCur === null ? '待更新' : fmtPct(shareCur, 1),
@@ -566,29 +586,30 @@ function buildFunnel(pack) {
   }
   const base = steps.length ? Number(steps[0].cur) || 0 : 0;
   const basePrev = steps.length ? Number(steps[0].prev) || 0 : 0;
+  const shortPrev = shortPrevCoverage(pack, 'ga4');
   const out = steps.map((s, i) => {
-    const d = deltaCount(s.cur, s.prev);
+    const d = deltaCountCovered(s.cur, s.prev, shortPrev);
     const rate = i === 0 ? '本期基准' : base > 0 ? fmtPct(Number(s.cur) / base, 2) : '待更新';
     return {
       value: fmtInt(s.cur),
       label: s.label,
       rate_label: rate,
       accent_color: FUNNEL_COLORS[i] || FUNNEL_COLORS[FUNNEL_COLORS.length - 1],
-      prev_value: fmtInt(s.prev),
+      prev_value: withDayNote(fmtInt(s.prev), shortPrev),
       delta: d.text,
       delta_color: d.color,
       is_last: i === steps.length - 1,
     };
   });
   const rows = steps.map((s) => {
-    const d = deltaCount(s.cur, s.prev);
+    const d = deltaCountCovered(s.cur, s.prev, shortPrev);
     return {
       metric: s.label,
-      prev_value: fmtInt(s.prev),
+      prev_value: withDayNote(fmtInt(s.prev), shortPrev),
       value: fmtInt(s.cur),
       delta: d.text,
       delta_color: d.color,
-      note: shortNote(s.cur, s.prev, true),
+      note: shortNote(s.cur, coveredBase(s.prev, shortPrev), true),
     };
   });
   if (steps.length >= 2) {
@@ -960,6 +981,7 @@ module.exports = {
   buildKeywordRows,
   buildPageRows,
   buildChannelRows,
+  buildChannelKpis,
   buildWorkItems,
   buildNextItems,
   buildRankDist,

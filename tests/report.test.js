@@ -717,6 +717,29 @@ t('对比期残月时计数类 KPI 按日均折算并标注天数，比值类不
   pack.gsc.coverage.prev.short = false;
   assert.strictEqual(R.kpiCard(pack, 'gsc_clicks').delta, '+82.1%');
 });
+t('残月折算同时作用于渠道卡与漏斗，正文和控件不会各说各的', () => {
+  const pack = fakePack();
+  pack.ga4.coverage = { cur: { days: 31, span: 31, short: false }, prev: { days: 19, span: 31, short: true } };
+  pack.ga4.channels_total = { sessions: 286, prev_sessions: 231, leads: 13, prev_leads: 13 };
+  pack.ga4.funnel = {
+    steps: [
+      { label: '自然搜索访问', cur: 129, prev: 70 },
+      { label: '开始填写表单', cur: 12, prev: 12 },
+      { label: '询盘', cur: 10, prev: 11 },
+    ],
+    rates: [],
+  };
+  const cards = R.buildChannelKpis(pack);
+  assert.strictEqual(cards[0].delta, '-24.1%（日均）');
+  assert.ok(cards[0].note.indexOf('仅 19 天') > -1);
+  // 占比是比值，不折算
+  assert.ok(cards[2].delta.indexOf('日均') === -1);
+  const f = R.buildFunnel(pack);
+  assert.strictEqual(f.steps[0].delta, '+12.9%（日均）');
+  // 总量持平的一步，按日均看其实是掉的，备注要跟着改口
+  assert.strictEqual(f.rows[1].delta, '-38.7%（日均）');
+  assert.strictEqual(f.rows[1].note, '环比回落');
+});
 t('渠道表列出访问、询盘与询盘占比，合计取渠道行', () => {
   const c = R.buildChannelRows(fakePack());
   assert.strictEqual(c.total_sessions, '1,000');
