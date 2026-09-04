@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-04 AIRA (bh) 报告：deploy.sh worker 重启会杀跑到一半的 job（Aiden 领地，报告不动手）
+
+- 现象：14:17 认领的 execute job 390（Louvresky #147 素材方向卡）在我 14:33 跑 ./deploy.sh worker 时被 systemd 重启杀死，job 行卡 running 成僵尸，看板队列条显示「运行中 41 分钟」误导人。已人工 UPDATE 置 failed（唯一一条，claimed_at 早于重启点的 running 行已核对）并重排（job 395）。
+- 建议方向：deploy.sh worker 重启前查一把 agent_jobs 的 running 行，非空就拒绝或提示 --force（drain 后再发）；或 listener 收 SIGTERM 时给 job 行写 failed 再退。deploy.sh 与 listener 都在你认领面，按规矩报告不动手。09-01 那次 #147 退出 143 疑似同款（当时也有一次 worker 发版，未核实）。
+- 下一步/认领：修复归 Aiden 排期；我这边发 worker 前先手查 running 行当临时纪律。
+
 ### 2026-09-04 AIRA (bg) 登记：facts 版本账 + 会话抽 facts 开闸（Alvin 定的同事自助方案 P0，跨认领边界报备）
 
 - 干了什么：目标是同事走看板会话替代 Discord 问答，前置两件。一，facts 版本账：新表 seo_facts_history（惰性 DDL），三个写入口（POST /facts、PATCH /facts/{id}、裁决白名单动作）统一过 fact_history_snapshot()，记前值、改动人、来源坐标（feedback:{id}/worker/api/ruling:{inbox}/revert:{hid}）；新增 POST /facts/{id}/revert（admin）一键揭回上一版，回滚本身也进账。纯后台，无任何前台界面，抽查与回滚归 admin/agent。二，普通会话开闸抽 facts：/inbox/{id}/chat 去掉任务线程 guard，task_id=0 加 payload.chat_root；feedback.js 接受无任务反馈（跳任务查找、按字面抽取）；/tasks/0/feedback_result 只更新反馈行不碰任务。会话区 UI 文案加一句「说的客户事实会入档」。
