@@ -69,7 +69,8 @@ worker)
   # 0. drain 检查：有 runner_host 在跑就拒绝重启（FORCE_DEPLOY=1 越过）。重启会
   #    杀掉跑到一半的 job（2026-09-04 job390 僵尸事故）；被杀的 job 下次启动会被
   #    收尸判 failed 不再留僵尸，但白烧的模型钱回不来，能等就等。
-  RUNNING_JOBS=$(ros_sh "pgrep -af 'runner_host.js' || true")
+  # 方括号技巧防 pgrep 自匹配：模式 '[r]unner_host' 不会命中携带这行文本的 shell 自身
+  RUNNING_JOBS=$(ros_sh "pgrep -af '[r]unner_host\.js' || true")
   if [ -n "$RUNNING_JOBS" ] && [ "${FORCE_DEPLOY:-0}" != "1" ]; then
     echo "拒绝部署：worker 有 job 在跑。等它跑完再发，或 FORCE_DEPLOY=1 强发（会杀掉这些）："
     echo "$RUNNING_JOBS" | sed 's/^/    /'
