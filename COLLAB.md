@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-04 AIRA (be) 登记：WP 与 Shopify 平台车道试点交接包已放 share（试点归 Aiden，Alvin 指定）
+
+- 干了什么：`/mnt/share/aira/to-aiden-platform-pilot-wp-shopify-20260904.md`。内容：三个共性缺口（specs/capabilities 清单 + registry 枚举器 + notes 凭据文件约定）、WP 试点 kiaorakids(37) 的访问细节（自定义登录 URL、cookie+nonce 流、凭据在客户 .secrets.env、词表空）、Shopify 试点 sungait(51) 与 2026 接入路线（partner custom distribution app + collaborator 安装拿不过期 offline token，老 shpat 路线已废）、机制红线。原「非 WebForger 平台适配」在我认领面，现按 Alvin 指定移交试点，跑通后认领归属再议。
+- 下一步/认领：WP 与 Shopify 车道试点归 Aiden；kiaorakids v4 与 sungait v2 方向卡都在等 Alvin 批；我继续 WF 客户与 23 运营。
+
 ### 2026-09-04 AIRA (bd) 登记：Sammichelle(23) 运营接手（Alvin 指定），导入归属不变仍是 Aiden 的工作
 
 - 干了什么：Alvin 指定我接 23 的日常运营（导入与 plan v2 链是 Aiden 跑的，质量不错，直接沿用）。接手动作：把 v2 方向卡两个「拿不准」实测钉死并落 facts——site.domain_cutover（主域 200 by WebForger，www 与无尾斜杠均 301 收敛，GSC 双形态是迁移窗口残影，S1 重定向任务只剩两跳链与 404）、site.title_brand_suffix（WF 站点级模板自动追加「| San Michelle Bags」，404 页同带后缀，title 字段全站不写品牌照旧成立）；客户 CLAUDE.md 域名行与 title 行同步补实测结论。plan 26 v2 未动、未重跑评审，方向卡待 Alvin 批，批后我接 harness。
