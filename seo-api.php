@@ -1149,7 +1149,7 @@ function fb_dir_ready(){
 }
 function fb_name_ok($n){return (bool)preg_match('#^[a-f0-9]{32}\.(png|jpg|jpeg|webp)$#',(string)$n);}
 /* 聊天附件（2026-09-07）：截图之外允许文本类与 PDF，做决策参考与数据分析用。 */
-function fb_file_name_ok($n){return (bool)preg_match('#^[a-f0-9]{32}\.(png|jpg|jpeg|webp|csv|tsv|txt|md|json|log|pdf)$#',(string)$n);}
+function fb_file_name_ok($n){return (bool)preg_match('#^[a-f0-9]{32}\.(png|jpg|jpeg|webp|csv|tsv|txt|md|json|log|pdf|xml|xlsx|xls|docx)$#',(string)$n);}
 function fb_orig_clean($s){
     $s=trim((string)$s);
     $s=str_replace(["\\","/","\0","\n","\r",'"'],'',$s);
@@ -1721,7 +1721,9 @@ if($m==='GET'&&preg_match('#^/feedback_file/([A-Za-z0-9._-]+)$#',$ROUTE,$mm)){
     $ext=strtolower(pathinfo($name,PATHINFO_EXTENSION));
     $types=['png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','webp'=>'image/webp',
         'csv'=>'text/csv','tsv'=>'text/tab-separated-values','txt'=>'text/plain','md'=>'text/markdown',
-        'json'=>'application/json','log'=>'text/plain','pdf'=>'application/pdf'];
+        'json'=>'application/json','log'=>'text/plain','pdf'=>'application/pdf','xml'=>'application/xml',
+        'xlsx'=>'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','xls'=>'application/vnd.ms-excel',
+        'docx'=>'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     header('Content-Type: '.($types[$ext]??'application/octet-stream'));
     header('Content-Length: '.filesize($p));
     header('Cache-Control: private, max-age=300');
@@ -4318,14 +4320,24 @@ if($m==='POST'&&$ROUTE==='/feedback_upload'){
     }
     $exts=['image/png'=>'png','image/jpeg'=>'jpg','image/webp'=>'webp','application/pdf'=>'pdf'];
     $orig=fb_orig_clean(is_string($f['name']??null)?$f['name']:'');
+    $oe=strtolower(pathinfo($orig,PATHINFO_EXTENSION));
     if(isset($exts[$mime])){$ext=$exts[$mime];}
+    elseif(in_array($mime,['application/zip','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],true)){
+        /* Office 新格式本体是 zip，finfo 常只报 application/zip，按原始扩展名认；裸 zip 不收。 */
+        if(!in_array($oe,['xlsx','docx'],true))res(400,['error'=>'zip 只收 .xlsx 与 .docx，其他压缩包请解开后发内容文件']);
+        $ext=$oe;
+    }
+    elseif(in_array($mime,['application/vnd.ms-excel','application/x-ole-storage','application/CDFV2','application/CDFV2-corrupt','application/msword'],true)){
+        /* 老 Office 二进制族：只认 .xls；.doc 老格式解析不了，请另存 .docx。 */
+        if($oe!=='xls')res(400,['error'=>'老格式只收 .xls；.doc 请另存为 .docx 再发']);
+        $ext='xls';
+    }
     else{
-        /* 文本类（csv/tsv/txt/md/json/log）finfo 大多报 text/plain，扩展名从原始文件名取，
+        /* 文本类（csv/tsv/txt/md/json/log/xml）finfo 大多报 text/plain，扩展名从原始文件名取，
            不在白名单就落 txt。二进制杂类一律拒。 */
-        $textish=(strpos($mime,'text/')===0)||in_array($mime,['application/json','application/csv','application/x-ndjson'],true);
-        if(!$textish)res(400,['error'=>'Only images, PDF or text files (csv/tsv/txt/md/json/log) are accepted, got '.($mime?:'unknown')]);
-        $oe=strtolower(pathinfo($orig,PATHINFO_EXTENSION));
-        $ext=in_array($oe,['csv','tsv','txt','md','json','log'],true)?$oe:'txt';
+        $textish=(strpos($mime,'text/')===0)||in_array($mime,['application/json','application/csv','application/x-ndjson','application/xml'],true);
+        if(!$textish)res(400,['error'=>'Only images, PDF, Office (xlsx/xls/docx) or text files (csv/tsv/txt/md/json/log/xml) are accepted, got '.($mime?:'unknown')]);
+        $ext=in_array($oe,['csv','tsv','txt','md','json','log','xml'],true)?$oe:'txt';
     }
     if(!fb_dir_ready())res(500,['error'=>'Upload directory is missing or not writable: '.fb_dir()]);
     $name=bin2hex(random_bytes(16)).'.'.$ext;

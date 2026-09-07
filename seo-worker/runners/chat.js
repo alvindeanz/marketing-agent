@@ -139,11 +139,33 @@ async function fetchThreadImages(ctx, messages, workspace) {
       const name = f && f.name ? String(f.name) : '';
       if (!name) continue;
       const dest = path.join(dir, name);
+      const origNote = f.orig ? '（原名 ' + f.orig + '）' : '';
       try {
         if (!fs.existsSync(dest)) await api.downloadFeedbackImage(name, dest);
-        m.filePaths.push(dest + (f.orig ? '（原名 ' + f.orig + '）' : ''));
       } catch (e) {
         log('线程：文件 ' + name + ' 下载失败，照聊 :: ' + e.message);
+        continue;
+      }
+      const ext = name.split('.').pop().toLowerCase();
+      if (ext === 'xlsx' || ext === 'xls' || ext === 'docx') {
+        // Office 三格式转纯文本再给 Read（lib/convert_doc.py，零第三方依赖，xls 走 xlrd）
+        const conv = dest + '.txt';
+        try {
+          if (!fs.existsSync(conv)) {
+            const { execFileSync } = require('child_process');
+            execFileSync('python3', [path.join(__dirname, '..', 'lib', 'convert_doc.py'), dest, conv], {
+              timeout: 30000,
+              maxBuffer: 1024 * 1024,
+            });
+          }
+          m.filePaths.push(conv + origNote + '（已由 ' + ext + ' 转成文本）');
+        } catch (e) {
+          const why = String((e.stderr || e.message || '')).trim().slice(0, 120);
+          log('线程：文件 ' + name + ' 转换失败 :: ' + why);
+          m.filePaths.push('（附件 ' + (f.orig || name) + ' 转换失败：' + (why || '格式不支持') + '，请对方另存为 csv 或 xlsx 再发）');
+        }
+      } else {
+        m.filePaths.push(dest + origNote);
       }
     }
   }
