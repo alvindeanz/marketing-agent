@@ -4314,9 +4314,19 @@ if($m==='POST'&&$ROUTE==='/feedback_upload'){
         $fi=finfo_open(FILEINFO_MIME_TYPE);
         $mime=(string)finfo_file($fi,$tmp);
         finfo_close($fi);
-    }elseif(function_exists('getimagesize')){
-        $gi=@getimagesize($tmp);
-        $mime=$gi&&isset($gi['mime'])?(string)$gi['mime']:'';
+    }
+    /* 250 的 PHP 没装 fileinfo（2026-09-07 实测），自己读魔数兜底：
+       图片走 getimagesize，PDF/zip/OLE 看头字节，无 NUL 的当文本。 */
+    if($mime===''||$mime==='application/octet-stream'){
+        $gi=function_exists('getimagesize')?@getimagesize($tmp):false;
+        if($gi&&isset($gi['mime'])){$mime=(string)$gi['mime'];}
+        else{
+            $head=(string)@file_get_contents($tmp,false,null,0,8192);
+            if(strncmp($head,'%PDF-',5)===0)$mime='application/pdf';
+            elseif(strncmp($head,"PK\x03\x04",4)===0)$mime='application/zip';
+            elseif(strncmp($head,"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1",8)===0)$mime='application/x-ole-storage';
+            elseif($head!==''&&strpos($head,"\0")===false)$mime='text/plain';
+        }
     }
     $exts=['image/png'=>'png','image/jpeg'=>'jpg','image/webp'=>'webp','application/pdf'=>'pdf'];
     $orig=fb_orig_clean(is_string($f['name']??null)?$f['name']:'');

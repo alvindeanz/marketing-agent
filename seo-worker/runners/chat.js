@@ -562,12 +562,17 @@ async function runWith(ctx, parse) {
     task = refTasks.find((t) => Number(t.id) === Number(rootTaskIds[0])) || null;
     if (task) {
       task = attachChangePlan(task, workspace, log);
-      await fetchThreadImages(ctx, messages, workspace);
-      const shots = messages.reduce((n, m) => n + ((m.imagePaths && m.imagePaths.length) || 0), 0);
-      log('线程模式：任务 #' + task.id + ' [' + task.status + ']' + (task.change_plan ? '，附方案 ' + task.change_plan.length + ' 字' : '') + (shots ? '，截图 ' + shots + ' 张' : ''));
+      log('线程模式：任务 #' + task.id + ' [' + task.status + ']' + (task.change_plan ? '，附方案 ' + task.change_plan.length + ' 字' : ''));
     } else {
       log('线程：根挂了任务 #' + rootTaskIds[0] + ' 但 ref_tasks 里没有它，按普通会话处理');
     }
+  }
+  // 附件抓取对任务线程与普通频道一视同仁（2026-09-07 Chat 化：频道也收截图和文件）
+  if (messages.some((m) => (m.images && m.images.length) || (m.files && m.files.length))) {
+    await fetchThreadImages(ctx, messages, workspace);
+    const shots = messages.reduce((n, m) => n + ((m.imagePaths && m.imagePaths.length) || 0), 0);
+    const docs = messages.reduce((n, m) => n + ((m.filePaths && m.filePaths.length) || 0), 0);
+    log('附件：截图 ' + shots + ' 张，文件 ' + docs + ' 个');
   }
   let parsed;
   try {
