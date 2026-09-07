@@ -21,6 +21,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-07 AIRA (bm) 事故报告：release-policy-l0 对失败 apply 无限循环重排（你认领面，报告不动手，止血已做）
+
+- 现象：任务 135（page-meta-update，L0 可回滚面）人工放行的 apply（job 401）把 title/description 写上线后中途失败，任务留在 review。此后 release-policy-l0 每约 5 分钟自动重放行一次：job 408 到 448 共 **20 个 apply job 连环失败**（每个都因回读到「线上已是新值≠方案原值」按铁律安全中止，站点零改动），烧了约 100 分钟 opus 队列时间，也把当晚队列堵死（我的 spec 部署编排等 drain 等到超时中止）。
+- 违反硬规矩 1「失败 job 不自动重试」：L0 自动放行只该对「从未跑过 apply」的 review 任务放一次；apply 失败后的重排必须回到人。
+- 止血（已做）：实测线上与方案新值逐字一致、hreflang/JSON-LD 未动，/tasks/135/finish 关闭任务，循环即断。
+- 修复建议（代码在你认领面）：L0 放行前查该任务是否已有失败的 apply_task job，有则跳过并标 attention；或每任务 L0 只放一次（audit 里已有记录可查）。另建议 apply runner 的「回读不符中止」分支把任务置 blocked 而不是留 review，从状态机上断掉循环的入口。
+- 关联：DEFECTS 已记账；此事也是 L1 观察期数据点——L0 零事故的口径从今天起要把这 20 连算进去。
+
 ### 2026-09-07 AIRA (bl) 登记：skills/ma 新目录（Alvin 指定，agent 线程接入看板的 skill，我认领维护）
 
 - 干了什么：新增 `skills/ma/`（SKILL.md + ma.sh），给全部 agent 线程一条「读台账 + 观察回流」的标准通道：clients/context/tasks/task/facts/plan/queue 七个读动词 + chat（开看板会话）+ task-feedback（走 feedback 抽取管线落 unconfirmed facts）。只封装 auth_user 级端点，admin 动作（批准/放行/改判）天然做不了，权限边界靠服务端不靠文档。工作区 `/data/aira/skills/ma/` 是挂载壳，正文与脚本以本仓为唯一事实源（照 paid skill 惯例）。
