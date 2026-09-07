@@ -3188,6 +3188,32 @@ if($m==='GET'&&$ROUTE==='/inbox/chats'){
 // POST /inbox/chat -> 开一个新会话。
 // body { client_id, title?, text }，一次请求做三件事：建根、写第一条人消息、
 // 排 chat job。标题不给就从第一句话截一段，人懒得起名是常态。
+/* POST /inbox/channel/reset body { client_id } -> { old_root_id, root_id }
+   翻篇（2026-09-07 Alvin 定，输入框敲 /reset 触发）：现频道归档成历史（随时可翻，
+   不再接新消息），开一个空白新频道。上下文本就每轮重建，翻篇翻的是屏不是记忆，
+   facts 台账不受影响。 */
+if($m==='POST'&&$ROUTE==='/inbox/channel/reset'){
+    $u=auth_user();
+    ensure_inbox_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $q=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' AND status='open' ORDER BY id DESC LIMIT 1");
+    $q->execute([$cid]);
+    $cur=$q->fetch();
+    $oldId=0;
+    if($cur){
+        $oldId=(int)$cur['id'];
+        chat_msg_insert($cur,'chat_agent','频道已翻篇（'.$u['username'].' 发起），这一页归档为历史，后续对话在新频道。','seo-worker');
+        db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE id=?")->execute([$oldId]);
+    }
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'chat_root','频道',?,NULL,'open',?)")
+        ->execute([$cid,json_encode(['channel'=>true]),$u['username']]);
+    $rid=(int)db()->lastInsertId();
+    audit($u['username'],'seo_chat_channel_reset',(string)$rid,['client_id'=>$cid,'old_root_id'=>$oldId]);
+    res(200,['ok'=>true,'root_id'=>$rid,'old_root_id'=>$oldId]);
+}
+
 /* POST /inbox/channel body { client_id } -> { root_id }
    客户的默认聊天频道（Discord 式一客户一条流）。找不到就建一个，不排任何 job：
    频道只是一个 refs 带 channel 标记的 chat_root，消息照常走 /inbox/{id}/chat。 */
@@ -3200,7 +3226,7 @@ if($m==='POST'&&$ROUTE==='/inbox/channel'){
     $c=db()->prepare("SELECT id FROM clients WHERE id=?");
     $c->execute([$cid]);
     if(!$c->fetch())res(404,['error'=>'Client not found']);
-    $q=db()->prepare("SELECT id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' ORDER BY id LIMIT 1");
+    $q=db()->prepare("SELECT id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' AND status='open' ORDER BY id DESC LIMIT 1");
     $q->execute([$cid]);
     $row=$q->fetch();
     if($row)res(200,['ok'=>true,'root_id'=>(int)$row['id'],'created'=>false]);

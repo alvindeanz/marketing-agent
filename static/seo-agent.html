@@ -780,7 +780,7 @@ let lastOverview=null,lastAttention=null,excOpen={};
 let apprPlanId=0,apprTasks=[],apprPick={};
 /* 决策收件箱：全局跨客户流，客户过滤只是个筛子。裁决草稿按卡片 id 存内存，
    刷新会重画卡片，草稿从这里补回去，不会被自动刷新吃掉。 */
-let chanRootId=0,chatHistOpen=false; /* 频道根与历史区开关；chatRootId=当前打开的会话（频道或历史） */
+let chanRootId=0,chatHistOpen=false,chatLimit=50; /* 频道根与历史区开关；chatRootId=当前打开的会话（频道或历史） */
 /* 收件箱对话：会话按当前客户过滤，会话详情 5 秒轮询一次等 opus 回复，
    会话关掉或者离开这个视图就把轮询停掉，别让它在后台空转。
    chatSpawned 记这一轮点过立项的草案（key 是 消息id:序号），刷新后靠系统行补回来。 */
@@ -2520,8 +2520,8 @@ async function loadChats(){
   if(!curId)return;
   const d=await api('/inbox/chats?limit=50&client_id='+curId);
   if(fail(d,'历史会话载入失败'))return;
-  /* 频道根不算历史会话；历史 = 频道化之前的旧会话与任务线程外的旧聊天 */
-  chatList=(d.items||[]).filter(c=>String(c.refs||'').indexOf('"channel":true')<0);
+  /* 活跃频道不进历史；翻篇归档的旧频道算历史，标「频道（已翻篇）」 */
+  chatList=(d.items||[]).filter(c=>!(String(c.refs||'').indexOf('"channel":true')>=0&&c.status==='open'));
   renderChatList();
   const meta=document.getElementById('chMeta');
   if(meta)meta.textContent=chatList.length?('历史会话 '+chatList.length+' 个'):'';
@@ -2537,14 +2537,14 @@ function renderChatList(){
   }
   box.innerHTML=chatList.map(c=>
     '<div class="ch-row'+(c.id===chatRootId?' on':'')+(c.status==='resolved'?' arch':'')+'" onclick="openChat('+c.id+')">'+
-      '<div class="t">'+esc(c.body||('会话 #'+c.id))+'</div>'+
+      '<div class="t">'+esc((String(c.refs||'').indexOf('"channel":true')>=0?('频道（已翻篇）#'+c.id):(c.body||('会话 #'+c.id))))+'</div>'+
       '<div class="m">'+(c.status==='open'?'进行中':'已归档')+' · '+(c.msg_count||0)+' 条 · '+esc(String(c.last_at||'').slice(5,16))+'</div>'+
     '</div>').join('');
 }
 
 function openChat(id){
   if(chatRootId===id)return;
-  chatRootId=id;chatItem=null;chatMsgs=[];chatPending=0;chatSpawned={};
+  chatRootId=id;chatItem=null;chatMsgs=[];chatPending=0;chatSpawned={};chatLimit=50;
   renderChatList();
   renderChatMain();
   loadChatThread(false);
@@ -2603,7 +2603,9 @@ function renderChatStream(){
   }
   const spawned=chSpawnedTitles();
   const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
-  box.innerHTML=chatMsgs.map(m=>{
+  const older=Math.max(0,chatMsgs.length-chatLimit);
+  const shown=older?chatMsgs.slice(older):chatMsgs;
+  box.innerHTML=(older?'<div style="text-align:center;margin-bottom:8px"><button class="btn tiny ghost" onclick="chatLimit+=200;renderChatStream()">加载更早（还有 '+older+' 条）</button></div>':'')+shown.map(m=>{
     const isMe=m.kind==='chat_user';
     const isSys=m.kind==='chat_agent'&&m.created_by!=='seo-worker';
     const cls=isMe?'me':(isSys?'sys':'bot');
@@ -2661,7 +2663,7 @@ function renderChatMain(){
     '<div class="ch-form" id="chForm">'+
       '<div class="fld"><textarea id="chText" onpaste="onFbPaste('+key+',event)" onkeydown="chKey(event)" '+
         'ondragover="event.preventDefault()" ondrop="chDrop('+key+',event)" '+
-        'placeholder="发消息。Enter 发送，Shift+Enter 换行，截图粘贴，文件拖进来（CSV、PDF 等，5MB 内）。"></textarea></div>'+
+        'placeholder="发消息。Enter 发送，Shift+Enter 换行，截图粘贴，文件拖进来（5MB 内）。/reset 翻篇。"></textarea></div>'+
       '<div class="fb-thumbs" id="fb_imgs_'+key+'"></div>'+
       '<input type="file" class="hidden" id="fb_file_'+key+'" accept="'+CH_ACCEPT+'" multiple onchange="onFbPick('+key+',this)">'+
       '<div class="fb-row"><button class="btn tiny" id="chSend" onclick="sendChat()">发送</button>'+
@@ -2694,6 +2696,18 @@ async function sendChat(){
   if(!chatRootId||chatSending)return;
   const el=document.getElementById('chText');
   const text=(el?el.value:'').trim();
+  if(text==='/reset'){
+    if(chatRootId!==chanRootId){toast('翻篇只对频道有效，历史会话用「归档会话」',true);return}
+    const d0=await api('/inbox/channel/reset','POST',{client_id:curId});
+    if(fail(d0,'翻篇失败'))return;
+    if(el)el.value='';
+    chanRootId=d0.root_id;chatRootId=0;chatLimit=50;
+    toast('已翻篇，旧频道进历史');
+    openChat(d0.root_id);
+    loadChats();
+    return;
+  }
+  if(text.charAt(0)==='/'&&text.length<20){toast('支持的命令：/reset 翻篇（旧频道归档进历史，开新频道）',true);return}
   const key=-chatRootId;
   const all=fbImgs[key]||[];
   const imgs=all.filter(fbIsImg);
