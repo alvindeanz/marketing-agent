@@ -476,23 +476,6 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
       </div>
     </div>
 
-    <!-- 方案 -->
-    <div id="v_plan" class="hidden">
-      <div class="sec">
-        <div class="sec-head">
-          <div class="sec-title">当前生效方案</div>
-          <span class="plan-meta" id="planMeta"></span>
-        </div>
-        <div class="panel">
-          <div id="activePlanBox"></div>
-          <div style="margin-top:16px">
-            <div class="sec-title" style="font-size:11px;margin-bottom:8px">待审方案与历史版本</div>
-            <div id="planList"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- 任务 -->
     <div id="v_tasks" class="hidden">
       <!-- 队列条：整台 worker 的队列，跨客户。看的人先知道现在有没有东西在跑，
@@ -512,6 +495,10 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn" id="ct_all" onclick="setCatScope('all')">全部类目</button>
             <button class="btn ghost" id="ct_seo" onclick="setCatScope('seo')">SEO</button>
             <button class="btn ghost" id="ct_paid" onclick="setCatScope('paid')">Paid</button>
+            <span style="display:inline-block;width:1px;height:16px;background:#2b3546;margin:0 6px;vertical-align:middle"></span>
+            <button class="btn" id="og_all" onclick="setOriginScope('all')">全部来源</button>
+            <button class="btn ghost" id="og_sprint" onclick="setOriginScope('sprint')">Sprint</button>
+            <button class="btn ghost" id="og_chat" onclick="setOriginScope('chat')">Chat</button>
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
               <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
@@ -609,34 +596,6 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
       </div>
     </div>
 
-    <!-- Jobs -->
-    <div id="v_jobs" class="hidden">
-      <div class="sec">
-        <div class="sec-head">
-          <div class="sec-title">Job 控制台</div>
-          <span class="plan-meta">列表每 15 秒自动刷新</span>
-        </div>
-        <div class="panel">
-          <div class="job-btns">
-            <button class="btn" onclick="fireJob('discover',this)">摸底 Discover</button>
-            <button class="btn" onclick="fireJob('pull_data',this)">拉数据</button>
-            <button class="btn" onclick="fireJob('plan',this)">规划方案</button>
-            <button class="btn" onclick="fireJob('execute_task',this)">执行选中任务</button>
-            <button class="btn" onclick="fireJob('report',this)">生成报告</button>
-            <button class="btn" title="通读该客户全局状态，给出诊断与下一步建议。只读分析，不会改动任何东西。结果看下面的 job 日志，工作区里另存一份巡检报告文件。" onclick="fireJob('triage',this)">Fable 巡检</button>
-            <button class="btn ghost" onclick="loadJobs()">刷新</button>
-          </div>
-          <div class="plan-meta" id="pickHint" style="margin-bottom:4px"></div>
-          <div class="plan-meta" style="margin-bottom:12px">Fable 巡检：通读全局给出诊断与下一步建议，结果看 job 日志与工作区里的巡检报告文件。</div>
-          <table class="grid">
-            <thead><tr><th style="width:50px">ID</th><th style="width:110px">类型</th><th style="width:85px">状态</th><th style="width:85px">耗时</th><th style="width:80px">Token</th><th style="width:100px">创建人</th><th style="width:145px">创建时间</th><th>日志</th></tr></thead>
-            <tbody id="jobRows"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- 档案 + Facts -->
     <div id="v_profile" class="hidden">
       <div class="sec">
         <div class="sec-head">
@@ -695,6 +654,56 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           </div>
         </div>
       </div>
+
+      <div class="sec"><div class="sec-head" style="cursor:pointer" onclick="togglePfSec('plan')"><div class="sec-title">方案</div><span class="plan-meta" id="pfCaret_plan">▸ 已折叠，点开看当前方案与历史版本</span></div></div>
+    <!-- 方案 -->
+    <div id="v_plan" class="hidden">
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">当前生效方案</div>
+          <span class="plan-meta" id="planMeta"></span>
+        </div>
+        <div class="panel">
+          <div id="activePlanBox"></div>
+          <div style="margin-top:16px">
+            <div class="sec-title" style="font-size:11px;margin-bottom:8px">待审方案与历史版本</div>
+            <div id="planList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+      <div class="sec"><div class="sec-head" style="cursor:pointer" onclick="togglePfSec('jobs')"><div class="sec-title">Jobs</div><span class="plan-meta" id="pfCaret_jobs">▸ 已折叠，点开看 Job 队列与控制台</span></div></div>
+    <!-- Jobs -->
+    <div id="v_jobs" class="hidden">
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">Job 控制台</div>
+          <span class="plan-meta">列表每 15 秒自动刷新</span>
+        </div>
+        <div class="panel">
+          <div class="job-btns">
+            <button class="btn" onclick="fireJob('discover',this)">摸底 Discover</button>
+            <button class="btn" onclick="fireJob('pull_data',this)">拉数据</button>
+            <button class="btn" onclick="fireJob('plan',this)">规划方案</button>
+            <button class="btn" onclick="fireJob('execute_task',this)">执行选中任务</button>
+            <button class="btn" onclick="fireJob('report',this)">生成报告</button>
+            <button class="btn" title="通读该客户全局状态，给出诊断与下一步建议。只读分析，不会改动任何东西。结果看下面的 job 日志，工作区里另存一份巡检报告文件。" onclick="fireJob('triage',this)">Fable 巡检</button>
+            <button class="btn ghost" onclick="loadJobs()">刷新</button>
+          </div>
+          <div class="plan-meta" id="pickHint" style="margin-bottom:4px"></div>
+          <div class="plan-meta" style="margin-bottom:12px">Fable 巡检：通读全局给出诊断与下一步建议，结果看 job 日志与工作区里的巡检报告文件。</div>
+          <table class="grid">
+            <thead><tr><th style="width:50px">ID</th><th style="width:110px">类型</th><th style="width:85px">状态</th><th style="width:85px">耗时</th><th style="width:80px">Token</th><th style="width:100px">创建人</th><th style="width:145px">创建时间</th><th>日志</th></tr></thead>
+            <tbody id="jobRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 档案 + Facts -->
+
     </div>
 
   </main>
@@ -745,7 +754,7 @@ const CH_FILE_EXT=['csv','tsv','txt','md','json','log','pdf','xml','xlsx','xls',
 const CH_ACCEPT='image/png,image/jpeg,image/webp,.csv,.tsv,.txt,.md,.json,.log,.pdf,.xml,.xlsx,.xls,.docx';
 const PRIORITIES=['P0','P1','P2','P3'];
 const SNAP_SOURCES=['discovery','ga4','gsc','semrush','content_registry'];
-const VIEWS=[{key:'dash',name:'Dashboard'},{key:'inbox',name:'Chat'},{key:'plan',name:'方案'},{key:'tasks',name:'任务'},{key:'report',name:'报告'},{key:'jobs',name:'Jobs'},{key:'profile',name:'档案'}];
+const VIEWS=[{key:'dash',name:'Dashboard'},{key:'inbox',name:'Chat'},{key:'tasks',name:'任务'},{key:'report',name:'报告'},{key:'profile',name:'档案'}]; /* 方案与 Jobs 折叠进档案（2026-09-07 Alvin 定） */
 
 let token=localStorage.getItem('ops_token');
 let clientsData=[];
@@ -761,6 +770,9 @@ let blogSocial={};
 let showDone=false,taskDays=0,sprintScope='current';
 /* 类目切换：paid = module 为 paid 的任务，其余算 SEO。渠道不参与分类（W10：渠道只是执行地点）。 */
 let catScope='all';
+let originScope='all';
+function taskOrigin(t){return String(t.origin||'sprint').indexOf('chat')===0?'chat':'sprint'}
+function setOriginScope(v){originScope=v;renderLanes()}
 function taskCat(t){return String((t&&t.module)||'')==='paid'?'paid':'seo'}
 function setCatScope(v){catScope=v;renderLanes()}
 let lastOverview=null,lastAttention=null,excOpen={};
@@ -878,11 +890,14 @@ function loadView(){
   if(curView!=='inbox')chStop();
   if(curView==='dash')loadOverview();
   else if(curView==='inbox')loadChatView();
-  else if(curView==='plan')loadPlans();
   else if(curView==='tasks')loadTasksAndQueue();
   else if(curView==='report')loadReport();
-  else if(curView==='jobs'){loadJobs();renderPickHint()}
-  else if(curView==='profile'){loadProfile();loadFacts()}
+  else if(curView==='profile'){
+    loadProfile();loadFacts();
+    const vp=document.getElementById('v_plan'),vj=document.getElementById('v_jobs');
+    if(vp&&!vp.classList.contains('hidden'))loadPlans();
+    if(vj&&!vj.classList.contains('hidden')){loadJobs();renderPickHint()}
+  }
 }
 
 /* ================= 侧边栏 ================= */
@@ -2655,6 +2670,16 @@ function renderChatMain(){
   renderFbStrip(key);
 }
 
+function togglePfSec(which){
+  const el=document.getElementById('v_'+which);
+  if(!el)return;
+  const open=el.classList.contains('hidden');
+  el.classList.toggle('hidden',!open);
+  const caret=document.getElementById('pfCaret_'+which);
+  if(caret)caret.textContent=open?'▾ 展开中，点标题折叠':(which==='plan'?'▸ 已折叠，点开看当前方案与历史版本':'▸ 已折叠，点开看 Job 队列与控制台');
+  if(open){if(which==='plan')loadPlans();else{loadJobs();renderPickHint()}}
+}
+
 function chKey(ev){
   if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();sendChat()}
 }
@@ -3128,7 +3153,7 @@ function renderLanes(){
   let laterTotal=0,doneHiddenTotal=0;
   const laneHtml=[];const hiddenNames=[];
   LANES.forEach(lane=>{
-    const rows=tasksData.filter(t=>lane.keys.indexOf(t.owner_type)!==-1&&(catScope==='all'||taskCat(t)===catScope));
+    const rows=tasksData.filter(t=>lane.keys.indexOf(t.owner_type)!==-1&&(catScope==='all'||taskCat(t)===catScope)&&(originScope==='all'||taskOrigin(t)===originScope));
     const afterDone=rows.filter(taskVisible);
     const vis=afterDone.filter(t=>withinScope(t,cur))
       .sort((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id));
@@ -3167,6 +3192,7 @@ function renderLanes(){
   ['all','seo','paid'].forEach(k=>{
     const b=document.getElementById('ct_'+k);
     if(b)b.className=(catScope===k)?'btn':'btn ghost';
+  ['all','sprint','chat'].forEach(k=>{const b=document.getElementById('og_'+k);if(b)b.className=(originScope===k)?'btn':'btn ghost'});
   });
   const hint=document.getElementById('taskFilterHint');
   if(hint){
@@ -3286,7 +3312,7 @@ function taskCard(t,col){
     stateLine(t)+
     rvLine(t)+
     detail+
-    '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+
+    '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+(taskOrigin(t)==='chat'?'<span class="badge review" title="Chat 频道派单，只读验证，免审批">Chat</span>':'')+opsTags(t)+
     (t.owner_type!=='agent'?'<span class="badge mod">'+esc(t.owner_type)+'</span>':'')+
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+acts+'</div>'+
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
@@ -4218,7 +4244,7 @@ function boot(){
     if(document.activeElement&&(document.activeElement.tagName==='INPUT'||document.activeElement.tagName==='TEXTAREA'))return;
     if(document.getElementById('addBg').classList.contains('show'))return;
     if(document.getElementById('apprBg').classList.contains('show'))return;
-    if(curView==='jobs')loadJobs();
+    if(curView==='profile'&&document.getElementById('v_jobs')&&!document.getElementById('v_jobs').classList.contains('hidden'))loadJobs();
     else if(curView==='dash')loadOverview();
     else if(curView==='inbox')loadChats();
     /* 任务视图跟着轮询：排队中和运行中的徽标要自己动起来，队列条也要跟着走，

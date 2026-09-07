@@ -887,15 +887,26 @@ function inbox_drafts_norm($v){
 
 /* CHAT-PURE-END */
 
+/* seo_tasks.origin（2026-09-07 Chat 派单线）：sprint（默认，走判定+放行）或 chat:{root_id}
+   （频道里 fable 派的只读验证单，免审批自动完结）。VARCHAR 不用 ENUM，躲静默截断坑。 */
+function ensure_task_origin(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    $col=db()->query("SHOW COLUMNS FROM seo_tasks LIKE 'origin'")->fetch();
+    if(!$col)db()->exec("ALTER TABLE seo_tasks ADD COLUMN origin VARCHAR(40) NOT NULL DEFAULT 'sprint'");
+}
+
 /* 一行任务落库，入参是 task_fields_clean() 出来的干净数组。
    POST /tasks 和 POST /inbox/{root}/spawn_task 共用，写的列必须一致：
    立项出来的任务和人工建的任务在看板上不该有任何区别。 */
-function task_insert($cid,$t,$by){
-    db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+function task_insert($cid,$t,$by,$origin='sprint'){
+    ensure_task_origin();
+    db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             (int)$cid,$t['plan_id'],$t['sprint'],$t['module'],$t['title'],$t['detail'],
             $t['owner_type'],$t['priority'],$t['attention'],$t['ops'],$t['status'],$t['output_url'],$by
-        ]);
+        ,$origin]);
     return (int)db()->lastInsertId();
 }
 
@@ -1640,11 +1651,30 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         db()->prepare("UPDATE seo_tasks SET attention=? WHERE id=?")->execute([$i['attention']?1:0,$tid]);
     }
     audit('seo-worker','seo_task_result',(string)$tid,['output_url'=>$i['output_url']??'','attention'=>isset($i['attention'])?($i['attention']?1:0):null]);
-    /* 方案一出就自动判「该不该落地」，待放行面板上人看到的是判决不是 30KB 方案。 */
-    $cq=db()->prepare("SELECT client_id FROM seo_tasks WHERE id=?");
+    ensure_task_origin();
+    $cq=db()->prepare("SELECT client_id,origin,title,result_note,output_url FROM seo_tasks WHERE id=?");
     $cq->execute([$tid]);
     $cr=$cq->fetch();
     $cq->closeCursor();
+    /* Chat 派单（只读验证）：产出即完结不进待放行不排判定，结果回频道系统行，
+       留痕给人工审计（Alvin 发起，不自动化）。 */
+    if(strpos((string)($cr['origin']??''),'chat:')===0){
+        task_close($tid,'accepted','Chat 派单产出自动验收（只读验证类，人工审计抽查）','seo-worker');
+        $rootIdC=(int)substr((string)$cr['origin'],5);
+        $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+        $rq->execute([$rootIdC]);
+        $rootC=$rq->fetch();
+        if($rootC){
+            $sum=trim((string)($i['note']??''));
+            if($sum==='')$sum=trim((string)($cr['result_note']??''));
+            $line='派单 #'.$tid.'「'.$cr['title'].'」完成：'.mb_substr($sum,0,400,'UTF-8');
+            $ou=trim((string)($i['output_url']??$cr['output_url']??''));
+            if($ou!=='')$line.="\n产出: ".$ou;
+            chat_msg_insert($rootC,'chat_agent',$line,'seo-worker');
+        }
+        res(200,['ok'=>true,'auto_accepted'=>true]);
+    }
+    /* 方案一出就自动判「该不该落地」，待放行面板上人看到的是判决不是 30KB 方案。 */
     list($rjid,$rmerged)=queue_review_job((int)($cr['client_id']??0),[$tid],'seo-worker','seo_tasks_review_auto');
     res(200,['ok'=>true,'review_job_id'=>$rjid]);
 }
@@ -3362,10 +3392,38 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
             chat_msg_insert($root,'chat_agent',"已更新档案（记在 ".$authorF." 名下，版本账可回滚）：\n".implode("\n",$linesF),$authorF);
         }
     }
+    /* dispatch（2026-09-07 Chat 派单线，Alvin 定）：fable 在频道里判定的只读验证类任务，
+       免判定免放行直接排 opus 执行，origin=chat:{root} 供任务视图筛选与人工审计。
+       只在非任务线程根生效；写类动作走不进这里（任务生而 ops 空、owner agent、analysis 形态），
+       花钱/改站/对外的诉求仍然只能变草案走 sprint 流程。 */
+    $dispatched=[];
+    $dispIn=(!$rootRefs['tasks']&&is_array($i['dispatch']??null))?array_values($i['dispatch']):[];
+    if($dispIn&&$root['client_id']!==null){
+        if(count($dispIn)>2)$dispIn=array_slice($dispIn,0,2);
+        $mqD=db()->prepare("SELECT id,created_by FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
+        $mqD->execute([$rootId]);
+        $umD=$mqD->fetch();
+        $askerD=($umD&&$umD['created_by']!=='')?(string)$umD['created_by']:'seo-worker';
+        foreach($dispIn as $dx){
+            if(!is_array($dx))continue;
+            list($cleanD,$errD)=task_fields_clean([
+                'title'=>(string)($dx['title']??''),
+                'detail'=>(string)($dx['detail']??''),
+                'module'=>(string)($dx['module']??'technical'),
+                'owner_type'=>'agent','priority'=>'P1','ops'=>'','sprint'=>'',
+            ],['status_force'=>'approved']);
+            if($errD)continue;
+            $cleanD['detail'].="\n\n[来源] Chat 频道 #".$rootId." 由 ".$askerD." 发起，fable 判定为只读验证类，免审批；产出报告或结论，不动任何线上资产。";
+            $tidD=task_insert((int)$root['client_id'],$cleanD,$askerD,'chat:'.$rootId);
+            list($jidsD,)=queue_task_jobs((int)$root['client_id'],'execute_task',[$tidD],$askerD,'chat_dispatch');
+            $dispatched[]=['task_id'=>$tidD,'job_id'=>$jidsD?$jidsD[0]:0,'title'=>$cleanD['title']];
+            chat_msg_insert($root,'chat_agent','已派单 #'.$tidD.'「'.$cleanD['title'].'」（Chat 只读验证，job #'.($jidsD?$jidsD[0]:0).'），跑完结果自动回频道。','seo-worker');
+        }
+    }
     audit('seo-worker','seo_chat_reply',(string)$rootId,[
         'message_id'=>$msgId,'chars'=>mb_strlen($body,'UTF-8'),
         'drafts'=>count($drafts),'drafts_dropped'=>max(0,$raw-count($drafts)),'actions'=>count($actions),'executed'=>$executed,
-        'facts'=>count($factWrites)
+        'facts'=>count($factWrites),'dispatched'=>count($dispatched)
     ]);
     res(200,['ok'=>true,'message_id'=>$msgId,'drafts'=>count($drafts),'actions'=>count($actions),'executed'=>$executed]);
 }

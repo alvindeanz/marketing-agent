@@ -74,7 +74,7 @@ function threadMessages(item, replies) {
     // 服务端写的系统行（已执行提议 / 已立项）created_by 不是 seo-worker；模型自己的回复是。
     // 自动执行的系统行 created_by 也是 seo-worker，靠正文前缀区分。
     const bodyStr = String(r.body == null ? '' : r.body);
-    const isSysLine = /^(已执行提议|提议 \d+\/\d+ 未执行|已立项)/.test(bodyStr);
+    const isSysLine = /^(已执行提议|提议 \d+\/\d+ 未执行|已立项|已派单|派单 #\d+|已更新档案)/.test(bodyStr);
     msgs.push({
       id: Number(r.id) || 0,
       kind: r.kind,
@@ -281,6 +281,7 @@ function buildPrompt(opts) {
     '{"drafts":[{"title":"任务标题","detail":"要做什么，做到什么程度算完","module":"content",' +
       '"owner_type":"agency","priority":"P2","sprint":"W35","ops":""}],' +
       '"facts":[{"key":"content.delivery_time","value":"交期 6 周，2026-09 客户微信确认"}]' +
+      (task ? '' : ',"dispatch":[{"title":"验证 8 月广告询价口径","detail":"拉取并核对，产出一页结论","module":"paid"}]') +
       (task ? ',"actions":[{"type":"redispatch","reason":"描述里去掉 220 km/h，社交图改用站内真实 hero 图"}]' : '') +
       '}',
     '```',
@@ -302,6 +303,11 @@ function buildPrompt(opts) {
     '- facts 的 key 优先复用简报里已有的 fact key；确实是新事实才起新 key，照简报里的命名风格',
     '  （小写加点分层，如 content.warranty）。value 一句话写清事实本身，带日期与出处。',
     '- 人没让记就不要写 facts；拿不准这算不算客户事实（比如只是讨论），先问再记。最多 8 条。',
+    task ? '' : '- dispatch 是派单：人明确要求做一件**只读验证或数据分析**的活（拉数核对、效果验证、',
+    task ? '' : '  搜索词摸底、追踪排查这类），且简报里现有数据答不了时，才派。派单免审批直接执行，',
+    task ? '' : '  所以边界必须自己守死：**任何要改账户、改页面、花钱、发内容的活一律不进 dispatch**，',
+    task ? '' : '  那些走 drafts 让人立项。能用简报直接回答的不派，派单是给要现场跑数的活的。',
+    task ? '' : '- dispatch 最多 2 个；title 写清验证什么，detail 写清产出物（一页结论/一份清单）和口径。',
     '- json 必须语法合法。字符串值里不许出现英文双引号，要引用时用中文引号；',
     '  不许出现换行符，长内容压成一行。输出前自己检查一遍能不能被机器解析。',
     task
@@ -367,6 +373,22 @@ function cleanActions(json, task, log) {
       continue;
     }
     out.push({ type, reason });
+  }
+  return out;
+}
+
+/* 模型给的派单清单规整：title 必填，module 合法，最多 2 条；只读边界由服务端强制。 */
+function cleanDispatch(json, log) {
+  const say = log || function () {};
+  const raw = json && Array.isArray(json.dispatch) ? json.dispatch : [];
+  const out = [];
+  for (const item of raw) {
+    if (out.length >= 2) { say('对话：dispatch 超过 2 条，多出来的没有提交'); break; }
+    const d = item || {};
+    const title = summarize(d.title, 255);
+    if (!title) { say('对话：丢弃一条派单，没有标题'); continue; }
+    const mod = String(d.module || 'technical').trim().toLowerCase();
+    out.push({ title, detail: summarize(d.detail, 4000), module: MODULES.indexOf(mod) !== -1 || mod === 'paid' ? mod : 'technical' });
   }
   return out;
 }
@@ -607,9 +629,10 @@ async function runWith(ctx, parse) {
   const drafts = Array.isArray(parsed.drafts) ? parsed.drafts : cleanDrafts(parsed.json, log);
   const actions = task ? (Array.isArray(parsed.actions) ? parsed.actions : cleanActions(parsed.json, task, log)) : [];
   const facts = cleanFacts(parsed.json, log);
+  const dispatch = task ? [] : cleanDispatch(parsed.json, log);
   const body = replyBody(parsed.body, drafts, parsed.degraded);
-  await api.postChatReply(rootId, { body, drafts, actions, facts });
-  log('对话 #' + rootId + ' 已回复，正文 ' + body.length + ' 字符，草案 ' + drafts.length + ' 个，动作 ' + actions.length + ' 个，facts ' + facts.length + ' 条');
+  await api.postChatReply(rootId, { body, drafts, actions, facts, dispatch });
+  log('对话 #' + rootId + ' 已回复，正文 ' + body.length + ' 字符，草案 ' + drafts.length + ' 个，动作 ' + actions.length + ' 个，facts ' + facts.length + ' 条，派单 ' + dispatch.length + ' 个');
   return { tokenUsage: 0 };
 }
 

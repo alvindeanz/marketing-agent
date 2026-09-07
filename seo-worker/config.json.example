@@ -30,5 +30,7 @@
   "workspaceRoot": "/data/aira/clients",
   "defaultClientDir": "powerdekorfloors",
   "httpTimeoutMs": 60000,
-  "gscSpamExcludeRegex": "(jack|jek|jak|jeck)\\s?toto"
+  "gscSpamExcludeRegex": "(jack|jek|jak|jeck)\\s?toto",
+  "chatModel": "fable",
+  "threadModel": "fable"
 }
