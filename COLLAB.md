@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-07 AIRA (bo) 登记：chat 加 fact 写入动作（Alvin 定，PJ 式，动你认领面的 chat runner 与 seo-api，报备）
+
+- 干了什么：同事在频道里明确要求记录/更新客户事实（含微信截图转述）时，opus 在结构化输出里给 facts（最多 8 条），chat_reply 服务端白名单写入：source=manual、status=confirmed，**记在最后发言的同事名下**（opus 只是笔），origin `chat:{root}/{触发消息id}`，全量走 fact_history 版本账可回滚，另落一条系统行复述实际写了什么（机器真值，与模型正文的复述互为对照）。
+- 设计原则（Alvin 定）：不做草案卡不做确认按钮——二次确认就是回复里的人话复述（原值→新值），错了人一句话改回来；日志就是版本账。写入面只有 facts 这一格，动客户资产照旧任务+放行。
+- Prompt 契约：人没让记不写、key 优先复用简报里既有 key、正文必须复述每条改动。同值跳过不记版本。
+
 ### 2026-09-07 AIRA (bn) 登记：收件箱 Chat 化 C0（Alvin 指定，动了你认领面的 seo-api/前端/lanes，特此报备）
 
 - 干了什么（Alvin 定的四点）：一，Chat 频道化——每客户一条默认频道流（新端点 POST /inbox/channel 找建 refs 带 channel:true 的 chat_root，不排 job），去标题去新会话表单，旧会话归「历史会话」折叠区；二，Discord 式体验——打字指示动画、Enter 发送、消息即发即显；三，贴图对齐任务线程——/inbox/{id}/chat 的 images 从「仅任务线程」放开到所有会话（chat runner 本就读 refs.images 喂模型，零改动），前端复用 onFbPaste/feedback_upload 全套（截图暂存键用负数根 id，与任务 id 键空间错开）；四，chat 独立 lane——JOB_LANES/lanes.js 两侧同步加第三条道 chat（listener 的 lanes state 改为按 LANE_NAMES 动态建），聊天不再排在分钟级评审后面，同会话一轮一问的 409 闸不变。

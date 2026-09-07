@@ -3280,9 +3280,54 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
             }
         }
     }
+    /* facts：人在会话里明确要求记录或更新的客户事实（含微信截图转述），模型翻译成
+       结构化写入（2026-09-07 Alvin 定，PJ 式：直接改，复述即确认，版本账即日志）。
+       记在最后发言的同事名下，opus 只是笔；origin chat:{root}/{触发消息 id}，
+       全量走 fact_history，可回滚。只能写 facts 这一格，动客户资产照旧走任务与放行。 */
+    $factWrites=[];
+    $factsIn=is_array($i['facts']??null)?array_values($i['facts']):[];
+    if($factsIn&&$root['client_id']!==null){
+        if(count($factsIn)>8)$factsIn=array_slice($factsIn,0,8);
+        $cidF=(int)$root['client_id'];
+        $mq=db()->prepare("SELECT id,created_by FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
+        $mq->execute([$rootId]);
+        $um=$mq->fetch();
+        $authorF=($um&&$um['created_by']!=='')?(string)$um['created_by']:'seo-worker';
+        $originF='chat:'.$rootId.'/'.($um?(int)$um['id']:0);
+        $lookF=db()->prepare("SELECT id,value,source,status FROM seo_facts WHERE client_id=? AND fact_key=?");
+        $updF=db()->prepare("UPDATE seo_facts SET value=?,source='manual',status='confirmed',updated_by=? WHERE id=?");
+        $insF=db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)VALUES(?,?,?,'manual','confirmed',?)");
+        foreach($factsIn as $f){
+            if(!is_array($f))continue;
+            $k=trim((string)($f['key']??$f['fact_key']??''));
+            $v=trim((string)($f['value']??''));
+            if($k===''||$v===''||mb_strlen($k,'UTF-8')>100)continue;
+            if(mb_strlen($v,'UTF-8')>2000)$v=mb_substr($v,0,2000,'UTF-8');
+            $lookF->execute([$cidF,$k]);
+            $ex=$lookF->fetch();
+            $lookF->closeCursor();
+            if($ex){
+                if((string)$ex['value']===$v)continue;
+                fact_history_snapshot((int)$ex['id'],$cidF,$k,$ex,$v,$authorF,$originF);
+                $updF->execute([$v,$authorF,(int)$ex['id']]);
+                $factWrites[]=['key'=>$k,'old'=>(string)$ex['value'],'new'=>$v];
+            }else{
+                $insF->execute([$cidF,$k,$v,$authorF]);
+                fact_history_snapshot((int)db()->lastInsertId(),$cidF,$k,null,$v,$authorF,$originF);
+                $factWrites[]=['key'=>$k,'old'=>null,'new'=>$v];
+            }
+        }
+        if($factWrites){
+            $linesF=array_map(function($w){
+                return $w['key'].($w['old']===null?'：新增「':'：由「'.mb_substr($w['old'],0,60,'UTF-8').'」改为「').mb_substr($w['new'],0,120,'UTF-8').'」';
+            },$factWrites);
+            chat_msg_insert($root,'chat_agent',"已更新档案（记在 ".$authorF." 名下，版本账可回滚）：\n".implode("\n",$linesF),$authorF);
+        }
+    }
     audit('seo-worker','seo_chat_reply',(string)$rootId,[
         'message_id'=>$msgId,'chars'=>mb_strlen($body,'UTF-8'),
-        'drafts'=>count($drafts),'drafts_dropped'=>max(0,$raw-count($drafts)),'actions'=>count($actions),'executed'=>$executed
+        'drafts'=>count($drafts),'drafts_dropped'=>max(0,$raw-count($drafts)),'actions'=>count($actions),'executed'=>$executed,
+        'facts'=>count($factWrites)
     ]);
     res(200,['ok'=>true,'message_id'=>$msgId,'drafts'=>count($drafts),'actions'=>count($actions),'executed'=>$executed]);
 }

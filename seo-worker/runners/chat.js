@@ -237,7 +237,8 @@ function buildPrompt(opts) {
     '',
     '```json',
     '{"drafts":[{"title":"任务标题","detail":"要做什么，做到什么程度算完","module":"content",' +
-      '"owner_type":"agency","priority":"P2","sprint":"W35","ops":""}]' +
+      '"owner_type":"agency","priority":"P2","sprint":"W35","ops":""}],' +
+      '"facts":[{"key":"content.delivery_time","value":"交期 6 周，2026-09 客户微信确认"}]' +
       (task ? ',"actions":[{"type":"redispatch","reason":"描述里去掉 220 km/h，社交图改用站内真实 hero 图"}]' : '') +
       '}',
     '```',
@@ -253,6 +254,12 @@ function buildPrompt(opts) {
     '  拿不准写 agency。',
     '- priority 只能是 P0 P1 P2 P3，默认 P2。sprint 最多 10 个字符，例如 W35，不确定就留空字符串。',
     '- ops 是给执行者的一句操作提示，最多 255 字符，没有就留空字符串。',
+    '- facts 只在人明确要求记录或更新客户事实时用（「记一下」「更新档案」「客户微信说」这类，',
+    '  含转述截图内容）。写入即生效并记在说话人名下，所以正文里必须用人话复述每一条改动',
+    '  （原来是什么，改成什么，依据哪句话或哪张截图），人看到复述有错会让你改回来。',
+    '- facts 的 key 优先复用简报里已有的 fact key；确实是新事实才起新 key，照简报里的命名风格',
+    '  （小写加点分层，如 content.warranty）。value 一句话写清事实本身，带日期与出处。',
+    '- 人没让记就不要写 facts；拿不准这算不算客户事实（比如只是讨论），先问再记。最多 8 条。',
     '- json 必须语法合法。字符串值里不许出现英文双引号，要引用时用中文引号；',
     '  不许出现换行符，长内容压成一行。输出前自己检查一遍能不能被机器解析。',
     task
@@ -318,6 +325,22 @@ function cleanActions(json, task, log) {
       continue;
     }
     out.push({ type, reason });
+  }
+  return out;
+}
+
+/* 模型给的 facts 清单规整：key 非空且不超 100 字、value 非空，坏的丢掉记日志，最多 8 条。 */
+function cleanFacts(json, log) {
+  const say = log || function () {};
+  const raw = json && Array.isArray(json.facts) ? json.facts : [];
+  const out = [];
+  for (const item of raw) {
+    if (out.length >= 8) { say('对话：facts 超过 8 条，多出来的没有提交'); break; }
+    const f = item || {};
+    const key = String(f.key || f.fact_key || '').trim();
+    const value = String(f.value || '').trim();
+    if (!key || key.length > 100 || !value) { say('对话：丢弃一条 fact，key 或 value 不合法'); continue; }
+    out.push({ key, value });
   }
   return out;
 }
@@ -536,9 +559,10 @@ async function runWith(ctx, parse) {
   // parse 注入版可以直接给 drafts，模型版给的是 json，统一从这里规整。
   const drafts = Array.isArray(parsed.drafts) ? parsed.drafts : cleanDrafts(parsed.json, log);
   const actions = task ? (Array.isArray(parsed.actions) ? parsed.actions : cleanActions(parsed.json, task, log)) : [];
+  const facts = cleanFacts(parsed.json, log);
   const body = replyBody(parsed.body, drafts, parsed.degraded);
-  await api.postChatReply(rootId, { body, drafts, actions });
-  log('对话 #' + rootId + ' 已回复，正文 ' + body.length + ' 字符，草案 ' + drafts.length + ' 个，动作 ' + actions.length + ' 个');
+  await api.postChatReply(rootId, { body, drafts, actions, facts });
+  log('对话 #' + rootId + ' 已回复，正文 ' + body.length + ' 字符，草案 ' + drafts.length + ' 个，动作 ' + actions.length + ' 个，facts ' + facts.length + ' 条');
   return { tokenUsage: 0 };
 }
 
