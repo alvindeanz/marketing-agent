@@ -501,6 +501,12 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn ghost" id="og_chat" onclick="setOriginScope('chat')">Chat</button>
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
+              <!-- 手动挡（2026-09-07 Alvin 定收起）：判定与执行由 harness 与 Chat 派单自动跑，
+                   这些按钮只留给应急人工干预，函数与端点原样保留 -->
+              <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
+              <button class="btn ghost" id="rvBtn" onclick="reviewTasks(this,'all')" title="手动触发 Fable 判定（正常由产线自动跑）">判定</button>
+              <button class="btn ghost" id="rvApplyBtn" onclick="applyVerdicts(this,'all')" style="display:none" title="手动按判决处理（正常由 harness 收口）">全部按推荐</button>
+              <button class="btn ghost" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
               <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
               <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="人工泳道常年为空时隐藏，Agent 泳道撑满宽度">隐藏空泳道</button>
               <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
@@ -510,11 +516,6 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
                 <option value="90">近 90 天</option>
               </select>
             </span>
-            <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
-            <button class="btn ghost" id="rvBtn" onclick="reviewTasks(this,'all')" title="Fable 按第一性原理判：待判的该不该做，待放行的方案该不该落地">判定</button>
-            <button class="btn" id="rvApplyBtn" onclick="applyVerdicts(this,'all')" style="display:none" title="按每张卡上的判决处理：做的排队，放行的落地，砍的关掉，延后的挂起，并入的合并">全部按推荐</button>
-            <!-- 执行按钮就放在勾选框旁边，不用切到 Jobs 页找（Jobs 页那颗保留） -->
-            <button class="btn green" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
           </div>
         </div>
         <div class="panel hidden" id="addTaskPanel" style="margin-bottom:12px">
