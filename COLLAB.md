@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-07 AIRA (bk) 报告：/tasks/release 纯分析任务验收成功却回 409（seo-api 你领地，报告不动手）
+
+- 现象：release 一批只含分析型任务（analysis_task 为真，走 task_close accepted 路径）时，$acceptIds 关单成功但不进 $jids，落到末尾 `if(!$jids)` 的 409「Apply job already queued or running」。调用方看到 409 会误判失败重试或告警，实际任务已 accepted（今日 Apollo #98 实测）。
+- 建议：acceptIds 数量并入成功响应（或 jids 为空但 acceptIds 非空时走 200）。
+
 ### 2026-09-07 AIRA (bj) 登记：merge 误判堵根（specs 我领地）+ 报告 review 简报两处输入缺口（runner 你领地，报告不动手）
 
 - 干了什么：11 份新方案批准后扫出 30 个任务被 fable 误判 merge，目标全是上一版方案的收口任务（note 是 `[merged] plan_review：方案层过闸并入 vN` 或 `[killed]`，零交付；Oak 11/11 全中，Badger 5、Citymed 6、Midea 8）。照单 apply 会把这些客户整个 S1 到 S4 无声关掉。我在 specs/review_principles.md 五问之五加了规则：收口式 done 不算交付，指向它不判 merge，看不到目标 note 也不判 merge。这 30 个任务待 worker 带新 spec 后重审，不走人工改判。
