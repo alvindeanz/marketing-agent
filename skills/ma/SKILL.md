@@ -23,11 +23,11 @@ bash /data/aira/skills/ma/ma.sh chat <客户> <问题>   # 问 MA（触发一次
 bash /data/aira/skills/ma/ma.sh task-feedback <客户> <任务id> <正文>  # 观察回流
 ```
 
-认证：`MA_TOKEN` 环境变量，或 `/data/aira/.secrets/ma_skill.jwt`。没有就找 aira/Alvin 开，不要借别人的 admin token。
+认证：`MA_TOKEN` 环境变量，或 `/data/aira/.secrets/ma_skill.jwt`（agent 线程共用账号 agent-bot，admin 角色，Alvin 2026-09-07 定；token 由 aira 维护轮换，当前期到 2027-03-06）。
 
 ## 规矩（违反任何一条都是事故）
 
-1. **只读为主**。这个 token 是非 admin：批准方案、放行任务、改判、建任务都做不了，服务端会拒绝——也不要绕。要推动这些，把诉求写进 `chat` 或 `task-feedback`，由看板流程走人。
+1. **只用本文档列出的动词**。token 是 admin（Alvin 定，图省事不设多级账号），意味着服务端不会拦你调批准/放行/改判/建任务——所以这条纪律靠你自己：**那些动作是人的闸，agent 线程一律不碰，绕过等于替 Alvin 花钱拍板，属于事故**。要推动这些，把诉求写进 `chat` 或 `task-feedback`，由看板流程走人。审计日志按 agent-bot 记账，谁越权一查一个准。
 2. **一次只碰一个客户**。查 A 客户的数据不写进 B 客户的产出；回流观察前确认 client 和任务号对得上（跨客户串写出过真实事故）。
 3. **facts 分等级用**：`confirmed` 可直接引用；`unconfirmed` 只能当线索，不进任何对客交付物。客户产品事实（价格、规格、门店、交期、质保）缺了就占位标待提供，不猜。
 4. **回流写事实不写结论**。task-feedback 写你观察到的（测了什么、看到什么数字、客户原话），抽取管线会落成 unconfirmed facts 等人确认；不要替看板下判断。
@@ -52,3 +52,4 @@ bash /data/aira/skills/ma/ma.sh task-feedback <客户> <任务id> <正文>  # �
 
 变更记录：
 - v1 2026-09-07 首版：读五件套（clients/context/tasks/facts/plan/queue）+ chat + task-feedback。
+- v1.1 2026-09-07 账号定稿：共用账号 agent-bot 为 admin 角色（Alvin 定），权限边界改为动词纪律 + 审计，规矩第 1 条相应改写。

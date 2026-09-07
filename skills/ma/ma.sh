@@ -1,8 +1,9 @@
 #!/bin/bash
 # ma.sh — MA (Always Agent) 看板只读查询 + 反馈回流，给 agent 线程用。
 # 认证：MA_TOKEN 环境变量，或 /data/aira/.secrets/ma_skill.jwt（600）。
-# 边界：本脚本只封装 auth_user 级端点（读 + 反馈）。批准/放行/改判是 admin 端点，
-#       服务端会拒绝，也不要试。维护人 aira，改动走 marketing-agent 仓 + COLLAB 登记。
+# 边界：本脚本只封装读 + 反馈动词。共用 token 是 admin（Alvin 2026-09-07 定），但批准/
+#       放行/改判/建任务是人的闸，agent 一律不碰、不自行 curl。维护人 aira，改动走
+#       marketing-agent 仓 + COLLAB 登记。
 set -euo pipefail
 API="${MA_API:-https://always.horntech-dev.com/seo-api.php}"
 TOKEN="${MA_TOKEN:-}"

@@ -25,7 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 - 干了什么：新增 `skills/ma/`（SKILL.md + ma.sh），给全部 agent 线程一条「读台账 + 观察回流」的标准通道：clients/context/tasks/task/facts/plan/queue 七个读动词 + chat（开看板会话）+ task-feedback（走 feedback 抽取管线落 unconfirmed facts）。只封装 auth_user 级端点，admin 动作（批准/放行/改判）天然做不了，权限边界靠服务端不靠文档。工作区 `/data/aira/skills/ma/` 是挂载壳，正文与脚本以本仓为唯一事实源（照 paid skill 惯例）。
 - 认领：skills/ma/ 归我维护；seo-api 端点如有变更麻烦在 COLLAB 提一句，我同步脚本。
-- 待定：agent 线程共用的非 admin 账号（等 Alvin 批）；批下来 token 落 /data/aira/.secrets/ma_skill.jwt（600），不进 git。
+- 已定（Alvin 2026-09-07）：共用账号 agent-bot（users id 19，**admin 角色**），token 落 /data/aira/.secrets/ma_skill.jwt（600，期到 2027-03-06，aira 轮换），不进 git。注意：权限边界因此从服务端强制变为 skill 动词纪律 + audit 按 agent-bot 记账；批准/放行/改判仍是人的闸，agent 不碰。
 
 ### 2026-09-07 AIRA (bk) 报告：/tasks/release 纯分析任务验收成功却回 409（seo-api 你领地，报告不动手）
 
