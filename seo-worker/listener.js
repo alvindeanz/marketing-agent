@@ -4,7 +4,7 @@
 // State machine, in one breath, per lane: idle -> drain (claim jobs one at a
 // time until the API returns {job:null}) -> idle. A wake or a poll tick that
 // lands while a drain is running only sets pendingWake, and the drain reruns
-// once it finishes. Two lanes (lib/lanes.js): heavy (site writers, minutes)
+// once it finishes. Lanes (lib/lanes.js): heavy (site writers, minutes)
 // and light (board only, seconds). Each lane is single flight on its own, so
 // a light job never waits behind a heavy one and two heavy jobs never overlap.
 //
@@ -40,7 +40,7 @@ function laneState() {
 }
 
 const state = {
-  lanes: { heavy: laneState(), light: laneState() },
+  lanes: Object.fromEntries(LANE_NAMES.map((n) => [n, laneState()])),
   startedAt: Date.now(),
   lastDrainAt: null,
   lastDrainReason: null,

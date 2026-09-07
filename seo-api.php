@@ -1276,15 +1276,23 @@ function jobs_inflight_tasks($type){
    拆开的理由只有一个：判定不能排在 10 分钟的 execute 后面等。不在表里的类型归 heavy。 */
 define('JOB_LANES',[
     'heavy'=>['pull_data','discover','plan','execute_task','apply_task','report','backfill_metrics'],
-    'light'=>['review_plan','ruling','feedback','chat','triage','plan_review'],
+    'light'=>['review_plan','ruling','feedback','triage','plan_review'],
+    'chat'=>['chat'],
 ]);
-function job_lane($type){return in_array((string)$type,JOB_LANES['light'],true)?'light':'heavy';}
-/* 某条道的类型 IN 列表（SQL 片段，值来自常量不来自输入）。heavy 用「不在 light 里」表达，
+function job_lane($type){
+    foreach(JOB_LANES as $lane=>$types){
+        if($lane!=='heavy'&&in_array((string)$type,$types,true))return $lane;
+    }
+    return 'heavy';
+}
+/* 某条道的类型 IN 列表（SQL 片段，值来自常量不来自输入）。heavy 用「不在任何具名道里」表达，
    这样没登记的新类型也落 heavy，跟 job_lane() 一致。 */
 function lane_type_sql($lane,$alias='j'){
-    $light=implode(',',array_map(function($w){return "'".$w."'";},JOB_LANES['light']));
-    if($lane==='light')return "$alias.type IN ($light)";
-    return "$alias.type NOT IN ($light)";
+    $quote=function($arr){return implode(',',array_map(function($w){return "'".$w."'";},$arr));};
+    if($lane!=='heavy'&&isset(JOB_LANES[$lane]))return "$alias.type IN (".$quote(JOB_LANES[$lane]).")";
+    $named=[];
+    foreach(JOB_LANES as $ln=>$types){if($ln!=='heavy')$named=array_merge($named,$types);}
+    return "$alias.type NOT IN (".$quote($named).")";
 }
 
 /* 队列取单顺序，claim、位次、GET /jobs/queue 三处共用，改顺序只改这一处。
@@ -3124,6 +3132,29 @@ if($m==='GET'&&$ROUTE==='/inbox/chats'){
 // POST /inbox/chat -> 开一个新会话。
 // body { client_id, title?, text }，一次请求做三件事：建根、写第一条人消息、
 // 排 chat job。标题不给就从第一句话截一段，人懒得起名是常态。
+/* POST /inbox/channel body { client_id } -> { root_id }
+   客户的默认聊天频道（Discord 式一客户一条流）。找不到就建一个，不排任何 job：
+   频道只是一个 refs 带 channel 标记的 chat_root，消息照常走 /inbox/{id}/chat。 */
+if($m==='POST'&&$ROUTE==='/inbox/channel'){
+    $u=auth_user();
+    ensure_inbox_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    $c=db()->prepare("SELECT id FROM clients WHERE id=?");
+    $c->execute([$cid]);
+    if(!$c->fetch())res(404,['error'=>'Client not found']);
+    $q=db()->prepare("SELECT id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' ORDER BY id LIMIT 1");
+    $q->execute([$cid]);
+    $row=$q->fetch();
+    if($row)res(200,['ok'=>true,'root_id'=>(int)$row['id'],'created'=>false]);
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'chat_root','频道',?,NULL,'open',?)")
+        ->execute([$cid,json_encode(['channel'=>true]),$u['username']]);
+    $rid=(int)db()->lastInsertId();
+    audit($u['username'],'seo_chat_channel_create',(string)$rid,['client_id'=>$cid]);
+    res(200,['ok'=>true,'root_id'=>$rid,'created'=>true]);
+}
+
 if($m==='POST'&&$ROUTE==='/inbox/chat'){
     $u=auth_user();
     ensure_inbox_schema();
@@ -3165,10 +3196,10 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
     $i=input();
     $text=trim((string)($i['text']??''));
     if(mb_strlen($text,'UTF-8')>5000)res(400,['error'=>'text over 5000 chars']);
-    /* 截图与来源标记只在任务线程里有意义（走反馈那套校验与存储）。 */
+    /* 截图任何会话都收（2026-09-07 Chat 化：频道聊天对齐任务线程），走反馈那套校验与存储。 */
     $rootRefs=inbox_refs_norm($root['refs']);
     $imgs=[];
-    if($rootRefs['tasks']&&isset($i['images'])&&is_array($i['images'])){
+    if(isset($i['images'])&&is_array($i['images'])){
         foreach($i['images'] as $n){
             $n=(string)$n;
             if(!fb_name_ok($n))res(400,['error'=>'bad image name']);

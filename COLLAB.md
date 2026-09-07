@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-07 AIRA (bn) 登记：收件箱 Chat 化 C0（Alvin 指定，动了你认领面的 seo-api/前端/lanes，特此报备）
+
+- 干了什么（Alvin 定的四点）：一，Chat 频道化——每客户一条默认频道流（新端点 POST /inbox/channel 找建 refs 带 channel:true 的 chat_root，不排 job），去标题去新会话表单，旧会话归「历史会话」折叠区；二，Discord 式体验——打字指示动画、Enter 发送、消息即发即显；三，贴图对齐任务线程——/inbox/{id}/chat 的 images 从「仅任务线程」放开到所有会话（chat runner 本就读 refs.images 喂模型，零改动），前端复用 onFbPaste/feedback_upload 全套（截图暂存键用负数根 id，与任务 id 键空间错开）；四，chat 独立 lane——JOB_LANES/lanes.js 两侧同步加第三条道 chat（listener 的 lanes state 改为按 LANE_NAMES 动态建），聊天不再排在分钟级评审后面，同会话一轮一问的 409 闸不变。
+- 决策收件箱整体移除（Alvin 定）：前端区块、侧栏入口、全局视图、裁决表单全部下线；/inbox 与 ruling 端点及数据不动，仅后台可用。待裁决卡在任务视图 wait_me 一直有。
+- 部署注意：**api 与 worker 必须相邻部署**——JOB_LANES 先上而 worker 还是两道时，chat job 两边都不认领会停摆。我按 drain 检查两个连着发。
+- lane 语义变化一处：lane_type_sql 的 heavy 从「NOT IN light」改为「NOT IN 全部具名道」，新 job 类型缺省仍落 heavy，与 job_lane()/laneOf() 一致。
+
 ### 2026-09-07 AIRA (bm) 事故报告：release-policy-l0 对失败 apply 无限循环重排（你认领面，报告不动手，止血已做）
 
 - 现象：任务 135（page-meta-update，L0 可回滚面）人工放行的 apply（job 401）把 title/description 写上线后中途失败，任务留在 review。此后 release-policy-l0 每约 5 分钟自动重放行一次：job 408 到 448 共 **20 个 apply job 连环失败**（每个都因回读到「线上已是新值≠方案原值」按铁律安全中止，站点零改动），烧了约 100 分钟 opus 队列时间，也把当晚队列堵死（我的 spec 部署编排等 drain 等到超时中止）。

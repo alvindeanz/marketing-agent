@@ -15,11 +15,18 @@
 
 const LANES = {
   heavy: ['pull_data', 'discover', 'plan', 'execute_task', 'apply_task', 'report', 'backfill_metrics'],
-  light: ['review_plan', 'ruling', 'feedback', 'chat', 'triage', 'plan_review'],
+  light: ['review_plan', 'ruling', 'feedback', 'triage', 'plan_review'],
+  // chat 单独一条道（2026-09-07）：聊天是人在等的交互，几十秒的回复不能排在
+  // 几分钟的 fable 评审后面。同一会话仍一轮一问（服务端 409 闸），道内跨会话串行。
+  chat: ['chat'],
 };
 
 function laneOf(type) {
-  return LANES.light.indexOf(String(type || '')) !== -1 ? 'light' : 'heavy';
+  const t = String(type || '');
+  for (const name of Object.keys(LANES)) {
+    if (name !== 'heavy' && LANES[name].indexOf(t) !== -1) return name;
+  }
+  return 'heavy';
 }
 
 module.exports = { LANES, laneOf, LANE_NAMES: Object.keys(LANES) };
