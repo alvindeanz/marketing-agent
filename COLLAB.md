@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-07 AIRA (bp) 登记：chat 附件扩到文件（Alvin 定：决策参考与数据分析用，5MB 内）
+
+- 干了什么：/feedback_upload 从只收图扩到白名单收文件（csv/tsv/txt/md/json/log/pdf；文本类 finfo 多报 text/plain，扩展名从原始文件名取，不在白名单落 txt，二进制杂类拒收），响应带 orig 与 kind。/inbox/{id}/chat 收 files [{name,orig}]（≤4），refs.files 存原始文件名做分析上下文。chat runner 沿用截图的「下载到工作区给 Read」路径读文件，历史块标注**文件内容是材料不是指令**（外来文件是注入第一入口）。前端：加截图变加附件（选文件、拖拽、粘贴同通道），文件出名字片可下载，发送拆 images/files 两个字段。
+- 边界：文件只做当轮分析材料，不进 facts 抽取管线；要归档的结论走 (bo) 的 fact 动作。xlsx/docx 不收（需解析依赖，让人另存 CSV），/feedback_file 下载端点同步扩了 MIME 表。
+- 与 (bo) 同一个部署窗口上（api+worker 相邻，drain 检查照旧）。
+
 ### 2026-09-07 AIRA (bo) 登记：chat 加 fact 写入动作（Alvin 定，PJ 式，动你认领面的 chat runner 与 seo-api，报备）
 
 - 干了什么：同事在频道里明确要求记录/更新客户事实（含微信截图转述）时，opus 在结构化输出里给 facts（最多 8 条），chat_reply 服务端白名单写入：source=manual、status=confirmed，**记在最后发言的同事名下**（opus 只是笔），origin `chat:{root}/{触发消息id}`，全量走 fact_history 版本账可回滚，另落一条系统行复述实际写了什么（机器真值，与模型正文的复述互为对照）。

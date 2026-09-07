@@ -982,6 +982,20 @@ function inbox_refs_norm($v){
         foreach($v['images'] as $n){$n=(string)$n;if(fb_name_ok($n)&&!in_array($n,$out['images'],true))$out['images'][]=$n;}
         if(count($out['images'])>5)$out['images']=array_slice($out['images'],0,5);
     }
+    /* 聊天附件（截图之外的文件）：{name, orig}，name 走 fb_file_name_ok，最多 4 个。 */
+    $out['files']=[];
+    if(isset($v['files'])&&is_array($v['files'])){
+        foreach($v['files'] as $fx){
+            if(!is_array($fx))continue;
+            $n=(string)($fx['name']??'');
+            if(!fb_file_name_ok($n))continue;
+            $dup=false;
+            foreach($out['files'] as $e){if($e['name']===$n){$dup=true;break;}}
+            if($dup)continue;
+            $out['files'][]=['name'=>$n,'orig'=>fb_orig_clean($fx['orig']??'')];
+        }
+        if(count($out['files'])>4)$out['files']=array_slice($out['files'],0,4);
+    }
     $out['source']=(isset($v['source'])&&$v['source']==='client')?'client':'';
     return $out;
 }
@@ -1134,6 +1148,14 @@ function fb_dir_ready(){
     return is_dir($d)&&is_writable($d);
 }
 function fb_name_ok($n){return (bool)preg_match('#^[a-f0-9]{32}\.(png|jpg|jpeg|webp)$#',(string)$n);}
+/* 聊天附件（2026-09-07）：截图之外允许文本类与 PDF，做决策参考与数据分析用。 */
+function fb_file_name_ok($n){return (bool)preg_match('#^[a-f0-9]{32}\.(png|jpg|jpeg|webp|csv|tsv|txt|md|json|log|pdf)$#',(string)$n);}
+function fb_orig_clean($s){
+    $s=trim((string)$s);
+    $s=str_replace(["\\","/","\0","\n","\r",'"'],'',$s);
+    if(mb_strlen($s,'UTF-8')>120)$s=mb_substr($s,0,120,'UTF-8');
+    return $s;
+}
 function fb_path($n){return fb_dir().'/'.$n;}
 function fb_upload_error($code){
     switch($code){
@@ -1693,11 +1715,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/feedback_result$#',$ROUTE,$mm)){
 if($m==='GET'&&preg_match('#^/feedback_file/([A-Za-z0-9._-]+)$#',$ROUTE,$mm)){
     auth_any();
     $name=$mm[1];
-    if(!fb_name_ok($name))res(400,['error'=>'bad file name']);
+    if(!fb_file_name_ok($name))res(400,['error'=>'bad file name']);
     $p=fb_path($name);
     if(!is_file($p))res(404,['error'=>'File not found']);
     $ext=strtolower(pathinfo($name,PATHINFO_EXTENSION));
-    $types=['png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','webp'=>'image/webp'];
+    $types=['png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','webp'=>'image/webp',
+        'csv'=>'text/csv','tsv'=>'text/tab-separated-values','txt'=>'text/plain','md'=>'text/markdown',
+        'json'=>'application/json','log'=>'text/plain','pdf'=>'application/pdf'];
     header('Content-Type: '.($types[$ext]??'application/octet-stream'));
     header('Content-Length: '.filesize($p));
     header('Cache-Control: private, max-age=300');
@@ -3208,12 +3232,24 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
         }
         if(count($imgs)>$FEEDBACK_MAX_IMAGES)res(400,['error'=>'too many images, max '.$FEEDBACK_MAX_IMAGES]);
     }
+    /* 文件附件（2026-09-07）：只做当轮分析材料，不进 facts 抽取管线。 */
+    $files=[];
+    if(isset($i['files'])&&is_array($i['files'])){
+        foreach($i['files'] as $fx){
+            if(!is_array($fx))continue;
+            $n=(string)($fx['name']??'');
+            if(!fb_file_name_ok($n))res(400,['error'=>'bad file name']);
+            if(!is_file(fb_path($n)))res(400,['error'=>'File no longer on disk: '.$n]);
+            $files[]=['name'=>$n,'orig'=>fb_orig_clean($fx['orig']??'')];
+        }
+        if(count($files)>4)res(400,['error'=>'too many files, max 4']);
+    }
     $src=(isset($i['source'])&&$i['source']==='client')?'client':'manual';
-    if($text===''&&!$imgs)res(400,['error'=>'text required']);
+    if($text===''&&!$imgs&&!$files)res(400,['error'=>'text required']);
     $busy=chat_job_inflight($rootId);
     if($busy)res(409,['error'=>'这个会话还在等上一条回复','job_id'=>$busy]);
-    $msgRefs=($imgs||$src==='client')?['images'=>$imgs,'source'=>$src]:null;
-    $msgId=chat_msg_insert($root,'chat_user',$text===''?'（见截图）':$text,$u['username'],$msgRefs);
+    $msgRefs=($imgs||$files||$src==='client')?['images'=>$imgs,'files'=>$files,'source'=>$src]:null;
+    $msgId=chat_msg_insert($root,'chat_user',$text===''?'（见附件）':$text,$u['username'],$msgRefs);
     $jid=chat_job_queue($root,$msgId,$u['username']);
     /* 人说的每一句同时投一条反馈走 feedback job 抽 facts，学习回路不因为换了界面而断。
        任务线程挂任务 id；普通会话 task_id=0，payload 带 chat_root 供 runner 与版本账溯源
@@ -4280,14 +4316,24 @@ if($m==='POST'&&$ROUTE==='/feedback_upload'){
         $gi=@getimagesize($tmp);
         $mime=$gi&&isset($gi['mime'])?(string)$gi['mime']:'';
     }
-    $exts=['image/png'=>'png','image/jpeg'=>'jpg','image/webp'=>'webp'];
-    if(!isset($exts[$mime]))res(400,['error'=>'Only png, jpeg or webp images are accepted, got '.($mime?:'unknown')]);
+    $exts=['image/png'=>'png','image/jpeg'=>'jpg','image/webp'=>'webp','application/pdf'=>'pdf'];
+    $orig=fb_orig_clean(is_string($f['name']??null)?$f['name']:'');
+    if(isset($exts[$mime])){$ext=$exts[$mime];}
+    else{
+        /* 文本类（csv/tsv/txt/md/json/log）finfo 大多报 text/plain，扩展名从原始文件名取，
+           不在白名单就落 txt。二进制杂类一律拒。 */
+        $textish=(strpos($mime,'text/')===0)||in_array($mime,['application/json','application/csv','application/x-ndjson'],true);
+        if(!$textish)res(400,['error'=>'Only images, PDF or text files (csv/tsv/txt/md/json/log) are accepted, got '.($mime?:'unknown')]);
+        $oe=strtolower(pathinfo($orig,PATHINFO_EXTENSION));
+        $ext=in_array($oe,['csv','tsv','txt','md','json','log'],true)?$oe:'txt';
+    }
     if(!fb_dir_ready())res(500,['error'=>'Upload directory is missing or not writable: '.fb_dir()]);
-    $name=bin2hex(random_bytes(16)).'.'.$exts[$mime];
+    $name=bin2hex(random_bytes(16)).'.'.$ext;
     if(!@move_uploaded_file($tmp,fb_path($name)))res(500,['error'=>'Could not store the upload in '.fb_dir()]);
     @chmod(fb_path($name),0640);
-    audit($u['username'],'seo_feedback_upload',$name,['bytes'=>$size,'mime'=>$mime]);
-    res(200,['ok'=>true,'name'=>$name,'bytes'=>$size]);
+    $isImg=in_array($ext,['png','jpg','jpeg','webp'],true);
+    audit($u['username'],'seo_feedback_upload',$name,['bytes'=>$size,'mime'=>$mime,'orig'=>$orig]);
+    res(200,['ok'=>true,'name'=>$name,'bytes'=>$size,'orig'=>$orig,'kind'=>$isImg?'image':'file']);
 }
 
 // POST /tasks/{id}/feedback -> a human writes a note on a task in plain words,

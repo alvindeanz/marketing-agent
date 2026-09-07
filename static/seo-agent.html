@@ -256,6 +256,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ch-stream.chan{max-height:58vh;min-height:280px}
 .ch-hist{margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap}
 .ch-hist .ch-row{margin-bottom:0;max-width:260px}
+.fb-thumb.fb-file{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;cursor:pointer;max-width:240px}
+.fb-thumb.fb-file .fn{font-size:11.5px;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fb-thumb.fb-file:hover{border-color:#475569}
 .badge.ruling{background:#1e3a5f;color:#60a5fa}
 .badge.ack{background:#1e2433;color:#94a3b8;border:1px solid #334155}
 .sb-pill.inbox{background:#3b1f6e;color:#c084fc}
@@ -738,6 +741,8 @@ const FB_STATUS={pending:{cls:'queued',name:'待解析'},parsed:{cls:'done',name
 const FB_MAX_IMAGES=5;
 const FB_MAX_BYTES=5*1024*1024;
 const FB_MIME=['image/png','image/jpeg','image/webp'];
+const CH_FILE_EXT=['csv','tsv','txt','md','json','log','pdf'];
+const CH_ACCEPT='image/png,image/jpeg,image/webp,.csv,.tsv,.txt,.md,.json,.log,.pdf';
 const PRIORITIES=['P0','P1','P2','P3'];
 const SNAP_SOURCES=['discovery','ga4','gsc','semrush','content_registry'];
 const VIEWS=[{key:'dash',name:'Dashboard'},{key:'inbox',name:'Chat'},{key:'plan',name:'方案'},{key:'tasks',name:'任务'},{key:'report',name:'报告'},{key:'jobs',name:'Jobs'},{key:'profile',name:'档案'}];
@@ -749,7 +754,7 @@ let tasksData=[],jobsData=[],factsData=[];
 let openLogs={},picked={},relPick={},archOpen=false;
 let fbOpen={},fbDraft={},fbSource={},fbComplete={},fbHist={};
 /* 截图：fbImgs 是待提交的文件名，fbBlobs 是取回来的 blob URL 缓存 */
-let fbImgs={},fbUploading={},fbBlobs={},fbBlobBusy={};
+let fbImgs={},fbUploading={},fbBlobs={},fbBlobBusy={},fbOrig={};
 /* 博客任务的客户话术，按任务 id 存一份纯文本供复制按钮取用 */
 let blogSocial={};
 /* 任务视图筛选：默认藏起已完成，时间窗默认全部。只存内存，刷新即重置 */
@@ -838,7 +843,7 @@ function router(){
   }
   if(prevId!==curId){
     picked={};relPick={};openLogs={};excOpen={};
-    fbOpen={};fbDraft={};fbSource={};fbComplete={};fbHist={};fbImgs={};fbUploading={};
+    fbOpen={};fbDraft={};fbSource={};fbComplete={};fbHist={};fbImgs={};fbUploading={};fbOrig={};
     releaseFbBlobs();
     tasksData=[];jobsData=[];factsData=[];lastOverview=null;lastAttention=null;
     chReset();
@@ -2591,7 +2596,11 @@ function renderChatStream(){
       '<div class="ch-by">'+who+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
       '<div class="ch-bubble">'+esc(m.body||'')+'</div>';
     const shots=(m.refs&&m.refs.images)||[];
-    if(shots.length)html+='<div class="fb-thumbs">'+shots.map(n=>fbThumb(n,0)).join('')+'</div>';
+    const mfiles=(m.refs&&m.refs.files)||[];
+    if(shots.length||mfiles.length){
+      mfiles.forEach(f=>{if(f&&f.orig)fbOrig[f.name]=f.orig});
+      html+='<div class="fb-thumbs">'+shots.map(n=>fbThumb(n,0)).join('')+mfiles.map(f=>fbFileChip(f.name,0)).join('')+'</div>';
+    }
     const drafts=(m.refs&&m.refs.drafts)||[];
     drafts.forEach((d,i)=>{
       const key=m.id+':'+i;
@@ -2635,9 +2644,10 @@ function renderChatMain(){
     '<div class="ch-form hidden" id="chArch"><span class="plan-meta">这个会话已经归档，不再接新消息。要接着聊回频道说。</span></div>'+
     '<div class="ch-form" id="chForm">'+
       '<div class="fld"><textarea id="chText" onpaste="onFbPaste('+key+',event)" onkeydown="chKey(event)" '+
-        'placeholder="发消息。Enter 发送，Shift+Enter 换行，截图直接粘贴。"></textarea></div>'+
+        'ondragover="event.preventDefault()" ondrop="chDrop('+key+',event)" '+
+        'placeholder="发消息。Enter 发送，Shift+Enter 换行，截图粘贴，文件拖进来（CSV、PDF 等，5MB 内）。"></textarea></div>'+
       '<div class="fb-thumbs" id="fb_imgs_'+key+'"></div>'+
-      '<input type="file" class="hidden" id="fb_file_'+key+'" accept="image/png,image/jpeg,image/webp" multiple onchange="onFbPick('+key+',this)">'+
+      '<input type="file" class="hidden" id="fb_file_'+key+'" accept="'+CH_ACCEPT+'" multiple onchange="onFbPick('+key+',this)">'+
       '<div class="fb-row"><button class="btn tiny" id="chSend" onclick="sendChat()">发送</button>'+
       '<button class="btn tiny ghost" onclick="pickFbFiles('+key+')">加截图</button>'+
       '<span class="plan-meta">一次一轮，等它回完再说下一句。</span></div>'+
@@ -2648,18 +2658,28 @@ function renderChatMain(){
 function chKey(ev){
   if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();sendChat()}
 }
+function chDrop(id,ev){
+  ev.preventDefault();
+  const files=Array.prototype.slice.call((ev.dataTransfer&&ev.dataTransfer.files)||[]);
+  if(files.length)uploadFbFiles(id,files);
+}
 
 async function sendChat(){
   if(!chatRootId||chatSending)return;
   const el=document.getElementById('chText');
   const text=(el?el.value:'').trim();
   const key=-chatRootId;
-  const imgs=fbImgs[key]||[];
-  if(!text&&!imgs.length){toast('写点什么，或贴一张截图',true);return}
+  const all=fbImgs[key]||[];
+  const imgs=all.filter(fbIsImg);
+  const files=all.filter(n=>!fbIsImg(n)).map(n=>({name:n,orig:fbOrig[n]||''}));
+  if(!text&&!all.length){toast('写点什么，或贴个附件',true);return}
   if(text.length>5000){toast('单条消息最多 5000 字',true);return}
-  if(fbUploading[key]){toast('还有截图在上传，等一下再发',true);return}
+  if(fbUploading[key]){toast('还有附件在上传，等一下再发',true);return}
   chatSending=true;renderChatStatus();
-  const d=await api('/inbox/'+chatRootId+'/chat','POST',imgs.length?{text,images:imgs}:{text});
+  const body={text};
+  if(imgs.length)body.images=imgs;
+  if(files.length)body.files=files;
+  const d=await api('/inbox/'+chatRootId+'/chat','POST',body);
   chatSending=false;
   if(!d){renderChatStatus();return}
   if(d._status===409){toast('还在等上一条回复（job #'+(d.job_id||'?')+'）',true);renderChatStatus();return}
@@ -3829,6 +3849,24 @@ function hydrateFeedback(){
   }
 }
 
+function fbIsImg(n){return /\.(png|jpg|jpeg|webp)$/.test(String(n||''))}
+function fbFileChip(name,removeId){
+  const label=esc(fbOrig[name]||name);
+  const x=removeId?('<span class="x" title="移除" onclick="removeFbImg('+removeId+',\''+name+'\')">×</span>'):'';
+  return '<div class="fb-thumb fb-file" title="点击下载" onclick="openFbFileDl(\''+name+'\')"><span class="fn">📄 '+label+'</span>'+x+'</div>';
+}
+async function openFbFileDl(name){
+  try{
+    const r=await fetch(API+'/feedback_file/'+encodeURIComponent(name),{headers:{'Authorization':'Bearer '+token}});
+    if(!r.ok){toast('文件下载失败',true);return}
+    const b=await r.blob();
+    const u=URL.createObjectURL(b);
+    const a=document.createElement('a');
+    a.href=u;a.download=fbOrig[name]||name;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),20000);
+  }catch(e){toast('文件下载失败',true)}
+}
 function fbThumb(name,removeId){
   const x=removeId?('<span class="x" title="移除" onclick="removeFbImg('+removeId+',\''+name+'\')">×</span>'):'';
   return '<div class="fb-thumb"><img data-fb="'+name+'" alt="截图" title="点击看原图" '+
@@ -3841,7 +3879,7 @@ function renderFbStrip(id){
   if(!box)return;
   const list=fbImgs[id]||[];
   const up=fbUploading[id]||0;
-  box.innerHTML=list.map(n=>fbThumb(n,id)).join('')+
+  box.innerHTML=list.map(n=>fbIsImg(n)?fbThumb(n,id):fbFileChip(n,id)).join('')+
     (up?'<span class="fb-up">上传中 '+up+' 张...</span>':'')+
     (!list.length&&!up?(Number(id)<0?'':'<span class="fb-up">还没有截图。可以直接在上面的输入框里粘贴。</span>'):'');
   hydrateFbStripImgs(box);
@@ -3891,9 +3929,10 @@ async function uploadFbFiles(id,files){
   if(!fbImgs[id])fbImgs[id]=[];
   for(let k=0;k<files.length;k++){
     const f=files[k];
-    if(fbImgs[id].length+(fbUploading[id]||0)>=FB_MAX_IMAGES){toast('最多 '+FB_MAX_IMAGES+' 张截图',true);break}
-    if(FB_MIME.indexOf(f.type)<0){toast('只支持 png、jpeg、webp 截图',true);continue}
-    if(f.size>FB_MAX_BYTES){toast('单张截图不能超过 5MB',true);continue}
+    if(fbImgs[id].length+(fbUploading[id]||0)>=FB_MAX_IMAGES){toast('最多 '+FB_MAX_IMAGES+' 个附件',true);break}
+    const chDoc=Number(id)<0&&CH_FILE_EXT.indexOf(String(f.name||'').split('.').pop().toLowerCase())>=0;
+    if(FB_MIME.indexOf(f.type)<0&&!chDoc){toast(Number(id)<0?'支持截图、PDF 和文本类文件（csv/tsv/txt/md/json/log）':'只支持 png、jpeg、webp 截图',true);continue}
+    if(f.size>FB_MAX_BYTES){toast('单个附件不能超过 5MB',true);continue}
     fbUploading[id]=(fbUploading[id]||0)+1;
     renderFbStrip(id);
     const fd=new FormData();
@@ -3916,6 +3955,7 @@ async function uploadFbFiles(id,files){
       continue;
     }
     fbImgs[id].push(d.name);
+    if(d.orig)fbOrig[d.name]=d.orig;
     renderFbStrip(id);
   }
 }

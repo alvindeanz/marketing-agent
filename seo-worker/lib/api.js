@@ -115,7 +115,7 @@ class Api {
       maxBytes: 8 * 1024 * 1024,
       headers: {
         Authorization: 'Bearer ' + this.token,
-        Accept: 'image/*',
+        Accept: '*/*',
       },
     });
   }
