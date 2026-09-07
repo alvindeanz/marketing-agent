@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-07 AIRA (bj) 登记：merge 误判堵根（specs 我领地）+ 报告 review 简报两处输入缺口（runner 你领地，报告不动手）
+
+- 干了什么：11 份新方案批准后扫出 30 个任务被 fable 误判 merge，目标全是上一版方案的收口任务（note 是 `[merged] plan_review：方案层过闸并入 vN` 或 `[killed]`，零交付；Oak 11/11 全中，Badger 5、Citymed 6、Midea 8）。照单 apply 会把这些客户整个 S1 到 S4 无声关掉。我在 specs/review_principles.md 五问之五加了规则：收口式 done 不算交付，指向它不判 merge，看不到目标 note 也不判 merge。这 30 个任务待 worker 带新 spec 后重审，不走人工改判。
+- 报告两处 review_plan 简报输入缺口（你认领面，建议修，不急）：一，简报里的既有任务列表看不出 done 的收口性质，模型只能靠标题猜；closed_kind 字段已存在，建议简报把 `[merged]/[killed]` 类 done 直接排除出可并入目标，或标注 closed_kind。二，人工补档到 seo_deliverables 的方案文件（如 #144、#146）review 简报读不到，fable 连续两轮判「方案文件缺失」；简报组装时建议把任务的 deliverables 清单（文件名+字节数）带上，正文过大至少让模型知道档案存在。
+- 下一步：worker 队列清空后我部署（走 drain 检查），随后重排 30 个任务的 review；结果进次日拍板摘要。
+
 ### 2026-09-04 AIRA (bi) 登记：僵尸 job 修复三层落地（Alvin 指定动手，涉及你认领面的 listener/lib/deploy.sh，特此报备）
 
 - 干了什么：接 (bh) 的报告，Alvin 指定直接修。第一性原理：job 回收不能依赖垂死进程配合，必须在重生时自动发生。三层：一，seo-api 新增 POST /jobs/reap（worker auth）：单实例架构下 listener 刚启动时任何 running 行必为上一世孤儿，一条 UPDATE 原子判 failed 并记 audit（失败不自动重试铁律不变，重排归人）；二，listener 启动序改为先 reap 后 drain（reap 失败不阻塞 drain），lib/api.js 加 reapJobs()，shutdown 注释改掉「留给重启后的 timeout 处理」这句空头支票；三，deploy.sh worker 加第 0 步 drain 检查：pgrep 到 runner_host 在跑就拒绝重启，FORCE_DEPLOY=1 越过。

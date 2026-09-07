@@ -65,6 +65,10 @@ agent_prepare 的操作。
 - 同一 plan 里两个任务动同一个页面或同一组词，判 merge，留 id 小的那个。
 - 判 merge 前看目标任务的 result_note 实际交付了什么，不看标题。目标任务标题写「一二两篇」而 note 只交付了一篇，
   另起的那篇不是重复（2026-08-29 Ben's NZ #120 被误并进 #110，人工推翻）。detail 里写明「从 #N 拆出」的任务默认不是重复。
+- note 以 [merged] 或 [killed] 开头的 done 任务是收口标记不是交付：[merged] plan_review 是旧版方案任务被并入新版重排，
+  [killed] 是作废，两者都没有产出。merge_into 指向这类任务等于把新任务无声关掉，一律不判 merge，该做判 do。
+  看不到目标任务 result_note 时同样不判 merge。（2026-09-07 Badger/Citymed/Midea/Oak 共 30 个新版任务被误并进
+  上一版方案的收口任务，其中 Oak 整份方案 11 个任务全中）
 - 依赖另一个任务结果的，判 later，merge_into 留空，reason 写等哪个任务号。
 
 ## 已出方案、等放行的任务（status 为 review）
