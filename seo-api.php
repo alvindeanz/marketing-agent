@@ -1030,6 +1030,11 @@ function inbox_actions_norm($v){
         $type=(string)($a['type']??'');
         if(!in_array($type,THREAD_ACTIONS,true))continue;
         $row=['type'=>$type,'reason'=>mb_substr(trim((string)($a['reason']??'')),0,500,'UTF-8')];
+        /* 频道动作的双锚（2026-09-07）：task_id + 标题片段，服务端执行前双校验 */
+        $tidA=(int)($a['task_id']??0);
+        if($tidA>0)$row['task_id']=$tidA;
+        $tcA=trim((string)($a['title_check']??''));
+        if($tcA!=='')$row['title_check']=mb_substr($tcA,0,120,'UTF-8');
         if($type==='set_verdict'){
             $vd=(string)($a['verdict']??'');
             if(!in_array($vd,['do','later','drop'],true))continue;
@@ -3348,9 +3353,9 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
     if(mb_strlen($body,'UTF-8')>20000)res(400,['error'=>'body over 20000 chars']);
     $drafts=inbox_drafts_norm($i['drafts']??null);
     $raw=is_array($i['drafts']??null)?count($i['drafts']):0;
-    /* actions 只在任务线程里有意义：根没挂任务的会话，提议的动作没有对象，丢掉。 */
+    /* actions：任务线程走原有白名单；频道（2026-09-07 Alvin 定）只放 kill/later，带双锚。 */
     $rootRefs=inbox_refs_norm($root['refs']);
-    $actions=$rootRefs['tasks']?inbox_actions_norm($i['actions']??null):[];
+    $actions=inbox_actions_norm($i['actions']??null);
     $msgId=chat_msg_insert($root,'chat_agent',$body,'seo-worker',['drafts'=>$drafts,'actions'=>$actions]);
     /* 任务线程的自动执行：白名单里的看板层动作在回复落库的同一刻执行，系统行记账，
        前端看到的就是「已执行」。release 留卡给人点。指令来源是人在线程里说的话，
@@ -3371,6 +3376,52 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 $executed[]=['idx'=>$idx,'type'=>$a['type'],'ok'=>$r['ok'],'what'=>$r['what']];
                 /* 同一轮里后面的动作要看到前面改过的状态 */
                 $tq->execute([(int)$t['id']]);$t=$tq->fetch();
+            }
+        }
+    }
+    elseif($actions&&!$rootRefs['tasks']&&$root['client_id']!==null){
+        /* 频道看板层动作：人在频道里明确说「#N 不做/延后」，fable 翻译，服务端双锚校验后执行。
+           只放 kill 与 later（关闭留档/挂起，都可逆）；release 与其余动作频道不可达。 */
+        $cidA=(int)$root['client_id'];
+        $mqA=db()->prepare("SELECT created_by FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
+        $mqA->execute([$rootId]);
+        $umA=$mqA->fetch();
+        $askerA=($umA&&$umA['created_by']!=='')?(string)$umA['created_by']:'seo-worker';
+        foreach($actions as $idx=>$a){
+            if(!in_array($a['type'],['kill','later'],true))continue;
+            $tidA=(int)($a['task_id']??0);
+            $tcA=(string)($a['title_check']??'');
+            $failLine=function($why)use($root,$msgId,$idx){
+                chat_msg_insert($root,'chat_agent','频道指令 '.$msgId.'/'.$idx.' 未执行：'.$why,'seo-worker');
+            };
+            if(!$tidA||mb_strlen($tcA,'UTF-8')<6){$failLine('缺任务号或标题锚（防砍错的双锚校验），请带 #任务号 再说一次');continue;}
+            $tq2=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");
+            $tq2->execute([$tidA]);
+            $t2=$tq2->fetch();
+            if(!$t2){$failLine('任务 #'.$tidA.' 不存在');continue;}
+            if((int)$t2['client_id']!==$cidA){$failLine('任务 #'.$tidA.' 属于其他客户，频道只能动本客户的任务');continue;}
+            if(mb_stripos((string)$t2['title'],$tcA)===false){$failLine('任务 #'.$tidA.' 的标题与「'.$tcA.'」对不上，可能记错号，请人工确认');continue;}
+            if(in_array($t2['status'],['done'],true)){$failLine('任务 #'.$tidA.' 已经结束');continue;}
+            if($a['type']==='kill'){
+                /* 在跑保护：queued 的 job 随砍随撤，running 的拒砍 */
+                $jq=db()->prepare("SELECT id,status FROM agent_jobs WHERE client_id=? AND status IN('queued','running') AND payload LIKE ? ORDER BY id");
+                $jq->execute([$cidA,'%"task_ids":['.$tidA.']%']);
+                $blocked=false;
+                foreach($jq->fetchAll() as $jrow){
+                    if($jrow['status']==='running'){$failLine('任务 #'.$tidA.' 的 job #'.$jrow['id'].' 正在跑，跑完再砍');$blocked=true;break;}
+                    db()->prepare("UPDATE agent_jobs SET status='failed',finished_at=NOW(),log_text=CONCAT(COALESCE(log_text,''),'\n[cancelled] 频道砍单撤销')  WHERE id=? AND status='queued'")->execute([(int)$jrow['id']]);
+                }
+                if($blocked)continue;
+                $sunk=($t2['status']==='review'||trim((string)$t2['result_note'])!=='')?'（该任务已有产出，砍掉即弃）':'';
+                $err=task_close($tidA,'killed','频道指令不做：'.$a['reason'].'（发起 '.$askerA.'）',$askerA);
+                if($err){$failLine($err);continue;}
+                chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」归档不做'.$sunk.'。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
+                $executed[]=['idx'=>$idx,'type'=>'kill','ok'=>true,'task_id'=>$tidA];
+            }else{
+                db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tidA]);
+                task_append_note($tidA,'[later] 频道指令延后：'.$a['reason']);
+                chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」延后挂起。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
+                $executed[]=['idx'=>$idx,'type'=>'later','ok'=>true,'task_id'=>$tidA];
             }
         }
     }
@@ -4146,8 +4197,25 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
             $auto[]=['task_id'=>$tid,'job_id'=>$aj[0]];
         }
     }
-    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
-    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto]);
+    /* auto-drop（2026-09-07 Alvin 定）：fable 判 drop 的任务当场归档，不等 harness。
+       只砍未生产的（proposed/approved，弃之零成本），review 阶段已有产出的 drop 留给人/harness；
+       evidence 空的不自动砍（判定原则本要求证据，缺证据的判决本就该降级）。
+       观察期 30 天：拍板摘要逐条列，误砍改判一句话重开。 */
+    $autoDrop=[];
+    foreach($rows as $v){
+        if(!is_array($v)||(string)($v['verdict']??'')!=='drop')continue;
+        if(trim((string)($v['evidence']??''))==='')continue;
+        $tid=(int)($v['task_id']??0);
+        if(!$tid)continue;
+        $tq=db()->prepare("SELECT id,status FROM seo_tasks WHERE id=? AND client_id=?");
+        $tq->execute([$tid,$cid]);
+        $t=$tq->fetch();
+        if(!$t||!in_array($t['status'],['proposed','approved'],true))continue;
+        $err=task_close($tid,'dropped','[auto-drop] fable 判不做自动归档：'.mb_substr(trim((string)($v['reason']??'')),0,200,'UTF-8'),'seo-worker');
+        if(!$err)$autoDrop[]=$tid;
+    }
+    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
+    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop]);
 }
 
 // POST /tasks/{id}/review_override body { verdict, note } -> 人推翻 fable 的判决，理由必填。

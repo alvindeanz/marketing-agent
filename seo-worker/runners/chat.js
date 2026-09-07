@@ -74,7 +74,7 @@ function threadMessages(item, replies) {
     // 服务端写的系统行（已执行提议 / 已立项）created_by 不是 seo-worker；模型自己的回复是。
     // 自动执行的系统行 created_by 也是 seo-worker，靠正文前缀区分。
     const bodyStr = String(r.body == null ? '' : r.body);
-    const isSysLine = /^(已执行提议|提议 \d+\/\d+ 未执行|已立项|已派单|派单 #\d+|已更新档案)/.test(bodyStr);
+    const isSysLine = /^(已执行提议|提议 \d+\/\d+ 未执行|已立项|已派单|派单 #\d+|已更新档案|已执行频道指令|频道指令 \d+)/.test(bodyStr);
     msgs.push({
       id: Number(r.id) || 0,
       kind: r.kind,
@@ -281,7 +281,8 @@ function buildPrompt(opts) {
     '{"drafts":[{"title":"任务标题","detail":"要做什么，做到什么程度算完","module":"content",' +
       '"owner_type":"agency","priority":"P2","sprint":"W35","ops":""}],' +
       '"facts":[{"key":"content.delivery_time","value":"交期 6 周，2026-09 客户微信确认"}]' +
-      (task ? '' : ',"dispatch":[{"title":"验证 8 月广告询价口径","detail":"拉取并核对，产出一页结论","module":"paid"}]') +
+      (task ? '' : ',"dispatch":[{"title":"验证 8 月广告询价口径","detail":"拉取并核对，产出一页结论","module":"paid"}],' +
+        '"actions":[{"type":"kill","task_id":470,"title_check":"第一批五个品类页","reason":"客户暂停这条线"}]') +
       (task ? ',"actions":[{"type":"redispatch","reason":"描述里去掉 220 km/h，社交图改用站内真实 hero 图"}]' : '') +
       '}',
     '```',
@@ -308,6 +309,11 @@ function buildPrompt(opts) {
     task ? '' : '  所以边界必须自己守死：**任何要改账户、改页面、花钱、发内容的活一律不进 dispatch**，',
     task ? '' : '  那些走 drafts 让人立项。能用简报直接回答的不派，派单是给要现场跑数的活的。',
     task ? '' : '- dispatch 最多 2 个；title 写清验证什么，detail 写清产出物（一页结论/一份清单）和口径。',
+    task ? '' : '- actions 是看板动作，频道里只有两种：kill（归档不做）、later（延后挂起）。只有人明确说了',
+    task ? '' : '  「#N 不做了/砍掉/先放放」才动作。**双锚必填**：task_id 用人说的或简报任务清单里的号，',
+    task ? '' : '  title_check 原样抄该任务标题的前十几个字（服务端会核对，对不上不执行）。人没带任务号',
+    task ? '' : '  且简报里对不出唯一一个时，列出候选问人，绝不猜号。正文必须复述砍/延哪个任务和理由；',
+    task ? '' : '  该任务已有产出（待放行或有结果备注）时必须说明「砍掉即弃产出」。放行类动作频道里没有。',
     '- json 必须语法合法。字符串值里不许出现英文双引号，要引用时用中文引号；',
     '  不许出现换行符，长内容压成一行。输出前自己检查一遍能不能被机器解析。',
     task
@@ -373,6 +379,24 @@ function cleanActions(json, task, log) {
       continue;
     }
     out.push({ type, reason });
+  }
+  return out;
+}
+
+/* 频道看板动作规整：只认 kill/later，双锚必填（task_id + title_check≥6字），最多 3 条。 */
+function cleanChanActions(json, log) {
+  const say = log || function () {};
+  const raw = json && Array.isArray(json.actions) ? json.actions : [];
+  const out = [];
+  for (const item of raw) {
+    if (out.length >= 3) break;
+    const a = item || {};
+    const type = String(a.type || '').trim();
+    if (type !== 'kill' && type !== 'later') { say('对话：频道动作只认 kill/later，丢弃 ' + type); continue; }
+    const tid = Number(a.task_id) || 0;
+    const tc = String(a.title_check || '').trim();
+    if (!tid || tc.length < 6) { say('对话：频道动作缺双锚（task_id+title_check），丢弃'); continue; }
+    out.push({ type, task_id: tid, title_check: tc.slice(0, 120), reason: summarize(a.reason, 500) });
   }
   return out;
 }
@@ -627,7 +651,9 @@ async function runWith(ctx, parse) {
 
   // parse 注入版可以直接给 drafts，模型版给的是 json，统一从这里规整。
   const drafts = Array.isArray(parsed.drafts) ? parsed.drafts : cleanDrafts(parsed.json, log);
-  const actions = task ? (Array.isArray(parsed.actions) ? parsed.actions : cleanActions(parsed.json, task, log)) : [];
+  const actions = task
+    ? (Array.isArray(parsed.actions) ? parsed.actions : cleanActions(parsed.json, task, log))
+    : cleanChanActions(parsed.json, log);
   const facts = cleanFacts(parsed.json, log);
   const dispatch = task ? [] : cleanDispatch(parsed.json, log);
   const body = replyBody(parsed.body, drafts, parsed.degraded);

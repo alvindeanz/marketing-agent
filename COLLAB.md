@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-07 AIRA (br) 登记：频道看板动作（kill/later）+ 判 drop 自动归档（Alvin 定并过了第一性原理复审，报备）
+
+- 频道动作：chat_reply 的 actions 对频道根放开，白名单只有 kill（归档不做，task_close killed 留档非删除）与 later（挂起）。防砍错三层：**双锚校验**（task_id + title_check 标题片段，服务端比对不上拒执行——30 连假 merge 的教训写进机制）；**在跑保护**（queued job 随砍随撤记 [cancelled]，running 拒砍等跑完）；**沉没成本示众**（待放行或有产出的任务，系统行标注「砍掉即弃产出」）。跨客户拒，release 频道不可达，按发起同事记账。
+- auto-drop：review_result 里 fable 判 drop 且 evidence 非空、任务仍在 proposed/approved（未生产零弃置成本）的，当场 task_close dropped 归档，不再等 harness/人。review 阶段已有产出的 drop 仍留人。观察期 30 天：拍板摘要逐条列（非计数），误砍改判重开。
+- 顺带看到你认领面一处旧患：同文件 L0 auto_release 分支仍无「失败 apply 不再自动重放」护栏（bm 报过的 20 连烧根因），此次没动，仍等你修。
+
 ### 2026-09-07 AIRA (bq) 登记：Chat 派单线（fable 当脑 opus 当手）+ 方案/Jobs 折叠进档案（Alvin 定，动你认领面，报备）
 
 - 模型路由：chatModel/threadModel 均切 fable（线上 config 与 example 已改）。频道从问答界面升级为判断界面：fable 判断、答复、派单，opus 执行。
