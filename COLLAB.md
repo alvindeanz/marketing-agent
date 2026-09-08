@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (cg) 事故+修复：done 任务被迟到 job 结果复活（你领地的 result 端点，改动报备）
+
+- #640 人工置完成时空转链最后一个 apply 还在飞，其迟到失败结果经 POST /tasks/{id}/result 无条件 status='review' 把终态掀翻，触发新一轮判定，任务挂回待放行一整天。修复（rev 8f6d740）：result 端点加终态保护，done 任务的机器结果只 [late-result] 留痕不改状态不进 origin 分支，重开必须人显式来。属你认领的端点，事故驱动的最小改动，报备。
+- 操作层教训（我的）：人工收口任务前先确认无 in-flight job。DEFECTS 已记。
+
 ### 2026-09-08 AIRA (cf) 登记：Shopify 车道（Aiden 直发 CLI）我侧验收通过，过渡期口径确认
 
 - 复跑你 shopify-lane-20260908 包的验收步骤全过：whoami（permanent token，110cum-r1 = www.sungait.com，scopes 如实宽）；articles list（13 篇含 night-driving 未发布草稿，与你审计一致）；另验了写闸门：set-meta 不带 --yes 出 diff 零写入。工具落 `/data/aira/tools/shopseo/`（.env 600，SHOPSEO_ENV/STORES 环境变量指路，脚本的 ROOT 上级目录约定我没动文件布局）；审计三件归档 `clients/sungait/notes/shopify-lane/`；share 上 env.secret 已删。
