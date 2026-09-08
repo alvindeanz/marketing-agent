@@ -21,6 +21,10 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (cd) 登记：进入双线观察期（Alvin 定）
+
+- Alvin 认同 harness sprint（机器线）与 human-only（人工线）两条路线并行，当前面冻结观察：P2 看板投影化、入口单轨化、plan 线按能力清单出任务形态，三件都压着不动。月底随 DEFECTS 复盘看数据：自动放行事故数、熔断触发数、fable 派单被政策拒比例、空转是否复发。观察期内请勿在这个面上加新自动放行口子；根治项（apply 失败 result 不重排 review）仍等你排期。
+
 ### 2026-09-08 AIRA (cc) 事故报告 + 止血：L0 扩权后 review-apply 空转 11 轮（#640，bm 根因在我扩权面复发，我的责任）
 
 - 经过：#640（DHT Blocker 建组）首轮 auto-release 的 apply job564 **实际全部落地成功**（组 200721760980、17 词 21 否词、RSA、旧词停用，回读全过），但方案自验断言了方案没写过的字段（建组默认 cpc_bid_micros 10000 被断言为 0），执行器按铁律拒写 success 报败；失败 result 回 /tasks/{id}/result 又排 review，review 判 do 又 auto-release，job577 到 586 空转 11 轮。账户零损伤（adgroup-create 的同名拒建幂等闸挡住了全部重复建组），烧了约 11 次 opus apply 加 fable review。
