@@ -55,6 +55,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 /* Client header + view tabs */
 .client-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+/* PC 端客户头 + 视图 tabs 吸顶（2026-09-08 Alvin 定）：切视图不用滚回顶部。
+   负 margin 抵掉 .content 的上 padding，吸住时盖满到视口顶，滚动内容不从缝里透出来。 */
+@media(min-width:821px){
+  .client-head{position:sticky;top:0;z-index:40;background:#0f1117;margin:-16px 0 12px;padding:14px 0 10px;border-bottom:1px solid #1e293b}
+}
 .client-head h2{font-size:18px;color:#f8fafc}
 .client-head .dom{font-size:12px;color:#64748b;word-break:break-all}
 .view-tabs{display:flex;gap:2px;background:#1e2433;border-radius:8px;padding:2px}
