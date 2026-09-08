@@ -2696,13 +2696,23 @@ async function loadChatThread(silent){
 /* 已经立过项的草案：服务端在会话里写了一条系统行「已立项 #12「标题」」，
    刷新以后靠标题把草案卡对回去，按钮就不会回到可点状态。 */
 function chSpawnedTitles(){
+  /* title -> [{id:任务号, at:回执消息id}]。回执永远晚于被立项的草案，
+     所以草案只认「在它之后出现的回执」；任务被砍后重发的同名草案不再被旧回执误标，
+     立项按钮照常出现（2026-09-08 Ctomi #638 重建死循环的教训）。 */
   const map={};
   chatMsgs.forEach(m=>{
     if(m.kind!=='chat_agent'||m.created_by==='seo-worker')return;
     const mm=String(m.body||'').match(/^已立项 #(\d+)「([\s\S]+?)」/);
-    if(mm)map[mm[2]]=parseInt(mm[1],10);
+    if(!mm)return;
+    if(!map[mm[2]])map[mm[2]]=[];
+    map[mm[2]].push({id:parseInt(mm[1],10),at:m.id});
   });
   return map;
+}
+function chSpawnedFor(spawned,title,draftMsgId){
+  const list=spawned[title]||[];
+  for(const r of list){if(r.at>draftMsgId)return r.id}
+  return 0;
 }
 
 function chDraftCard(msgId,idx,d,doneId){
@@ -2751,7 +2761,7 @@ function renderChatStream(){
     const drafts=(m.refs&&m.refs.drafts)||[];
     drafts.forEach((d,i)=>{
       const key=m.id+':'+i;
-      const doneId=chatSpawned[key]||spawned[d.title]||0;
+      const doneId=chatSpawned[key]||chSpawnedFor(spawned,d.title,m.id);
       html+=chDraftCard(m.id,i,d,doneId);
     });
     return html+'</div>';
