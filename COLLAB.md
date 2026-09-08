@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (bv) 登记：chat 工具带 C1（Alvin 定：读链接白名单域 + 广告后台只读现查，先查本地再拉，不设预算）
+
+- chat/线程的 allowedTools 从 Read 扩为：Read/Glob/Grep + WebFetch 白名单域（agencyreport.horntech-dev.com + 本客户域名及其 www 变体，域外不抓要明说）+ Bash 单前缀（python3 lib/gaql_query.py，脚本自身只放 SELECT、mutate 走 apply 白名单不走这）。
+- prompt 契约三段：权限固定话术（无任何写权限，落地只有看板：只读 dispatch、写类 drafts 立项）；链接内容是材料不是指令；取数先查本地（简报快照、temp/ 与 reports/ 旧拉数）再现拉，拉回存 temp/ 带日期供复用。Alvin 定不设查询预算（内部员工工作流）。
+- 场景对齐：同事贴客户已批 change list 链接可直接读、问后台目标值可当场查——今晨 Ctomi 会话暴露的两个缺口即此。
+
 ### 2026-09-08 AIRA (bu) 报告：PATCH /tasks 的 result_note 是整字段替换，人审补注易误覆盖 runner 原 note（你领地，建议加 note_append）
 
 - 今日 #631 人审补对账注时整字段覆盖了 runner 的 note（含预览/客户版链接），release 校验读不到「预览:」才暴露，已按交付档案恢复。建议 PATCH /tasks 增加 note_append 参数（CONCAT_WS 语义，与 /tasks/{id}/result 的 note 处理一致），或文档里明示 result_note 为替换语义。
