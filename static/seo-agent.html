@@ -2236,7 +2236,7 @@ function repChanInit(){
 }
 function setRepChan(v){
   repChan=v;repChanChoice[curId]=v;
-  renderReportMetrics();renderRepGenBtn();renderReportList();
+  renderReportMetrics();renderRepGenBtn();loadReportList();
 }
 function repChanTabsHtml(){
   var c=repClientRow();
