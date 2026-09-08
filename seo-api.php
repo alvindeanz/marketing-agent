@@ -3572,7 +3572,26 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」归档不做'.$sunk.'。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
                 $executed[]=['idx'=>$idx,'type'=>'kill','ok'=>true,'task_id'=>$tidA];
             }elseif($a['type']==='release'){
+                /* 语义与看板放行按钮完全一致（2026-09-08 #639 job#544 教训）：
+                   分析任务放行=验收；博客大纲放行=排写稿；只有带 ops 的方案任务才排 apply。
+                   ops 空的非分析任务，执行时走的是分析模式，根本没有 change plan，排 apply 必失败。 */
                 if($t2['status']!=='review'){$failLine('任务 #'.$tidA.' 不在待放行状态（当前 '.$t2['status'].'），放行只对已出方案的任务生效');continue;}
+                if(analysis_task($t2)){
+                    if(trim((string)$t2['output_url'])===''&&strpos((string)$t2['result_note'],'预览: ')===false){$failLine('任务 #'.$tidA.' 是分析任务但没有产出链接，无法验收');continue;}
+                    $err=task_close($tidA,'accepted','分析报告已验收（频道放行，发起 '.$askerA.'）',$askerA);
+                    if($err){$failLine($err);continue;}
+                    chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」分析报告验收完结（发起 '.$askerA.'）。','seo-worker');
+                    $executed[]=['idx'=>$idx,'type'=>'release','ok'=>true,'task_id'=>$tidA];
+                    continue;
+                }
+                if(blog_outline_stage($t2)){
+                    list($ajB,)=blog_release_as_write($cidA,$t2,$askerA);
+                    chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」大纲放行，已排写稿（job #'.($ajB?$ajB[0]:0).'，发起 '.$askerA.'）。','seo-worker');
+                    $executed[]=['idx'=>$idx,'type'=>'release','ok'=>true,'task_id'=>$tidA];
+                    continue;
+                }
+                $opsChk=array_values(array_filter(array_map('trim',explode(',',(string)$t2['ops']))));
+                if(!$opsChk){$failLine('任务 #'.$tidA.' 没有 ops，执行时走的是分析模式没有 change plan，排落地必失败。先给任务补 ops 重跑出方案再放行');continue;}
                 list($ajC,$skC)=queue_task_jobs($cidA,'apply_task',[$tidA],$askerA,'seo_tasks_release');
                 if(!$ajC){$failLine('任务 #'.$tidA.' 已有落地 job 在飞（job #'.($skC?$skC[0]['job_id']:0).'），不重复排');continue;}
                 task_append_note($tidA,'[release] 频道放行（发起 '.$askerA.'）'.($a['reason']!==''?('：'.$a['reason']):''));
