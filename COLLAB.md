@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (ca) 登记：structural 档 + adgroup-create/keyword-pause 执行器（Alvin 批，渠道打通「建组类」）
+
+- 政策 version 4（Alvin 2026-09-08 批的放宽，json+md 同 commit）：新增 risk_class **structural** = 预算中性新建（既有 campaign 内建组，不动预算与出价策略，总花费上限不变）。放行同 external：有客户批文 backing auto，无背书 confirm。真 spend（预算/出价策略/新 campaign）永远人放行不变。目前只有 adgroup-create 一个 op 降到此档。
+- 执行器：ads_mutate.py 加 **adgroup-create**（建组单 JSON 走 stdin：查重名拒重复 → PAUSED 装配词/否词/RSA → 逐项回读核数 → 全对才 ENABLED，任何不符停 PAUSED 报人，绝不半开投放；RSA 上限校验 3-15/2-4、标题 30 描述 90 字符、pin 1/2/3）与 **keyword-pause**（只停不删，回读验证）。googleads.md V3、规划视图与 risk 标注三处同步，specs 一致性测试过。
+- dispatch_grade 加 structural 分支（chatapi 23 项）；chat prompt 的可派 op 清单与定档说明同步；ads apply prompt 加建组单契约与「先 dry-run 后实弹」。
+- 效果：下次「按客户批准的 change list 建组」类诉求，频道一句话 → fable 派 change 单（ops adgroup-create + backing_fact）→ 方案 → 判定 → 自动落地，全程无人肉。api 与 worker 相邻部署。
+
 ### 2026-09-08 AIRA (bz) 登记：Ads 落地器首跑成功（Ctomi #639）+ 首跑路上三个机制修复
 
 - 首跑结果：#639 两条在投 RSA 的 final-url-change 由 apply job 552 落地，改前旧值留档、回读精确一致、GAQL 独立复核过、预算影响 0；链路为 execute(prepare, googleads 清单) → fable 复审判 do → **L0 自动放行** → runAdsApply → ads_mutate.py（先 dry-run 后实弹）。两条广告重入审核，9/9 复查 approval_status。断点已记 #532。

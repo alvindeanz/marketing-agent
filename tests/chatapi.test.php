@@ -109,6 +109,7 @@ section('dispatch_grade：分级派单的风险定档（2026-09-08）');
 $POL=['risk_class_by_op'=>[
     'content-edit'=>'reversible','page-rewrite'=>'reversible','final-url-change'=>'reversible',
     'ad-copy-rewrite'=>'external','budget-change'=>'spend','conversion-goal-change'=>'irreversible',
+    'adgroup-create'=>'structural',
 ],'l0_rules'=>['l0_exclude_ops'=>['ops'=>['page-rewrite']]]];
 
 t('全 reversible 且不在排除表 = auto',function()use($POL){
@@ -122,6 +123,11 @@ t('花钱与不可逆永远 confirm，背书救不了',function()use($POL){
 t('external 看背书：有 auto 无 confirm',function()use($POL){
     eq(dispatch_grade(['ad-copy-rewrite'],$POL,true),'auto','有客户批文该直落');
     eq(dispatch_grade(['ad-copy-rewrite'],$POL,false),'confirm','无背书该停人');
+});
+t('structural（预算中性新建，2026-09-08 Alvin 批）同 external：有背书 auto 无背书 confirm',function()use($POL){
+    eq(dispatch_grade(['adgroup-create'],$POL,true),'auto','有客户批文的建组该直落');
+    eq(dispatch_grade(['adgroup-create'],$POL,false),'confirm','无背书的建组该停人');
+    eq(dispatch_grade(['adgroup-create','budget-change'],$POL,true),'confirm','混入真 spend 背书救不了');
 });
 t('l0_exclude_ops 里的 reversible 照旧 confirm',function()use($POL){
     eq(dispatch_grade(['page-rewrite'],$POL,false),'confirm','排除表优先');

@@ -889,6 +889,7 @@ function inbox_drafts_norm($v){
    入参：ops 数组、release_policy 解码数组、是否有客户批文背书（调用方已验 fact 存在且 confirmed）。
    返回 'auto'（全绿直落）| 'confirm'（出方案后停一句话）| 'invalid: 说明'（op 不在政策表，整单拒）。
    规矩：花钱与不可逆永远 confirm，背书救不了；external 有背书按 auto（对外风险已被客户签字消化）；
+   structural（预算中性新建，2026-09-08 Alvin 批）同 external：有背书 auto，无背书 confirm；
    reversible 但在 l0_exclude_ops 的照旧 confirm；政策文件缺失一律 confirm（默认从严）。 */
 function dispatch_grade($ops,$pol,$hasBacking){
     if(!is_array($ops))return 'invalid: 改动类派单必须带 ops';
@@ -902,7 +903,7 @@ function dispatch_grade($ops,$pol,$hasBacking){
         $cls=(string)($rc[$op]??'');
         if($cls==='')return 'invalid: op「'.$op.'」不在放行政策表';
         if($cls==='spend'||$cls==='irreversible'||$cls==='')$needConfirm=true;
-        elseif($cls==='external'){if(!$hasBacking)$needConfirm=true;}
+        elseif($cls==='external'||$cls==='structural'){if(!$hasBacking)$needConfirm=true;}
         if(in_array($op,$excl,true))$needConfirm=true;
     }
     return $needConfirm?'confirm':'auto';
