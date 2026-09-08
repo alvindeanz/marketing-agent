@@ -4458,6 +4458,16 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $bk0=false;
         if(preg_match('/\[backing\]\s*(\S+)/u',(string)($t['detail']??''),$bm0))$bk0=dispatch_backing_ok($cid,$bm0[1]);
         if(dispatch_grade($ops,$pol,$bk0)!=='auto')continue;
+        /* 熔断（2026-09-08 job577-586 空转教训，与 chatw 派单同一条规矩）：同任务只自动放行一次。
+           apply 失败会经 /tasks/{id}/result 把任务送回判定，没有这道闸就是
+           review→auto-release→apply→review 的死循环（bm 事故根因）。有任何 apply 历史一律留人。 */
+        $seen0=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload=?");
+        $seen0->execute([$cid,json_encode(['task_ids'=>[$tid]],JSON_UNESCAPED_UNICODE)]);
+        $r0=$seen0->fetch();
+        if($r0&&(int)$r0['c']>0){
+            task_append_note($tid,'[auto-release 熔断] 已有 apply 历史，不再自动放行，留人处理');
+            continue;
+        }
         list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],'release-policy-l0','seo_tasks_release');
         if($aj){
             task_append_note($tid,'[auto-release L0] 复审判 do 且风险档 auto（全部可回滚'.($bk0?'，或预算中性/对外类有客户批文背书':'').'），按放行政策自动放行（apply job '.$aj[0].'），月度抽查');
