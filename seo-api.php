@@ -3218,11 +3218,12 @@ if($m==='POST'&&$ROUTE==='/reports/paid_monthly'){
     $mon=(string)($i['month']??'');
     if(!$cid)res(400,['error'=>'client_id required']);
     if(!preg_match('#^\d{4}-\d{2}$#',$mon))res(400,['error'=>'month 要 YYYY-MM']);
-    $c=db()->prepare("SELECT id,name,services FROM clients WHERE id=?");
+    /* services 在 seo_profiles 上（惰性列），不在 clients 表 */
+    $c=db()->prepare("SELECT c.id,c.name,p.services FROM clients c LEFT JOIN seo_profiles p ON p.client_id=c.id WHERE c.id=?");
     $c->execute([$cid]);
     $cl=$c->fetch();
     if(!$cl)res(404,['error'=>'Client not found']);
-    $svc=strtolower((string)$cl['services']);
+    $svc=strtolower((string)($cl['services']??''));
     if(!in_array($svc,['sem','paid','both'],true))res(400,['error'=>'这个客户没有 paid 服务']);
     list($clean,$err)=task_fields_clean([
         'title'=>'Paid 月报草稿 '.$mon,
