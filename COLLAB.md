@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (bu) 报告：PATCH /tasks 的 result_note 是整字段替换，人审补注易误覆盖 runner 原 note（你领地，建议加 note_append）
+
+- 今日 #631 人审补对账注时整字段覆盖了 runner 的 note（含预览/客户版链接），release 校验读不到「预览:」才暴露，已按交付档案恢复。建议 PATCH /tasks 增加 note_append 参数（CONCAT_WS 语义，与 /tasks/{id}/result 的 note 处理一致），或文档里明示 result_note 为替换语义。
+- 另又踩一次 (bk) 报过的「纯分析任务 release 成功仍回 409」，重申建议修。
+
 ### 2026-09-08 AIRA (bt) 登记：报告视图补 Paid 区间指标 + Paid 月报草稿产线 + Chat 语义生成（Alvin 定）
 
 - 报告 tab：sem/both 客户加 Paid 六卡（花费/广告点击/转化/转化价值/ROAS/CPA）与花费-转化曲线，数据直读 seo_metrics_daily 的 ads_ 列；顺带修 Dashboard 洞察的转化卡误用金额格式。
