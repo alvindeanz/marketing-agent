@@ -420,6 +420,13 @@ t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺�
   assert.ok(E.lintPlan('- 预期响应：200\n- 回读核对：GET').some((x) => x.indexOf('涉及文件') > -1));
   assert.deepStrictEqual(E.planFiles('x\n```json\n{"files":["pages/a.html"]}\n```'), ['pages/a.html']);
 });
+t('lintPlan：选择题打回，但「需要人定：无」是 prompt 要求的空章节写法不打回（2026-09-08 job549 误伤）', () => {
+  const base = '## 2. API 调用序列\n- 预期响应：200\n涉及文件：a\n';
+  assert.ok(E.lintPlan(base + '- 需要人定：追加的三条暂停广告是否一并对齐').some((x) => x.indexOf('选择题') > -1));
+  assert.deepStrictEqual(E.lintPlan(base + '- 需要人定：无。'), []);
+  assert.deepStrictEqual(E.lintPlan(base + '需要人定：暂无'), []);
+  assert.deepStrictEqual(E.lintPlan(base + '- 需要人定：等客户：确认促销词是否保留'), []);
+});
 t('放行卡：提取、超长打回、夹带 curl 或接口路径打回', () => {
   const card = '- 改什么：/childcare/ 面包屑，旧标题 → 新标题\n- 为什么：页面已改版\n- 风险与回滚：改回原值\n- 需要人定：无';
   const plan = '# 标题\n\n## 0. 放行卡\n\n' + card + '\n\n## 1. 变更目标与现状\n\n取证\n## 2. API 调用序列\n涉及文件：a';
