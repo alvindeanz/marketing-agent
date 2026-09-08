@@ -301,7 +301,11 @@ details.seat[open]{padding-bottom:4px}
 <script>
 (function () {
   'use strict';
-  var API = 'https://always.horntech-dev.com/seo-api.php/card_feedback';
+  /* 双端点（2026-09-08）：对客页面在公网 agencyreport，看板 API 域外网整体 403（客户手机 5G 保存失败的教训），
+     也不该把内部 API 暴露公网。首选同域中继 /reports/card_feedback.php（等 agencyreport nginx 加
+     单路径转发 location，Aiden 领地），中继没落位或不可用时退回看板域直连（内网用户仍然能存）。 */
+  var API = '/reports/card_feedback.php';
+  var API_FALLBACK = 'https://always.horntech-dev.com/seo-api.php/card_feedback';
   var params = new URLSearchParams(window.location.search);
   var taskId = parseInt(params.get('t'), 10);
   var token = params.get('k');
@@ -320,12 +324,22 @@ details.seat[open]{padding-bottom:4px}
     return;
   }
 
-  function post(item, choice, text) {
-    return fetch(API, {
+  function postTo(url, body) {
+    return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId, token: token, item: item, choice: choice, text: text || '' })
-    }).then(function (res) {
+      body: body
+    });
+  }
+
+  function post(item, choice, text) {
+    var body = JSON.stringify({ task_id: taskId, token: token, item: item, choice: choice, text: text || '' });
+    /* 中继 404/405/403 或网络错说明它还没落位或被挡，退回看板域再试一次。
+       两边都失败才算失败（外网用户在中继落位前会走到这里，页面上的邮件兜底文案接住）。 */
+    return postTo(API, body).then(function (res) {
+      if (res.status === 404 || res.status === 405 || res.status === 403) { return postTo(API_FALLBACK, body); }
+      return res;
+    }, function () { return postTo(API_FALLBACK, body); }).then(function (res) {
       if (!res.ok) { throw new Error('HTTP ' + res.status); }
       return true;
     });

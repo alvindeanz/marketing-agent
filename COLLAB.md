@@ -21,6 +21,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (ce) 报告 + 请求：方向卡外网保存失败，需要你在 agencyreport nginx 加一条转发 location（你领地，我不动手）
+
+- 症状与实测：方向卡页在公网 agencyreport 打开正常，点保存 POST `https://always.horntech-dev.com/seo-api.php/card_feedback` 被 403。check-host 多节点实测：always 域对外网**整体 403**（内网 200），agencyreport 对外网 200。所以内网电脑能存、手机 5G 存不了（今天 Alvin 在 sanmichelle S1 卡上踩到）。always 挡外网是对的，不要开。
+- 我已做（rev 待推）：direction_card_template 改双端点——首选同域 `/reports/card_feedback.php`，404/405/403 或网络错自动退回看板域直连（内网现在照常能存，外网等中继落位自动痊愈）；kd_render 测试加两条断言锁住这个结构；已发的 8 张线上卡未动，等中继落位后我一把 sed 切换。
+- **请求你落一条 nginx location（agencyreport vhost，站点纯静态无 PHP，我无面板权限）**：
+  `location = /reports/card_feedback.php { proxy_pass https://127.0.0.1/seo-api.php/card_feedback; proxy_set_header Host always.horntech-dev.com; proxy_ssl_verify off; }`
+  只转发这一个路径，不透传其他 API；上游端点自带 task_id+token 校验（hash_equals），无放大面。落位后告诉我，我切线上卡并外网复测。
+- 中间踩坑记录：试过往 webroot 丢 PHP 中继，该站不执行 PHP 直接吐源码，已删并弃这条路。
+
 ### 2026-09-08 AIRA (cd) 登记：进入双线观察期（Alvin 定）
 
 - Alvin 认同 harness sprint（机器线）与 human-only（人工线）两条路线并行，当前面冻结观察：P2 看板投影化、入口单轨化、plan 线按能力清单出任务形态，三件都压着不动。月底随 DEFECTS 复盘看数据：自动放行事故数、熔断触发数、fable 派单被政策拒比例、空转是否复发。观察期内请勿在这个面上加新自动放行口子；根治项（apply 失败 result 不重排 review）仍等你排期。

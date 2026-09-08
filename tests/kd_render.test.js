@@ -20,6 +20,9 @@ function base() {
 const html = renderCard(base());
 assert(html.includes("parseInt(params.get('t'), 10)") && html.includes("params.get('k')"), 'widget 必须原样注入');
 assert(html.includes('card_feedback'), '提交端点在');
+// 2026-09-08 外网保存事故：对客页首选同域中继，看板域只能是降级备胎（外网 403）
+assert(html.includes("'/reports/card_feedback.php'"), '首选端点必须是同域中继');
+assert(html.includes('API_FALLBACK'), '必须带看板域降级备胎，否则中继落位前内网也存不了');
 
 // 2) A31：词族名与红绿灯名全中文 => 拒绝
 const zh = base();
