@@ -332,14 +332,19 @@ async function main() {
     assert.strictEqual(LLM_CALLS.length, 1, '不该有第二次调用');
   });
 
-  await ta('工具只给 Read，模型走 cfg.chatModel，没有 Write 没有 Bash', async () => {
+  await ta('工具带 C1 契约：只读集 + 白名单域抓取 + 单前缀取数，永无 Write', async () => {
     LLM_OUT.length = 0; LLM_CALLS.length = 0;
     LLM_OUT.push('好的');
     await chat.parseWithModel(mkParseCtx(), PARSE_OPTS);
-    assert.strictEqual(LLM_CALLS[0].allowedTools, 'Read');
+    const tools = LLM_CALLS[0].allowedTools;
     assert.strictEqual(LLM_CALLS[0].model, 'opus');
-    assert.ok(LLM_CALLS[0].allowedTools.indexOf('Write') < 0);
-    assert.ok(LLM_CALLS[0].allowedTools.indexOf('Bash') < 0);
+    assert.ok(tools.indexOf('Read') >= 0);
+    assert.ok(tools.indexOf('WebFetch(domain:agencyreport.horntech-dev.com)') >= 0, '白名单域抓取');
+    // Bash 只允许 gaql 只读脚本这一个前缀，绝不出现无限制的裸 Bash
+    assert.ok(tools.indexOf('Bash(python3 /data/aira/seo-worker/lib/gaql_query.py:*)') >= 0, 'gaql 只读前缀');
+    assert.ok(!/(^|,)Bash(,|$)/.test(tools), '不许裸 Bash');
+    assert.ok(tools.indexOf('Write') < 0);
+    assert.ok(tools.indexOf('Edit') < 0);
   });
 
   await ta('json 块好使：正文和草案分得开', async () => {
