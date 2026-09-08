@@ -4412,13 +4412,15 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         if(analysis_task($t)||blog_outline_stage($t))continue;
         $ops=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
         if(!$ops)continue; /* 无 ops 的任务说不清风险，走人 */
-        $allRev=true;
-        $excl=isset($pol['l0_rules']['l0_exclude_ops']['ops'])&&is_array($pol['l0_rules']['l0_exclude_ops']['ops'])?$pol['l0_rules']['l0_exclude_ops']['ops']:[];
-        foreach($ops as $op){ if(($rc[$op]??'')!=='reversible'||in_array($op,$excl,true)){$allRev=false;break;} }
-        if(!$allRev)continue;
+        /* 定档统一走 dispatch_grade（2026-09-08）：全 reversible 直落；external/structural
+           要任务 detail 里 [backing] 指向的客户批文 fact 存在且 confirmed 才直落；
+           spend/不可逆/排除表/未知 op 一律停人。与 Chat 派单同一个函数同一份政策，不许分叉。 */
+        $bk0=false;
+        if(preg_match('/\[backing\]\s*(\S+)/u',(string)($t['detail']??''),$bm0))$bk0=dispatch_backing_ok($cid,$bm0[1]);
+        if(dispatch_grade($ops,$pol,$bk0)!=='auto')continue;
         list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],'release-policy-l0','seo_tasks_release');
         if($aj){
-            task_append_note($tid,'[auto-release L0] 复审判 do 且全部操作可回滚，按放行政策自动放行（apply job '.$aj[0].'），月度抽查');
+            task_append_note($tid,'[auto-release L0] 复审判 do 且风险档 auto（全部可回滚'.($bk0?'，或预算中性/对外类有客户批文背书':'').'），按放行政策自动放行（apply job '.$aj[0].'），月度抽查');
             $auto[]=['task_id'=>$tid,'job_id'=>$aj[0]];
         }
     }
