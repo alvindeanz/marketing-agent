@@ -1563,7 +1563,7 @@ if($m==='GET'&&$ROUTE==='/jobs/queue'){
     $rows=$q->fetchAll();
     /* 位次按道各算：每行带 lane，queued 里 position 是该道内的位次，排序 heavy 在前、道内按取单顺序。 */
     $pos=jobs_queue_positions(100);
-    $laneIdx=['heavy'=>0,'light'=>1];
+    $laneIdx=['heavy'=>0,'light'=>1,'chat'=>2];
     usort($rows,function($a,$b)use($pos,$laneIdx){
         if($a['status']!==$b['status'])return $a['status']==='running'?-1:1;
         $la=$laneIdx[job_lane($a['type'])];$lb=$laneIdx[job_lane($b['type'])];
@@ -3225,6 +3225,11 @@ if($m==='POST'&&$ROUTE==='/reports/paid_monthly'){
     if(!$cl)res(404,['error'=>'Client not found']);
     $svc=strtolower((string)($cl['services']??''));
     if(!in_array($svc,['sem','paid','both'],true))res(400,['error'=>'这个客户没有 paid 服务']);
+    ensure_task_origin();
+    $dq=db()->prepare("SELECT id,status FROM seo_tasks WHERE client_id=? AND title=? AND origin LIKE 'report:%' AND status NOT IN ('done') ORDER BY id DESC LIMIT 1");
+    $dq->execute([$cid,'Paid 月报草稿 '.$mon]);
+    $dup=$dq->fetch();
+    if($dup)res(409,['error'=>'该月草稿任务已在跑（#'.$dup['id'].'，状态 '.$dup['status'].'），别重复点','task_id'=>(int)$dup['id']]);
     list($clean,$err)=task_fields_clean([
         'title'=>'Paid 月报草稿 '.$mon,
         'detail'=>"按 /data/aira/seo-worker/specs/report/paid_monthly_spec.md 出 ".$mon." 的 paid 月报内部草稿。\n"

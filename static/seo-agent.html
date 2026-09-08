@@ -551,6 +551,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
         <div class="sec-head">
           <div class="sec-title">区间指标</div>
           <div class="tb-group">
+            <span class="tb-group" id="repChanTabs" style="margin-right:8px"></span>
             <span class="plan-meta" id="repRangeHint"></span>
             <button class="btn" id="rep_last_month" onclick="setRepPreset('last_month')">上月</button>
             <button class="btn ghost" id="rep_mtd" onclick="setRepPreset('mtd')">本月至今</button>
@@ -2134,6 +2135,7 @@ var repState={client:0,from:'',to:'',gran:'day',metrics:null,events:[],reports:[
 var repPreset='last_month',repNoteEdit={},repFetched='';
 
 function repReset(){
+  repChan='seo';
   repState.client=0;repState.from='';repState.to='';repState.gran='day';
   repState.metrics=null;repState.events=[];repState.reports=[];
   repState.loading=false;repState.error='';repState.ver++;
@@ -2220,6 +2222,16 @@ function repKpiCards(metrics,from,to){
     {key:'brand',name:'品牌点击占比',has:bm.has&&shC!=null,val:shC,txt:insFmtPct(shC,1),d:insDeltaPP(shC,shP),pp:true}
   ]};
 }
+var repChan='seo';
+function setRepChan(v){repChan=v;renderReportMetrics()}
+function repChanTabsHtml(){
+  var cR=clientsData.filter(function(c){return c.client_id===curId})[0];
+  if(!cR||!insSvcPaid(cR))return '';
+  var svc=String(cR.services||'').toLowerCase();
+  if(svc==='sem'||svc==='paid'){if(repChan!=='paid'){repChan='paid'}}
+  return '<button class="btn '+(repChan==='seo'?'':'ghost')+'" onclick="setRepChan(\'seo\')">SEO</button>'+
+    '<button class="btn '+(repChan==='paid'?'':'ghost')+'" onclick="setRepChan(\'paid\')">Paid</button>';
+}
 function repPaidKpiCards(metrics,from,to){
   var m=metrics||{},P=repKpiPeriod(from,to);
   function g(k,r){return insSumRange(m[k]||[],r.from,r.to)}
@@ -2249,20 +2261,19 @@ function repMetricsBody(metrics,events,from,to,gran,note){
   var evb=insEventsToBuckets(insGroupEventsByDay(events),buckets);
   var clk=insAgg(m.gsc_clicks||[],buckets,'sum');
   var impr=insAgg(m.gsc_impressions||[],buckets,'sum');
-  var paidBlock='';
-  var cRow=clientsData.filter(function(c){return c.client_id===curId})[0];
-  if(cRow&&insSvcPaid(cRow)){
+  if(repChan==='paid'){
     var cost=insAgg(m.ads_cost||[],buckets,'sum');
     var conv=insAgg(m.ads_conversions||[],buckets,'sum');
-    paidBlock='<div class="sec-title" style="margin:16px 0 8px">Paid（Google Ads）</div>'+
-      insKpiHtml(repPaidKpiCards(m,from,to))+
+    return '<div class="panel">'+insKpiHtml(repPaidKpiCards(m,from,to))+
       insLegendHtml([{name:'花费（左轴）',color:INS_COLOR.impr},{name:'转化（右轴）',color:INS_COLOR.clicks}],true)+
-      insChart({w:920,h:220,labels:labels,events:evb,
+      insChart({w:920,h:280,labels:labels,events:evb,
         empty:'这个区间没有 Ads 数据。先在洞察区回填历史数据。',
         series:[
           {name:'花费',color:INS_COLOR.impr,values:cost,axis:'l',width:1.8},
           {name:'转化',color:INS_COLOR.clicks,values:conv,axis:'r',width:2.2}
-        ]});
+        ]})+
+      '<div class="plan-meta" style="margin-top:6px">'+esc(note)+'</div>'+
+      '</div>';
   }
   return '<div class="panel">'+insKpiHtml(repKpiCards(m,from,to))+
     insLegendHtml([{name:'曝光（右轴）',color:INS_COLOR.impr},{name:'点击（左轴）',color:INS_COLOR.clicks}],true)+
@@ -2272,7 +2283,6 @@ function repMetricsBody(metrics,events,from,to,gran,note){
         {name:'曝光',color:INS_COLOR.impr,values:impr,axis:'r',width:1.8},
         {name:'点击',color:INS_COLOR.clicks,values:clk,axis:'l',width:2.2}
       ]})+
-    paidBlock+
     '<div class="plan-meta" style="margin-top:6px">'+esc(note)+'</div>'+
     '</div>';
 }
@@ -2291,6 +2301,8 @@ function renderReportMetrics(){
   }
   box.innerHTML=repMetricsBody(repState.metrics,repState.events,repState.from,repState.to,repState.gran,repNoteText());
   insBind(box);
+  var tb=document.getElementById('repChanTabs');
+  if(tb)tb.innerHTML=repChanTabsHtml();
   var pb=document.getElementById('repPaidBtn');
   if(pb){
     var cR=clientsData.filter(function(c){return c.client_id===curId})[0];
@@ -2496,13 +2508,18 @@ window.cancelRepNote=cancelRepNote;
 window.saveRepNote=saveRepNote;
 window.toggleRepStatus=toggleRepStatus;
 
+var paidMonthlyBusy=false;
 async function firePaidMonthly(btn){
+  if(paidMonthlyBusy)return;
   var mEl=document.getElementById('repMonth');
   var mon=mEl?String(mEl.value||''):'';
   if(!/^\d{4}-\d{2}$/.test(mon)){toast('先选报告月份',true);return}
-  if(btn)btn.disabled=true;
+  paidMonthlyBusy=true;
+  if(btn){btn.disabled=true;btn.textContent='生成中…'}
   var d=await api('/reports/paid_monthly','POST',{client_id:curId,month:mon});
-  if(btn)btn.disabled=false;
+  paidMonthlyBusy=false;
+  if(btn){btn.disabled=false;btn.textContent='生成 Paid 月报'}
+  if(d&&d._status===409){toast((d.error||'该月草稿已在跑')+'，任务 #'+(d.task_id||'?'),true);return}
   if(fail(d,'Paid 月报任务创建失败'))return;
   toast('已建任务 #'+d.task_id+'（job #'+d.job_id+'），草稿出来后在任务视图人审验收，不会自动发客户');
 }
