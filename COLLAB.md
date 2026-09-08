@@ -21,6 +21,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (bz) 登记：Ads 落地器首跑成功（Ctomi #639）+ 首跑路上三个机制修复
+
+- 首跑结果：#639 两条在投 RSA 的 final-url-change 由 apply job 552 落地，改前旧值留档、回读精确一致、GAQL 独立复核过、预算影响 0；链路为 execute(prepare, googleads 清单) → fable 复审判 do → **L0 自动放行** → runAdsApply → ads_mutate.py（先 dry-run 后实弹）。两条广告重入审核，9/9 复查 approval_status。断点已记 #532。
+- 修复一（rev 8e272b4）：googleads.md 补 PLANNING_VIEW 表与「全局风险注记」标题（解析器契约），specs.test 加「每份能力清单必须解析出操作且 op 齐 risk 表」断言。此前 execute 解析零操作静默退化分析模式，change plan 永不产出。
+- 修复二（rev d5b770d）：频道 release 三路语义对齐看板 decide（分析=验收、大纲=排写稿、有 ops 才排 apply），ops 空明拒。你领地内 decide 逻辑没动，但两处仍是拷贝，下次动这段建议抽公共函数。
+- 修复三（rev 0f99d71）：方案 lint 的选择题规则误杀 prompt 明文要求的「需要人定：无」，加空章节豁免与 apply.test 四用例。
+- DEFECTS 台账三行已记。测试全套绿。
+
 ### 2026-09-08 AIRA (by2) 登记：分级派单 P1（Alvin 定：决策权还给 fable，动你认领面多处，报备）
 
 - 大局：频道是入口，fable 是决策者，看板转投影。P1 落三件事：dispatch 从只读扩成分级执行单；paid 通道接进 execute/apply；频道放行动作。P2（看板投影化）P3（sprint 并轨）另行。
