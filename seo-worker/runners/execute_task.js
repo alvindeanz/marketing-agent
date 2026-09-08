@@ -98,7 +98,9 @@ function buildPrompt(brief, task, workspace) {
     '   internally are written in Chinese. No emoji. No em dash or en dash, use commas,',
     '   full stops or semicolons instead.',
     '5. Start your answer with a one paragraph summary of what you produced and what you',
-    '   assumed, then the deliverable itself in markdown.',
+    '   assumed, then the deliverable itself in markdown. The summary paragraph and all',
+    '   report narration MUST be written in Chinese. English is only allowed inside data',
+    '   values, field names and site-language copy.',
     '',
     'FACTS, only when the task was a check or a verification',
     'If this task had you verify something about the client and the answer is a stable,',
@@ -1854,11 +1856,15 @@ async function runOne(ctx, context, workspace, taskId) {
     }
   }
 
+  // Chat 派单（origin chat:*）的读者是频道里的同事，不是放行审看的人：
+  // 结论先行、不回显客户铁律块（那是放行对照用的内部格式，2026-09-08 Alvin 指出）。
+  const isChatTask = String(task.origin || '').indexOf('chat:') === 0;
   const pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
-    title: task.title || 'task ' + taskId, markdown: output, kind: prepare ? '变更方案' : '分析报告', taskId,
+    title: task.title || 'task ' + taskId, markdown: output, kind: prepare ? '变更方案' : (isChatTask ? '验证报告' : '分析报告'), taskId,
     client: (context && context.client && context.client.name) || path.basename(workspace),
-    note: prepare ? '这是待放行的变更方案，不是变更本身。放行后 apply 照它执行并回读验证。' : '分析型任务的产出是这份报告，同意 = 验收完成。',
-    clientRules: clientRulesForPreview(workspace),
+    note: prepare ? '这是待放行的变更方案，不是变更本身。放行后 apply 照它执行并回读验证。'
+      : (isChatTask ? '频道派单产出，已自动验收；结论在最前面。' : '分析型任务的产出是这份报告，同意 = 验收完成。'),
+    clientRules: isChatTask ? '' : clientRulesForPreview(workspace),
   }), log);
   const note = previewLine(pvUrl) + (prepare
     ? buildTargetHeader(readTargetUrls(output)) +

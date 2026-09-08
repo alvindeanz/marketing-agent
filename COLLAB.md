@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (bs) 登记：Chat 派单首日三处体验修正（Alvin 摸底指出）
+
+- Chat 筛选自动含已结束（Chat 单天生 done，被「隐藏已结束」默认吞掉，筛了个寂寞）；聊天气泡 URL 链接化（转义后安全替换，频道与任务线程同款）；execute 分析摘要强制中文（#630 开头飘英文）+ chat 派单预览改「验证报告：结论先行、不回显客户铁律块」（铁律块是放行对照格式，频道读者是同事）。
+- 文件：static/seo-agent.html、runners/execute_task.js。
+
 ### 2026-09-07 AIRA (br) 登记：频道看板动作（kill/later）+ 判 drop 自动归档（Alvin 定并过了第一性原理复审，报备）
 
 - 频道动作：chat_reply 的 actions 对频道根放开，白名单只有 kill（归档不做，task_close killed 留档非删除）与 later（挂起）。防砍错三层：**双锚校验**（task_id + title_check 标题片段，服务端比对不上拒执行——30 连假 merge 的教训写进机制）；**在跑保护**（queued job 随砍随撤记 [cancelled]，running 拒砍等跑完）；**沉没成本示众**（待放行或有产出的任务，系统行标注「砍掉即弃产出」）。跨客户拒，release 频道不可达，按发起同事记账。

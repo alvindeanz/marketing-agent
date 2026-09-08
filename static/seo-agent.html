@@ -2612,7 +2612,7 @@ function renderChatStream(){
     const who=isMe?esc(m.created_by||'我'):(isSys?'系统':'opus');
     let html='<div class="ch-turn '+cls+'">'+
       '<div class="ch-by">'+who+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
-      '<div class="ch-bubble">'+esc(m.body||'')+'</div>';
+      '<div class="ch-bubble">'+chLinkify(m.body||'')+'</div>';
     const shots=(m.refs&&m.refs.images)||[];
     const mfiles=(m.refs&&m.refs.files)||[];
     if(shots.length||mfiles.length){
@@ -2681,6 +2681,11 @@ function togglePfSec(which){
   const caret=document.getElementById('pfCaret_'+which);
   if(caret)caret.textContent=open?'▾ 展开中，点标题折叠':(which==='plan'?'▸ 已折叠，点开看当前方案与历史版本':'▸ 已折叠，点开看 Job 队列与控制台');
   if(open){if(which==='plan')loadPlans();else{loadJobs();renderPickHint()}}
+}
+
+function chLinkify(text){
+  return esc(text).replace(/(https?:\/\/[^\s<）」”"']+)/g,
+    '<a href="$1" target="_blank" rel="noopener" style="color:#60a5fa;word-break:break-all">$1</a>');
 }
 
 function chKey(ev){
@@ -3058,6 +3063,8 @@ function withinWindow(t){
 }
 function taskVisible(t){
   if((t.human_state||(t.status==='done'?'closed':'wait_me'))!=='closed')return true;
+  /* Chat 单天生完结，选中 Chat 筛选时不受「隐藏已结束」影响（2026-09-08） */
+  if(originScope==='chat'&&taskOrigin(t)==='chat')return true;
   return showDone&&withinWindow(t);
 }
 function toggleShowDone(){showDone=!showDone;renderLanes()}
@@ -3416,7 +3423,7 @@ function threadBox(t,where){
     const cls=isMe?'me':(isSys?'sys':'bot');
     const who=isMe?(esc(m.created_by||'我')+((m.refs&&m.refs.source==='client')?' · <span class="badge review">客户原话</span>':'')):(isSys?'系统':'fable');
     let h='<div class="ch-turn '+cls+'"><div class="ch-by">'+who+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
-      '<div class="ch-bubble">'+esc(m.body||'')+'</div>';
+      '<div class="ch-bubble">'+chLinkify(m.body||'')+'</div>';
     const shots=(m.refs&&m.refs.images)||[];
     if(shots.length)h+='<div class="fb-thumbs">'+shots.map(n=>fbThumb(n,0)).join('')+'</div>';
     ((m.refs&&m.refs.actions)||[]).forEach((a,i)=>{h+=thActionCard(d.root_id,m.id,i,a,!!done[m.id+'/'+i])});
