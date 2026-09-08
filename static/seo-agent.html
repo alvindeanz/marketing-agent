@@ -569,8 +569,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           <div class="sec-title">生成月报</div>
           <div class="tb-group">
             <input type="month" class="tb-select" id="repMonth">
-            <button class="btn" id="repGenBtn" onclick="fireReportJob(this)">生成月报</button>
-            <button class="btn ghost hidden" id="repPaidBtn" onclick="firePaidMonthly(this)" title="按 AU 基准口径出内部草稿，人工验收后才可对客">生成 Paid 月报</button>
+            <button class="btn" id="repGenBtn" onclick="fireRepGen(this)">生成月报</button>
           </div>
         </div>
         <div class="panel">
@@ -2222,15 +2221,44 @@ function repKpiCards(metrics,from,to){
     {key:'brand',name:'品牌点击占比',has:bm.has&&shC!=null,val:shC,txt:insFmtPct(shC,1),d:insDeltaPP(shC,shP),pp:true}
   ]};
 }
-var repChan='seo';
-function setRepChan(v){repChan=v;renderReportMetrics()}
+var repChan='seo',repChanReady=false,repChanChoice={};
+function repClientRow(){return clientsData.filter(function(c){return c.client_id===curId})[0]||null}
+/* 状态先行：进报告页时按服务定初始视图（seo->SEO, sem/paid->Paid, both->记住本会话上次选择），
+   渲染函数只读 repChan、绝不改它——标签和正文永远同源（2026-09-08 标签正文错位的教训） */
+function repChanInit(){
+  var c=repClientRow();
+  var svc=c?String(c.services||'').toLowerCase():'';
+  if(repChanChoice[curId]){repChan=repChanChoice[curId]}
+  else if(svc==='sem'||svc==='paid'){repChan='paid'}
+  else{repChan='seo'}
+  if(!(c&&insSvcPaid(c)))repChan='seo';
+  repChanReady=true;
+}
+function setRepChan(v){
+  repChan=v;repChanChoice[curId]=v;
+  renderReportMetrics();renderRepGenBtn();renderReportList();
+}
 function repChanTabsHtml(){
-  var cR=clientsData.filter(function(c){return c.client_id===curId})[0];
-  if(!cR||!insSvcPaid(cR))return '';
-  var svc=String(cR.services||'').toLowerCase();
-  if(svc==='sem'||svc==='paid'){if(repChan!=='paid'){repChan='paid'}}
+  var c=repClientRow();
+  if(!c||!insSvcPaid(c))return '';
   return '<button class="btn '+(repChan==='seo'?'':'ghost')+'" onclick="setRepChan(\'seo\')">SEO</button>'+
     '<button class="btn '+(repChan==='paid'?'':'ghost')+'" onclick="setRepChan(\'paid\')">Paid</button>';
+}
+/* 生成按钮合并为一颗：文案与行为跟随当前视图，视图即意图 */
+function renderRepGenBtn(){
+  var b=document.getElementById('repGenBtn');
+  if(!b)return;
+  if(repChan==='paid'){
+    b.textContent='生成 Paid 月报（内部草稿）';
+    b.title='按 AU 基准口径出内部草稿，人工验收后才可对客';
+  }else{
+    b.textContent='生成月报';
+    b.title='';
+  }
+}
+function fireRepGen(btn){
+  if(repChan==='paid')firePaidMonthly(btn);
+  else fireReportJob(btn);
 }
 function repPaidKpiCards(metrics,from,to){
   var m=metrics||{},P=repKpiPeriod(from,to);
@@ -2303,11 +2331,7 @@ function renderReportMetrics(){
   insBind(box);
   var tb=document.getElementById('repChanTabs');
   if(tb)tb.innerHTML=repChanTabsHtml();
-  var pb=document.getElementById('repPaidBtn');
-  if(pb){
-    var cR=clientsData.filter(function(c){return c.client_id===curId})[0];
-    pb.classList.toggle('hidden',!(cR&&insSvcPaid(cR)));
-  }
+  renderRepGenBtn();
 }
 
 async function loadReportMetrics(force){
@@ -2402,12 +2426,34 @@ async function repCheckJob(){
 /* ---- 版本列表 ---- */
 async function loadReportList(){
   if(!curId)return;
+  if(repChan==='paid'){
+    var td=await api('/tasks?client_id='+curId);
+    if(!td||td._status>=400){fail(td,'Paid 草稿列表载入失败');return}
+    repState.paidDrafts=(td.tasks||[]).filter(function(t){return String(t.origin||'').indexOf('report:')===0});
+    repState.client=curId;
+    renderReportList();
+    return;
+  }
   var d=await api('/reports?client_id='+curId);
   if(!d)return;
   if(fail(d,'报告版本载入失败'))return;
   repState.reports=d.reports||[];
   repState.client=curId;
   renderReportList();
+}
+function repPaidDraftRow(t){
+  var note=String(t.result_note||'');
+  var mPrev=note.match(/预览: (https?:\S+)/);
+  var mCli=note.match(/客户版: (https?:\S+)/);
+  var st=t.status==='done'?(t.closed_kind==='accepted'?'已验收':'已关闭'):(t.status==='review'?'待人审':'生成中');
+  return '<div class="plan-row">'+
+    '<span class="badge mod">#'+t.id+'</span>'+
+    '<span class="badge '+(t.status==='done'?'done':'review')+'">'+st+'</span>'+
+    '<span class="pr-main">'+esc(t.title)+'</span>'+
+    (mCli?'<a class="log-toggle" href="'+esc(mCli[1])+'" target="_blank" rel="noopener">草稿</a>':'')+
+    (mPrev?'<a class="log-toggle" href="'+esc(mPrev[1])+'" target="_blank" rel="noopener">预览</a>':'')+
+    '<span class="plan-meta">'+esc(String(t.updated_at||'').slice(0,16))+'</span>'+
+    '</div>';
 }
 window.loadReportList=loadReportList;
 
@@ -2440,6 +2486,14 @@ function repRow(r){
     '</div>';
 }
 function renderReportList(){
+  if(repChan==='paid'){
+    var box0=document.getElementById('repVersions');
+    var meta0=document.getElementById('repVerMeta');
+    var list0=repState.paidDrafts||[];
+    if(meta0)meta0.textContent='Paid 草稿 '+list0.length+' 份（人审验收后才可对客）';
+    if(box0)box0.innerHTML=list0.length?list0.map(repPaidDraftRow).join(''):'<span class="muted">还没有 Paid 月报草稿。上面选好月份点「生成 Paid 月报」。</span>';
+    return;
+  }
   var box=document.getElementById('repVersions');
   if(!box)return;
   var meta=document.getElementById('repVerMeta');
@@ -2518,13 +2572,15 @@ async function firePaidMonthly(btn){
   if(btn){btn.disabled=true;btn.textContent='生成中…'}
   var d=await api('/reports/paid_monthly','POST',{client_id:curId,month:mon});
   paidMonthlyBusy=false;
-  if(btn){btn.disabled=false;btn.textContent='生成 Paid 月报'}
+  if(btn){btn.disabled=false;renderRepGenBtn()}
   if(d&&d._status===409){toast((d.error||'该月草稿已在跑')+'，任务 #'+(d.task_id||'?'),true);return}
   if(fail(d,'Paid 月报任务创建失败'))return;
   toast('已建任务 #'+d.task_id+'（job #'+d.job_id+'），草稿出来后在任务视图人审验收，不会自动发客户');
 }
 
+function loadReportChanBoot(){repChanInit();renderRepGenBtn()}
 function loadReport(){
+  loadReportChanBoot();
   if(!curId)return;
   if(repState.client&&repState.client!==curId)repReset();
   var mel=document.getElementById('repMonth');
