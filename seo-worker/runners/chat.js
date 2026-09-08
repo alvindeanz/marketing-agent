@@ -309,6 +309,9 @@ function buildPrompt(opts) {
     task ? '' : '  所以边界必须自己守死：**任何要改账户、改页面、花钱、发内容的活一律不进 dispatch**，',
     task ? '' : '  那些走 drafts 让人立项。能用简报直接回答的不派，派单是给要现场跑数的活的。',
     task ? '' : '- dispatch 最多 2 个；title 写清验证什么，detail 写清产出物（一页结论/一份清单）和口径。',
+    task ? '' : '- 人要的是**paid 月报/客户报告草稿**时，dispatch 加 "kind":"report"，detail 里写明报告月份并注明',
+    task ? '' : '  按 /data/aira/seo-worker/specs/report/paid_monthly_spec.md 执行；报告草稿会走人工验收，不自动完结，',
+    task ? '' : '  回复里要说清「草稿出来后需人审才发客户」。其他验证类不带 kind。',
     task ? '' : '- actions 是看板动作，频道里只有两种：kill（归档不做）、later（延后挂起）。只有人明确说了',
     task ? '' : '  「#N 不做了/砍掉/先放放」才动作。**双锚必填**：task_id 用人说的或简报任务清单里的号，',
     task ? '' : '  title_check 原样抄该任务标题的前十几个字（服务端会核对，对不上不执行）。人没带任务号',
@@ -412,7 +415,8 @@ function cleanDispatch(json, log) {
     const title = summarize(d.title, 255);
     if (!title) { say('对话：丢弃一条派单，没有标题'); continue; }
     const mod = String(d.module || 'technical').trim().toLowerCase();
-    out.push({ title, detail: summarize(d.detail, 4000), module: MODULES.indexOf(mod) !== -1 || mod === 'paid' ? mod : 'technical' });
+    const kind = String(d.kind || '').trim() === 'report' ? 'report' : 'verify';
+    out.push({ title, detail: summarize(d.detail, 4000), module: MODULES.indexOf(mod) !== -1 || mod === 'paid' ? mod : 'technical', kind });
   }
   return out;
 }

@@ -569,6 +569,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           <div class="tb-group">
             <input type="month" class="tb-select" id="repMonth">
             <button class="btn" id="repGenBtn" onclick="fireReportJob(this)">生成月报</button>
+            <button class="btn ghost hidden" id="repPaidBtn" onclick="firePaidMonthly(this)" title="按 AU 基准口径出内部草稿，人工验收后才可对客">生成 Paid 月报</button>
           </div>
         </div>
         <div class="panel">
@@ -1800,7 +1801,7 @@ function insPaidKpiCards(metrics,gran,today){
   return {period:P,cards:[
     {key:'cost',name:'花费',has:co.has,val:co.sum,txt:insFmtMoney(co.sum),d:insDelta(co.sum,cop.sum),pp:false},
     {key:'pclicks',name:'点击',has:ck.has,val:ck.sum,txt:insFmtNum(ck.sum),d:insDelta(ck.sum,ckp.sum),pp:false},
-    {key:'conv',name:'转化',has:cv.has,val:cv.sum,txt:insFmtMoney(cv.sum),d:insDelta(cv.sum,cvp.sum),pp:false},
+    {key:'conv',name:'转化',has:cv.has,val:cv.sum,txt:(cv.sum==null?'--':(Math.round(cv.sum*10)/10).toString()),d:insDelta(cv.sum,cvp.sum),pp:false},
     {key:'value',name:'转化价值',has:va.has,val:va.sum,txt:insFmtMoney(va.sum),d:insDelta(va.sum,vap.sum),pp:false},
     {key:'roas',name:'ROAS',has:roasC!=null,val:roasC,txt:roasC==null?'--':roasC.toFixed(2),d:insDelta(roasC,roasP),pp:false},
     {key:'cpa',name:'CPA',has:cpaC!=null,val:cpaC,txt:insFmtMoney(cpaC),d:insDelta(cpaC,cpaP),pp:false,inv:true}
@@ -2124,7 +2125,7 @@ function insBindOne(box){
    刻意不进 15 秒轮询：报告 job 要跑几分钟，轮询既救不了等待也会把图表交互拆掉。
    排完队按钮自己置灰 12 秒，15 秒后单独刷一次版本列表就够了。 */
 
-var REP_METRIC_LIST='gsc_impressions,gsc_clicks,gsc_clicks_brand,ga4_sessions_organic,ga4_leads';
+var REP_METRIC_LIST='gsc_impressions,gsc_clicks,gsc_clicks_brand,ga4_sessions_organic,ga4_leads,ads_cost,ads_clicks,ads_impressions,ads_conversions,ads_conv_value';
 var REP_PRESETS=['last_month','mtd','d90','custom'];
 var REP_GRAN_NAME={day:'按日汇总',week:'按周汇总',month:'按月汇总'};
 
@@ -2219,6 +2220,24 @@ function repKpiCards(metrics,from,to){
     {key:'brand',name:'品牌点击占比',has:bm.has&&shC!=null,val:shC,txt:insFmtPct(shC,1),d:insDeltaPP(shC,shP),pp:true}
   ]};
 }
+function repPaidKpiCards(metrics,from,to){
+  var m=metrics||{},P=repKpiPeriod(from,to);
+  function g(k,r){return insSumRange(m[k]||[],r.from,r.to)}
+  var co=g('ads_cost',P.cur),cop=g('ads_cost',P.prev);
+  var ck=g('ads_clicks',P.cur),ckp=g('ads_clicks',P.prev);
+  var cv=g('ads_conversions',P.cur),cvp=g('ads_conversions',P.prev);
+  var va=g('ads_conv_value',P.cur),vap=g('ads_conv_value',P.prev);
+  var roasC=co.sum>0?va.sum/co.sum:null,roasP=cop.sum>0?vap.sum/cop.sum:null;
+  var cpaC=cv.sum>0?co.sum/cv.sum:null,cpaP=cvp.sum>0?cop.sum/cvp.sum:null;
+  return {period:P,cards:[
+    {key:'cost',name:'花费',has:co.has,val:co.sum,txt:insFmtMoney(co.sum),d:insDelta(co.sum,cop.sum),pp:false},
+    {key:'pclicks',name:'广告点击',has:ck.has,val:ck.sum,txt:insFmtNum(ck.sum),d:insDelta(ck.sum,ckp.sum),pp:false},
+    {key:'conv',name:'转化',has:cv.has,val:cv.sum,txt:(cv.sum==null?'--':(Math.round(cv.sum*10)/10).toString()),d:insDelta(cv.sum,cvp.sum),pp:false},
+    {key:'value',name:'转化价值',has:va.has,val:va.sum,txt:insFmtMoney(va.sum),d:insDelta(va.sum,vap.sum),pp:false},
+    {key:'roas',name:'ROAS',has:roasC!=null,val:roasC,txt:roasC==null?'--':roasC.toFixed(2),d:insDelta(roasC,roasP),pp:false},
+    {key:'cpa',name:'CPA',has:cpaC!=null,val:cpaC,txt:insFmtMoney(cpaC),d:insDelta(cpaC,cpaP),pp:false,inv:true}
+  ]};
+}
 function repMetricsBody(metrics,events,from,to,gran,note){
   var m=metrics||{},i;
   if(!from||!to)return '<div class="panel">'+insEmptyBox('先选一个日期区间。')+'</div>';
@@ -2230,6 +2249,21 @@ function repMetricsBody(metrics,events,from,to,gran,note){
   var evb=insEventsToBuckets(insGroupEventsByDay(events),buckets);
   var clk=insAgg(m.gsc_clicks||[],buckets,'sum');
   var impr=insAgg(m.gsc_impressions||[],buckets,'sum');
+  var paidBlock='';
+  var cRow=clientsData.filter(function(c){return c.client_id===curId})[0];
+  if(cRow&&insSvcPaid(cRow)){
+    var cost=insAgg(m.ads_cost||[],buckets,'sum');
+    var conv=insAgg(m.ads_conversions||[],buckets,'sum');
+    paidBlock='<div class="sec-title" style="margin:16px 0 8px">Paid（Google Ads）</div>'+
+      insKpiHtml(repPaidKpiCards(m,from,to))+
+      insLegendHtml([{name:'花费（左轴）',color:INS_COLOR.impr},{name:'转化（右轴）',color:INS_COLOR.clicks}],true)+
+      insChart({w:920,h:220,labels:labels,events:evb,
+        empty:'这个区间没有 Ads 数据。先在洞察区回填历史数据。',
+        series:[
+          {name:'花费',color:INS_COLOR.impr,values:cost,axis:'l',width:1.8},
+          {name:'转化',color:INS_COLOR.clicks,values:conv,axis:'r',width:2.2}
+        ]});
+  }
   return '<div class="panel">'+insKpiHtml(repKpiCards(m,from,to))+
     insLegendHtml([{name:'曝光（右轴）',color:INS_COLOR.impr},{name:'点击（左轴）',color:INS_COLOR.clicks}],true)+
     insChart({w:920,h:280,labels:labels,events:evb,
@@ -2238,6 +2272,7 @@ function repMetricsBody(metrics,events,from,to,gran,note){
         {name:'曝光',color:INS_COLOR.impr,values:impr,axis:'r',width:1.8},
         {name:'点击',color:INS_COLOR.clicks,values:clk,axis:'l',width:2.2}
       ]})+
+    paidBlock+
     '<div class="plan-meta" style="margin-top:6px">'+esc(note)+'</div>'+
     '</div>';
 }
@@ -2256,6 +2291,11 @@ function renderReportMetrics(){
   }
   box.innerHTML=repMetricsBody(repState.metrics,repState.events,repState.from,repState.to,repState.gran,repNoteText());
   insBind(box);
+  var pb=document.getElementById('repPaidBtn');
+  if(pb){
+    var cR=clientsData.filter(function(c){return c.client_id===curId})[0];
+    pb.classList.toggle('hidden',!(cR&&insSvcPaid(cR)));
+  }
 }
 
 async function loadReportMetrics(force){
@@ -2455,6 +2495,17 @@ window.editRepNote=editRepNote;
 window.cancelRepNote=cancelRepNote;
 window.saveRepNote=saveRepNote;
 window.toggleRepStatus=toggleRepStatus;
+
+async function firePaidMonthly(btn){
+  var mEl=document.getElementById('repMonth');
+  var mon=mEl?String(mEl.value||''):'';
+  if(!/^\d{4}-\d{2}$/.test(mon)){toast('先选报告月份',true);return}
+  if(btn)btn.disabled=true;
+  var d=await api('/reports/paid_monthly','POST',{client_id:curId,month:mon});
+  if(btn)btn.disabled=false;
+  if(fail(d,'Paid 月报任务创建失败'))return;
+  toast('已建任务 #'+d.task_id+'（job #'+d.job_id+'），草稿出来后在任务视图人审验收，不会自动发客户');
+}
 
 function loadReport(){
   if(!curId)return;

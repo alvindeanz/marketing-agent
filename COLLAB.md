@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (bt) 登记：报告视图补 Paid 区间指标 + Paid 月报草稿产线 + Chat 语义生成（Alvin 定）
+
+- 报告 tab：sem/both 客户加 Paid 六卡（花费/广告点击/转化/转化价值/ROAS/CPA）与花费-转化曲线，数据直读 seo_metrics_daily 的 ads_ 列；顺带修 Dashboard 洞察的转化卡误用金额格式。
+- Paid 月报：新 spec `specs/report/paid_monthly_spec.md`（AU 口径基准：WF 后台 leads/gclid、捕获起点守卫、投放天数核对、告警红禁用、自检清单顶卡），生成走 analysis 产线（方向卡同款），**产出带 .draft 水印，人工验收（放行=验收）后才可对客，这是红线**。入口两个：报告 tab「生成 Paid 月报」按钮（POST /reports/paid_monthly，origin=report:ui）；频道语义（dispatch 加 kind:"report"，origin=report:{root}，出稿回频道但不自动验收，与 verify 类的自动完结分开）。
+- 主 report runner（你的 SEO 叙事产线）没动；paid 章并入主产线留待草稿线跑顺后再议。
+
 ### 2026-09-08 AIRA (bs) 登记：Chat 派单首日三处体验修正（Alvin 摸底指出）
 
 - Chat 筛选自动含已结束（Chat 单天生 done，被「隐藏已结束」默认吞掉，筛了个寂寞）；聊天气泡 URL 链接化（转义后安全替换，频道与任务线程同款）；execute 分析摘要强制中文（#630 开头飘英文）+ chat 派单预览改「验证报告：结论先行、不回显客户铁律块」（铁律块是放行对照格式，频道读者是同事）。

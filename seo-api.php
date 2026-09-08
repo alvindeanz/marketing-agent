@@ -1663,6 +1663,21 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     $cq->closeCursor();
     /* Chat 派单（只读验证）：产出即完结不进待放行不排判定，结果回频道系统行，
        留痕给人工审计（Alvin 发起，不自动化）。 */
+    if(strpos((string)($cr['origin']??''),'report:')===0){
+        /* 报告草稿：不自动验收（红线：对客发送必须人审），只把出稿消息回频道 */
+        $rootIdR=(int)substr((string)$cr['origin'],7);
+        if($rootIdR>0){
+            $rqR=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+            $rqR->execute([$rootIdR]);
+            $rootR=$rqR->fetch();
+            if($rootR){
+                $sumR=trim((string)($i['note']??''));
+                if($sumR==='')$sumR=trim((string)($cr['result_note']??''));
+                chat_msg_insert($rootR,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」草稿已出：'.mb_substr($sumR,0,300,'UTF-8')."\n注意：这是内部草稿，人工验收（放行=验收）后才可发客户。",'seo-worker');
+            }
+        }
+        /* 继续走正常 review 排队，人审入口不变 */
+    }
     if(strpos((string)($cr['origin']??''),'chat:')===0){
         task_close($tid,'accepted','Chat 派单产出自动验收（只读验证类，人工审计抽查）','seo-worker');
         $rootIdC=(int)substr((string)$cr['origin'],5);
@@ -3193,6 +3208,36 @@ if($m==='GET'&&$ROUTE==='/inbox/chats'){
 // POST /inbox/chat -> 开一个新会话。
 // body { client_id, title?, text }，一次请求做三件事：建根、写第一条人消息、
 // 排 chat job。标题不给就从第一句话截一段，人懒得起名是常态。
+/* POST /reports/paid_monthly body { client_id, month:"YYYY-MM" } -> { task_id, job_id }
+   报告 tab 的「生成 Paid 月报」按钮：建 analysis 任务按 specs/report/paid_monthly_spec.md 出内部草稿，
+   走正常 review 人审（红线：对客发送必须人审）。 */
+if($m==='POST'&&$ROUTE==='/reports/paid_monthly'){
+    $u=auth_user();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    $mon=(string)($i['month']??'');
+    if(!$cid)res(400,['error'=>'client_id required']);
+    if(!preg_match('#^\d{4}-\d{2}$#',$mon))res(400,['error'=>'month 要 YYYY-MM']);
+    $c=db()->prepare("SELECT id,name,services FROM clients WHERE id=?");
+    $c->execute([$cid]);
+    $cl=$c->fetch();
+    if(!$cl)res(404,['error'=>'Client not found']);
+    $svc=strtolower((string)$cl['services']);
+    if(!in_array($svc,['sem','paid','both'],true))res(400,['error'=>'这个客户没有 paid 服务']);
+    list($clean,$err)=task_fields_clean([
+        'title'=>'Paid 月报草稿 '.$mon,
+        'detail'=>"按 /data/aira/seo-worker/specs/report/paid_monthly_spec.md 出 ".$mon." 的 paid 月报内部草稿。\n"
+            ."报告月份：".$mon."。口径以该 spec 与客户 facts（ads.google.conversion_scope、paid.report_lead_source 等）为准，数字全部现拉现算。\n"
+            ."产出草稿 HTML 到 reports/ 并跑 lint，摘要里给自检清单结论与各数字来源。\n\n[来源] 报告页一键生成，由 ".$u['username']." 发起；内部草稿，人工验收后才可对客。",
+        'module'=>'paid','owner_type'=>'agent','priority'=>'P1','ops'=>'','sprint'=>'',
+    ],['status_force'=>'approved']);
+    if($err)res(400,['error'=>$err]);
+    $tid=task_insert($cid,$clean,$u['username'],'report:ui');
+    list($jids,)=queue_task_jobs($cid,'execute_task',[$tid],$u['username'],'paid_monthly_report');
+    audit($u['username'],'seo_paid_monthly_report',(string)$tid,['client_id'=>$cid,'month'=>$mon,'job_id'=>$jids?$jids[0]:0]);
+    res(200,['ok'=>true,'task_id'=>$tid,'job_id'=>$jids?$jids[0]:0]);
+}
+
 /* POST /inbox/channel/reset body { client_id } -> { old_root_id, root_id }
    翻篇（2026-09-07 Alvin 定，输入框敲 /reset 触发）：现频道归档成历史（随时可翻，
    不再接新消息），开一个空白新频道。上下文本就每轮重建，翻篇翻的是屏不是记忆，
@@ -3483,6 +3528,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
         $askerD=($umD&&$umD['created_by']!=='')?(string)$umD['created_by']:'seo-worker';
         foreach($dispIn as $dx){
             if(!is_array($dx))continue;
+            $kindD=((string)($dx['kind']??'verify')==='report')?'report':'verify';
             list($cleanD,$errD)=task_fields_clean([
                 'title'=>(string)($dx['title']??''),
                 'detail'=>(string)($dx['detail']??''),
@@ -3490,11 +3536,12 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 'owner_type'=>'agent','priority'=>'P1','ops'=>'','sprint'=>'',
             ],['status_force'=>'approved']);
             if($errD)continue;
-            $cleanD['detail'].="\n\n[来源] Chat 频道 #".$rootId." 由 ".$askerD." 发起，fable 判定为只读验证类，免审批；产出报告或结论，不动任何线上资产。";
-            $tidD=task_insert((int)$root['client_id'],$cleanD,$askerD,'chat:'.$rootId);
+            $cleanD['detail'].="\n\n[来源] Chat 频道 #".$rootId." 由 ".$askerD." 发起，"
+                .($kindD==='report'?"月报/报告草稿类：产出内部草稿，须人工验收后才可对客。":"fable 判定为只读验证类，免审批；产出报告或结论，不动任何线上资产。");
+            $tidD=task_insert((int)$root['client_id'],$cleanD,$askerD,($kindD==='report'?'report:':'chat:').$rootId);
             list($jidsD,)=queue_task_jobs((int)$root['client_id'],'execute_task',[$tidD],$askerD,'chat_dispatch');
             $dispatched[]=['task_id'=>$tidD,'job_id'=>$jidsD?$jidsD[0]:0,'title'=>$cleanD['title']];
-            chat_msg_insert($root,'chat_agent','已派单 #'.$tidD.'「'.$cleanD['title'].'」（Chat 只读验证，job #'.($jidsD?$jidsD[0]:0).'），跑完结果自动回频道。','seo-worker');
+            chat_msg_insert($root,'chat_agent','已派单 #'.$tidD.'「'.$cleanD['title'].'」（'.($kindD==='report'?'报告草稿，出稿后需人工验收再对客':'Chat 只读验证').'，job #'.($jidsD?$jidsD[0]:0).'），跑完结果自动回频道。','seo-worker');
         }
     }
     audit('seo-worker','seo_chat_reply',(string)$rootId,[
