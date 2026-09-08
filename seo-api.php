@@ -1716,9 +1716,19 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     auth_worker();
     $tid=(int)$mm[1];
     $i=input();
-    $chk=db()->prepare("SELECT id FROM seo_tasks WHERE id=?");
+    $chk=db()->prepare("SELECT id,status FROM seo_tasks WHERE id=?");
     $chk->execute([$tid]);
-    if(!$chk->fetch())res(404,['error'=>'Task not found']);
+    $trowR=$chk->fetch();
+    if(!$trowR)res(404,['error'=>'Task not found']);
+    /* 终态不可被机器结果改写（2026-09-08 #640 事故：人已置完成，最后一个在飞 apply 的迟到
+       失败结果把 done 掀回 review 并触发新判定）。done 的任务只追加备注留痕，状态一根手指不动，
+       也不进任何 origin 分支；要重开必须人显式来。 */
+    if((string)$trowR['status']==='done'){
+        $lateNote=trim((string)($i['note']??''));
+        task_append_note($tid,'[late-result] 任务已终态，迟到的 job 结果只留痕不改状态'.($lateNote!==''?('：'.mb_substr($lateNote,0,300,'UTF-8')):''));
+        audit('seo-worker','seo_task_result_late',(string)$tid,['ignored'=>true]);
+        res(200,['ok'=>true,'late'=>true,'note'=>'task already done, result recorded as note only']);
+    }
     db()->prepare("UPDATE seo_tasks SET output_url=?,status='review' WHERE id=?")
         ->execute([(string)($i['output_url']??''),$tid]);
     $note=trim((string)($i['note']??''));
