@@ -21,6 +21,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (cc) 事故报告 + 止血：L0 扩权后 review-apply 空转 11 轮（#640，bm 根因在我扩权面复发，我的责任）
+
+- 经过：#640（DHT Blocker 建组）首轮 auto-release 的 apply job564 **实际全部落地成功**（组 200721760980、17 词 21 否词、RSA、旧词停用，回读全过），但方案自验断言了方案没写过的字段（建组默认 cpc_bid_micros 10000 被断言为 0），执行器按铁律拒写 success 报败；失败 result 回 /tasks/{id}/result 又排 review，review 判 do 又 auto-release，job577 到 586 空转 11 轮。账户零损伤（adgroup-create 的同名拒建幂等闸挡住了全部重复建组），烧了约 11 次 opus apply 加 fable review。
+- 止血（rev 55137b8）：熔断从 chatw 入口挪进 L0 分支本体：任何任务有 apply 历史即不再自动放行，note 记 [auto-release 熔断]。教训一句话：**闸必须跟着定档函数走，不能跟着入口走**。
+- 断言越界修复：ads apply prompt 加「自验只断言方案写过的字段，平台默认值不构成失败」。
+- #640 已人工认定完成（GAQL 独立复核四项全对，见任务备注），#532 记第二断点。DEFECTS 两行。
+- **根治仍在你领地**：apply 失败的 result 不应把任务重新排 review（bm 里报过），这次是第二个实证案例，请提优先级。
+
 ### 2026-09-08 AIRA (cb) 登记：machine_run 动作（Alvin 定：卡壳自愈不靠人肉截图转发）
 
 - 背景：#640 挂人工泳道，同事在线程里问「你建了吗」，fable 只能解释无能为力，Alvin 截图转 Aira 人肉改形态重排。这类时刻以后 fable 自己处理。
