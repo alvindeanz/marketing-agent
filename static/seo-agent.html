@@ -299,6 +299,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .lane-body{padding:8px 12px 12px}
 .grp-label{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.6px;margin:10px 0 5px}
 .tcard{background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:9px 11px;margin-bottom:6px}
+.tcard.closed{opacity:.62}.tcard.closed:hover{opacity:1}
 .tcard-top{display:flex;align-items:flex-start;gap:7px}
 .tcard-title{flex:1;font-size:14.5px;color:#e2e8f0;line-height:1.45;min-width:0;word-break:break-word}
 .tcard-detail{font-size:13px;color:#8b98ab;line-height:1.55;margin-top:5px;white-space:pre-wrap}
@@ -3403,7 +3404,13 @@ function stateLine(t){
   if(hs==='wait_me'){tag='等我';txt=t.wait_reason||'待判'}
   else if(hs==='running'){tag='在跑';txt=t.run_note||'执行中';const js=t.job_state||{};if(js.status==='running'){const m=qsElapsedMin(js.claimed_at,null);if(m!=null)txt+=' '+(m>0?(m+' 分钟'):'不到 1 分钟')}}
   else if(hs==='wait_ext'){tag='等外部';txt=t.wait_reason||'延后'}
-  else{tag={done:'落地',accepted:'验收',dropped:'砍掉',merged:'并入',killed:'不做'}[t.closed_kind||'done']||'结束';txt=''}
+  else{
+    /* 终态必须一眼读出「已经结束」（2026-09-08 Alvin：绿色「落地」被读成进行中的阶段）。
+       统一「已」字头 + 结束日期，颜色仍按 closed_kind 的既有 CSS 区分。 */
+    tag={done:'已落地',accepted:'已验收',dropped:'已放弃',merged:'已并入',killed:'已叫停'}[t.closed_kind||'done']||'已结束';
+    const d=String(t.updated_at||'').slice(0,10);
+    txt=(({done:'机器改完并自验通过',accepted:'人工验收通过',dropped:'判定不值得做',merged:'并入其他任务',killed:'人工叫停'})[t.closed_kind||'done']||'')+(d?(' · '+d):'');
+  }
   const failed=(t.job_state||{}).status==='failed'&&hs==='wait_me';
   const bits=['<span class="st-tag">'+esc(tag)+'</span>'];
   if(txt)bits.push('<span'+(failed?' class="st-fail"':'')+'>'+esc(txt)+'</span>');
@@ -3477,7 +3484,7 @@ function taskCard(t,col){
   const dl=String(t.detail||'');
   const clip=dl.length>150&&!detailOpen[t.id];
   const detail=dl?'<div class="tcard-detail'+(clip?' clip':'')+'" onclick="toggleDetail('+t.id+')" title="'+(clip?'展开':'收起')+'">'+esc(dl)+'</div>':'';
-  return '<div class="tcard">'+
+  return '<div class="tcard'+((t.human_state||'')==='closed'?' closed':'')+'">'+
     '<div class="tcard-top">'+cb+'<div class="tcard-title"><span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div></div>'+
     stateLine(t)+
     rvLine(t)+
