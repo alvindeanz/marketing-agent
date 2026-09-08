@@ -28,7 +28,7 @@ const { ensureClientWorkspace, truncate, summarize } = require('../lib/util');
 
 // 任务线程模式：根挂了一个任务时，会话就是这个任务的线程。模型多拿到任务全文、
 // 判决和（等放行时的）方案正文，回复末尾可以附「动作提议」，人点执行才落账。
-const THREAD_ACTIONS = ['redispatch', 'kill', 'later', 'set_verdict', 'edit_task', 'release'];
+const THREAD_ACTIONS = ['redispatch', 'kill', 'later', 'set_verdict', 'edit_task', 'release', 'machine_run'];
 const THREAD_TMP_DIR = 'thread-images';
 const MAX_ACTIONS = 3;
 const MAX_PLAN_CHARS = 6000;
@@ -231,7 +231,7 @@ function actionsContract(task) {
   const canRelease = task && task.status === 'review';
   return [
     '3. 动作（只在人的话已经明确指向一个动作时出现）：在 json 里加 actions 数组，最多 ' + MAX_ACTIONS + ' 个。',
-    '   六种，多一种没有：',
+    '   七种，多一种没有：',
     '   - redispatch {reason}：人要求改了再跑一遍。reason 写清这次要怎么改，会原样写进任务说明再重跑。',
     '   - kill {reason}：人说这件事不做了。',
     '   - later {reason}：人说先放着，reason 写等什么。',
@@ -239,6 +239,11 @@ function actionsContract(task) {
     '   - edit_task {title?, detail?, priority?, sprint?, reason}：人要改任务本身（标题、说明、优先级、sprint）。',
     '     detail 给的是完整新说明，不是补丁；只改一个字段就只给那个字段。priority 只能是 P0 到 P3。',
     (canRelease ? '   - release {reason}：人说方案可以放行落地。这个任务现在正等放行，可以提。' : '   - release：这个任务现在不在等放行状态，不许提。'),
+    '   - machine_run {ops, module?, backing_fact?, reason}：任务挂在人工泳道但能力清单已覆盖时',
+    '     （人问「怎么还没做/能不能直接做/你建了吗」就是这个时刻），把它转成机器执行位并直接排产。',
+    '     ops 从能力清单操作名里选（逗号分隔）；客户已批准的改动填 backing_fact 指向批文 fact key。',
+    '     转位不花钱不担风险：落地照旧按放行政策（可回滚或有背书自动落，花钱不可逆停人）。',
+    '     op 不在政策表会被拒，那说明缺执行器：正文里说清「缺 XX 执行器，已在任务上登记缺口，当前走人工」。',
     '   **前五种在你回复落库的同一刻由服务端直接执行**，不再等人点一次，所以只有人已经明确说了才写，',
     '   人只是在问情况、还在讨论、拿不准，就不要附。写了等于替人拍板。release 例外：它动线上，',
     '   永远只是一张卡，人点了才放。',
@@ -352,11 +357,13 @@ function buildPrompt(opts) {
     task ? '' : '  记录客户批准的 fact key（如 paid.change_list_approved），没有批文就不填，会停人确认。',
     task ? '' : '  正文里必须复述：派了什么、动哪些资产、风险档是直落还是等确认。没有人要求就不派改动类。',
     task ? '' : '- dispatch 最多 2 个；title 写清做什么，detail 写清产出物或验收标准（改动类写完成标准与回滚依据）。',
-    task ? '' : '- actions 是看板动作，频道里有三种：kill（归档不做）、later（延后挂起）、release（放行落地，',
+    task ? '' : '- actions 是看板动作，频道里有四种：kill（归档不做）、later（延后挂起）、release（放行落地，',
     task ? '' : '  只对待放行任务，人明确说了「放行 #N/可以落」才用，这就是花钱与不可逆类的人工确认）。**双锚必填**：',
     task ? '' : '  task_id 用人说的或简报任务清单里的号，title_check 原样抄该任务标题的前十几个字（服务端会核对，',
     task ? '' : '  对不上不执行）。人没带任务号且简报里对不出唯一一个时，列出候选问人，绝不猜号。正文必须复述',
     task ? '' : '  动作对象和理由；该任务已有产出（待放行或有结果备注）时砍掉前必须说明「砍掉即弃产出」。',
+    task ? '' : '  第四种 machine_run {task_id, title_check, ops, module?, backing_fact?, reason}：人工泳道的任务',
+    task ? '' : '  能力清单已覆盖、人在催或问能不能直接做时，转机器执行位并排产，规矩同任务线程里的说明。',
     '- json 必须语法合法。字符串值里不许出现英文双引号，要引用时用中文引号；',
     '  不许出现换行符，长内容压成一行。输出前自己检查一遍能不能被机器解析。',
     task
@@ -407,6 +414,20 @@ function cleanActions(json, task, log) {
       out.push({ type, verdict: v, reason });
       continue;
     }
+    if (type === 'machine_run') {
+      const opsA = String(a.ops || '').trim();
+      if (!opsA) {
+        say('线程：丢弃一个 machine_run，没有 ops');
+        continue;
+      }
+      const rowM = { type, reason, ops: opsA.slice(0, 255) };
+      const modA = String(a.module || '').trim().toLowerCase();
+      if (MODULES.includes(modA)) rowM.module = modA;
+      const bkA = String(a.backing_fact || '').trim();
+      if (bkA) rowM.backing_fact = bkA.slice(0, 100);
+      out.push(rowM);
+      continue;
+    }
     if (type === 'edit_task') {
       const row = { type, reason };
       if (a.title && String(a.title).trim()) row.title = summarize(a.title, 255);
@@ -436,11 +457,21 @@ function cleanChanActions(json, log) {
     if (out.length >= 3) break;
     const a = item || {};
     const type = String(a.type || '').trim();
-    if (type !== 'kill' && type !== 'later' && type !== 'release') { say('对话：频道动作只认 kill/later/release，丢弃 ' + type); continue; }
+    if (type !== 'kill' && type !== 'later' && type !== 'release' && type !== 'machine_run') { say('对话：频道动作只认 kill/later/release/machine_run，丢弃 ' + type); continue; }
     const tid = Number(a.task_id) || 0;
     const tc = String(a.title_check || '').trim();
     if (!tid || tc.length < 6) { say('对话：频道动作缺双锚（task_id+title_check），丢弃'); continue; }
-    out.push({ type, task_id: tid, title_check: tc.slice(0, 120), reason: summarize(a.reason, 500) });
+    const row = { type, task_id: tid, title_check: tc.slice(0, 120), reason: summarize(a.reason, 500) };
+    if (type === 'machine_run') {
+      const opsC = String(a.ops || '').trim();
+      if (!opsC) { say('对话：丢弃一个 machine_run，没有 ops'); continue; }
+      row.ops = opsC.slice(0, 255);
+      const modC = String(a.module || '').trim().toLowerCase();
+      if (MODULES.includes(modC)) row.module = modC;
+      const bkC = String(a.backing_fact || '').trim();
+      if (bkC) row.backing_fact = bkC.slice(0, 100);
+    }
+    out.push(row);
   }
   return out;
 }

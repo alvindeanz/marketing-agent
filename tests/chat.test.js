@@ -143,6 +143,24 @@ t('分级派单：change 必带 ops，backing_fact 跟着走，verify/report 不
   assert.strictEqual(dropped.length, 0, '改动类没 ops 必须整条丢');
 });
 
+t('machine_run：线程与频道两侧都认，ops 必填，module/backing_fact 跟着走（2026-09-08 卡壳自愈）', () => {
+  const th = chat.cleanActions({ actions: [
+    { type: 'machine_run', reason: '能力已覆盖', ops: 'adgroup-create,keyword-pause', module: 'paid', backing_fact: 'paid.change_list_approved' },
+    { type: 'machine_run', reason: '没 ops 的丢' },
+  ] }, { id: 1, status: 'approved' }, null);
+  assert.strictEqual(th.length, 1);
+  assert.strictEqual(th[0].ops, 'adgroup-create,keyword-pause');
+  assert.strictEqual(th[0].module, 'paid');
+  assert.strictEqual(th[0].backing_fact, 'paid.change_list_approved');
+  const ch = chat.cleanChanActions({ actions: [
+    { type: 'machine_run', task_id: 640, title_check: 'DHT Blocker 建组', ops: 'adgroup-create', reason: 'x' },
+    { type: 'machine_run', task_id: 641, title_check: 'DHT Blocker 建组', reason: '没 ops 的丢' },
+  ] }, null);
+  assert.strictEqual(ch.length, 1);
+  assert.strictEqual(ch[0].type, 'machine_run');
+  assert.strictEqual(ch[0].ops, 'adgroup-create');
+});
+
 t('频道动作认 release，双锚照旧必填', () => {
   const out = chat.cleanChanActions({ actions: [
     { type: 'release', task_id: 641, title_check: '四组 intent 路由' },

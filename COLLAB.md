@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (cb) 登记：machine_run 动作（Alvin 定：卡壳自愈不靠人肉截图转发）
+
+- 背景：#640 挂人工泳道，同事在线程里问「你建了吗」，fable 只能解释无能为力，Alvin 截图转 Aira 人肉改形态重排。这类时刻以后 fable 自己处理。
+- 动作：thread/channel 双侧新增 machine_run {ops, module?, backing_fact?, reason}。服务端 thread_action_exec 单一实现（频道侧复用不复制）：ops 过 dispatch_grade 校验（invalid 拒并提示登记缺口）、owner 转 agent、批文 fact 核实后写 [backing] 行、直接排 execute。列进 THREAD_AUTO_ACTIONS：转位只花一次出方案，真风险闸仍在放行政策层。
+- 缺口登记 v1：op 无执行器时 fable 在线程说明并在任务备注标 [capability-gap]（attention 浮等我队列，Aira 扫队列排开发）。triage 巡检加「机器可接但挂人工泳道」检测属你认领的 runner，报备后另做。
+- prompt/规整器/测试三处同步（chat.test 35 项）。api 与 worker 相邻部署。
+
 ### 2026-09-08 AIRA (ca) 登记：structural 档 + adgroup-create/keyword-pause 执行器（Alvin 批，渠道打通「建组类」）
 
 - 政策 version 4（Alvin 2026-09-08 批的放宽，json+md 同 commit）：新增 risk_class **structural** = 预算中性新建（既有 campaign 内建组，不动预算与出价策略，总花费上限不变）。放行同 external：有客户批文 backing auto，无背书 confirm。真 spend（预算/出价策略/新 campaign）永远人放行不变。目前只有 adgroup-create 一个 op 降到此档。

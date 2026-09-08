@@ -1058,11 +1058,12 @@ function inbox_refs_norm($v){
 /* 任务线程里模型提议的动作，存在 chat_agent 行的 refs.actions，人点「执行」才落账
    （POST /inbox/{root}/thread_action）。白名单五种，跟 spawn_task 的草案同一个道理：
    提议是卡片，不是账本上的一行。 */
-define('THREAD_ACTIONS',['redispatch','kill','later','set_verdict','edit_task','release']);
+define('THREAD_ACTIONS',['redispatch','kill','later','set_verdict','edit_task','release','machine_run']);
 /* 线程里人话已经明确指向的动作，模型回复落库时服务端立即执行，不等人再点一次：
    这些全是看板层改动，可逆，指令来源是人自己在线程里说的话。
-   release 不在里面：放行动线上，永远留人点。 */
-define('THREAD_AUTO_ACTIONS',['redispatch','kill','later','set_verdict','edit_task']);
+   release 不在里面：放行动线上，永远留人点。
+   machine_run 在里面（2026-09-08）：转执行位只花一次出方案，真正的风险闸在放行政策那层没动。 */
+define('THREAD_AUTO_ACTIONS',['redispatch','kill','later','set_verdict','edit_task','machine_run']);
 define('THREAD_MAX_ACTIONS',3);
 function inbox_actions_norm($v){
     if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
@@ -1092,6 +1093,15 @@ function inbox_actions_norm($v){
             if(isset($a['sprint']))$f['sprint']=mb_substr(trim((string)$a['sprint']),0,10,'UTF-8');
             if(!$f)continue;
             $row['fields']=$f;
+        }
+        if($type==='machine_run'){
+            $opsN=trim((string)($a['ops']??''));
+            if($opsN==='')continue;
+            $row['ops']=mb_substr($opsN,0,255,'UTF-8');
+            $modN=(string)($a['module']??'');
+            if(in_array($modN,['technical','onpage','content','local','offpage','paid'],true))$row['module']=$modN;
+            $bkN=trim((string)($a['backing_fact']??''));
+            if($bkN!=='')$row['backing_fact']=mb_substr($bkN,0,100,'UTF-8');
         }
         if($row['reason']===''&&$type!=='release')continue;
         $out[]=$row;
@@ -1144,6 +1154,29 @@ function thread_action_exec($root,$t,$a,$by){
         }
         list($jids,$sk)=queue_task_jobs($cid,'apply_task',[$tid],$by,'seo_tasks_release');
         return ['ok'=>true,'what'=>'已放行'.($jids?('，apply job #'.$jids[0]):'（已在队列，未重复排）'),'job_ids'=>$jids];
+    }
+    if($type==='machine_run'){
+        /* 转机器执行位（2026-09-08 Alvin 定：卡壳自愈不靠人肉截图转发）。
+           人工泳道的任务，能力清单已覆盖时 fable 直接改形态并重排：owner 转 agent、补 ops、
+           带批文背书。风险闸不动：转位只花一次出方案的钱，落地照旧走判定与放行政策。
+           ops 必须全部在政策表里（dispatch_grade 不得 invalid），不认识的 op 拒转并提示登记缺口。 */
+        if($t['status']==='done')return ['ok'=>false,'what'=>'任务已经结束'];
+        $opsM=array_values(array_filter(array_map('trim',explode(',',(string)($a['ops']??'')))));
+        if(!$opsM)return ['ok'=>false,'what'=>'转机器执行必须带 ops'];
+        $bkM=false;$bkKey=trim((string)($a['backing_fact']??''));
+        if($bkKey!=='')$bkM=dispatch_backing_ok($cid,$bkKey);
+        $gM=dispatch_grade($opsM,release_policy_load(),$bkM);
+        if(strpos($gM,'invalid')===0)return ['ok'=>false,'what'=>$gM.'。执行器未覆盖的操作转不了机器，在任务上标记 [capability-gap] 等排期'];
+        $modM=(string)($a['module']??'');
+        $sets=['owner_type=?','ops=?','status=?'];$args=['agent',implode(',',$opsM),'approved'];
+        if(in_array($modM,['technical','onpage','content','local','offpage','paid'],true)){ensure_task_module();$sets[]='module=?';$args[]=$modM;}
+        $args[]=$tid;
+        db()->prepare("UPDATE seo_tasks SET ".implode(',',$sets)." WHERE id=?")->execute($args);
+        $detAdd='[machine-run '.date('Y-m-d').'] 转机器执行位（'.$by.'）：'.$reason;
+        if($bkM&&strpos((string)$t['detail'],'[backing] '.$bkKey)===false)$detAdd.="\n[backing] ".$bkKey;
+        db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?) WHERE id=?")->execute([$detAdd,$tid]);
+        list($jids,$sk)=queue_task_jobs($cid,'execute_task',[$tid],$by,'seo_job_create');
+        return ['ok'=>true,'what'=>'已转机器执行位（ops '.implode(',',$opsM).'，风险档 '.$gM.($bkM?'，批文背书已核':'').'）并排产'.($jids?('，job #'.$jids[0]):'（已在队列）').'。落地按放行政策：可回滚或有背书的自动落，其余停放行卡','job_ids'=>$jids];
     }
     return ['ok'=>false,'what'=>'未知动作'];
 }
@@ -3543,7 +3576,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
         $umA=$mqA->fetch();
         $askerA=($umA&&$umA['created_by']!=='')?(string)$umA['created_by']:'seo-worker';
         foreach($actions as $idx=>$a){
-            if(!in_array($a['type'],['kill','later','release'],true))continue;
+            if(!in_array($a['type'],['kill','later','release','machine_run'],true))continue;
             $tidA=(int)($a['task_id']??0);
             $tcA=(string)($a['title_check']??'');
             $failLine=function($why)use($root,$msgId,$idx){
@@ -3572,6 +3605,13 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 if($err){$failLine($err);continue;}
                 chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」归档不做'.$sunk.'。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
                 $executed[]=['idx'=>$idx,'type'=>'kill','ok'=>true,'task_id'=>$tidA];
+            }elseif($a['type']==='machine_run'){
+                /* 频道版转机器执行位：双锚已过，逻辑与线程版同一个函数，不复制第二份。 */
+                $rM=thread_action_exec($root,$t2,$a,$askerA);
+                if($rM['ok']){
+                    chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」'.$rM['what'].'（发起 '.$askerA.'）。','seo-worker');
+                    $executed[]=['idx'=>$idx,'type'=>'machine_run','ok'=>true,'task_id'=>$tidA];
+                }else{$failLine($rM['what']);}
             }elseif($a['type']==='release'){
                 /* 语义与看板放行按钮完全一致（2026-09-08 #639 job#544 教训）：
                    分析任务放行=验收；博客大纲放行=排写稿；只有带 ops 的方案任务才排 apply。
