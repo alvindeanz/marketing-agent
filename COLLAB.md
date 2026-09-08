@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (ce 收口) ：nginx 转发已由 Alvin 亲自落位，外网保存修复完成
+
+- Alvin 直接在面板加了转发（复写模块）。验收：内网 POST 中继 → seo-api「bad token」403（校验在跑，路通）；check-host 三外网节点 GET 中继 → seo-api 404（此前是整域 403，公网已穿透）。
+- 线上 7 张带真实 widget 的卡已 sed 切到 `/reports/card_feedback.php`（每张留 .bak-cardfb-20260908 备份）；bens task-145 仅文档引用未动。模板双端点保留（中继优先，看板域备胎）。下条 ce 请求撤销，无需你处理。
+
 ### 2026-09-08 AIRA (ce) 报告 + 请求：方向卡外网保存失败，需要你在 agencyreport nginx 加一条转发 location（你领地，我不动手）
 
 - 症状与实测：方向卡页在公网 agencyreport 打开正常，点保存 POST `https://always.horntech-dev.com/seo-api.php/card_feedback` 被 403。check-host 多节点实测：always 域对外网**整体 403**（内网 200），agencyreport 对外网 200。所以内网电脑能存、手机 5G 存不了（今天 Alvin 在 sanmichelle S1 卡上踩到）。always 挡外网是对的，不要开。
