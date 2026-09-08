@@ -473,7 +473,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           </div>
         </div>
         <div class="plan-meta" style="margin-bottom:10px">
-          直接打字聊这个客户的事：问数据、聊规划、贴截图。它只读，改不了看板任何一格；聊到能派的活它会附任务草案，你点「立项」才建任务。
+          直接打字聊这个客户的事：问数据、聊规划、贴截图。它只读，改不了看板任何一格；聊到能派的活它会附任务草案，你点「开工」才建任务并直接排产。
           你说到的客户事实（门店、政策、价格、联系人这类）会被自动抽取进该客户的档案，说话按可入档的标准来。
         </div>
         <div class="ch-hist hidden" id="chHist"></div>
@@ -789,7 +789,7 @@ let apprPlanId=0,apprTasks=[],apprPick={};
 let chanRootId=0,chatHistOpen=false,chatLimit=50; /* 频道根与历史区开关；chatRootId=当前打开的会话（频道或历史） */
 /* 收件箱对话：会话按当前客户过滤，会话详情 5 秒轮询一次等 opus 回复，
    会话关掉或者离开这个视图就把轮询停掉，别让它在后台空转。
-   chatSpawned 记这一轮点过立项的草案（key 是 消息id:序号），刷新后靠系统行补回来。 */
+   chatSpawned 记这一轮点过开工的草案（key 是 消息id:序号），刷新后靠系统行补回来。 */
 let chatList=[],chatRootId=0,chatItem=null,chatMsgs=[],chatPending=0,chatTimer=null,chatSending=false,chatSpawned={};
 
 function priIdx(p){const n=PRIORITIES.indexOf(p||'P2');return n<0?2:n}
@@ -2604,7 +2604,7 @@ function loadReport(){
 
 /* ================= Chat（频道化，2026-09-07 Alvin 定） =================
    聊天是界面，看板是账本。这一段没有任何直接改看板的调用：唯一写看板的按钮是
-   「立项」（POST /inbox/{root}/spawn_task，与人工建任务同一套校验）。别加第二个写口子。
+   「开工」（POST /inbox/{root}/spawn_task，与人工建任务同一套校验）。别加第二个写口子。
    决策收件箱已整体移除：裁决在任务视图里做，ruling 端点与历史数据仅后台保留。 */
 
 function chStop(){if(chatTimer){clearInterval(chatTimer);chatTimer=null}}
@@ -2693,16 +2693,17 @@ async function loadChatThread(silent){
   renderChatStatus();
 }
 
-/* 已经立过项的草案：服务端在会话里写了一条系统行「已立项 #12「标题」」，
+/* 已经开过工的草案：服务端在会话里写了一条系统行「已开工 #12「标题」」
+   （2026-09-08 前的老回执写「已立项」，一并认），
    刷新以后靠标题把草案卡对回去，按钮就不会回到可点状态。 */
 function chSpawnedTitles(){
-  /* title -> [{id:任务号, at:回执消息id}]。回执永远晚于被立项的草案，
+  /* title -> [{id:任务号, at:回执消息id}]。回执永远晚于被开工的草案，
      所以草案只认「在它之后出现的回执」；任务被砍后重发的同名草案不再被旧回执误标，
-     立项按钮照常出现（2026-09-08 Ctomi #638 重建死循环的教训）。 */
+     开工按钮照常出现（2026-09-08 Ctomi #638 重建死循环的教训）。 */
   const map={};
   chatMsgs.forEach(m=>{
     if(m.kind!=='chat_agent'||m.created_by==='seo-worker')return;
-    const mm=String(m.body||'').match(/^已立项 #(\d+)「([\s\S]+?)」/);
+    const mm=String(m.body||'').match(/^已(?:立项|开工) #(\d+)「([\s\S]+?)」/);
     if(!mm)return;
     if(!map[mm[2]])map[mm[2]]=[];
     map[mm[2]].push({id:parseInt(mm[1],10),at:m.id});
@@ -2721,10 +2722,10 @@ function chDraftCard(msgId,idx,d,doneId){
   if(d.sprint)rows.push('sprint '+esc(d.sprint));
   if(d.ops)rows.push('ops '+esc(d.ops));
   const act=doneId
-    ? '<span class="badge done">已立项 #'+doneId+'</span>'+
+    ? '<span class="badge done">已开工 #'+doneId+'</span>'+
       '<span class="sb-act" onclick="navTo('+curId+',\'tasks\')">去任务看板</span>'
-    : '<button class="btn tiny" id="ch_sp_'+key.replace(':','_')+'" onclick="spawnTask('+msgId+','+idx+')">立项</button>'+
-      '<span class="plan-meta">立项后建成 approved 任务，detail 末尾会带上来源行。</span>';
+    : '<button class="btn tiny" id="ch_sp_'+key.replace(':','_')+'" onclick="spawnTask('+msgId+','+idx+')">开工</button>'+
+      '<span class="plan-meta">开工即排产：建任务并直接进执行队列（客户侧任务只挂看板），detail 末尾会带上来源行。</span>';
   return '<div class="ch-draft">'+
     '<div class="dt">任务草案：'+esc(d.title||'')+'</div>'+
     (d.detail?'<div class="dd">'+esc(d.detail)+'</div>':'')+
@@ -2897,9 +2898,9 @@ async function spawnTask(msgId,idx){
     priority:d0.priority||'P2',sprint:d0.sprint||'',ops:d0.ops||''
   });
   if(btn)btn.disabled=false;
-  if(fail(d,'立项失败'))return;
+  if(fail(d,'开工失败'))return;
   chatSpawned[msgId+':'+idx]=d.task_id;
-  toast('已立项 #'+d.task_id+'，任务已经在看板上');
+  toast('已开工 #'+d.task_id+(d.job_id?'，已排产 job #'+d.job_id:'，已挂看板等客户动作'));
   await loadChatThread(false);
   loadClients(true);
 }
@@ -3473,7 +3474,7 @@ function taskCard(t,col){
     stateLine(t)+
     rvLine(t)+
     detail+
-    '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+(taskOrigin(t)==='chat'?'<span class="badge review" title="Chat 来源：派单/立项/报告草稿">Chat</span>':'')+opsTags(t)+
+    '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+(taskOrigin(t)==='chat'?'<span class="badge review" title="Chat 来源：派单/开工/报告草稿">Chat</span>':'')+opsTags(t)+
     (t.owner_type!=='agent'?'<span class="badge mod">'+esc(t.owner_type)+'</span>':'')+
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+acts+'</div>'+
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
@@ -3516,7 +3517,7 @@ async function decideTask(id,yes){
    这一段没有别的写口子。 */
 var thOpen={},thData={},thSending={},thClient={};
 const TH_ACTION_LABEL={redispatch:'改了重跑',kill:'不做了',later:'先放着',set_verdict:'改判',edit_task:'改任务',release:'放行落地'};
-function thIsSysLine(m){return m.kind==='chat_agent'&&/^(已执行提议|提议 \d+\/\d+ 未执行|已立项)/.test(String(m.body||''))}
+function thIsSysLine(m){return m.kind==='chat_agent'&&/^(已执行提议|提议 \d+\/\d+ 未执行|已立项|已开工)/.test(String(m.body||''))}
 function toggleThread(id){
   thOpen[id]=!thOpen[id];
   if(thOpen[id]&&!thData[id]){loadThread(id);return}

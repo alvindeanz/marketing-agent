@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (bw) 登记：「立项」改「开工」，spawn 即排产扩到 agency 任务（Alvin 定：精简冗余流程，动你认领面，报备）
+
+- 背景：Ctomi #639 立项后落人工泳道干等人，Alvin 定按钮语义升级为「开工」：点下去那一下就是授权，后台直接干活。spawn_task 对 agent 与 agency 任务一律直排 execute_task，机器先干到自己权限的最远处（出方案、白名单内落地，落不了的停在放行卡换人）；client 任务例外只挂看板（等的是客户动作，排机器没意义）。判定与放行两道闸门不动。
+- 波及面：系统行回执从「已立项 #N」改「已开工 #N」，解析它的三处全部兼容新旧前缀（前端 chSpawnedTitles 防重复开工正则、前端 thIsSysLine、worker chat.js isSysLine）；chat prompt 与注释里的「立项」措辞同步改「开工」，chat.test.js 断言跟着改并加了开工回执分类用例。
+- 测试：node tests 全套绿（chat 32 项含新用例），chatapi.test.php 16 项绿，php -l 绿（本机无 php，走 docker php:8.2-cli，deploy 时 250 远端 php -l 照旧把关）。
+- 文件：seo-api.php、static/seo-agent.html、seo-worker/runners/chat.js、seo-worker/lib/config.js、seo-worker/lib/api.js、tests/chat.test.js。api 与 worker 相邻部署（回执前缀两侧要一致）。
+
 ### 2026-09-08 AIRA (bv) 登记：chat 工具带 C1（Alvin 定：读链接白名单域 + 广告后台只读现查，先查本地再拉，不设预算）
 
 - chat/线程的 allowedTools 从 Read 扩为：Read/Glob/Grep + WebFetch 白名单域（agencyreport.horntech-dev.com + 本客户域名及其 www 变体，域外不抓要明说）+ Bash 单前缀（python3 lib/gaql_query.py，脚本自身只放 SELECT、mutate 走 apply 白名单不走这）。

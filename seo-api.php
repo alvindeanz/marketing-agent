@@ -76,10 +76,10 @@ define('INBOX_ACTIONS',['approve_task','reject_task','set_priority','set_sprint'
 /* 收件箱对话用的三种消息类型，和原来的 digest/ruling/ack 同住 seo_inbox。
    chat_root  一次会话的根，body 存会话标题，client_id 必填（chat job 要归属客户）
    chat_user  人在会话里说的话，reply_to 指向根
-   chat_agent opus 的回复，或者服务端写的系统行（已立项、会话归档），reply_to 指向根
+   chat_agent opus 的回复，或者服务端写的系统行（已开工、会话归档；2026-09-08 前写「已立项」），reply_to 指向根
    会话状态就是根行的 status：open 在聊，resolved 已归档。
    铁律：对话是任务编译器不是执行器。这三种消息本身不改看板任何一格，
-   唯一的落账口子是 POST /inbox/{root}/spawn_task，那是人点了「立项」才走的。 */
+   唯一的落账口子是 POST /inbox/{root}/spawn_task，那是人点了「开工」才走的。 */
 define('CHAT_KINDS',['chat_root','chat_user','chat_agent']);
 /* seo_inbox.kind ENUM 的完整取值，只增不改：删一个值等于让老行读不出来。 */
 define('INBOX_KINDS',['digest','ruling','ack','chat_root','chat_user','chat_agent']);
@@ -3654,7 +3654,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/thread_action$#',$ROUTE,$mm)){
     res(200,['ok'=>true,'message'=>$r['what'],'job_ids'=>$r['job_ids'],'system_message_id'=>$sysId]);
 }
 
-// POST /inbox/{root_id}/spawn_task -> 人点了「立项」。
+// POST /inbox/{root_id}/spawn_task -> 人点了「开工」（2026-09-08 前叫「立项」）。
 // 这是整条对话链路上唯一一次写看板，而且是 admin 手点的一次请求。
 // 字段校验用的就是 POST /tasks 的那个函数，一个字都不放宽。
 // 客户归属取会话根，不取入参：草案卡片是从这个会话里长出来的，
@@ -3675,16 +3675,18 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
     $t['detail']=($t['detail']===''?$src:($t['detail']."\n\n".$src));
     $cid=(int)$root['client_id'];
     $tid=task_insert($cid,$t,$u['username'],'spawn:'.$rootId);
-    /* 立项即排产（2026-09-08 Alvin 定）：点立项的那一下就是人的授权，agent 任务不再等
-       赛前判定那一轮，直接进执行队列。方案出来后的判定照旧（它驱动 L0 自动放行）；
-       花钱/不可逆的照旧停在放行卡。agency/client 任务是人的活，立项即到位不排机器。 */
+    /* 开工即排产（2026-09-08 Alvin 定，同日二次收紧：按钮从「立项」改「开工」，agency 任务
+       也直接进执行队列）。点下去那一下就是人的授权，机器先干到自己权限的最远处：出方案、
+       白名单内的落地，落不了的停在放行卡换人接手，这也比一张干等人的空卡少一半人工。
+       方案出来后的判定照旧（它驱动 L0 自动放行）；花钱/不可逆的照旧停在放行卡。
+       唯一例外是 client 任务：等的是客户的动作，排机器没有意义，挂看板即可。 */
     $spawnJob=0;
-    if($t['owner_type']==='agent'){
+    if($t['owner_type']!=='client'){
         list($sj,)=queue_task_jobs($cid,'execute_task',[$tid],$u['username'],'seo_chat_spawn_exec');
         $spawnJob=$sj?$sj[0]:0;
     }
-    $note='已立项 #'.$tid.'「'.$t['title'].'」，状态 approved'
-        .($spawnJob?('，已直接排产（job #'.$spawnJob.'），产出到待放行会回这里说一声。'):'，已经在看板上了。');
+    $note='已开工 #'.$tid.'「'.$t['title'].'」'
+        .($spawnJob?('，已排产（job #'.$spawnJob.'），产出到待放行会回这里说一声。'):'，客户侧任务，挂在看板上等客户动作。');
     $msgId=chat_msg_insert($root,'chat_agent',$note,$u['username'],['tasks'=>[$tid]]);
     audit($u['username'],'seo_chat_spawn_task',(string)$tid,[
         'root_id'=>$rootId,'client_id'=>$cid,'title'=>$t['title'],'module'=>$t['module'],'message_id'=>$msgId,'exec_job'=>$spawnJob
