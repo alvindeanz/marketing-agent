@@ -3407,7 +3407,7 @@ function stateLine(t){
   else{
     /* 终态必须一眼读出「已经结束」（2026-09-08 Alvin：绿色「落地」被读成进行中的阶段）。
        统一「已」字头 + 结束日期，颜色仍按 closed_kind 的既有 CSS 区分。 */
-    tag={done:'已落地',accepted:'已验收',dropped:'已放弃',merged:'已并入',killed:'已叫停'}[t.closed_kind||'done']||'已结束';
+    tag={done:'已完成',accepted:'已验收',dropped:'已放弃',merged:'已并入',killed:'已叫停'}[t.closed_kind||'done']||'已结束';
     const d=String(t.updated_at||'').slice(0,10);
     txt=(({done:'机器改完并自验通过',accepted:'人工验收通过',dropped:'判定不值得做',merged:'并入其他任务',killed:'人工叫停'})[t.closed_kind||'done']||'')+(d?(' · '+d):'');
   }
