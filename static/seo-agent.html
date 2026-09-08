@@ -773,7 +773,7 @@ let showDone=false,taskDays=0,sprintScope='current';
 /* 类目切换：paid = module 为 paid 的任务，其余算 SEO。渠道不参与分类（W10：渠道只是执行地点）。 */
 let catScope='all';
 let originScope='all';
-function taskOrigin(t){return String(t.origin||'sprint').indexOf('chat')===0?'chat':'sprint'}
+function taskOrigin(t){var o=String(t.origin||'sprint');return (o.indexOf('chat')===0||o.indexOf('spawn')===0||o.indexOf('report')===0)?'chat':'sprint'}
 function setOriginScope(v){originScope=v;renderLanes()}
 function taskCat(t){return String((t&&t.module)||'')==='paid'?'paid':'seo'}
 function setCatScope(v){catScope=v;renderLanes()}
@@ -3458,7 +3458,7 @@ function taskCard(t,col){
     stateLine(t)+
     rvLine(t)+
     detail+
-    '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+(taskOrigin(t)==='chat'?'<span class="badge review" title="Chat 频道派单，只读验证，免审批">Chat</span>':'')+opsTags(t)+
+    '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+(taskOrigin(t)==='chat'?'<span class="badge review" title="Chat 来源：派单/立项/报告草稿">Chat</span>':'')+opsTags(t)+
     (t.owner_type!=='agent'?'<span class="badge mod">'+esc(t.owner_type)+'</span>':'')+
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+acts+'</div>'+
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
