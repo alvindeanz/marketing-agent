@@ -1,6 +1,12 @@
 {
-  "_doc": "放行分级政策，类目无关（SEO 与 paid 同一份，Alvin 拥有，Aira 起草）。risk_class 定义在各渠道/平台能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行，deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
-  "version": 2,
+  "_doc": "放行分级政策，类目无关（SEO 与 paid 同一份，Alvin 拥有，Aira 起草）。risk_class 定义在各渠道/平台能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行与 Chat 分级派单（dispatch_rules），deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
+  "version": 3,
+  "dispatch_rules": {
+    "_doc": "Chat 分级派单（2026-09-08 Alvin 定：决策权还给 fable）。fable 在频道判定后可派改动类任务（ops 必填），服务端按本表定档：全部 ops reversible 且不在 l0_exclude_ops 为 auto（出方案直接落地，失败一次熔断转人工，不自动重试）；external 有已确认客户批文 fact 背书按 auto，无背书 confirm；spend/irreversible 永远 confirm（出方案后停在待放行，频道一句「放行 #N」或看板点放行）。定档在派单与方案产出两个时刻各算一次，以后者为准。",
+    "auto_tiers": ["reversible"],
+    "external_with_backing_fact": "auto",
+    "circuit_breaker": "same-task auto-apply at most once"
+  },
   "tiers": {
     "reversible": "L0",
     "spend": "L2",
@@ -30,6 +36,7 @@
     "blog-draft": "external",
     "image-generate": "reversible",
     "negative-keyword-add": "reversible",
+    "final-url-change": "reversible",
     "ad-pause": "reversible",
     "adgroup-pause": "reversible",
     "keyword-bid-adjust": "reversible",

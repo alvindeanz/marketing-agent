@@ -58,7 +58,7 @@ function chatTools(clientDomain) {
 }
 const ALLOWED_TOOLS = 'Read';
 
-const MODULES = ['technical', 'onpage', 'content', 'local', 'offpage'];
+const MODULES = ['technical', 'onpage', 'content', 'local', 'offpage', 'paid'];
 const OWNERS = ['agency', 'client', 'agent'];
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 
@@ -312,7 +312,8 @@ function buildPrompt(opts) {
     '{"drafts":[{"title":"任务标题","detail":"要做什么，做到什么程度算完","module":"content",' +
       '"owner_type":"agency","priority":"P2","sprint":"W35","ops":""}],' +
       '"facts":[{"key":"content.delivery_time","value":"交期 6 周，2026-09 客户微信确认"}]' +
-      (task ? '' : ',"dispatch":[{"title":"验证 8 月广告询价口径","detail":"拉取并核对，产出一页结论","module":"paid"}],' +
+      (task ? '' : ',"dispatch":[{"title":"验证 8 月广告询价口径","detail":"拉取并核对，产出一页结论","module":"paid"},' +
+        '{"title":"四组 intent 路由改 final URL","detail":"按客户批准的 change list 改四组 final URL，改前记旧值，改后回读加 curl 200 零跳转","module":"paid","kind":"change","ops":"final-url-change","backing_fact":"paid.change_list_approved"}],' +
         '"actions":[{"type":"kill","task_id":470,"title_check":"第一批五个品类页","reason":"客户暂停这条线"}]') +
       (task ? ',"actions":[{"type":"redispatch","reason":"描述里去掉 220 km/h，社交图改用站内真实 hero 图"}]' : '') +
       '}',
@@ -335,19 +336,25 @@ function buildPrompt(opts) {
     '- facts 的 key 优先复用简报里已有的 fact key；确实是新事实才起新 key，照简报里的命名风格',
     '  （小写加点分层，如 content.warranty）。value 一句话写清事实本身，带日期与出处。',
     '- 人没让记就不要写 facts；拿不准这算不算客户事实（比如只是讨论），先问再记。最多 8 条。',
-    task ? '' : '- dispatch 是派单：人明确要求做一件**只读验证或数据分析**的活（拉数核对、效果验证、',
-    task ? '' : '  搜索词摸底、追踪排查这类），且简报里现有数据答不了时，才派。派单免审批直接执行，',
-    task ? '' : '  所以边界必须自己守死：**任何要改账户、改页面、花钱、发内容的活一律不进 dispatch**，',
-    task ? '' : '  那些走 drafts 让人点开工。能用简报直接回答的不派，派单是给要现场跑数的活的。',
-    task ? '' : '- dispatch 最多 2 个；title 写清验证什么，detail 写清产出物（一页结论/一份清单）和口径。',
-    task ? '' : '- 人要的是**paid 月报/客户报告草稿**时，dispatch 加 "kind":"report"，detail 里写明报告月份并注明',
-    task ? '' : '  按 /data/aira/seo-worker/specs/report/paid_monthly_spec.md 执行；报告草稿会走人工验收，不自动完结，',
-    task ? '' : '  回复里要说清「草稿出来后需人审才发客户」。其他验证类不带 kind。',
-    task ? '' : '- actions 是看板动作，频道里只有两种：kill（归档不做）、later（延后挂起）。只有人明确说了',
-    task ? '' : '  「#N 不做了/砍掉/先放放」才动作。**双锚必填**：task_id 用人说的或简报任务清单里的号，',
-    task ? '' : '  title_check 原样抄该任务标题的前十几个字（服务端会核对，对不上不执行）。人没带任务号',
-    task ? '' : '  且简报里对不出唯一一个时，列出候选问人，绝不猜号。正文必须复述砍/延哪个任务和理由；',
-    task ? '' : '  该任务已有产出（待放行或有结果备注）时必须说明「砍掉即弃产出」。放行类动作频道里没有。',
+    task ? '' : '- dispatch 是派单，决策权在你（2026-09-08 Alvin 定）：人在频道里要求的活，你判断该做就派，',
+    task ? '' : '  拿不准就在正文里问清再派，觉得不该做就不派并说明为什么。你也有权对已派/在跑的任务喊停（kill/later）。',
+    task ? '' : '  三种 kind：不带 kind 是**只读验证/数据分析**（拉数核对、效果验证、搜索词摸底），免审批直接执行；',
+    task ? '' : '  "kind":"report" 是**paid 月报/客户报告草稿**，detail 写明报告月份并注明按',
+    task ? '' : '  /data/aira/seo-worker/specs/report/paid_monthly_spec.md 执行，草稿出来走人工验收，回复里要说清；',
+    task ? '' : '  "kind":"change" 是**改动类**（改账户、改页面这类实际动线上资产的活），ops 必填。',
+    task ? '' : '- 改动类的规矩：ops 从能力清单的操作名里选（逗号分隔），常用：page-meta-update、content-edit、',
+    task ? '' : '  redirect-batch、negative-keyword-add、ad-pause、adgroup-pause、keyword-bid-adjust、final-url-change、',
+    task ? '' : '  ad-copy-rewrite、budget-change；完整表在放行政策，op 不在表里服务端会拒并回一行原因。',
+    task ? '' : '  服务端按风险定档：全部可回滚的出方案后**自动落地**（失败一次熔断转人工）；花钱/不可逆的出方案后',
+    task ? '' : '  **停在待放行等人一句话**；对外类（如 ad-copy-rewrite）有客户批文才自动，"backing_fact" 填简报里',
+    task ? '' : '  记录客户批准的 fact key（如 paid.change_list_approved），没有批文就不填，会停人确认。',
+    task ? '' : '  正文里必须复述：派了什么、动哪些资产、风险档是直落还是等确认。没有人要求就不派改动类。',
+    task ? '' : '- dispatch 最多 2 个；title 写清做什么，detail 写清产出物或验收标准（改动类写完成标准与回滚依据）。',
+    task ? '' : '- actions 是看板动作，频道里有三种：kill（归档不做）、later（延后挂起）、release（放行落地，',
+    task ? '' : '  只对待放行任务，人明确说了「放行 #N/可以落」才用，这就是花钱与不可逆类的人工确认）。**双锚必填**：',
+    task ? '' : '  task_id 用人说的或简报任务清单里的号，title_check 原样抄该任务标题的前十几个字（服务端会核对，',
+    task ? '' : '  对不上不执行）。人没带任务号且简报里对不出唯一一个时，列出候选问人，绝不猜号。正文必须复述',
+    task ? '' : '  动作对象和理由；该任务已有产出（待放行或有结果备注）时砍掉前必须说明「砍掉即弃产出」。',
     '- json 必须语法合法。字符串值里不许出现英文双引号，要引用时用中文引号；',
     '  不许出现换行符，长内容压成一行。输出前自己检查一遍能不能被机器解析。',
     task
@@ -417,7 +424,8 @@ function cleanActions(json, task, log) {
   return out;
 }
 
-/* 频道看板动作规整：只认 kill/later，双锚必填（task_id + title_check≥6字），最多 3 条。 */
+/* 频道看板动作规整：认 kill/later/release，双锚必填（task_id + title_check≥6字），最多 3 条。
+   release 是分级派单 confirm 档的一句话放行（2026-09-08），reason 可空，其余动作 reason 服务端要。 */
 function cleanChanActions(json, log) {
   const say = log || function () {};
   const raw = json && Array.isArray(json.actions) ? json.actions : [];
@@ -426,7 +434,7 @@ function cleanChanActions(json, log) {
     if (out.length >= 3) break;
     const a = item || {};
     const type = String(a.type || '').trim();
-    if (type !== 'kill' && type !== 'later') { say('对话：频道动作只认 kill/later，丢弃 ' + type); continue; }
+    if (type !== 'kill' && type !== 'later' && type !== 'release') { say('对话：频道动作只认 kill/later/release，丢弃 ' + type); continue; }
     const tid = Number(a.task_id) || 0;
     const tc = String(a.title_check || '').trim();
     if (!tid || tc.length < 6) { say('对话：频道动作缺双锚（task_id+title_check），丢弃'); continue; }
@@ -435,7 +443,8 @@ function cleanChanActions(json, log) {
   return out;
 }
 
-/* 模型给的派单清单规整：title 必填，module 合法，最多 2 条；只读边界由服务端强制。 */
+/* 模型给的派单清单规整：title 必填，module 合法，最多 2 条。
+   kind change（2026-09-08 分级派单）要求 ops 非空，风险定档与白名单由服务端政策表强制。 */
 function cleanDispatch(json, log) {
   const say = log || function () {};
   const raw = json && Array.isArray(json.dispatch) ? json.dispatch : [];
@@ -446,8 +455,17 @@ function cleanDispatch(json, log) {
     const title = summarize(d.title, 255);
     if (!title) { say('对话：丢弃一条派单，没有标题'); continue; }
     const mod = String(d.module || 'technical').trim().toLowerCase();
-    const kind = String(d.kind || '').trim() === 'report' ? 'report' : 'verify';
-    out.push({ title, detail: summarize(d.detail, 4000), module: MODULES.indexOf(mod) !== -1 || mod === 'paid' ? mod : 'technical', kind });
+    const kindRaw = String(d.kind || '').trim();
+    const kind = kindRaw === 'report' ? 'report' : (kindRaw === 'change' ? 'change' : 'verify');
+    const row = { title, detail: summarize(d.detail, 4000), module: MODULES.indexOf(mod) !== -1 || mod === 'paid' ? mod : 'technical', kind };
+    if (kind === 'change') {
+      const ops = String(d.ops || '').trim();
+      if (!ops) { say('对话：丢弃一条改动类派单，没有 ops'); continue; }
+      row.ops = ops.slice(0, 255);
+      const back = String(d.backing_fact || '').trim();
+      if (back) row.backing_fact = back.slice(0, 100);
+    }
+    out.push(row);
   }
   return out;
 }
@@ -720,6 +738,8 @@ module.exports = {
   historyBlock,
   cleanDrafts,
   cleanActions,
+  cleanDispatch,
+  cleanChanActions,
   taskBlock,
   attachChangePlan,
   fetchThreadImages,

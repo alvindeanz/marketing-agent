@@ -641,6 +641,106 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   return { taskId, status: 'success', logFile };
 }
 
+// ==== Google Ads 落地（paid 通道，2026-09-08）====
+// 安全模型与站台 apply 不同：没有 changeset，安全网是三层——
+//   1. 只有 lib/ads_mutate.py 一条写通道，op 白名单 + 学习期/幅度硬闸都在脚本里，模型绕不开；
+//   2. 每个 mutate 前脚本强制打印旧值（回滚依据），后强制回读验证；
+//   3. 失败不重试（run 层已保证），任务留 review 转人工。
+const ADS_GAQL = '/data/aira/seo-worker/lib/gaql_query.py';
+const ADS_MUTATE = '/data/aira/seo-worker/lib/ads_mutate.py';
+const ADS_TOOLS = 'Read,Bash(curl:*),Bash(python3 ' + ADS_GAQL + ':*),Bash(python3 ' + ADS_MUTATE + ':*)';
+
+function buildAdsPrompt(opts) {
+  const { task, plan, planFile, customerId, manifest } = opts;
+  return [
+    '你是一家新西兰数字营销公司的 SEM 执行 agent，现在处于 apply 阶段。',
+    '下面这份变更方案**已获授权**（频道判定放行或人工放行）。你的工作只有一件：严格照着它执行，然后自验。',
+    '',
+    '客户 Google Ads customer_id：' + customerId + '（写死，不许对任何其他账户发请求）。',
+    '',
+    '工具与铁律：',
+    '- 读账户用 python3 ' + ADS_GAQL + ' ' + customerId + ' "GAQL"（只读）。',
+    '- 一切写操作只许走 python3 ' + ADS_MUTATE + ' ' + customerId + ' --op <操作> ...，这是唯一写通道，',
+    '  op 白名单、学习期保护、出价幅度硬闸都在脚本里。脚本每步会打印改前旧值与回读结果，逐条核对。',
+    '- 方案没写的资产一根手指都不许碰。响应与方案预期不符就停手（aborted），不要随机应变。',
+    '- 涉及 final URL 的，提交前先 curl -sIL 验证目标 URL 200 且零跳转（Location 链为空），不过就停手。',
+    '- 每个 mutate 的旧值必须出现在你的执行记录里（回滚依据）。',
+    '',
+    '能力清单（风险注记必须遵守）：',
+    manifest || '（清单缺失，只许执行方案里明确写出的白名单操作）',
+    '',
+    '===== 变更方案开始（' + planFile + '）=====',
+    plan,
+    '===== 变更方案结束 =====',
+    '',
+    '任务 #' + task.id + '：' + (task.title || ''),
+    '',
+    '执行完输出执行记录（中文），最后附一个 json 代码块，块后不许再有文字：',
+    '```json',
+    '{"status":"success","checks_passed":4,"affected":["改动对象清单"],"old_values":["每个改动的旧值"],"note":"一句话结论"}',
+    '```',
+    'status 只能是 success / failed / aborted。任何一步没过，status 不许写 success。',
+  ].join('\n');
+}
+
+async function runAdsApply(ctx, workspace, profile, task, taskId) {
+  const { cfg, api, log } = ctx;
+  const customerId = String(profile.ads_customer_id || '').replace(/-/g, '');
+  const fail = async (note) => {
+    try { await api.postTaskResult(taskId, { output_url: '', note, attention: true }); } catch (e) { log('task ' + taskId + ': could not write note :: ' + e.message); }
+  };
+  if (!customerId) {
+    await fail('执行中止：profile 缺 ads_customer_id，Ads 落地无法定位账户。账户零改动，任务保持 review。');
+    throw new Error('task ' + taskId + ': ads_customer_id missing');
+  }
+  const planFile = changePlanPath(workspace, taskId);
+  let plan;
+  try { plan = fs.readFileSync(planFile, 'utf8'); } catch (e) {
+    throw new Error('task ' + taskId + ': no approved change plan at ' + planFile + '. Run execute_task first');
+  }
+  if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+  const manifest = capabilities.fullText('googleads');
+  const prompt = buildAdsPrompt({ task, plan, planFile, customerId, manifest });
+  log('task ' + taskId + ': ads apply, customer ' + customerId + ', model ' + cfg.applyModel);
+  const res = await runClaude(cfg, {
+    prompt,
+    cwd: workspace,
+    log,
+    model: cfg.applyModel,
+    allowedTools: ADS_TOOLS,
+    label: 'ads apply task ' + taskId,
+  });
+  const output = String(res.stdout || '').trim();
+  if (!output) throw new Error('task ' + taskId + ': the ads apply pass produced no output');
+  const outDir = path.join(workspace, OUTPUT_DIRNAME);
+  fs.mkdirSync(outDir, { recursive: true });
+  const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
+  fs.writeFileSync(logFile, output, 'utf8');
+  const parsed = extractTrailingJson(output);
+  const j = (parsed && parsed.json) || {};
+  const status = STATUSES.indexOf(String(j.status || '')) !== -1 ? String(j.status) : 'failed';
+  const affected = Array.isArray(j.affected) ? j.affected.map(String).slice(0, 20) : [];
+  const oldVals = Array.isArray(j.old_values) ? j.old_values.map(String).slice(0, 20) : [];
+  const checks = Number(j.checks_passed) || 0;
+  const head = [
+    '受影响: ' + (affected.join('；') || '（未声明）'),
+    '改前旧值: ' + (oldVals.join('；') || '（见执行记录）'),
+    '检查: 通过 ' + checks + ' 项，待人工 0 项',
+    '预算影响: 0（白名单内 reversible 操作）',
+  ].join('\n');
+  if (status === 'success' && affected.length) {
+    await api.completeTask(taskId, {
+      note: head + '\n已按授权方案执行并回读自验通过。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
+    });
+    log('task ' + taskId + ': ads applied and verified, marked done');
+    return { taskId, status: 'success', logFile };
+  }
+  const why = status === 'success' ? 'affected 为空，无法证明改了什么，按失败处理' : summarize(String(j.note || '') || output, 300);
+  await fail(head + '\n' + (status === 'aborted' ? '执行中止' : '执行失败') + '：' + why + ' 任务保持 review，未标记完成，不自动重试。执行记录 ' + path.basename(logFile));
+  log('task ' + taskId + ': ads apply ' + status + ' :: ' + truncate(why, 200));
+  return { taskId, status: status === 'success' ? 'failed' : status, logFile };
+}
+
 async function runOne(ctx, context, workspace, taskId) {
   const { cfg, api, log, job } = ctx;
   const profile = (context && context.profile) || {};
@@ -648,6 +748,12 @@ async function runOne(ctx, context, workspace, taskId) {
   const task = findTask(context, taskId) || { id: taskId, title: null, detail: null };
   if (!findTask(context, taskId)) {
     log('task ' + taskId + ': not found in context, applying against the plan file alone');
+  }
+
+  // paid 通道（2026-09-08）：paid 任务落地走 googleads adapter，
+  // 白名单 mutate 脚本执行，没有 changeset（安全网换成改前记旧值 + 回读验证）。
+  if (String(task.module || '') === 'paid') {
+    return runAdsApply(ctx, workspace, profile, task, taskId);
   }
 
   // Blog publish is its own path: the deliverable is a draft on the platform,

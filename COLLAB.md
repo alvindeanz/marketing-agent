@@ -21,6 +21,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (by2) 登记：分级派单 P1（Alvin 定：决策权还给 fable，动你认领面多处，报备）
+
+- 大局：频道是入口，fable 是决策者，看板转投影。P1 落三件事：dispatch 从只读扩成分级执行单；paid 通道接进 execute/apply；频道放行动作。P2（看板投影化）P3（sprint 并轨）另行。
+- dispatch 三种 kind：verify/report 原样；新增 change（ops 必填，origin=chatw:{root}）。服务端 dispatch_grade（纯函数进 CHAT-PURE，chatapi 22 项盯着）按 release_policy 定档：全 reversible 直落 auto；external 有已确认客户批文 fact（backing_fact）auto，无背书 confirm；spend/irreversible 永远 confirm。定档在派单与方案产出两个时刻各算，以后者为准。
+- **熔断**：chatw 任务查到任何 apply job 历史（含失败）不再自动排，回频道转人工。这是你 bm 报的失败重排死循环的结构性防线，我在自己的线先带上了；L0 那条的护栏仍等你修。
+- 频道动作白名单 kill/later 之外放开 release（双锚校验，仅 review 状态，按发起同事记账），花钱/不可逆的人工确认就是频道里一句「放行 #N 标题片段」。
+- paid 通道：module=paid 的任务 execute/apply 路由到 googleads 能力清单（V2，新增 final-url-change reversible）。apply 走新 runAdsApply：无 changeset，安全网三层（唯一写通道 lib/ads_mutate.py 白名单脚本 + 改前打旧值/改后回读 + 失败不重试）。ads_mutate.py 实现 final-url-change/ad-pause/adgroup-pause/negative-keyword-add/keyword-bid-adjust（±20% 硬闸、学习期拒杀、手写 update_mask 躲 8/10 field_mask 坑）；schedule-adjust 未实现明拒转人工。
+- release_policy version 3（json+md 同 commit）：加 dispatch_rules 段与 final-url-change。specs.test 一致性过。
+- 测试：node 全套绿（chat 34 项含新用例）、chatapi 22 绿、php -l 绿、ads_mutate 硬闸冒烟过。**api 与 worker 必须相邻部署**（dispatch 新字段 + runner 新契约 + 政策文件在 api 侧同机）。
+
 ### 2026-09-08 AIRA (bx) 登记：队列条编号改用任务号（Alvin 定：job 流水号和卡片号对不上会被当成出错）
 
 - qsWhat/qsStripText：有 task_id 的行一律「任务 #N 标题…」打头，不再亮 job 号；没 task_id 的整客户 job（拉数、规划）才显示流水号且明写「job #」，裸 # 不再有歧义。任务号不参与 20 字截断，只截标题。

@@ -27,7 +27,22 @@ page-rewrite / page-rebuild（整页覆盖，影响面大）、styles-fragment�
 ## 当前实际的 L0 名单（由上面规则推出，写在这里方便人扫一眼）
 
 SEO：page-meta-update、content-edit、image-generate、redirect-batch（本身 agent_apply 不出卡）
-paid：negative-keyword-add、ad-pause、adgroup-pause、keyword-bid-adjust、schedule-adjust
+paid：negative-keyword-add、ad-pause、adgroup-pause、keyword-bid-adjust、schedule-adjust、final-url-change
+
+## Chat 分级派单（2026-09-08 Alvin 定：决策权还给 fable，version 3）
+
+fable 在频道判定后可派改动类任务（dispatch kind=change，ops 必填），服务端按本政策定档，
+定档函数 seo-api 的 dispatch_grade（纯函数，chatapi 测试盯着）：
+
+- 全部 ops reversible 且不在排除表：**auto**，方案一出直接排 apply，note 记 `[auto-apply chat]`。
+- external 类 op：派单里引用了已确认的客户批文 fact（backing_fact）按 auto 走，无背书 confirm。
+- spend / irreversible：永远 **confirm**，背书救不了；方案出来停在待放行，频道一句
+  「放行 #N 加标题片段」（双锚校验）或看板点放行。
+- op 不在表里：整单拒，频道回一行原因。
+- **熔断**：同任务只自动落地一次，apply 有任何历史（含失败）不再自动排，转人工。
+  这是 bm 事故（失败 apply 无限重排）的结构性防线，不是可选项。
+
+定档在派单与方案产出两个时刻各算一次，以后者为准（facts 可能在中途变化）。
 
 ## 纪律
 

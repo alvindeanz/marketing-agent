@@ -104,6 +104,37 @@ t('body 不是对象直接拒',function(){
     is_true($e!==null,'应该报错');
 });
 
+section('dispatch_grade：分级派单的风险定档（2026-09-08）');
+
+$POL=['risk_class_by_op'=>[
+    'content-edit'=>'reversible','page-rewrite'=>'reversible','final-url-change'=>'reversible',
+    'ad-copy-rewrite'=>'external','budget-change'=>'spend','conversion-goal-change'=>'irreversible',
+],'l0_rules'=>['l0_exclude_ops'=>['ops'=>['page-rewrite']]]];
+
+t('全 reversible 且不在排除表 = auto',function()use($POL){
+    eq(dispatch_grade(['content-edit','final-url-change'],$POL,false),'auto','应该直落');
+});
+t('花钱与不可逆永远 confirm，背书救不了',function()use($POL){
+    eq(dispatch_grade(['budget-change'],$POL,true),'confirm','spend 有背书也要停人');
+    eq(dispatch_grade(['conversion-goal-change'],$POL,true),'confirm','irreversible 有背书也要停人');
+    eq(dispatch_grade(['content-edit','budget-change'],$POL,false),'confirm','混入 spend 整单 confirm');
+});
+t('external 看背书：有 auto 无 confirm',function()use($POL){
+    eq(dispatch_grade(['ad-copy-rewrite'],$POL,true),'auto','有客户批文该直落');
+    eq(dispatch_grade(['ad-copy-rewrite'],$POL,false),'confirm','无背书该停人');
+});
+t('l0_exclude_ops 里的 reversible 照旧 confirm',function()use($POL){
+    eq(dispatch_grade(['page-rewrite'],$POL,false),'confirm','排除表优先');
+});
+t('op 不在政策表整单 invalid，空 ops 也 invalid',function()use($POL){
+    is_true(strpos(dispatch_grade(['content-edit','没这个op'],$POL,false),'invalid')===0,'未知 op 该拒');
+    is_true(strpos(dispatch_grade([],$POL,false),'invalid')===0,'空 ops 该拒');
+    is_true(strpos(dispatch_grade(['  '],$POL,false),'invalid')===0,'全空白 ops 该拒');
+});
+t('政策文件缺失默认从严 confirm',function(){
+    eq(dispatch_grade(['content-edit'],null,true),'confirm','没政策就全停人');
+});
+
 section('inbox_drafts_norm：模型草案存进 refs 之前的规整');
 
 t('好草案原样留下，字段齐全',function()use($GOOD){

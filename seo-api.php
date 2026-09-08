@@ -885,7 +885,50 @@ function inbox_drafts_norm($v){
     return $out;
 }
 
+/* Chat 分级派单的风险定级（2026-09-08 Alvin 定：决策权还给 fable，服务端只按政策分流）。
+   入参：ops 数组、release_policy 解码数组、是否有客户批文背书（调用方已验 fact 存在且 confirmed）。
+   返回 'auto'（全绿直落）| 'confirm'（出方案后停一句话）| 'invalid: 说明'（op 不在政策表，整单拒）。
+   规矩：花钱与不可逆永远 confirm，背书救不了；external 有背书按 auto（对外风险已被客户签字消化）；
+   reversible 但在 l0_exclude_ops 的照旧 confirm；政策文件缺失一律 confirm（默认从严）。 */
+function dispatch_grade($ops,$pol,$hasBacking){
+    if(!is_array($ops))return 'invalid: 改动类派单必须带 ops';
+    $ops=array_values(array_filter(array_map('trim',$ops)));
+    if(!$ops)return 'invalid: 改动类派单必须带 ops';
+    $rc=is_array($pol)&&isset($pol['risk_class_by_op'])&&is_array($pol['risk_class_by_op'])?$pol['risk_class_by_op']:null;
+    if(!$rc)return 'confirm';
+    $excl=isset($pol['l0_rules']['l0_exclude_ops']['ops'])&&is_array($pol['l0_rules']['l0_exclude_ops']['ops'])?$pol['l0_rules']['l0_exclude_ops']['ops']:[];
+    $needConfirm=false;
+    foreach($ops as $op){
+        $cls=(string)($rc[$op]??'');
+        if($cls==='')return 'invalid: op「'.$op.'」不在放行政策表';
+        if($cls==='spend'||$cls==='irreversible'||$cls==='')$needConfirm=true;
+        elseif($cls==='external'){if(!$hasBacking)$needConfirm=true;}
+        if(in_array($op,$excl,true))$needConfirm=true;
+    }
+    return $needConfirm?'confirm':'auto';
+}
+
 /* CHAT-PURE-END */
+
+/* release_policy.json 只读加载，L0 自动放行与分级派单共用（review_result 里的历史内联加载不动）。 */
+function release_policy_load(){
+    static $pol=null,$loaded=false;
+    if($loaded)return $pol;
+    $loaded=true;
+    $p=@json_decode(@file_get_contents(__DIR__.'/release_policy.json'),true);
+    $pol=is_array($p)?$p:null;
+    return $pol;
+}
+/* 背书 fact 校验：key 存在且 confirmed 才算客户批文背书。 */
+function dispatch_backing_ok($cid,$key){
+    $key=trim((string)$key);
+    if($key===''||mb_strlen($key,'UTF-8')>100)return false;
+    $q=db()->prepare("SELECT status FROM seo_facts WHERE client_id=? AND fact_key=?");
+    $q->execute([(int)$cid,$key]);
+    $r=$q->fetch();
+    $q->closeCursor();
+    return $r&&(string)$r['status']==='confirmed';
+}
 
 /* seo_tasks.origin（2026-09-07 Chat 派单线）：sprint（默认，走判定+放行）或 chat:{root_id}
    （频道里 fable 派的只读验证单，免审批自动完结）。VARCHAR 不用 ENUM，躲静默截断坑。 */
@@ -1657,10 +1700,46 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     }
     audit('seo-worker','seo_task_result',(string)$tid,['output_url'=>$i['output_url']??'','attention'=>isset($i['attention'])?($i['attention']?1:0):null]);
     ensure_task_origin();
-    $cq=db()->prepare("SELECT client_id,origin,title,result_note,output_url FROM seo_tasks WHERE id=?");
+    $cq=db()->prepare("SELECT client_id,origin,title,detail,ops,result_note,output_url FROM seo_tasks WHERE id=?");
     $cq->execute([$tid]);
     $cr=$cq->fetch();
     $cq->closeCursor();
+    /* Chat 分级派单的改动类（origin chatw:，2026-09-08 Alvin 定）：方案已出（本端点刚置 review），
+       此刻按政策重算风险档（派单后 facts 可能变了，以此刻为准）：
+       auto 直接排 apply；confirm 回频道要一句放行。
+       熔断：同任务只自动落地一次。apply 失败会把失败 note 写回本端点，没有这道闸就是
+       失败重排死循环（账本 bm 条的 20 连烧根因），所以查到任何 apply job 历史一律不再自动排。 */
+    if(strpos((string)($cr['origin']??''),'chatw:')===0){
+        $rootIdW=(int)substr((string)$cr['origin'],6);
+        $rootW=null;
+        if($rootIdW>0){
+            $rqW=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+            $rqW->execute([$rootIdW]);
+            $rootW=$rqW->fetch();
+        }
+        $cidW=(int)($cr['client_id']??0);
+        $seenW=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload=?");
+        $seenW->execute([$cidW,json_encode(['task_ids'=>[$tid]],JSON_UNESCAPED_UNICODE)]);
+        $rw=$seenW->fetch();
+        if($rw&&(int)$rw['c']>0){
+            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」落地未完成，按熔断规矩不自动重试，转人工：细节在任务卡结果备注里。','seo-worker');
+            res(200,['ok'=>true,'dispatch_grade'=>'halted']);
+        }
+        $opsW=array_values(array_filter(array_map('trim',explode(',',(string)($cr['ops']??'')))));
+        $backW=false;
+        if(preg_match('/\[backing\]\s*(\S+)/u',(string)($cr['detail']??''),$bm))$backW=dispatch_backing_ok($cidW,$bm[1]);
+        $gradeW=dispatch_grade($opsW,release_policy_load(),$backW);
+        if($gradeW==='auto'){
+            list($ajW,)=queue_task_jobs($cidW,'apply_task',[$tid],'chat-dispatch-auto','seo_tasks_release');
+            if($ajW){
+                task_append_note($tid,'[auto-apply chat] fable 频道判定的改动类派单，风险档可回滚'.($backW?'/有批文背书':'').'，按政策自动落地（apply job #'.$ajW[0].'），失败即熔断转人工');
+                if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，风险档可回滚，自动落地中（apply job #'.$ajW[0].'），落完回报。','seo-worker');
+            }
+        }else{
+            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出（预览见任务卡），含花钱/不可逆/无背书对外项：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
+        }
+        res(200,['ok'=>true,'dispatch_grade'=>$gradeW]);
+    }
     /* Chat 派单（只读验证）：产出即完结不进待放行不排判定，结果回频道系统行，
        留痕给人工审计（Alvin 发起，不自动化）。 */
     if(strpos((string)($cr['origin']??''),'spawn:')===0){
@@ -1714,13 +1793,25 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/complete$#',$ROUTE,$mm)){
     auth_worker();
     $tid=(int)$mm[1];
     $i=input();
-    $chk=db()->prepare("SELECT id FROM seo_tasks WHERE id=?");
+    ensure_task_origin();
+    $chk=db()->prepare("SELECT id,origin,title FROM seo_tasks WHERE id=?");
     $chk->execute([$tid]);
-    if(!$chk->fetch())res(404,['error'=>'Task not found']);
+    $trow=$chk->fetch();
+    if(!$trow)res(404,['error'=>'Task not found']);
     $note=trim((string)($i['note']??''));
     if($note==='')res(400,['error'=>'note required：落地结果要带「检查:」行，没有证据不能算完成']);
     $err=task_close($tid,'applied',$note);
     if($err)res(400,['error'=>$err]);
+    /* Chat 改动类派单闭环：落地完成回频道说一声，人不用去看板巡。 */
+    if(strpos((string)($trow['origin']??''),'chatw:')===0){
+        $rootIdK=(int)substr((string)$trow['origin'],6);
+        if($rootIdK>0){
+            $rqK=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+            $rqK->execute([$rootIdK]);
+            $rootK=$rqK->fetch();
+            if($rootK)chat_msg_insert($rootK,'chat_agent','派单 #'.$tid.'「'.$trow['title'].'」已落地并自验通过（检查行在任务卡结果备注），月度抽查照旧。','seo-worker');
+        }
+    }
     audit('seo-worker','seo_task_complete',(string)$tid,['note'=>$note]);
     res(200,['ok'=>true]);
 }
@@ -3441,15 +3532,17 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
         }
     }
     elseif($actions&&!$rootRefs['tasks']&&$root['client_id']!==null){
-        /* 频道看板层动作：人在频道里明确说「#N 不做/延后」，fable 翻译，服务端双锚校验后执行。
-           只放 kill 与 later（关闭留档/挂起，都可逆）；release 与其余动作频道不可达。 */
+        /* 频道看板层动作：人在频道里明确说「#N 不做/延后/放行」，fable 翻译，服务端双锚校验后执行。
+           kill 与 later 关闭留档/挂起，都可逆；release（2026-09-08 Alvin 定，分级派单 confirm 档的
+           一句话放行）只对 review 状态生效，指令来源是人自己在频道说的话，按发起同事记账。
+           其余动作频道不可达。 */
         $cidA=(int)$root['client_id'];
         $mqA=db()->prepare("SELECT created_by FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
         $mqA->execute([$rootId]);
         $umA=$mqA->fetch();
         $askerA=($umA&&$umA['created_by']!=='')?(string)$umA['created_by']:'seo-worker';
         foreach($actions as $idx=>$a){
-            if(!in_array($a['type'],['kill','later'],true))continue;
+            if(!in_array($a['type'],['kill','later','release'],true))continue;
             $tidA=(int)($a['task_id']??0);
             $tcA=(string)($a['title_check']??'');
             $failLine=function($why)use($root,$msgId,$idx){
@@ -3478,6 +3571,13 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 if($err){$failLine($err);continue;}
                 chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」归档不做'.$sunk.'。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
                 $executed[]=['idx'=>$idx,'type'=>'kill','ok'=>true,'task_id'=>$tidA];
+            }elseif($a['type']==='release'){
+                if($t2['status']!=='review'){$failLine('任务 #'.$tidA.' 不在待放行状态（当前 '.$t2['status'].'），放行只对已出方案的任务生效');continue;}
+                list($ajC,$skC)=queue_task_jobs($cidA,'apply_task',[$tidA],$askerA,'seo_tasks_release');
+                if(!$ajC){$failLine('任务 #'.$tidA.' 已有落地 job 在飞（job #'.($skC?$skC[0]['job_id']:0).'），不重复排');continue;}
+                task_append_note($tidA,'[release] 频道放行（发起 '.$askerA.'）'.($a['reason']!==''?('：'.$a['reason']):''));
+                chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」放行落地（apply job #'.$ajC[0].'，发起 '.$askerA.'），落完回报。','seo-worker');
+                $executed[]=['idx'=>$idx,'type'=>'release','ok'=>true,'task_id'=>$tidA];
             }else{
                 db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tidA]);
                 task_append_note($tidA,'[later] 频道指令延后：'.$a['reason']);
@@ -3530,10 +3630,15 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
             chat_msg_insert($root,'chat_agent',"已更新档案（记在 ".$authorF." 名下，版本账可回滚）：\n".implode("\n",$linesF),$authorF);
         }
     }
-    /* dispatch（2026-09-07 Chat 派单线，Alvin 定）：fable 在频道里判定的只读验证类任务，
-       免判定免放行直接排 opus 执行，origin=chat:{root} 供任务视图筛选与人工审计。
-       只在非任务线程根生效；写类动作走不进这里（任务生而 ops 空、owner agent、analysis 形态），
-       花钱/改站/对外的诉求仍然只能变草案走 sprint 流程。 */
+    /* dispatch（2026-09-07 Chat 派单线；2026-09-08 Alvin 定分级派单，决策权还给 fable）：
+       fable 在频道里判定后直接派单，三种 kind：
+         verify  只读验证/数据分析：免审批，产出即完结（原样不动）。
+         report  报告草稿：出稿回频道，人工验收后才可对客（原样不动）。
+         change  改动类：ops 必填，服务端按 release_policy 定档。auto（全 reversible，或
+                 external 有已确认客户批文 fact 背书）出方案后自动落地，失败一次熔断转人工；
+                 confirm（花钱/不可逆/无背书对外）出方案后停在待放行，频道一句「放行 #N」或看板点。
+       origin：verify=chat:{root}，report=report:{root}，change=chatw:{root}，供结果回流与审计筛选。
+       只在非任务线程根生效。 */
     $dispatched=[];
     $dispIn=(!$rootRefs['tasks']&&is_array($i['dispatch']??null))?array_values($i['dispatch']):[];
     if($dispIn&&$root['client_id']!==null){
@@ -3542,22 +3647,48 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
         $mqD->execute([$rootId]);
         $umD=$mqD->fetch();
         $askerD=($umD&&$umD['created_by']!=='')?(string)$umD['created_by']:'seo-worker';
-        foreach($dispIn as $dx){
+        foreach($dispIn as $dxi=>$dx){
             if(!is_array($dx))continue;
-            $kindD=((string)($dx['kind']??'verify')==='report')?'report':'verify';
+            $kindRaw=(string)($dx['kind']??'verify');
+            $kindD=in_array($kindRaw,['report','change'],true)?$kindRaw:'verify';
+            $opsD='';$gradeD='';$backKeyD='';
+            if($kindD==='change'){
+                ensure_task_module();
+                $opsArrD=array_values(array_filter(array_map('trim',explode(',',(string)($dx['ops']??'')))));
+                $backKeyD=trim((string)($dx['backing_fact']??''));
+                $hasBackD=$backKeyD!==''&&dispatch_backing_ok((int)$root['client_id'],$backKeyD);
+                $gradeD=dispatch_grade($opsArrD,release_policy_load(),$hasBackD);
+                if(strpos($gradeD,'invalid')===0){
+                    chat_msg_insert($root,'chat_agent','派单 '.$msgId.'/'.$dxi.' 未建：'.$gradeD.'。改动类派单的每个 op 都必须在放行政策表里。','seo-worker');
+                    continue;
+                }
+                if(!$hasBackD)$backKeyD='';
+                $opsD=implode(',',$opsArrD);
+            }
             list($cleanD,$errD)=task_fields_clean([
                 'title'=>(string)($dx['title']??''),
                 'detail'=>(string)($dx['detail']??''),
                 'module'=>(string)($dx['module']??'technical'),
-                'owner_type'=>'agent','priority'=>'P1','ops'=>'','sprint'=>'',
+                'owner_type'=>'agent','priority'=>'P1','ops'=>$opsD,'sprint'=>'',
             ],['status_force'=>'approved']);
             if($errD)continue;
-            $cleanD['detail'].="\n\n[来源] Chat 频道 #".$rootId." 由 ".$askerD." 发起，"
-                .($kindD==='report'?"月报/报告草稿类：产出内部草稿，须人工验收后才可对客。":"fable 判定为只读验证类，免审批；产出报告或结论，不动任何线上资产。");
-            $tidD=task_insert((int)$root['client_id'],$cleanD,$askerD,($kindD==='report'?'report:':'chat:').$rootId);
+            $srcLineD="\n\n[来源] Chat 频道 #".$rootId." 由 ".$askerD." 发起，";
+            if($kindD==='report')$srcLineD.="月报/报告草稿类：产出内部草稿，须人工验收后才可对客。";
+            elseif($kindD==='change'){
+                $srcLineD.="fable 判定的改动类派单，风险档 ".$gradeD."。";
+                if($backKeyD!=='')$srcLineD.="\n[backing] ".$backKeyD;
+            }
+            else $srcLineD.="fable 判定为只读验证类，免审批；产出报告或结论，不动任何线上资产。";
+            $cleanD['detail'].=$srcLineD;
+            $originD=$kindD==='report'?'report:':($kindD==='change'?'chatw:':'chat:');
+            $tidD=task_insert((int)$root['client_id'],$cleanD,$askerD,$originD.$rootId);
             list($jidsD,)=queue_task_jobs((int)$root['client_id'],'execute_task',[$tidD],$askerD,'chat_dispatch');
-            $dispatched[]=['task_id'=>$tidD,'job_id'=>$jidsD?$jidsD[0]:0,'title'=>$cleanD['title']];
-            chat_msg_insert($root,'chat_agent','已派单 #'.$tidD.'「'.$cleanD['title'].'」（'.($kindD==='report'?'报告草稿，出稿后需人工验收再对客':'Chat 只读验证').'，job #'.($jidsD?$jidsD[0]:0).'），跑完结果自动回频道。','seo-worker');
+            $dispatched[]=['task_id'=>$tidD,'job_id'=>$jidsD?$jidsD[0]:0,'title'=>$cleanD['title'],'kind'=>$kindD,'grade'=>$gradeD];
+            $lineTail=$kindD==='report'?'报告草稿，出稿后需人工验收再对客'
+                :($kindD==='change'
+                    ?('改动类，风险档 '.($gradeD==='auto'?'可回滚'.($backKeyD!==''?'/有批文背书':'').'：方案出来直接落地，失败即熔断转人工':'需确认：方案出来后回「放行 #'.$tidD.' 标题片段」或在看板点放行'))
+                    :'Chat 只读验证');
+            chat_msg_insert($root,'chat_agent','已派单 #'.$tidD.'「'.$cleanD['title'].'」（'.$lineTail.'，job #'.($jidsD?$jidsD[0]:0).'），跑完结果自动回频道。','seo-worker');
         }
     }
     audit('seo-worker','seo_chat_reply',(string)$rootId,[

@@ -128,6 +128,31 @@ t('开工回执（2026-09-08 起替代已立项）也认成系统行', () => {
   assert.deepStrictEqual(msgs.map(m => m.role), ['user', 'system']);
 });
 
+t('分级派单：change 必带 ops，backing_fact 跟着走，verify/report 不受影响', () => {
+  const out = chat.cleanDispatch({ dispatch: [
+    { title: '改四组 final URL', detail: 'x', module: 'paid', kind: 'change', ops: 'final-url-change', backing_fact: 'paid.change_list_approved' },
+    { title: '拉数核对', detail: 'y', module: 'paid' },
+  ] }, null);
+  assert.strictEqual(out.length, 2);
+  assert.strictEqual(out[0].kind, 'change');
+  assert.strictEqual(out[0].ops, 'final-url-change');
+  assert.strictEqual(out[0].backing_fact, 'paid.change_list_approved');
+  assert.strictEqual(out[1].kind, 'verify');
+  assert.strictEqual(out[1].ops, undefined);
+  const dropped = chat.cleanDispatch({ dispatch: [{ title: '没 ops 的改动', kind: 'change' }] }, null);
+  assert.strictEqual(dropped.length, 0, '改动类没 ops 必须整条丢');
+});
+
+t('频道动作认 release，双锚照旧必填', () => {
+  const out = chat.cleanChanActions({ actions: [
+    { type: 'release', task_id: 641, title_check: '四组 intent 路由' },
+    { type: 'release', task_id: 0, title_check: '四组 intent 路由' },
+    { type: 'redispatch', task_id: 641, title_check: '四组 intent 路由', reason: 'x' },
+  ] }, null);
+  assert.strictEqual(out.length, 1, 'release 缺锚或非白名单类型都要丢');
+  assert.strictEqual(out[0].type, 'release');
+});
+
 t('超长会话只留最近 N 条，掐头不掐尾', () => {
   const many = [];
   for (let i = 1; i <= chat.MAX_HISTORY_MESSAGES + 10; i += 1) many.push(userMsg(i, '第' + i + '句'));

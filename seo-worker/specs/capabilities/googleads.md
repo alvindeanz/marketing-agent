@@ -1,8 +1,9 @@
 # Google Ads 能力清单（channel=google，paid 类目第一个 adapter 模板）
 
-<!-- PAID-CAP-GOOGLEADS-V1：权限映射来自 Alvin 批准的 SEM 执行边界（Aira SOUL / Kira SOUL §2），
+<!-- PAID-CAP-GOOGLEADS-V2：权限映射来自 Alvin 批准的 SEM 执行边界（Aira SOUL / Kira SOUL §2），
      服务端白名单与 apply adapter 以本文件为准。凭据：/data/aira/.env.google-ads，
-     login-customer-id 恒为 MCC 152-489-2513，customer-id 走 profile.ads_customer_id。 -->
+     login-customer-id 恒为 MCC 152-489-2513，customer-id 走 profile.ads_customer_id。
+     V2（2026-09-08）：新增 final-url-change（reversible），mutate 通道 lib/ads_mutate.py 白名单执行。 -->
 
 ## 操作集与自主权限
 
@@ -12,7 +13,8 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 - negative-keyword-add [risk_class: reversible]：加否词（关键词级 / 共享否词表）。否词不放竞品牌名，除非客户点名。
 - ad-pause / adgroup-pause [risk_class: reversible]：暂停单条 ad 或单个 ad group。
 - keyword-bid-adjust [risk_class: reversible]：单关键词出价调整，幅度 ±20% 以内。
-- schedule-adjust [risk_class: reversible]：投放时段调整。
+- schedule-adjust [risk_class: reversible]：投放时段调整。（mutate 执行器未实现，当前落地时转人工）
+- final-url-change [risk_class: reversible]：改既有 ad / ad group 内广告的 final URL。只改既有结构不新建；改前记录旧 URL（回滚依据）；新 URL 必须 curl 200 且零跳转后才提交；提交后回读验证。不花钱、旧值可一键改回，故 reversible。
 
 ### agent_prepare（只出方案，放行卡确认后执行）
 - budget-change [risk_class: spend]：预算变动超当前日预算 20%。

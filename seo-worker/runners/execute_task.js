@@ -1740,7 +1740,9 @@ async function runOne(ctx, context, workspace, taskId) {
   if (!task) {
     throw new Error('task ' + taskId + ' not found in context for client_id ' + job.client_id);
   }
-  const platform = profile.platform || profile.cms || null;
+  // paid 通道路由（2026-09-08）：paid 任务的能力清单是 googleads（channel 级），
+  // 不是站点 CMS。凭据走中心 env，不吃 notes/ 里的站台凭据文件。
+  const platform = String(task.module || '') === 'paid' ? 'googleads' : (profile.platform || profile.cms || null);
   const allOps = taskOps(task);
 
   // Blog mode wins over prepare and analysis. A blog task produces an unpublished
