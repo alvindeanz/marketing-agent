@@ -11,6 +11,10 @@
   adgroup-create       --spec - 从 stdin 读 JSON 建组单（structural，预算中性：不动 campaign 预算与出价策略。
                        流程：查重名拒重复 → 建 PAUSED 组 → 录词/否词/RSA → 逐项回读核数 → 全对才 ENABLED，
                        任何一步不符即停在 PAUSED 并打印已建内容，绝不半开着投放）
+  rsa-copy-update      --spec - 从 stdin 读 JSON（external：改既有 RSA 的标题与描述，全量替换语义。
+                       spec: {ad_id, headlines:[{text,pin?}], descriptions:[{text}]}，给的是改后的完整集合。
+                       流程：读原文案全套打印（回滚依据）→ 校验条数/字符/pin → 与原集合相同则 noop →
+                       mutate 手写 mask → 回读逐条比对。注意：文案更新会触发广告重审）
   schedule-adjust      未实现，直接拒，转人工
 铁律（脚本硬闸，不靠调用方自觉）:
   - 改前必查旧值并打印（JSON 行，回滚依据）；mutate 后回读验证并打印新值。
@@ -27,7 +31,7 @@ import sys
 
 ENV_FILE = "/data/aira/.env.google-ads"
 OPS = ["final-url-change", "ad-pause", "adgroup-pause", "keyword-pause", "negative-keyword-add",
-       "keyword-bid-adjust", "adgroup-create", "schedule-adjust"]
+       "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "schedule-adjust"]
 MATCH_TYPES = {"broad": "BROAD", "phrase": "PHRASE", "exact": "EXACT",
                "BROAD": "BROAD", "PHRASE": "PHRASE", "EXACT": "EXACT"}
 
@@ -393,6 +397,98 @@ def op_adgroup_create(client, cid, args):
          "budget_impact": "0（campaign 预算与出价策略未动，预算中性新建）"})
 
 
+def _rsa_texts_validate(hs, ds):
+    if not (3 <= len(hs) <= 15):
+        return "headlines 数量须在 3 到 15"
+    if not (2 <= len(ds) <= 4):
+        return "descriptions 数量须在 2 到 4"
+    for h in hs:
+        t = str(h.get("text") or "")
+        if not t or len(t) > 30:
+            return "headline 为空或超 30 字符: " + t
+        if h.get("pin") not in (None, 1, 2, 3):
+            return "headline pin 只认 1/2/3"
+    for d in ds:
+        t = str(d.get("text") or "")
+        if not t or len(t) > 90:
+            return "description 为空或超 90 字符: " + t
+    return None
+
+
+def op_rsa_copy_update(client, cid, args):
+    raw = sys.stdin.read() if (args.spec or "") == "-" else None
+    if raw is None:
+        die("rsa-copy-update 需要 --spec -（JSON 走 stdin）")
+    try:
+        spec = json.loads(raw)
+    except Exception as e:
+        die("spec JSON 解析失败: " + str(e)[:200])
+    ad_id = int(spec.get("ad_id") or 0)
+    hs = spec.get("headlines") or []
+    ds = spec.get("descriptions") or []
+    if not ad_id:
+        die("spec 缺 ad_id")
+    err = _rsa_texts_validate(hs, ds)
+    if err:
+        die("文案校验不过: " + err)
+    rows = gaql(client, cid,
+                "SELECT ad_group_ad.ad.id, ad_group_ad.ad.type, ad_group_ad.status, "
+                "ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions "
+                "FROM ad_group_ad WHERE ad_group_ad.ad.id = " + str(ad_id))
+    if not rows:
+        die("ad " + str(ad_id) + " 不存在")
+    ad = rows[0].ad_group_ad.ad
+    if str(ad.type_) != "AdType.RESPONSIVE_SEARCH_AD" and "RESPONSIVE_SEARCH_AD" not in str(ad.type_):
+        die("ad " + str(ad_id) + " 不是 RSA（type " + str(ad.type_) + "），本操作只改 RSA 文案")
+    def dump(assets):
+        out_l = []
+        for a in assets:
+            row = {"text": a.text}
+            pf = str(a.pinned_field)
+            if "HEADLINE_" in pf:
+                row["pin"] = int(pf.rsplit("_", 1)[1])
+            out_l.append(row)
+        return out_l
+    old_h = dump(ad.responsive_search_ad.headlines)
+    old_d = dump(ad.responsive_search_ad.descriptions)
+    out({"step": "before", "op": "rsa-copy-update", "ad_id": ad_id,
+         "old_headlines": old_h, "old_descriptions": old_d})
+    new_h = [{"text": str(h["text"]), **({"pin": h["pin"]} if h.get("pin") else {})} for h in hs]
+    new_d = [{"text": str(d["text"])} for d in ds]
+    if new_h == old_h and new_d == [{"text": r["text"]} for r in old_d]:
+        out({"ok": True, "noop": True, "note": "文案与目标一致，零改动"})
+        return
+    if args.dry_run:
+        out({"ok": True, "dry_run": True, "would_set": {"headlines": new_h, "descriptions": new_d}})
+        return
+    svc = client.get_service("AdService")
+    op = client.get_type("AdOperation")
+    op.update.resource_name = svc.ad_path(cid, ad_id)
+    for h in hs:
+        a = client.get_type("AdTextAsset")
+        a.text = str(h["text"])
+        if h.get("pin") in (1, 2, 3):
+            a.pinned_field = getattr(client.enums.ServedAssetFieldTypeEnum, "HEADLINE_" + str(h["pin"]))
+        op.update.responsive_search_ad.headlines.append(a)
+    for d in ds:
+        a = client.get_type("AdTextAsset")
+        a.text = str(d["text"])
+        op.update.responsive_search_ad.descriptions.append(a)
+    op.update_mask.CopyFrom(field_mask(["responsive_search_ad.headlines", "responsive_search_ad.descriptions"]))
+    svc.mutate_ads(customer_id=cid, operations=[op])
+    rows2 = gaql(client, cid,
+                 "SELECT ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions "
+                 "FROM ad_group_ad WHERE ad_group_ad.ad.id = " + str(ad_id))
+    got_h = dump(rows2[0].ad_group_ad.ad.responsive_search_ad.headlines) if rows2 else []
+    got_d = dump(rows2[0].ad_group_ad.ad.responsive_search_ad.descriptions) if rows2 else []
+    if [r["text"] for r in got_h] != [r["text"] for r in new_h] or [r["text"] for r in got_d] != [r["text"] for r in new_d]:
+        die("回读比对不符，人工核对 ad " + str(ad_id) + "：读到 headlines " + json.dumps(got_h, ensure_ascii=False)[:300], 1)
+    out({"ok": True, "op": "rsa-copy-update", "ad_id": ad_id,
+         "headlines": len(new_h), "descriptions": len(new_d),
+         "old_headlines": old_h, "old_descriptions": old_d,
+         "budget_impact": 0, "note": "文案已更新并回读一致，广告将重新进入审核"})
+
+
 def op_keyword_bid_adjust(client, cid, args):
     if not args.criterion_resource or not args.new_bid_micros:
         die("keyword-bid-adjust 需要 --criterion-resource 与 --new-bid-micros")
@@ -448,7 +544,8 @@ def main():
          "keyword-pause": op_keyword_pause,
          "negative-keyword-add": op_negative_keyword_add,
          "keyword-bid-adjust": op_keyword_bid_adjust,
-         "adgroup-create": op_adgroup_create}[args.op](client, cid, args)
+         "adgroup-create": op_adgroup_create,
+         "rsa-copy-update": op_rsa_copy_update}[args.op](client, cid, args)
     except SystemExit:
         raise
     except Exception as e:

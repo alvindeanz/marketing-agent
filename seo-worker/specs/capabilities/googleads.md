@@ -25,7 +25,7 @@
 | campaign-create | agent_prepare | 新建 campaign |
 | adgroup-create | agent_prepare | 既有 campaign 内建组（词/否词/RSA 打包，PAUSED 装配回读全对才启用），预算中性 structural |
 | asset-create | agent_prepare | 新建 asset |
-| ad-copy-rewrite | agent_prepare | 改 ad copy，对外资产走放行；RSA mutate 执行器未实现，方案后转人工 |
+| ad-copy-rewrite | agent_prepare | 改 ad copy，对外资产，有批文才自动；执行器 rsa-copy-update 全量替换加回读比对 |
 | conversion-goal-change | agent_prepare | 转化目标与权重调整，不可逆类 |
 | keyword-direction | agent_readonly | 关键词方向卡，一步出报告 |
 | creative-direction | agent_readonly | 素材方向卡，一步出报告 |
@@ -52,7 +52,10 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
   预算中性：不动 campaign 预算与出价策略，总花费上限不变，风险实质是流量再分配而非新增支出
   （2026-09-08 Alvin 批，从 spend 降档）。执行器铁律：同名组拒建；PAUSED 装配，逐项回读核数
   全对才 ENABLED，任何一步不符停在 PAUSED 报人，绝不半开着投放。
-- ad-copy-rewrite [risk_class: external]：改 ad copy（文案是对外资产，走放行）。（RSA 文案 mutate 执行器未实现，当前方案定稿后转人工落地，标记 [capability-gap]）
+- ad-copy-rewrite [risk_class: external]：改 ad copy（文案是对外资产，有客户批文背书才自动，否则停人）。
+  执行器 rsa-copy-update（2026-09-09 上线，Alvin 解冻）：全量替换语义（spec 给改后完整集合），
+  改前打印原文案全套（回滚依据），条数/字符/pin 校验，回读逐条比对。铁律：文案更新触发广告重审，
+  同一任务不重复改同一条；只改方案明确列出的条目，未列出的原文一字不动。
 - conversion-goal-change [risk_class: irreversible]：转化目标与权重调整。
 
 ### analysis（一步出报告，不走 prepare/apply）

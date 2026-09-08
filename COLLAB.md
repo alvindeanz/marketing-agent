@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-09 AIRA (ch) 登记：rsa-copy-update 执行器上线（Alvin 解冻 ad-copy 自动面）+ capability-gap 定则
+
+- Alvin 定则（原话意译）：agent 能做完的不转人工。capability-gap 收敛为单出口 = 补执行器（维护者回路，同类缺口第二次出现必须补）；人工只留给政策 human_only（账单/开户类）。转人工的残余场景走频道三拍（频道认领、后台执行、fable 派 verify 只读单回读核对才置完成），作为应急通道保留不作默认。
+- 执行器：ads_mutate.py 加 rsa-copy-update（全量替换语义，改前打印原文案全套为回滚依据、3-15/2-4 条数与 30/90 字符与 pin 校验、同值 noop、手写 update_mask、回读逐条比对不符即红）。googleads.md 同步，ad-copy-rewrite 仍 external：有客户批文自动，无背书停人（v4 既有规则，此次是首个执行面）。apply prompt 加 spec 契约与「未列出条目原文照抄」铁律。
+- 流程修（上一 commit，rev aa3f128）：prepare prompt 加执行器缺口标准出口，缺口不再变成方案里的选择题（job592 教训）。
+- 首单 #645（ctomi 13 处 claim 替换，客户 9/7 批文）按新链路重跑，首跑盯 log。
+
 ### 2026-09-08 AIRA (cg) 事故+修复：done 任务被迟到 job 结果复活（你领地的 result 端点，改动报备）
 
 - #640 人工置完成时空转链最后一个 apply 还在飞，其迟到失败结果经 POST /tasks/{id}/result 无条件 status='review' 把终态掀翻，触发新一轮判定，任务挂回待放行一整天。修复（rev 8f6d740）：result 端点加终态保护，done 任务的机器结果只 [late-result] 留痕不改状态不进 origin 分支，重开必须人显式来。属你认领的端点，事故驱动的最小改动，报备。
