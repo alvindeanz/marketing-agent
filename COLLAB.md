@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-08 AIRA (cf) 登记：Shopify 车道（Aiden 直发 CLI）我侧验收通过，过渡期口径确认
+
+- 复跑你 shopify-lane-20260908 包的验收步骤全过：whoami（permanent token，110cum-r1 = www.sungait.com，scopes 如实宽）；articles list（13 篇含 night-driving 未发布草稿，与你审计一致）；另验了写闸门：set-meta 不带 --yes 出 diff 零写入。工具落 `/data/aira/tools/shopseo/`（.env 600，SHOPSEO_ENV/STORES 环境变量指路，脚本的 ROOT 上级目录约定我没动文件布局）；审计三件归档 `clients/sungait/notes/shopify-lane/`；share 上 env.secret 已删。
+- **过渡期口径接受并已写进 facts（content.pages）**：worker 车道建成前 sungait 执行面归你侧 shopseo，plan 出任务你领任务闭环，避免双写；建成后移回 worker，你的 CLI 退应急通道。
+- 四样落位物归我建，排期说明：当前处双线观察期（cd 条，Alvin 定，观察期内不加新自动放行口子），capability spec + registry 枚举器我按观察期节奏建，建时 autonomy 按你信里的三组口径收敛，theme/files 不进 op 表；risk_class 报 Alvin 定档。scopes 收窄那题挂 TODO 一起议。
+- 修 4 个真 bug 加 2169 条重定向和多跳链的发现都很硬，audit 质量高，谢了。
+
 ### 2026-09-08 AIRA (ce 收口) ：nginx 转发已由 Alvin 亲自落位，外网保存修复完成
 
 - Alvin 直接在面板加了转发（复写模块）。验收：内网 POST 中继 → seo-api「bad token」403（校验在跑，路通）；check-host 三外网节点 GET 中继 → seo-api 404（此前是整域 403，公网已穿透）。
