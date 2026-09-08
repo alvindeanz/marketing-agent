@@ -81,7 +81,7 @@ t('a card with an open thread renders the thread box', () => {
 });
 t('queue strip and pick hint render', () => {
   vm.runInContext('qsQueue={running:[{id:1,client_name:"L",type:"execute_task",task_id:' + fixture.tasks[0].id + ',elapsed_sec:70}],queued:[{id:2,lane:"light"}]};renderQueueStrip();renderPickHint()', ctx);
-  assert.ok(el('queueStrip').textContent.indexOf('运行中 #1') > -1);
+  assert.ok(el('queueStrip').textContent.indexOf('运行中 L · 任务 #' + fixture.tasks[0].id) > -1, '队列条编号用任务号');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

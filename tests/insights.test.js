@@ -755,14 +755,14 @@ t('qsElapsedMin 算整分钟，不足一分钟归 0，解析不了回 null', () 
   assert.strictEqual(P.qsElapsedMin('', '2026-08-25 10:00:00'), null);
   assert.strictEqual(P.qsElapsedMin(null, null), null);
 });
-t('qsStripText 拼出运行中加排队一整行，标题走 titleMap', () => {
+t('qsStripText 拼出运行中加排队一整行，编号用任务号不用 job 号，标题走 titleMap', () => {
   const q = {
     running: [{ id: 82, client_id: 7, client_name: 'Louvresky', type: 'execute_task', task_id: 91, elapsed_sec: 8 * 60 + 20 }],
     queued: [{ id: 83 }, { id: 84 }, { id: 85 }],
   };
   assert.strictEqual(
     P.qsStripText(q, { '91': '首页标题重写' }, {}, '2026-08-25 10:00:00'),
-    '队列：运行中 #82 Louvresky · 首页标题重写（8 分钟） · 排队 3 个'
+    '队列：运行中 Louvresky · 任务 #91 首页标题重写（8 分钟） · 排队 3 个'
   );
 });
 t('qsStripText 两条道分开报排队数，没有轻活时照旧只报合计', () => {
@@ -774,23 +774,23 @@ t('qsStripText 两条道分开报排队数，没有轻活时照旧只报合计',
   const onlyHeavy = { running: [], queued: [{ id: 1, lane: 'heavy' }] };
   assert.strictEqual(P.qsStripText(onlyHeavy, {}, {}, null), '队列：排队 1 个');
 });
-t('qsStripText 找不到标题只显示任务号，超长截断，无 elapsed_sec 时用 claimed_at', () => {
+t('qsStripText 找不到标题只显示任务号，标题超长截断但任务号不截，无 elapsed_sec 时用 claimed_at', () => {
   const q = {
     running: [{ id: 82, client_name: 'Bens', task_id: 404, claimed_at: '2026-08-25 09:58:00' }],
     queued: [],
   };
   assert.strictEqual(P.qsStripText(q, {}, {}, '2026-08-25 10:00:30'),
-    '队列：运行中 #82 Bens · 任务 #404（2 分钟）');
+    '队列：运行中 Bens · 任务 #404（2 分钟）');
   const long = { running: [{ id: 5, client_name: 'A', task_id: 1 }], queued: [] };
   const out = P.qsStripText(long, { '1': '一二三四五六七八九十一二三四五六七八九十一二' }, {}, null);
-  assert.ok(out.indexOf('一二三四五六七八九十一二三四五六七八九十…') > -1, '标题超 20 字要截断');
+  assert.ok(out.indexOf('任务 #1 一二三四五六七八九十一二三四五六七八九十…') > -1, '任务号打头，标题超 20 字截断');
 });
-t('qsStripText 空队列回空串，没有 task_id 的 job 显示类型名', () => {
+t('qsStripText 空队列回空串，没有 task_id 的 job 显示类型名并明写 job 号', () => {
   assert.strictEqual(P.qsStripText({ running: [], queued: [] }, {}, {}, null), '');
   assert.strictEqual(P.qsStripText(null, {}, {}, null), '');
   const q = { running: [{ id: 9, client_name: 'QK', type: 'pull_data', elapsed_sec: 30 }], queued: [] };
   assert.strictEqual(P.qsStripText(q, {}, { pull_data: '拉数据' }, null),
-    '队列：运行中 #9 QK · 拉数据（不到 1 分钟）');
+    '队列：运行中 job #9 QK · 拉数据（不到 1 分钟）');
 });
 
 /* ---------- 投放（paid）洞察 ---------- */
