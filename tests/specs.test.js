@@ -49,6 +49,28 @@ try {
   console.log('  ok   release_policy json/md/googleads/webforger 一致');
 } catch (e) { fail += 1; console.log('  FAIL release_policy :: ' + e.message); }
 
+// 能力清单必须能被 runner 解析（2026-09-08 job545 教训：googleads.md 只有文档没有规划视图表，
+// execute 解析出零操作全部退化成分析模式，方案文件永远出不来）。每份清单：
+// 规划视图非空；agent_apply/agent_prepare 的 op 必须在 release_policy 的 risk 表里（分级派单要用）。
+try {
+  const cap = require(path.join(__dirname, '..', 'seo-worker', 'lib', 'capabilities.js'));
+  const pol = JSON.parse(fs.readFileSync(path.join(S, 'release_policy.json'), 'utf8'));
+  const capDir = path.join(S, 'capabilities');
+  const problems = [];
+  for (const f of fs.readdirSync(capDir).filter((x) => x.endsWith('.md'))) {
+    const platform = f.replace(/\.md$/, '');
+    const ops = cap.operations(platform);
+    if (!ops.length) { problems.push(platform + ': 规划视图解析出零操作'); continue; }
+    for (const o of ops) {
+      if ((o.autonomy === 'agent_apply' || o.autonomy === 'agent_prepare') && !pol.risk_class_by_op[o.name]) {
+        problems.push(platform + ': op ' + o.name + ' 不在 release_policy risk 表');
+      }
+    }
+  }
+  assert.ok(!problems.length, problems.join('; '));
+  console.log('  ok   全部能力清单可解析且 op 齐 risk 表');
+} catch (e) { fail += 1; console.log('  FAIL 能力清单解析 :: ' + e.message); }
+
 // review_principles 的 SEO 部分还在（append 不许覆盖）
 const rp = fs.readFileSync(path.join(S, 'review_principles.md'), 'utf8');
 if (!rp.includes('五问')) { fail += 1; console.log('  FAIL review_principles 丢了原有五问段'); } else console.log('  ok   review_principles 原段完整');

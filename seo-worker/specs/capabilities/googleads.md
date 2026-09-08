@@ -5,6 +5,29 @@
      login-customer-id 恒为 MCC 152-489-2513，customer-id 走 profile.ads_customer_id。
      V2（2026-09-08）：新增 final-url-change（reversible），mutate 通道 lib/ads_mutate.py 白名单执行。 -->
 
+## 规划视图
+
+<!-- PLANNING_VIEW_START -->
+| operation | autonomy | note |
+|---|---|---|
+| negative-keyword-add | agent_apply | 加否词，关键词级或共享否词表，否词不放竞品牌名 |
+| ad-pause | agent_apply | 暂停单条 ad，学习期拒杀 |
+| adgroup-pause | agent_apply | 暂停单个 ad group，学习期拒杀 |
+| keyword-bid-adjust | agent_apply | 单关键词出价调整，脚本硬闸 ±20% |
+| final-url-change | agent_apply | 只改既有 ad 的 final URL，改前记旧值，回读加 curl 200 零跳转 |
+| schedule-adjust | agent_prepare | 投放时段调整，mutate 执行器未实现，方案出来转人工落地 |
+| budget-change | agent_prepare | 预算变动超当前日预算 20%，spend 永远人放行 |
+| campaign-pause | agent_prepare | 暂停整个 enabled campaign |
+| bidding-strategy-change | agent_prepare | 改出价策略 |
+| campaign-create | agent_prepare | 新建 campaign |
+| adgroup-create | agent_prepare | 新建 ad group |
+| asset-create | agent_prepare | 新建 asset |
+| ad-copy-rewrite | agent_prepare | 改 ad copy，对外资产走放行 |
+| conversion-goal-change | agent_prepare | 转化目标与权重调整，不可逆类 |
+| keyword-direction | agent_readonly | 关键词方向卡，一步出报告 |
+| creative-direction | agent_readonly | 素材方向卡，一步出报告 |
+<!-- PLANNING_VIEW_END -->
+
 ## 操作集与自主权限
 
 risk_class 是放行分级的输入（见 ../release_policy.md）：reversible 的 prepare 任务闸A 复审过即自动放行，其余人点。
@@ -31,7 +54,7 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 ### human_only
 - 账单与 payments profile、账户级设置、账户开通与关停。
 
-## 风险注记（执行侧必须遵守）
+## 全局风险注记（执行侧必须遵守）
 
 - 学习期保护：目标 campaign 处于学习期时，暂停与降预算动作一律拒绝执行，回「学习期内不下杀」。
 - 每个 apply 动作的 result_note 必须带「预算影响:」行（金额或 0）。
