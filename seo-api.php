@@ -1663,6 +1663,16 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     $cq->closeCursor();
     /* Chat 派单（只读验证）：产出即完结不进待放行不排判定，结果回频道系统行，
        留痕给人工审计（Alvin 发起，不自动化）。 */
+    if(strpos((string)($cr['origin']??''),'spawn:')===0){
+        /* 立项即排产的任务出了方案：回频道提醒放行（判定与 L0 自动放行照常走，不在这动） */
+        $rootIdS=(int)substr((string)$cr['origin'],6);
+        if($rootIdS>0){
+            $rqS=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+            $rqS->execute([$rootIdS]);
+            $rootS=$rqS->fetch();
+            if($rootS)chat_msg_insert($rootS,'chat_agent','任务 #'.$tid.'「'.$cr['title'].'」方案已出，进入判定与放行环节（可回滚项会自动放行，其余等人点放行卡）。','seo-worker');
+        }
+    }
     if(strpos((string)($cr['origin']??''),'report:')===0){
         /* 报告草稿：不自动验收（红线：对客发送必须人审），只把出稿消息回频道 */
         $rootIdR=(int)substr((string)$cr['origin'],7);
@@ -3664,13 +3674,22 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
     $t['detail']=trim($t['detail']);
     $t['detail']=($t['detail']===''?$src:($t['detail']."\n\n".$src));
     $cid=(int)$root['client_id'];
-    $tid=task_insert($cid,$t,$u['username']);
-    $note='已立项 #'.$tid.'「'.$t['title'].'」，状态 approved，已经在看板上了。';
+    $tid=task_insert($cid,$t,$u['username'],'spawn:'.$rootId);
+    /* 立项即排产（2026-09-08 Alvin 定）：点立项的那一下就是人的授权，agent 任务不再等
+       赛前判定那一轮，直接进执行队列。方案出来后的判定照旧（它驱动 L0 自动放行）；
+       花钱/不可逆的照旧停在放行卡。agency/client 任务是人的活，立项即到位不排机器。 */
+    $spawnJob=0;
+    if($t['owner_type']==='agent'){
+        list($sj,)=queue_task_jobs($cid,'execute_task',[$tid],$u['username'],'seo_chat_spawn_exec');
+        $spawnJob=$sj?$sj[0]:0;
+    }
+    $note='已立项 #'.$tid.'「'.$t['title'].'」，状态 approved'
+        .($spawnJob?('，已直接排产（job #'.$spawnJob.'），产出到待放行会回这里说一声。'):'，已经在看板上了。');
     $msgId=chat_msg_insert($root,'chat_agent',$note,$u['username'],['tasks'=>[$tid]]);
     audit($u['username'],'seo_chat_spawn_task',(string)$tid,[
-        'root_id'=>$rootId,'client_id'=>$cid,'title'=>$t['title'],'module'=>$t['module'],'message_id'=>$msgId
+        'root_id'=>$rootId,'client_id'=>$cid,'title'=>$t['title'],'module'=>$t['module'],'message_id'=>$msgId,'exec_job'=>$spawnJob
     ]);
-    res(200,['ok'=>true,'task_id'=>$tid,'message_id'=>$msgId]);
+    res(200,['ok'=>true,'task_id'=>$tid,'message_id'=>$msgId,'job_id'=>$spawnJob]);
 }
 
 /* =========================================================
