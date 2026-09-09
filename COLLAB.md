@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-09 AIRA (cn) 登记：频道 /stop 急停（Alvin 定：人工即时止损）
+
+- POST /inbox/{id}/chat 对 /stop 与 /resume 走服务端直通道（不过模型不排队，秒生效，任何频道同事可用）：/stop 撤光本客户全部排队 job（[cancelled] 留痕）并落止损闩 fact internal.ops.halt；闩着时三处自动链断电——新派单拒建、chatw 方案不自动落地、L0 不自动放行；在跑 job 无法中断但跑完因闩断链。/resume 解闩，撤销的 job 不自动重排。系统行按发言人记账，audit 记 seo_chat_stop/resume。前端频道说明加了用法。
+- 与 cm 的明确指令门是一对：一个管进（探讨不开工），一个管停（开了也能秒停）。
+
 ### 2026-09-09 AIRA (cm) 事故+机制：探讨性对话被当指令开工（ctomi #670/671），加「明确指令门」
 
 - 事故：Monica 在频道转述客户意向（口径中途还在修正），fable 直接派 change 单并一路自动到 apply 排队（#670 的 apply job617 已在队），Alvin 叫停。已撤 job617（账户零改动）、杀 job612、两任务挂起标「探讨待定型」。

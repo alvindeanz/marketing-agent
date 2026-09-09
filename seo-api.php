@@ -920,6 +920,23 @@ function release_policy_load(){
     $pol=is_array($p)?$p:null;
     return $pol;
 }
+/* 止损闩（2026-09-09 Alvin 定：频道 /stop 即时人工止损）。落在 facts 的 internal.ops.halt，
+   value 以 on/off 开头带时间与操作人。闩着时：新派单拒建、chatw 方案不自动落地、L0 不自动放行。 */
+function halt_set($cid,$val){
+    $q=db()->prepare("SELECT id FROM seo_facts WHERE client_id=? AND fact_key='internal.ops.halt'");
+    $q->execute([(int)$cid]);
+    $r=$q->fetch();
+    if($r)db()->prepare("UPDATE seo_facts SET value=?,source='manual',status='confirmed' WHERE id=?")->execute([$val,(int)$r['id']]);
+    else db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)VALUES(?,?,?,'manual','confirmed','chat-stop')")->execute([(int)$cid,'internal.ops.halt',$val]);
+}
+function ops_halted($cid){
+    $q=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='internal.ops.halt'");
+    $q->execute([(int)$cid]);
+    $r=$q->fetch();
+    $q->closeCursor();
+    return $r&&strpos((string)$r['value'],'on')===0;
+}
+
 /* 背书 fact 校验：key 存在且 confirmed 才算客户批文背书。 */
 function dispatch_backing_ok($cid,$key){
     $key=trim((string)$key);
@@ -1767,6 +1784,10 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         $rw=$seenW->fetch();
         if($rw&&(int)$rw['c']>0){
             if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」落地未完成，按熔断规矩不自动重试，转人工：细节在任务卡结果备注里。','seo-worker');
+            res(200,['ok'=>true,'dispatch_grade'=>'halted']);
+        }
+        if(ops_halted($cidW)){
+            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，但止损闩生效中（/stop），不自动落地。解闩发 /resume 后人工放行。','seo-worker');
             res(200,['ok'=>true,'dispatch_grade'=>'halted']);
         }
         $opsW=array_values(array_filter(array_map('trim',explode(',',(string)($cr['ops']??'')))));
@@ -3479,6 +3500,39 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
     $i=input();
     $text=trim((string)($i['text']??''));
     if(mb_strlen($text,'UTF-8')>5000)res(400,['error'=>'text over 5000 chars']);
+    /* /stop 与 /resume（2026-09-09 Alvin 定：频道即时人工止损）。服务端直通道，不过模型不排队：
+       /stop 撤光本客户全部排队 job 并落止损闩（internal.ops.halt），闩着时新派单拒建、
+       方案不自动落地、L0 不自动放行；在跑 job 无法中断但跑完因闩断链。/resume 解闩。
+       任何能进频道的同事都可用，系统行留痕按发言人记账。 */
+    if(preg_match('#^/(stop|resume)\b#i',$text,$haltM)){
+        $cidH=(int)$root['client_id'];
+        if(!$cidH)res(400,['error'=>'频道无客户归属，止损开关不可用']);
+        $whoH=$u['username'];
+        if(strtolower($haltM[1])==='stop'){
+            $cq=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND status='queued'");
+            $cq->execute([$cidH]);
+            $cancelledH=[];
+            foreach($cq->fetchAll() as $jr)$cancelledH[]=(int)$jr['id'];
+            if($cancelledH){
+                $inH=implode(',',$cancelledH);
+                db()->exec("UPDATE agent_jobs SET status='failed',finished_at=NOW(),log_text=CONCAT(COALESCE(log_text,''),'\n[cancelled] 频道 /stop 止损（".addslashes($whoH)."）') WHERE id IN ($inH) AND status='queued'");
+            }
+            $rq=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND status='running'");
+            $rq->execute([$cidH]);
+            $runH=array_map(function($r){return (int)$r['id'];},$rq->fetchAll());
+            halt_set($cidH,'on '.date('Y-m-d H:i').' by '.$whoH);
+            $lineH='已止损（/stop by '.$whoH.'）：撤销排队 job '.($cancelledH?('#'.implode(' #',$cancelledH)):'0 个')
+                .'；'.($runH?('在跑 job #'.implode(' #',$runH).' 无法中断，但跑完不会自动接落地或放行'):'无在跑 job')
+                .'。止损闩已落：本客户新派单、自动落地、自动放行全部暂停，恢复发 /resume。';
+            chat_msg_insert($root,'chat_agent',$lineH,$whoH);
+            audit($whoH,'seo_chat_stop',(string)$cidH,['cancelled'=>$cancelledH,'running'=>$runH]);
+            res(200,['ok'=>true,'stopped'=>true,'cancelled'=>$cancelledH,'running'=>$runH]);
+        }
+        halt_set($cidH,'off '.date('Y-m-d H:i').' by '.$whoH);
+        chat_msg_insert($root,'chat_agent','止损闩已解除（/resume by '.$whoH.'），自动链恢复。此前撤销的 job 不自动重排，需要重跑的在看板排或说一声。',$whoH);
+        audit($whoH,'seo_chat_resume',(string)$cidH,[]);
+        res(200,['ok'=>true,'resumed'=>true]);
+    }
     /* 截图任何会话都收（2026-09-07 Chat 化：频道聊天对齐任务线程），走反馈那套校验与存储。 */
     $rootRefs=inbox_refs_norm($root['refs']);
     $imgs=[];
@@ -3711,6 +3765,10 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
        只在非任务线程根生效。 */
     $dispatched=[];
     $dispIn=(!$rootRefs['tasks']&&is_array($i['dispatch']??null))?array_values($i['dispatch']):[];
+    if($dispIn&&$root['client_id']!==null&&ops_halted((int)$root['client_id'])){
+        chat_msg_insert($root,'chat_agent','止损闩生效中（/stop），本轮 '.count($dispIn).' 条派单未建。解闩发 /resume。','seo-worker');
+        $dispIn=[];
+    }
     if($dispIn&&$root['client_id']!==null){
         if(count($dispIn)>2)$dispIn=array_slice($dispIn,0,2);
         $mqD=db()->prepare("SELECT id,created_by FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
@@ -4464,7 +4522,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
     $auto=[];
     $pol=@json_decode(@file_get_contents(__DIR__.'/release_policy.json'),true);
     $rc=is_array($pol)&&isset($pol['risk_class_by_op'])?$pol['risk_class_by_op']:null;
-    $l0on=$rc&&!empty($pol['l0_rules']['auto_release']);
+    $l0on=$rc&&!empty($pol['l0_rules']['auto_release'])&&!ops_halted($cid);
     if($l0on)foreach($rows as $v){
         if(!is_array($v)||(string)($v['verdict']??'')!=='do')continue;
         $tid=(int)($v['task_id']??0);
