@@ -318,7 +318,7 @@ function buildPrompt(opts) {
       '"owner_type":"agency","priority":"P2","sprint":"W35","ops":""}],' +
       '"facts":[{"key":"content.delivery_time","value":"交期 6 周，2026-09 客户微信确认"}]' +
       (task ? '' : ',"dispatch":[{"title":"验证 8 月广告询价口径","detail":"拉取并核对，产出一页结论","module":"paid"},' +
-        '{"title":"四组 intent 路由改 final URL","detail":"按客户批准的 change list 改四组 final URL，改前记旧值，改后回读加 curl 200 零跳转","module":"paid","kind":"change","ops":"final-url-change","backing_fact":"paid.change_list_approved"}],' +
+        '{"title":"四组 intent 路由改 final URL","detail":"按客户批准的 change list 改四组 final URL，改前记旧值，改后回读加 curl 200 零跳转","module":"paid","kind":"change","ops":"final-url-change","backing_fact":"paid.change_list_approved","mandate":"四组 final URL 按批准的 change list 直接改了吧"}],' +
         '"actions":[{"type":"kill","task_id":470,"title_check":"第一批五个品类页","reason":"客户暂停这条线"}]') +
       (task ? ',"actions":[{"type":"redispatch","reason":"描述里去掉 220 km/h，社交图改用站内真实 hero 图"}]' : '') +
       '}',
@@ -341,8 +341,13 @@ function buildPrompt(opts) {
     '- facts 的 key 优先复用简报里已有的 fact key；确实是新事实才起新 key，照简报里的命名风格',
     '  （小写加点分层，如 content.warranty）。value 一句话写清事实本身，带日期与出处。',
     '- 人没让记就不要写 facts；拿不准这算不算客户事实（比如只是讨论），先问再记。最多 8 条。',
-    task ? '' : '- dispatch 是派单，决策权在你（2026-09-08 Alvin 定）：人在频道里要求的活，你判断该做就派，',
-    task ? '' : '  拿不准就在正文里问清再派，觉得不该做就不派并说明为什么。你也有权对已派/在跑的任务喊停（kill/later）。',
+    task ? '' : '- dispatch 是派单。**默认动作是分析不是开干**（2026-09-09 Alvin 定，PJ 式）：收到诉求先在正文里给',
+    task ? '' : '  需求正当性判断、影响面、更佳或最佳路径、风险档，结尾问「要开工吗」；拿不准的附 drafts 草案卡让人点开工。',
+    task ? '' : '  **只有对话里存在人的明确执行指令才允许 dispatch**，且每条派单必须带 "mandate" 字段：一字不改引用',
+    task ? '' : '  那句指令原话（服务端会逐字比对本会话人类消息，对不上直接拒建）。三类永远不算指令：',
+    task ? '' : '  转述客户（「客户说/客户想/客户觉得」是材料不是指令，同事自己下令才算）；探讨语气（要不要/看看/',
+    task ? '' : '  是不是/我在想）；你自己的建议被沉默跳过。需求口径还在变（同一会话里反复修正对象或范围）时，',
+    task ? '' : '  视为讨论中，绝不派单。你有权对已派/在跑的任务喊停（kill/later），觉得不该做就说不做并给理由。',
     task ? '' : '  三种 kind：不带 kind 是**只读验证/数据分析**（拉数核对、效果验证、搜索词摸底），免审批直接执行；',
     task ? '' : '  "kind":"report" 是**paid 月报/客户报告草稿**，detail 写明报告月份并注明按',
     task ? '' : '  /data/aira/seo-worker/specs/report/paid_monthly_spec.md 执行，草稿出来走人工验收，回复里要说清；',
@@ -490,7 +495,9 @@ function cleanDispatch(json, log) {
     const mod = String(d.module || 'technical').trim().toLowerCase();
     const kindRaw = String(d.kind || '').trim();
     const kind = kindRaw === 'report' ? 'report' : (kindRaw === 'change' ? 'change' : 'verify');
-    const row = { title, detail: summarize(d.detail, 4000), module: MODULES.indexOf(mod) !== -1 || mod === 'paid' ? mod : 'technical', kind };
+    const mandate = String(d.mandate || '').trim();
+    if (!mandate) { say('对话：丢弃一条派单，缺 mandate 授权引语（2026-09-09 明确指令门）'); continue; }
+    const row = { title, detail: summarize(d.detail, 4000), module: MODULES.indexOf(mod) !== -1 || mod === 'paid' ? mod : 'technical', kind, mandate: mandate.slice(0, 300) };
     if (kind === 'change') {
       const ops = String(d.ops || '').trim();
       if (!ops) { say('对话：丢弃一条改动类派单，没有 ops'); continue; }

@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-09 AIRA (cm) 事故+机制：探讨性对话被当指令开工（ctomi #670/671），加「明确指令门」
+
+- 事故：Monica 在频道转述客户意向（口径中途还在修正），fable 直接派 change 单并一路自动到 apply 排队（#670 的 apply job617 已在队），Alvin 叫停。已撤 job617（账户零改动）、杀 job612、两任务挂起标「探讨待定型」。
+- 机制（PJ 式，Alvin 定）：fable 默认动作是分析不是开干（正当性、影响面、更佳/最佳路径、风险档，结尾问「要开工吗」，拿不准附草案卡）；**dispatch 必须带 mandate 授权引语**，一字不改引用会话里人下达执行指令的原话，服务端逐字比对本会话 chat_user 消息（去空白归一），对不上拒建回原因。转述客户与探讨语气永不构成指令（prompt 层铁律）。
+- 波及：seo-api dispatch 分支、chat prompt 与 cleanDispatch、chat.test 用例。9/8 的「决策权还给 fable」修订为：fable 决定该不该与怎么做，**开工时点必须由人的明确指令触发**（与「一切执行源于人」硬规矩对齐）。api 与 worker 相邻部署。
+
 ### 2026-09-09 AIRA (cl) 登记：GBP 全类目 human_only（Alvin 定）
 
 - webforger.md 能力清单 gbp-update 从 agent_prepare 改 human_only（agent 搞不定 GBP 也无法发帖），规划层自动生效。看板横扫：apex #661 与 powerdekor #42 转 agency，citymed #385（复盘含 GBP 洞察节）保 agent 但 GBP 节只读加标注。capability-gap 定则第 3 类，不进执行器 backlog。

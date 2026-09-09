@@ -128,19 +128,22 @@ t('开工回执（2026-09-08 起替代已立项）也认成系统行', () => {
   assert.deepStrictEqual(msgs.map(m => m.role), ['user', 'system']);
 });
 
-t('分级派单：change 必带 ops，backing_fact 跟着走，verify/report 不受影响', () => {
+t('分级派单：change 必带 ops，backing_fact 跟着走，verify/report 不受影响；mandate 授权引语必填（2026-09-09 明确指令门）', () => {
   const out = chat.cleanDispatch({ dispatch: [
-    { title: '改四组 final URL', detail: 'x', module: 'paid', kind: 'change', ops: 'final-url-change', backing_fact: 'paid.change_list_approved' },
-    { title: '拉数核对', detail: 'y', module: 'paid' },
+    { title: '改四组 final URL', detail: 'x', module: 'paid', kind: 'change', ops: 'final-url-change', backing_fact: 'paid.change_list_approved', mandate: '直接改了吧' },
+    { title: '拉数核对', detail: 'y', module: 'paid', mandate: '拉一下数核对' },
   ] }, null);
   assert.strictEqual(out.length, 2);
   assert.strictEqual(out[0].kind, 'change');
   assert.strictEqual(out[0].ops, 'final-url-change');
   assert.strictEqual(out[0].backing_fact, 'paid.change_list_approved');
+  assert.strictEqual(out[0].mandate, '直接改了吧');
   assert.strictEqual(out[1].kind, 'verify');
   assert.strictEqual(out[1].ops, undefined);
-  const dropped = chat.cleanDispatch({ dispatch: [{ title: '没 ops 的改动', kind: 'change' }] }, null);
+  const dropped = chat.cleanDispatch({ dispatch: [{ title: '没 ops 的改动', kind: 'change', mandate: 'x改了' }] }, null);
   assert.strictEqual(dropped.length, 0, '改动类没 ops 必须整条丢');
+  const noMandate = chat.cleanDispatch({ dispatch: [{ title: '探讨阶段的活', detail: 'y', module: 'paid' }] }, null);
+  assert.strictEqual(noMandate.length, 0, '没 mandate 授权引语必须整条丢，探讨不派单');
 });
 
 t('machine_run：线程与频道两侧都认，ops 必填，module/backing_fact 跟着走（2026-09-08 卡壳自愈）', () => {

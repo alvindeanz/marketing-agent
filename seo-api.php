@@ -3717,8 +3717,22 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
         $mqD->execute([$rootId]);
         $umD=$mqD->fetch();
         $askerD=($umD&&$umD['created_by']!=='')?(string)$umD['created_by']:'seo-worker';
+        /* 明确指令门（2026-09-09 Alvin 定，ctomi #670/671 探讨误开工的教训）：
+           任何派单必须带 mandate = 一字不改引用会话里人下达执行指令的那句话。
+           服务端子串比对本会话全部 chat_user 消息（去空白归一），对不上视为模型自作主张，拒建。
+           转述客户（「客户说/客户想」）与探讨语气不构成指令，这在 prompt 层约束，这里只验真实性。 */
+        $humanBodies='';
+        $hq=db()->prepare("SELECT body FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id");
+        $hq->execute([$rootId]);
+        foreach($hq->fetchAll() as $hr)$humanBodies.=preg_replace('/\s+/u','',(string)$hr['body'])."\n";
         foreach($dispIn as $dxi=>$dx){
             if(!is_array($dx))continue;
+            $mandate=trim((string)($dx['mandate']??''));
+            $mandateNorm=preg_replace('/\s+/u','',$mandate);
+            if($mandate===''||mb_strlen($mandate,'UTF-8')<4||strpos($humanBodies,$mandateNorm)===false){
+                chat_msg_insert($root,'chat_agent','派单 '.$msgId.'/'.$dxi.' 未建：缺少或对不上「授权引语」（mandate 必须一字不改引用本会话里人下达执行指令的原话）。探讨阶段请先给分析与建议路径，问清「要开工吗」，拿到明确指令再派。','seo-worker');
+                continue;
+            }
             $kindRaw=(string)($dx['kind']??'verify');
             $kindD=in_array($kindRaw,['report','change'],true)?$kindRaw:'verify';
             $opsD='';$gradeD='';$backKeyD='';
@@ -3742,7 +3756,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 'owner_type'=>'agent','priority'=>'P1','ops'=>$opsD,'sprint'=>'',
             ],['status_force'=>'approved']);
             if($errD)continue;
-            $srcLineD="\n\n[来源] Chat 频道 #".$rootId." 由 ".$askerD." 发起，";
+            $srcLineD="\n\n[授权引语] ".mb_substr($mandate,0,200,'UTF-8')."\n[来源] Chat 频道 #".$rootId." 由 ".$askerD." 发起，";
             if($kindD==='report')$srcLineD.="月报/报告草稿类：产出内部草稿，须人工验收后才可对客。";
             elseif($kindD==='change'){
                 $srcLineD.="fable 判定的改动类派单，风险档 ".$gradeD."。";
