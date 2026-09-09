@@ -51,6 +51,23 @@ function humanDecisions(note) {
 async function main() {
   const bc = await boardClient();
   if (!bc) throw new Error('board 上没有 client ' + cid);
+  // 入 sprint 前的两道客户确认闸（2026-09-09 Alvin 定的全局流程：轻链方向卡 → 客户确认关键词 →
+  // 客户确认 mapping → 才进 sprint）。证据看 facts：词表确认与 mapping 确认各要一条 confirmed 记录。
+  // --skip-gates 显式跳过（如老客户补跑、或本次 --ids 只跑与词表无关的技术项），跳过原因进日志。
+  if (!argv.includes('--skip-gates')) {
+    const fr = await call('GET', '/facts?client_id=' + cid);
+    const facts = (fr.facts || []).filter((f) => String(f.status || '') === 'confirmed');
+    const kwOk = facts.some((f) => /^keywords\./.test(f.fact_key) && /(锁定|确认|lock|confirm)/i.test(String(f.fact_key) + String(f.value)));
+    const mapOk = facts.some((f) => /^seo\.mapping/.test(f.fact_key) && /(确认|定稿|confirm)/i.test(String(f.fact_key) + String(f.value)));
+    if (!kwOk || !mapOk) {
+      throw new Error('两道确认闸未过：' + (kwOk ? '' : '关键词未经客户确认（缺 keywords.* 的 confirmed 锁定记录）；')
+        + (mapOk ? '' : 'mapping 未定稿（缺 seo.mapping* 的 confirmed 记录）；')
+        + '流程是 方向卡 → 词表客户确认 → mapping 确认 → sprint。确有理由跳过用 --skip-gates。');
+    }
+    log('两道确认闸通过：词表已确认、mapping 已定稿');
+  } else {
+    log('注意：--skip-gates 跳过词表与 mapping 确认闸，理由自负');
+  }
   const sprint = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
   log(`${bc.name}（${cid}）本期 ${sprint}` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
   /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id */

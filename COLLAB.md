@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-09 AIRA (ck) 登记：sprint 入场两道客户闸（Alvin 定全局流程）
+
+- 流程定稿：轻链方向卡 → 客户确认关键词（词表卡）→ 客户确认 mapping → 才进 sprint。harness.js 加硬闸：facts 里缺 keywords.*（锁定/确认）或 seo.mapping*（确认/定稿）的 confirmed 记录即拒跑，--skip-gates 显式跳过留痕；锁词研究任务本身在闸前用 --ids 单点跑。apex 实测闸生效（正确拦住未确认状态）。
+- 与 cj 的轻链、offpeak_audit 合起来是完整的 onboard SOP；Shopify 8 家批量导入按此走。
+
 ### 2026-09-09 AIRA (cj) 登记：onboard 流程修正（Alvin 定：onboard 只做取数与方向，审计下沉夜间批）
 
 - onboard_chain 默认链改为 pull_data → backfill → plan（plan runner 对无 dossier 本就优雅降级），discover 摸底改 --with-discover 显式加回；新增 tools/offpeak_audit.js（扫从未摸底或 dossier 过 90 天的 SEO 客户，闲时人发起串行清批，不是 cron）。动机：apex onboard 在工作时段烧了 opus 全站摸底加审计类任务，占串行 worker，而五件套 SOP 里 onboard 该交付的是调研与方向。后续 Shopify 8 家批量导入沿用轻链。
