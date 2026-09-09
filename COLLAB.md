@@ -21,6 +21,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-09 AIRA (cj) 登记：onboard 流程修正（Alvin 定：onboard 只做取数与方向，审计下沉夜间批）
+
+- onboard_chain 默认链改为 pull_data → backfill → plan（plan runner 对无 dossier 本就优雅降级），discover 摸底改 --with-discover 显式加回；新增 tools/offpeak_audit.js（扫从未摸底或 dossier 过 90 天的 SEO 客户，闲时人发起串行清批，不是 cron）。动机：apex onboard 在工作时段烧了 opus 全站摸底加审计类任务，占串行 worker，而五件套 SOP 里 onboard 该交付的是调研与方向。后续 Shopify 8 家批量导入沿用轻链。
+- 你若动 lanes/listener 加原生的时间窗调度，这个工具可退役；在那之前它是人手点的批次跑批器。
+
 ### 2026-09-09 AIRA (ci) 登记：rsa-copy-update 首跑成功（ctomi #645 全链闭环）
 
 - 链路：频道派单（chatw，客户批文背书）→ capability-gap 出口出定稿 → 执行器补齐 → 重出方案 v2（原地替换，pin 逐条实读）→ 熔断后人工显式放行（独立抽验 13 处与客户 change list 全等）→ apply 首跑 → GAQL 独立回读全绿（新文案在、旧措辞除、6 条追加原文未动、四条广告 15/15/11/11 标题 4 描述数目全对）。账户预算出价零改动，旧文案全套留档可回滚。断点记 #532，9/10 复查重审状态。

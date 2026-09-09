@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 'use strict';
-// 导入后的 job 链：pull_data -> backfill_metrics -> discover -> plan -> plan_review（方案层过闸，自动接力），
-// 一步 done 才起下一步，失败即停。跑完停在「方向确认卡」，人批准 v2 后用 tools/harness.js 接 S1。
-//   SEO_AGENT_TOKEN=<admin jwt> node tools/onboard_chain.js <client_id> [起点类型]
-// 每一步都是这次人（我）在命令行触发的，不是 cron；链只是替我按顺序点四次按钮。
+// 导入后的 job 链（2026-09-09 Alvin 修正：onboard 只做取数与方向，审计类下沉夜间批）：
+//   默认 pull_data -> backfill_metrics -> plan -> plan_review（plan 无 dossier 时按数据简报出方向，
+//   runner 自带降级分支）。discover 的 opus 全站摸底是审计性质，对新站方向判断增量小，
+//   不该在工作时段占串行 worker：留给 tools/offpeak_audit.js 在闲时批量跑，跑完的客户
+//   下一版 plan 自然吃到 dossier。--with-discover 显式加回（存量大站、方向依赖站内盘的才用）。
+//   SEO_AGENT_TOKEN=<admin jwt> node tools/onboard_chain.js <client_id> [起点类型] [--with-discover]
+// 每一步都是这次人（我）在命令行触发的，不是 cron；链只是替我按顺序点按钮。
 const API = process.env.SEO_API_BASE || 'https://always.horntech-dev.com/seo-api.php';
 const TOKEN = process.env.SEO_AGENT_TOKEN || '';
 const cid = parseInt(process.argv[2], 10);
-const start = process.argv[3] || 'pull_data';
-const CHAIN = ['pull_data', 'backfill_metrics', 'discover', 'plan'];
+const withDiscover = process.argv.includes('--with-discover');
+const start = (process.argv[3] && !process.argv[3].startsWith('--')) ? process.argv[3] : 'pull_data';
+const CHAIN = withDiscover
+  ? ['pull_data', 'backfill_metrics', 'discover', 'plan']
+  : ['pull_data', 'backfill_metrics', 'plan'];
 if (!cid || !TOKEN) { console.error('用法：SEO_AGENT_TOKEN=... onboard_chain.js <client_id> [pull_data|backfill_metrics|discover|plan]'); process.exit(2); }
 
 async function call(method, p, body) {
@@ -62,6 +68,7 @@ async function runStep(type) {
       const i = log.indexOf('CARD\n');
       console.log(ts() + ' 方案层过闸完成，job #' + pr.id + '\n\n' + (i === -1 ? '(日志里没找到卡)' : log.slice(i + 5)));
       console.log('\n下一步：看板方案区批准 v2（= 确认方向），然后 SEO_AGENT_TOKEN=... node tools/harness.js ' + cid);
+      if (!withDiscover) console.log('提醒：本次未跑 discover（审计下沉夜间批），记得把 client ' + cid + ' 留给 tools/offpeak_audit.js 的下一个夜间窗口。');
       break;
     }
     if (pr.status === 'failed') { console.log(ts() + ' plan_review job #' + pr.id + ' 失败：\n' + String(pr.log_text || '').split('\n').slice(-10).join('\n')); break; }
