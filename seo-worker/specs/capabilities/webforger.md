@@ -3,7 +3,7 @@
 <!-- v1.1 (2026-08-18)：新增 Google 资产操作段（GA4/GSC/GTM/GBP），此前这类活被错派给 agency。v1 (2026-08-13)：首版 12 操作。 -->
 
 平台：WebForger（`https://api.webforger.ai`）
-适用：托管在 WebForger 上的客户站，worker 用 shadow bot 账号操作，siteId 取登录响应的 `user.shadowOf`。WebForger 客户的 Google 资产（GA4、GSC、GTM、GBP）由 agency 账号托管并已授权 agent，相关核查与配置工作派 agent，不派 agency。
+适用：托管在 WebForger 上的客户站，worker 用 shadow bot 账号操作，siteId 取登录响应的 `user.shadowOf`。WebForger 客户的 GA4、GSC、GTM 由 agency 账号托管并已授权 agent，相关核查与配置工作派 agent；**GBP 例外，一律归人工（human_only）**。
 
 autonomy 三级的判定标准只有一条：出错以后能不能低成本还原，以及错误在还原前是否已经被客户或搜索引擎看见。
 
@@ -33,7 +33,7 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | gsc-audit | agent_readonly | 只读审计 GSC 索引覆盖、手动操作、安全问题、站点地图状态，一步出结果不走 prepare/apply |
 | ga4-config-update | agent_prepare | GA4 配置变更：key event 标记、事件建改、数据流设置 |
 | gtm-edit | agent_prepare | GTM 容器变更：标签、触发器、变量，发布留人放行 |
-| gbp-update | agent_prepare | GBP 资料修改、类目、发帖、问答维护 |
+| gbp-update | human_only | GBP 一切事项（资料、类目、发帖、问答）归人工，agent 不碰不发（Alvin 2026-09-09 定） |
 <!-- PLANNING_VIEW_END -->
 
 <!-- RISK_CLASS_START：放行分级输入（见 ../release_policy.md），与 release_policy.json 一致由 specs 测试断言 -->
@@ -263,9 +263,9 @@ WebForger 客户的 GA4、GSC、GTM、GBP 由 agency 账号托管，agent 已获
 
 只读操作：Search Console API 读索引覆盖、sitemap 状态、安全与手动操作。工作区 `data/gsc/` 有缓存快照。
 
-## ga4-config-update / gtm-edit / gbp-update（agent_prepare）
+## ga4-config-update / gtm-edit（agent_prepare）；gbp-update（human_only，2026-09-09 Alvin 定）
 
-产出变更方案文档：改什么、改成什么、为什么、怎么验证、怎么回滚。**注意：这三类的 apply 自动化通道尚未接通（worker 侧没有 GTM/GBP 写入工具链），人放行后由人照方案执行，方案要写到人能直接照做的粒度。** 通道接通前不要在方案里假设 apply_task 会自动执行。GTM 发布（publish container version）永远留人确认。
+GA4/GTM 两类产出变更方案文档：改什么、改成什么、为什么、怎么验证、怎么回滚。**注意：apply 自动化通道尚未接通（worker 侧没有 GTM 写入工具链），人放行后由人照方案执行，方案要写到人能直接照做的粒度。** 通道接通前不要在方案里假设 apply_task 会自动执行。GTM 发布（publish container version）永远留人确认。\n\n**GBP 全类目 human_only（Alvin 2026-09-09 定）：agent 搞不定 GBP，也无法发帖。规划时 GBP 相关任务一律 owner=agency，不给 agent 派 GBP 的核查、方案或落地；已有的 GBP 分析产出只作为人工执行的参考材料。**
 
 - 重定向：改完 `GET /redirects` 回读，确认 key 在、value 对；有条件的话 `curl -sI https://{域名}{旧路径}` 看到 301 且 Location 正确。
 - 页面正文与元数据：`GET /api/pages/{siteId}` 或 `GET /api/content/{siteId}/elements?page=` 回读比对预期值。

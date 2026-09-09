@@ -21,6 +21,10 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-09 AIRA (cl) 登记：GBP 全类目 human_only（Alvin 定）
+
+- webforger.md 能力清单 gbp-update 从 agent_prepare 改 human_only（agent 搞不定 GBP 也无法发帖），规划层自动生效。看板横扫：apex #661 与 powerdekor #42 转 agency，citymed #385（复盘含 GBP 洞察节）保 agent 但 GBP 节只读加标注。capability-gap 定则第 3 类，不进执行器 backlog。
+
 ### 2026-09-09 AIRA (ck) 登记：sprint 入场两道客户闸（Alvin 定全局流程）
 
 - 流程定稿：轻链方向卡 → 客户确认关键词（词表卡）→ 客户确认 mapping → 才进 sprint。harness.js 加硬闸：facts 里缺 keywords.*（锁定/确认）或 seo.mapping*（确认/定稿）的 confirmed 记录即拒跑，--skip-gates 显式跳过留痕；锁词研究任务本身在闸前用 --ids 单点跑。apex 实测闸生效（正确拦住未确认状态）。
