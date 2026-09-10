@@ -332,10 +332,14 @@ function lintPlan(text) {
   {
     const openQ = /(需要人定|请人工(决定|判断|拍板)|你来定|由人(决定|判断)|请团队(决定|定))/;
     // 「需要人定：无」是 prompt 明文要求的空章节写法（见 buildPreparePrompt），不是选择题。
-    // 「无」后面允许跟补充说明（job561 教训：「需要人定：无。两处拦截按既定口径只登记」被误杀），
-    // 但「无」必须是完整词（后随标点/空白/行尾），免得「无法确定」也被豁免。
+    // 「无」后面允许跟补充说明（job561 教训），「无」必须是完整词（防「无法确定」蹭豁免）。
+    // 判定前剥掉 markdown 装饰符（job635 教训：「**需要人定**：无」的粗体星号卡住豁免正则）。
     const emptyDecl = /需要人定[：:]\s*(无|没有|暂无)(?=[。．.，,；;：:\s]|$)/;
-    const hitLine = t.split('\n').find((l) => openQ.test(l) && !emptyDecl.test(l.trim()) && !/等客户|客户独有|客户点头|客户确认/.test(l));
+    const strip = (l) => l.replace(/[*_`]/g, '').trim();
+    const hitLine = t.split('\n').find((l) => {
+      const s2 = strip(l);
+      return openQ.test(s2) && !emptyDecl.test(s2) && !/等客户|客户独有|客户点头|客户确认/.test(s2);
+    });
     if (hitLine) problems.push('方案把选择题递给了人（' + hitLine.trim().slice(0, 60) + '）。按判定原则自己选并给理由；只有客户独有信息可以留，写成「等客户：要什么信息」');
   }
   // 7. 放行卡超长或夹带代码：人读的那一节退化成论文

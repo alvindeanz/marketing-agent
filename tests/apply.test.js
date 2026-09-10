@@ -428,6 +428,8 @@ t('lintPlan：选择题打回，但「需要人定：无」是 prompt 要求的�
   assert.deepStrictEqual(E.lintPlan(base + '- 需要人定：等客户：确认促销词是否保留'), []);
   assert.deepStrictEqual(E.lintPlan(base + '- 需要人定：无。两处拦截按既定口径只登记，48 小时后回客户。'), [], '无 后带补充说明不算选择题(job561)');
   assert.ok(E.lintPlan(base + '- 需要人定：无法确定预算归属，请人工判断').some((x) => x.indexOf('选择题') > -1), '无法开头不吃豁免');
+  assert.deepStrictEqual(E.lintPlan(base + '**需要人定**：无。'), [], 'markdown 粗体装饰不卡豁免(job635)');
+  assert.deepStrictEqual(E.lintPlan(base + '- `需要人定`：暂无'), [], '反引号装饰不卡豁免');
 });
 t('放行卡：提取、超长打回、夹带 curl 或接口路径打回', () => {
   const card = '- 改什么：/childcare/ 面包屑，旧标题 → 新标题\n- 为什么：页面已改版\n- 风险与回滚：改回原值\n- 需要人定：无';
