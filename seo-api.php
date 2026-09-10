@@ -1815,7 +1815,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
                 if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，风险档可回滚，自动落地中（apply job #'.$ajW[0].'），落完回报。','seo-worker');
             }
         }else{
-            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出（预览见任务卡），含花钱/不可逆/无背书对外项：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
+            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出（放行卡在任务卡上），含花钱/不可逆/无背书对外项：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
         }
         res(200,['ok'=>true,'dispatch_grade'=>$gradeW]);
     }

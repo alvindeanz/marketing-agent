@@ -101,6 +101,12 @@ function buildPrompt(brief, task, workspace) {
     '   assumed, then the deliverable itself in markdown. The summary paragraph and all',
     '   report narration MUST be written in Chinese. English is only allowed inside data',
     '   values, field names and site-language copy.',
+    '6. Conclusion first, no reasoning dump. The opening summary is what humans read on',
+    '   the task card and in chat: state the conclusion and the one line of evidence that',
+    '   carries it, three sentences max. Process narration, what you tried, which tools or',
+    '   internal file paths you read, capability checks, id strings: none of that belongs',
+    '   in the deliverable. If a verification trail matters, put it in a short appendix',
+    '   section at the very end.',
     '',
     'FACTS, only when the task was a check or a verification',
     'If this task had you verify something about the client and the answer is a stable,',
@@ -189,7 +195,9 @@ function buildPreparePrompt(opts) {
     '- 风险与回滚：一两句，最坏情况是什么，怎么退回去。',
     '- 需要人定：只列必须由人拍板的点，没有就写「无」。',
     '硬限制：全节不超过 ' + RELEASE_CARD_MAX_CHARS + ' 个字符；不许出现代码块、curl、HTTP 方法、接口路径、字节偏移、',
-    '取证过程。这些全部属于下面的章节。放行卡超长或夹带代码会被机械校验打回。',
+    '取证过程；也不许出现内部文件路径、脚本或工具名、resource_name、9 位以上的 ID 长串、',
+    'agencyreport 链接，不许写「规格以某页为准」这类把读者踢去别处的话，该说清的在本节用一句话说清。',
+    '这些细节全部属于下面的章节。放行卡超长或夹带上述内容会被机械校验打回。',
     '',
     '## 1. 变更目标与现状',
     '这次要改什么，为什么改，现在是什么状态。现状必须是你实际 GET 回来的，附上你读到的关键值。',
@@ -260,7 +268,9 @@ function missingPlanSections(text) {
  * 这节是唯一进预览页默认视图和看板卡片的内容，所以长度和内容在这里硬卡。
  */
 const RELEASE_CARD_MAX_CHARS = 800;
-const RELEASE_CARD_FORBIDDEN = /```|\bcurl\b|\b(GET|POST|PATCH|PUT|DELETE)\b\s*\/|\/api\/|字节/;
+// 2026-09-10 收紧（Alvin：放行卡是结论不是 reasoning）：内部路径、脚本名、resource_name、
+// 9 位以上 ID 长串、agencyreport 链接、「以某页为准」式甩锅句一律不得上卡，细节归第 1、2 节。
+const RELEASE_CARD_FORBIDDEN = /```|\bcurl\b|\b(GET|POST|PATCH|PUT|DELETE)\b\s*\/|\/api\/|字节|resource_name|\/data\/aira|seo-worker|specs\/|ads_mutate|agencyreport\.|\b\d{9,}\b|以[^\n，。；]{0,16}(方案页|清单页|页面|文档)[^\n，。；]{0,6}为准/;
 
 /** 「## 0. 放行卡」到下一个 ## 之间的正文，没有就空串。 */
 function planReleaseCard(text) {
@@ -279,7 +289,7 @@ function lintReleaseCard(text) {
     problems.push('放行卡 ' + card.length + ' 字符，上限 ' + RELEASE_CARD_MAX_CHARS + '，取证和步骤挪到第 1、2 节');
   }
   const hit = card.match(RELEASE_CARD_FORBIDDEN);
-  if (hit) problems.push('放行卡夹带了代码或接口细节（' + hit[0].trim() + '），放行的人不读这些，挪到后面章节');
+  if (hit) problems.push('放行卡夹带了代码、内部路径、ID 长串或甩锅句（' + hit[0].trim() + '），放行的人不读这些，挪到后面章节');
   return problems;
 }
 
@@ -1587,16 +1597,17 @@ async function runBlogTask(ctx, context, workspace, task) {
     '，分类 ' + draft.category + '。' + imageNote + reviewNote;
 
   const clientName = (context && context.client && context.client.name) || profile.domain || '';
-  const previewNote = publishedRevise ? '已发布文章的改稿，线上未动，放行 = 替换并发布。' : (imagesMissing ? '配图不齐，发布前需人工补图。' : '');
+  // 预览页是可以直接转给客户的成稿页（2026-09-10 Alvin 定）：不带客户铁律回显、
+  // 不带内部警示。改稿状态与配图缺口这些内部信息只留在卡面 note（summary 里已有）。
   const pvHtml = preview.renderBlogPreview({
     draft: Object.assign({}, draft, { body_markdown: (placedBody || draft.body_markdown) }),
     ogImage: placedOg,
     host: profile.domain,
     taskId,
     client: clientName,
-    note: previewNote,
+    note: '',
     previewUrl: publishedRevise ? '' : previewUrl,
-    clientRules: clientRulesForPreview(workspace),
+    clientRules: '',
   });
   const internalPreview = await publishPreview(ctx, workspace, taskId, pvHtml, log);
   const note = [
@@ -1651,10 +1662,11 @@ async function runOutlineOnly(ctx, opts) {
     qs.length ? '## 需客户确认\n' + qs.map((q) => '- ' + q).join('\n') : '',
   ].join('\n'), 'utf8');
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
+  // 大纲页会随话术转给客户回批：纯内容页，不回显客户铁律（2026-09-10）。
   const pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
     title: String(o.title || task.title), markdown: fs.readFileSync(file, 'utf8'), kind: '博客大纲', taskId,
     client: (shared && shared.siteBlock ? '' : '') || path.basename(workspace),
-    clientRules: clientRulesForPreview(workspace),
+    clientRules: '',
   }), log);
   const social = String(o.social_message || '').split(blogcheck.PREVIEW_TOKEN).join(pvUrl || '（大纲见附件）');
   const note = [
@@ -1904,24 +1916,30 @@ async function runOne(ctx, context, workspace, taskId) {
     }
   }
 
-  // Chat 派单（origin chat:*）的读者是频道里的同事，不是放行审看的人：
-  // 结论先行、不回显客户铁律块（那是放行对照用的内部格式，2026-09-08 Alvin 指出）。
   const isChatTask = String(task.origin || '').indexOf('chat:') === 0;
-  const pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
-    title: task.title || 'task ' + taskId, markdown: output, kind: prepare ? '变更方案' : (isChatTask ? '验证报告' : '分析报告'), taskId,
-    client: (context && context.client && context.client.name) || path.basename(workspace),
-    note: prepare ? '这是待放行的变更方案，不是变更本身。放行后 apply 照它执行并回读验证。'
-      : (isChatTask ? '频道派单产出，已自动验收；结论在最前面。' : '分析型任务的产出是这份报告，同意 = 验收完成。'),
-    clientRules: isChatTask ? '' : clientRulesForPreview(workspace),
-  }), log);
+  // 预览页停发（2026-09-10 Alvin 定）：变更方案 / 分析 / 验证类产出是 reasoning，
+  // 不再默认渲染预览页上 agencyreport。放行看卡上的放行卡，全文在任务附件（.md）与
+  // job log。人工点名要网页版（任务 detail 里带「完整预览」，卡上按钮或频道补一句都会
+  // 落进 detail）才补发 doc 形态，且不回显客户铁律块。
+  const wantsFullPreview = /完整预览/.test(String(task.detail || ''));
+  let pvUrl = '';
+  if (wantsFullPreview) {
+    pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
+      title: task.title || 'task ' + taskId, markdown: output, kind: prepare ? '变更方案' : (isChatTask ? '验证报告' : '分析报告'), taskId,
+      client: (context && context.client && context.client.name) || path.basename(workspace),
+      note: prepare ? '这是待放行的变更方案，不是变更本身。放行后 apply 照它执行并回读验证。'
+        : (isChatTask ? '频道派单产出，已自动验收；结论在最前面。' : '分析型任务的产出是这份报告，同意 = 验收完成。'),
+      clientRules: '',
+    }), log);
+  }
   const note = previewLine(pvUrl) + (prepare
     ? buildTargetHeader(readTargetUrls(output)) +
       '变更方案已生成，待人工放行后由 apply_task 执行。方案文件 ' +
       path.basename(file) +
-      '。\n' +
+      '（任务附件可下载，要网页版在频道说「完整预览」重跑补发）。\n' +
       // 卡片正文就是放行卡，人在看板上看完这段就能放；旧方案没有放行卡时退回截断摘要。
       (planReleaseCard(output) || '摘要：' + summarize(output, 400))
-    : summarize(output, 500));
+    : summarize(output, 500) + '\n完整报告在任务附件。');
   // 客户版产物：分析任务若在 workspace/reports/ 里产出了给客户看的 HTML（如关键词方向卡），
   // 必须发布成公网 URL 并写进 note「客户版:」行。内部预览是给放行人看的壳，
   // 两个链接绝不能混（2026-08-31 #145 内部壳被当客户版发给人，DEFECTS 有案）。
