@@ -54,6 +54,8 @@ async function runStep(type) {
   if (!wsPath || !require('fs').existsSync(require('path').join(wsPath, 'CLAUDE.md'))) {
     throw new Error('工作区 ' + (wsPath || '(profile 没填 workspace_dir)') + ' 缺 CLAUDE.md，先写客户铁律再导入');
   }
+  const pfSlug = String((prof.profile && prof.profile.platform) || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (!pfSlug) throw new Error('profile.platform 为空：platform 是车道路由唯一真值，建档必填（webforger/shopify/wordpress/...），先补再导入');
   for (const type of CHAIN.slice(CHAIN.indexOf(start))) await runStep(type);
   // plan 落任务后服务端自动排 plan_review（方案层过闸），这里只等它跑完并把确认卡打出来。
   console.log(ts() + ' client ' + cid + ' plan draft 已落，等方案层过闸（plan_review）');

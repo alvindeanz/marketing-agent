@@ -1444,9 +1444,14 @@ function lane_type_sql($lane,$alias='j'){
    效果：A 客户一口气批 7 个，B 客户后来才排 1 个，B 排在 A 的第二个前面，
    谁也饿不死谁；同一客户内部仍严格按提交顺序。
    窗口函数 MariaDB 10.2 起可用，线上 10.3 没问题。 */
-function jobs_queue_order_sql($lane=null){
+function jobs_queue_order_sql($lane=null,$excludeRunningClients=false){
     $laneQ=$lane?(' AND '.lane_type_sql($lane,'j')):'';
     $laneR=$lane?(' AND '.lane_type_sql($lane,'x')):'';
+    /* excludeRunningClients（2026-09-10 heavy 并发 2，Alvin 定）：claim 时同客户硬互斥，
+       该客户有 heavy 在跑就直接不可领（防同站并发写冲突）；展示用的队列顺序仍走软性轮转。 */
+    $excl=$excludeRunningClients
+        ?" AND j.client_id NOT IN (SELECT DISTINCT y.client_id FROM agent_jobs y WHERE y.status='running'".($lane?(' AND '.lane_type_sql($lane,'y')):'').")"
+        :'';
     return "SELECT t.id FROM (
                 SELECT j.id,
                        ROW_NUMBER() OVER (PARTITION BY j.client_id ORDER BY j.id)
@@ -1454,7 +1459,7 @@ function jobs_queue_order_sql($lane=null){
                 FROM agent_jobs j
                 LEFT JOIN (SELECT DISTINCT x.client_id FROM agent_jobs x WHERE x.status='running'$laneR) r
                   ON r.client_id=j.client_id
-                WHERE j.status='queued'$laneQ
+                WHERE j.status='queued'$laneQ$excl
             ) t ORDER BY t.rn, t.id";
 }
 
@@ -1631,7 +1636,7 @@ if($m==='POST'&&$ROUTE==='/jobs/claim'){
     $lane=(string)($i['lane']??'');
     if($lane!==''&&!isset(JOB_LANES[$lane]))res(400,['error'=>'bad lane']);
     $jid=0;
-    $pick=db()->prepare(jobs_queue_order_sql($lane?:null)." LIMIT 1");
+    $pick=db()->prepare(jobs_queue_order_sql($lane?:null,$lane==='heavy')." LIMIT 1");
     $take=db()->prepare("UPDATE agent_jobs SET status='running',claimed_at=NOW() WHERE id=? AND status='queued'");
     for($try=0;$try<3;$try++){
         $pick->execute();
@@ -4153,6 +4158,17 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     $vals=[];
     foreach($PROFILE_FIELDS as $f){
         $vals[$f]=array_key_exists($f,$i)?(string)$i[$f]:(string)($row[$f]??'');
+    }
+    /* platform 是全局唯一的车道路由值（2026-09-10 Alvin 定：建档必填、枚举锁定，agent 不许绕）。
+       枚举 = 已注册车道（specs/capabilities/<slug>.md 有清单的）加已知待接平台；
+       新车道落地时在同一 commit 里扩这个表。存显示值，校验按 slug。 */
+    $PLATFORM_SLUGS=['webforger','shopify','wordpress','googleads','umbraco','shopline','wix','squarespace','custom'];
+    $pfSlug=strtolower(preg_replace('/[^a-z0-9_-]/i','',(string)$vals['platform']));
+    if($vals['platform']===''||$pfSlug===''){
+        res(400,['error'=>'platform 必填且为枚举值（'.implode('/',$PLATFORM_SLUGS).'）：它是车道路由的唯一真值，建档就要锁定']);
+    }
+    if(!in_array($pfSlug,$PLATFORM_SLUGS,true)){
+        res(400,['error'=>'platform「'.$vals['platform'].'」不在注册车道枚举里（'.implode('/',$PLATFORM_SLUGS).'）。新平台先建能力清单再扩枚举']);
     }
     if(array_key_exists('target_keywords',$i)){
         $kw=$i['target_keywords'];

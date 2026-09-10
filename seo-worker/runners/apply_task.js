@@ -883,6 +883,14 @@ async function runOne(ctx, context, workspace, taskId) {
     return runShopifyApply(ctx, workspace, profile, task, taskId);
   }
 
+  // 平台分流强制（2026-09-10 Alvin 定：platform 是唯一路由真值，未知平台明确拒，
+  // 不许掉进下面的 WebForger changeset 默认车道）。
+  if (capabilities.slugPlatform(platform) !== 'webforger') {
+    const msg = '平台「' + (platform || '(空)') + '」没有已接通的落地车道（现有：webforger/shopify/googleads），任务保持 review 转人工或等车道接入。站点零改动。';
+    try { await api.postTaskResult(taskId, { output_url: '', note: '执行中止：' + msg, attention: true }); } catch (e) { log('task ' + taskId + ': note write failed :: ' + e.message); }
+    throw new Error('task ' + taskId + ': no apply lane for platform ' + platform);
+  }
+
   // Blog publish is its own path: the deliverable is a draft on the platform,
   // not a change plan file, so the plan file requirement below does not apply.
   const ops = taskOps(task);

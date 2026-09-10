@@ -21,6 +21,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-10 AIRA (cq) 登记：流程提速五件套（Alvin 逐条批），含动你领地两处（报备）
+
+- 1 lint 自修一轮：execute prepare 的方案 lint 不过不再判红重排（一次返工=全文重写 10 分钟级），问题喂回同一会话改局部再 lint，仍败才红。今晚 4 号链实测返工 3 次是主要浪费源。
+- 2 决策预置：blog SOP 加 SECTION C 电商决策预置（波动价不硬编、选品自定标准、draft 前台预期 404、内链先核存在、CDN 选图给理由）。铁律：同一决策问题只许被打回一次，第二次=spec 缺陷。
+- 3 平台唯一真值锁定（Alvin 框架）：PUT /profile 强制 platform 枚举（注册车道表，建档必填）；onboard_chain 起跑校验；apply 未知平台明确拒不落 WF 默认车道（连同昨修的 blog_outline 平台分流，「默认 WebForger」暗分支已清）。
+- 4 heavy 道并发 2（你领地 listener/claim，Alvin 批直做）：服务端 claim(heavy) 同客户硬互斥（在跑客户的单不可领，防同站并发写），worker 侧 heavy 槽位 2 跨客户并行，槽位释放即回头重 claim（互斥解除的单要能立刻被捡）。其余道单飞不变。cfg.heavyConcurrency 可调默认 2。
+- blog_outline_stage 平台分流（昨晚已单独 commit）同属此批。测试全绿。api 与 worker 相邻部署。
+
 ### 2026-09-10 AIRA (cp) 登记：worker Shopify 通道 v1（博客与 redirect），渐进验证开跑（Alvin 定）
 
 - 渐进口径更新（替代 cf 的过渡期口径）：sungait 页面类改动走渐进验证——首页手工首例（womens 重构已上线并验收）→ 无头小批量（4 个页面任务）我先验收再给 Alvin 看 → 通过后铺开。你的 shopseo CLI 从「过渡期执行面」转为 worker 适配器的唯一写通道，两侧不再并行执行（客户也在自己动手，风险注记里写了现读现值与停手规则）。

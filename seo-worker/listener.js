@@ -36,7 +36,7 @@ try {
 const api = new Api(cfg);
 
 function laneState() {
-  return { busy: false, pendingWake: false, currentJob: null, lastDrainAt: null, lastDrainReason: null };
+  return { busy: false, pendingWake: false, currentJobs: {}, lastDrainAt: null, lastDrainReason: null };
 }
 
 const state = {
@@ -116,7 +116,7 @@ function runJob(job, lane) {
       finalize(new Error('cannot fork runner_host: ' + e.message));
       return;
     }
-    ls.currentJob = { id: job.id, type: job.type, client_id: job.client_id, startedAt: Date.now() };
+    ls.currentJobs[job.id] = { id: job.id, type: job.type, client_id: job.client_id, startedAt: Date.now() };
 
     const killTimer = setTimeout(() => {
       timedOut = true;
@@ -169,7 +169,7 @@ function runJob(job, lane) {
       finished = true;
       clearTimeout(killTimer);
       clearInterval(flushTimer);
-      ls.currentJob = null;
+      delete ls.currentJobs[job.id];
 
       if (err) {
         push('FAILED: ' + (err.stack || err.message));
@@ -226,33 +226,45 @@ async function drainLane(reason, lane) {
   ls.lastDrainAt = ts();
   ls.lastDrainReason = reason;
   let claimed = 0;
+  // heavy 道并发 2（2026-09-10 Alvin 定）：跨客户并行，同客户互斥由服务端 claim 硬保证
+  // （claim(heavy) 不发在跑客户的单）。其余道保持单飞。槽位空了就再 claim：
+  // 同客户被互斥压着的单会在兄弟 job 跑完后变得可领，所以每次有槽释放都要回头再问一次。
+  const maxSlots = lane === 'heavy' ? (cfg.heavyConcurrency || 2) : 1;
+  const active = new Set();
+  let stop = false;
   try {
     for (;;) {
       if (state.shuttingDown) break;
-      let job;
-      try {
-        job = await api.claimJob(lane);
-      } catch (e) {
-        log('claim(' + lane + ') failed :: ' + e.message);
-        break;
+      while (active.size < maxSlots && !stop) {
+        let job;
+        try {
+          job = await api.claimJob(lane);
+        } catch (e) {
+          log('claim(' + lane + ') failed :: ' + e.message);
+          stop = true;
+          break;
+        }
+        if (!job) break;
+        if (laneOf(job.type) !== lane) {
+          log('job#' + job.id + ' ' + job.type + ' claimed on ' + lane + ' lane but lib/lanes.js says ' + laneOf(job.type));
+        }
+        claimed += 1;
+        const p = runJob(job, lane).then(() => { active.delete(p); });
+        active.add(p);
+        if (claimed >= 50) {
+          log('claimed 50 jobs in one ' + lane + ' drain, pausing until next wake or poll');
+          ls.pendingWake = true;
+          stop = true;
+        }
       }
-      if (!job) break;
-      if (laneOf(job.type) !== lane) {
-        // The server filed it elsewhere. Run it anyway rather than leak a
-        // claimed job, but say so: the two lane tables have drifted.
-        log('job#' + job.id + ' ' + job.type + ' claimed on ' + lane + ' lane but lib/lanes.js says ' + laneOf(job.type));
-      }
-      claimed += 1;
-      await runJob(job, lane);
-      if (claimed >= 50) {
-        // Safety valve against a runaway queue. Next drain picks up the rest.
-        log('claimed 50 jobs in one ' + lane + ' drain, pausing until next wake or poll');
-        ls.pendingWake = true;
-        break;
-      }
+      if (active.size === 0) break;
+      await Promise.race(active);
+      if (stop && active.size === 0) break;
     }
+    if (active.size) await Promise.all(active);
   } catch (e) {
     log('drain(' + lane + ') error :: ' + (e.stack || e.message));
+    if (active.size) { try { await Promise.all(active); } catch (e2) { /* runJob never throws */ } }
   } finally {
     ls.busy = false;
     if (claimed > 0) log('drain(' + reason + ', ' + lane + ') finished, ' + claimed + ' job(s) processed');

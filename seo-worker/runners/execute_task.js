@@ -1846,7 +1846,7 @@ async function runOne(ctx, context, workspace, taskId) {
     label: 'task ' + taskId,
   });
 
-  const output = String(res.stdout || '').trim();
+  let output = String(res.stdout || '').trim();
   if (!output) throw new Error('task ' + taskId + ': claude produced no output');
 
   // Keep the full text on disk. The API note only carries a short summary.
@@ -1856,11 +1856,43 @@ async function runOne(ctx, context, workspace, taskId) {
 
   if (prepare) {
     const missing = missingPlanSections(output);
-    const lint = missing.length ? [] : lintPlan(output);
+    let lint = missing.length ? [] : lintPlan(output);
     if (lint.length) {
-      // 和缺章节同一待遇：不 post result，任务留在 approved，job 判红并把问题写清楚，
-      // 人在卡上看到「执行失败：方案 lint 未过：...」就知道该在线程里让它重出。
-      throw new Error('task ' + taskId + ': 方案 lint 未过，打回重出：' + lint.join('；'));
+      // lint 自修一轮（2026-09-10 Alvin 定的提速修法 1）：不再直接判红重排（那是整篇从零重写，
+      // 今晚实测一次返工烧 10 分钟级）。把 lint 问题喂回同一会话让模型改局部，再 lint 一次；
+      // 仍不过才红。与结构化输出三层防线同一个模式。
+      log('task ' + taskId + ': 方案 lint 未过，喂回自修一轮：' + lint.join('；'));
+      const fixPrompt = [
+        '你刚写的变更方案没有通过机械检查，问题如下：',
+        lint.map((x) => '- ' + x).join('\n'),
+        '',
+        '输出修正后的**完整方案全文**（不是补丁）。只修上述问题涉及的部分，其余内容一字不动。',
+        '判定原则提醒：方案不许把选择题递给人，自己选并给理由；只有客户独有信息可以留，写成「等客户：要什么信息」。',
+        '',
+        '===== 原方案开始 =====',
+        output,
+        '===== 原方案结束 =====',
+      ].join('\n');
+      const fixRes = await runClaude(cfg, {
+        prompt: fixPrompt, cwd: workspace, log, model: cfg.claudeModel,
+        allowedTools: 'Read', label: 'task ' + taskId + ' lint-fix',
+      });
+      const fixed = String(fixRes.stdout || '').trim();
+      if (fixed) {
+        const lint2 = lintPlan(fixed);
+        if (!lint2.length && !missingPlanSections(fixed).length) {
+          output = fixed;
+          fs.writeFileSync(file, output, 'utf8');
+          log('task ' + taskId + ': lint 自修通过，方案已更新');
+          lint = [];
+        } else {
+          lint = lint2.length ? lint2 : ['自修后缺章节'];
+        }
+      }
+    }
+    if (lint.length) {
+      // 自修仍不过：老待遇，job 判红留人。
+      throw new Error('task ' + taskId + ': 方案 lint 未过（自修一轮仍未过），打回重出：' + lint.join('；'));
     }
     if (missing.length) {
       // Do not post a result: posting flips the task to review, which is the
