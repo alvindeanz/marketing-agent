@@ -629,6 +629,15 @@ function analysis_task($t){
 function blog_outline_stage($t){
     $ops=strtolower((string)($t['ops']??''));
     if(strpos($ops,'blog-draft')===false)return false;
+    /* 大纲→写稿两段式是 WebForger 博客产线的专属轨道（write_draft 会重排 execute）。
+       其他平台（Shopify 等，2026-09-10 上线）的 blog-draft 是 prepare 成稿 + apply 建 DRAFT，
+       放行必须直通 apply，误入本分支会无限重写（task619 job653 教训）。按平台分流。 */
+    $pq=db()->prepare("SELECT platform FROM seo_profiles WHERE client_id=?");
+    $pq->execute([(int)($t['client_id']??0)]);
+    $pr=$pq->fetch();
+    $pq->closeCursor();
+    $slug=strtolower(preg_replace('/[^a-z0-9_-]/i','',(string)($pr['platform']??'')));
+    if($slug!=='webforger')return false;
     $u=(string)($t['output_url']??'');
     return ($u===''||strpos($u,'/blog/')===false);
 }
