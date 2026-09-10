@@ -4162,7 +4162,7 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     /* platform 是全局唯一的车道路由值（2026-09-10 Alvin 定：建档必填、枚举锁定，agent 不许绕）。
        枚举 = 已注册车道（specs/capabilities/<slug>.md 有清单的）加已知待接平台；
        新车道落地时在同一 commit 里扩这个表。存显示值，校验按 slug。 */
-    $PLATFORM_SLUGS=['webforger','shopify','wordpress','googleads','umbraco','shopline','wix','squarespace','custom'];
+    $PLATFORM_SLUGS=['webforger','shopify','wordpress','woocommerce','googleads','umbraco','shopline','wix','squarespace','custom'];
     $pfSlug=strtolower(preg_replace('/[^a-z0-9_-]/i','',(string)$vals['platform']));
     if($vals['platform']===''||$pfSlug===''){
         res(400,['error'=>'platform 必填且为枚举值（'.implode('/',$PLATFORM_SLUGS).'）：它是车道路由的唯一真值，建档就要锁定']);
