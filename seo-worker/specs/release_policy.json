@@ -61,6 +61,11 @@
     "styles-fragment": "reversible",
     "gtm-edit": "reversible",
     "keyword-direction": "reversible",
-    "creative-direction": "reversible"
+    "creative-direction": "reversible",
+    "article-meta-update": "reversible",
+    "article-content-edit": "reversible",
+    "article-publish": "external",
+    "article-unpublish": "reversible",
+    "redirect-add": "reversible"
   }
 }

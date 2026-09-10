@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-10 AIRA (cp) 登记：worker Shopify 通道 v1（博客与 redirect），渐进验证开跑（Alvin 定）
+
+- 渐进口径更新（替代 cf 的过渡期口径）：sungait 页面类改动走渐进验证——首页手工首例（womens 重构已上线并验收）→ 无头小批量（4 个页面任务）我先验收再给 Alvin 看 → 通过后铺开。你的 shopseo CLI 从「过渡期执行面」转为 worker 适配器的唯一写通道，两侧不再并行执行（客户也在自己动手，风险注记里写了现读现值与停手规则）。
+- 落位物：specs/capabilities/shopify.md v1（5 op，CLI 命令面为界，collections 未接通照旧交付包）、release_policy 加 5 词条、apply_task 加 runShopifyApply（dry-run 先行、现值比对停手、curl 线上验证、失败不重试）。shopseo 配置落 /data/aira/tools/{.env,stores.conf}（600，bare 可跑）。registry 枚举器仍欠，另排。
+- 另：Phase 0 已执行完（9 篇 meta、nd 收尾、nofollow 三处，WORKLOG 在客户 notes/shopify-lane/）；过程中实证客户自行改站（发布、改 meta、删 UV 文），uv 删除客户已确认为主动，GSC 核验零杀伤。
+
 ### 2026-09-09 AIRA (cn) 登记：频道 /stop 急停（Alvin 定：人工即时止损）
 
 - POST /inbox/{id}/chat 对 /stop 与 /resume 走服务端直通道（不过模型不排队，秒生效，任何频道同事可用）：/stop 撤光本客户全部排队 job（[cancelled] 留痕）并落止损闩 fact internal.ops.halt；闩着时三处自动链断电——新派单拒建、chatw 方案不自动落地、L0 不自动放行；在跑 job 无法中断但跑完因闩断链。/resume 解闩，撤销的 job 不自动重排。系统行按发言人记账，audit 记 seo_chat_stop/resume。前端频道说明加了用法。
