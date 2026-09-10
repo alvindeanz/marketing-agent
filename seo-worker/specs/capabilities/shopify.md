@@ -1,6 +1,6 @@
 # Shopify 能力清单（博客与 redirect 车道 v1）
 
-<!-- SHOPIFY-CAP-V1（2026-09-10）：执行通道是 Aiden 的 shopseo CLI（/data/aira/tools/shopseo/shopseo，
+<!-- SHOPIFY-CAP-V1.1（2026-09-10 加 blog-draft）：执行通道是 Aiden 的 shopseo CLI（/data/aira/tools/shopseo/shopseo，
      token 服务现取不落盘，写命令默认 dry-run，--yes 实弹且写前自动快照）。
      本 v1 只覆盖 CLI 已有命令面：博客文章 meta/正文/发布状态与 URL redirect。
      collections/products 操作未接通（CLI 无命令），相关任务保持交付包模式或等 CLI 扩展。
@@ -16,6 +16,7 @@
 | article-publish | agent_prepare | 发布未发布文章，对外可见走放行 |
 | article-unpublish | agent_apply | 下线文章，可逆（再发布即回） |
 | redirect-add | agent_apply | 加 301 redirect；加前必查目标零跳转防叠链 |
+| blog-draft | agent_prepare | 按 seo-blog-sop 写完整成稿，apply 仅建 DRAFT（published:false）绝不发布 |
 <!-- PLANNING_VIEW_END -->
 
 ## 操作集说明
@@ -25,6 +26,10 @@
 - article-publish [risk_class: external]：对外发布，走放行或客户批文背书。
 - article-unpublish [risk_class: reversible]：下线即回滚手段之一。
 - redirect-add [risk_class: reversible]：新 301 前先 curl 目标确认 200 零跳转（该店存量 2169 条 redirect 且有多跳链，禁止叠链）。
+- blog-draft [risk_class: external]：prepare 阶段按 /data/aira/seo-worker/specs/sops/seo-blog-sop.md 产出完整成稿
+  （Style Roll 文件头注释、骨架轮换、指纹查重、13 条红线自检、封面图必配且只用客户站 CDN 已有图、
+  内链按 KEYWORD-MAP、锁定词表内选题）；apply 阶段 shopseo article create（--title/--body-file/--meta-title/
+  --meta-desc/--image-url），该命令 published:false 硬编码，**永不发布**；发布是另一个 op 另一次放行。
 
 ## 全局风险注记（执行侧必须遵守）
 
