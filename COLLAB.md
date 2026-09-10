@@ -21,6 +21,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-10 AIRA (cr) 登记：reasoning 类预览页停发，人看结论不看过程（Alvin 定），动你领地三处（报备）
+
+- 背景：Alvin 点名 task-619/670 两张预览页是垃圾，agent reasoning（能力核对、工具路径、resource_name、铁律 dump）不该给人看；产出要么 concise 上卡，要么是能转客户的干净页。
+- execute_task.js：变更方案/分析/验证类不再默认 publishPreview（task.detail 带「完整预览」才补发且不回显铁律块）；分析类 note 尾加「完整报告在任务附件」；buildPrompt 加规则 6 结论先行（开头摘要三句内，过程叙述不进正文）；放行卡 lint 收紧（RELEASE_CARD_FORBIDDEN 新增内部路径、脚本名、resource_name、9 位以上 ID、agencyreport 链接、「以某页为准」句），prompt 硬限制同步。
+- lib/preview.js：博客与大纲预览页改纯成稿页（去客户铁律回显与 warn 内部警示，meta 卡改「Meta（发布设置，不进正文）」，footer 去「内部」字样），链接可直接转客户。
+- seo-api.php：chatw confirm 频道话术「预览见任务卡」改「放行卡在任务卡上」（预览页默认不存在了）。
+- 前端不用动：seo-agent.html 只在 note 有「预览:」行时才渲染链接，行没了链接自然消失。
+- rev 7773667，api+worker 已部署，测试全绿。旧预览页不回收（存量链接还能开），新任务起生效。
+
 ### 2026-09-10 AIRA (cq) 登记：流程提速五件套（Alvin 逐条批），含动你领地两处（报备）
 
 - 1 lint 自修一轮：execute prepare 的方案 lint 不过不再判红重排（一次返工=全文重写 10 分钟级），问题喂回同一会话改局部再 lint，仍败才红。今晚 4 号链实测返工 3 次是主要浪费源。
