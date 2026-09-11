@@ -2029,6 +2029,37 @@ function ensure_change_items(){
 }
 define('ITEM_STATES',['proposed','authorized','landed','verified','blocked']);
 
+/* capability-gap 登记（2026-09-11 W17）：方案条目撞到没有执行器的 op 时自动记账。
+   定则（2026-09-10 Alvin 定）：同类执行缺口第二次出现必须补执行器，不许一直转人工。
+   定则以前只在记忆里，没有 enforcement，ctomi #678 当天就第三次踩 keyword-add。
+   现在缺口次数在库里，hits>=2 的在 GET /capability_gaps 里置顶，谁看谁知道该立项了。 */
+function ensure_capability_gaps(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_capability_gaps(
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        op VARCHAR(60) NOT NULL,
+        hits INT NOT NULL DEFAULT 1,
+        last_task_id INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_op(op)
+    ) DEFAULT CHARSET=utf8mb4");
+}
+function capability_gap_bump($op,$tid){
+    $op=trim((string)$op);
+    if($op===''||$op==='manual')return 0;
+    ensure_capability_gaps();
+    db()->prepare("INSERT INTO seo_capability_gaps(op,hits,last_task_id)VALUES(?,1,?) ON DUPLICATE KEY UPDATE hits=hits+1,last_task_id=VALUES(last_task_id)")
+        ->execute([$op,(int)$tid]);
+    $q=db()->prepare("SELECT hits FROM seo_capability_gaps WHERE op=?");
+    $q->execute([$op]);
+    $r=$q->fetch();
+    $q->closeCursor();
+    return $r?(int)$r['hits']:1;
+}
+
 /* 任务的机器条目在排 apply 的那一刻集中转 authorized（queue_task_jobs 里挂钩），
    放行路径有好几条（看板按钮、频道 release、L0 自动、chatw 自动落地），钩在队列入口一处不漏。 */
 function items_mark_authorized($ids){
@@ -2087,6 +2118,10 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
             $state=$machine?'proposed':'blocked';
             $owner=$machine?'machine':'agency';
             $why=$machine?'':($c['op']===''||$c['op']==='manual'?'方案指定人工':'缺执行器 op '.$c['op']);
+            if(!$machine&&$c['op']!==''&&$c['op']!=='manual'){
+                $hitsG=capability_gap_bump($c['op'],$tid);
+                if($hitsG>=2)$why.='（缺口第 '.$hitsG.' 次，按定则该补执行器了）';
+            }
             $ins->execute([$cid,$tid,$seq,$c['op'],$c['entity'],$c['target_value'],$state,$owner,$why]);
             if(!$machine)$blocked[]=$c;
             $seq++;
@@ -2162,6 +2197,14 @@ if($m==='GET'&&$ROUTE==='/items/unowned'){
     ensure_change_items();
     $rows=db()->query("SELECT i.id,i.task_id,i.client_id,i.entity,i.op,i.state,i.block_reason,t.title FROM seo_change_items i LEFT JOIN seo_tasks t ON t.id=i.task_id WHERE i.state IN('authorized','blocked') AND i.owner='' ORDER BY i.id DESC LIMIT 100")->fetchAll();
     res(200,['count'=>count($rows),'items'=>$rows]);
+}
+
+// GET /capability_gaps -> 执行器缺口台账，hits 多的在前。hits>=2 按定则必须补执行器。
+if($m==='GET'&&$ROUTE==='/capability_gaps'){
+    auth_user();
+    ensure_capability_gaps();
+    $rows=db()->query("SELECT op,hits,last_task_id,created_at,updated_at FROM seo_capability_gaps ORDER BY hits DESC,updated_at DESC LIMIT 100")->fetchAll();
+    res(200,['gaps'=>$rows]);
 }
 
 // POST /tasks/{id}/feedback_result -> worker files what it made of a human note.

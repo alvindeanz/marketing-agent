@@ -5,7 +5,9 @@
      login-customer-id 恒为 MCC 152-489-2513，customer-id 走 profile.ads_customer_id。
      V2（2026-09-08）：新增 final-url-change（reversible），mutate 通道 lib/ads_mutate.py 白名单执行。
      V3（2026-09-08，Alvin 批）：adgroup-create 从 spend 改 structural（预算中性新建，不动 campaign 预算
-     与出价策略，装配全对才启用），执行器上线；新增 keyword-pause（reversible）。 -->
+     与出价策略，装配全对才启用），执行器上线；新增 keyword-pause（reversible）。
+     V4（2026-09-11，W17，ctomi #678 缺口回补）：新增 keyword-add（structural）、keyword-final-url
+     （reversible）、ad-create（structural），三执行器上线（ads_mutate.py）。 -->
 
 ## 规划视图
 
@@ -18,6 +20,9 @@
 | keyword-bid-adjust | agent_apply | 单关键词出价调整，脚本硬闸 ±20% |
 | final-url-change | agent_apply | 只改既有 ad 的 final URL，改前记旧值，回读加 curl 200 零跳转 |
 | keyword-pause | agent_apply | 暂停单个关键词，只停不删 |
+| keyword-final-url | agent_apply | 给既有关键词设关键词级 final URL，改前记旧值，回读加 curl 200 零跳转 |
+| keyword-add | agent_prepare | 往既有组加正向词（可带关键词级 URL），查重拒重复，预算中性 structural |
+| ad-create | agent_prepare | 既有组内新建一条 RSA，不动既有广告，组内上限 3 条，structural |
 | schedule-adjust | agent_prepare | 投放时段调整，mutate 执行器未实现，方案出来转人工落地 |
 | budget-change | agent_prepare | 预算变动超当前日预算 20%，spend 永远人放行 |
 | campaign-pause | agent_prepare | 暂停整个 enabled campaign |
@@ -42,6 +47,7 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 - keyword-bid-adjust [risk_class: reversible]：单关键词出价调整，幅度 ±20% 以内。
 - schedule-adjust [risk_class: reversible]：投放时段调整。（mutate 执行器未实现，当前落地时转人工）
 - final-url-change [risk_class: reversible]：改既有 ad / ad group 内广告的 final URL。只改既有结构不新建；改前记录旧 URL（回滚依据）；新 URL 必须 curl 200 且零跳转后才提交；提交后回读验证。不花钱、旧值可一键改回，故 reversible。
+- keyword-final-url [risk_class: reversible]：给既有关键词设关键词级 final URL（2026-09-11 W17）。同 final-url-change 的铁律：改前记旧值、新 URL curl 200 零跳转、回读验证；否定词拒设。
 
 ### agent_prepare（只出方案，放行卡确认后执行）
 - budget-change [risk_class: spend]：预算变动超当前日预算 20%。
@@ -52,6 +58,13 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
   预算中性：不动 campaign 预算与出价策略，总花费上限不变，风险实质是流量再分配而非新增支出
   （2026-09-08 Alvin 批，从 spend 降档）。执行器铁律：同名组拒建；PAUSED 装配，逐项回读核数
   全对才 ENABLED，任何一步不符停在 PAUSED 报人，绝不半开着投放。
+- keyword-add [risk_class: structural]：往既有 ad group 加正向关键词（2026-09-11 W17，ctomi #678 缺口回补）。
+  预算中性（不动预算与出价策略）但扩大触发面，故 structural：有客户批文自动，无批文停人。
+  执行器铁律：同词同匹配查重拒绝；建 ENABLED 后回读验证；可带 --final-url 顺带设关键词级 URL；
+  回滚 = 暂停该词。
+- ad-create [risk_class: structural]：既有 ad group 内新建一条 RSA（2026-09-11 W17，同上缺口回补）。
+  不动预算与既有广告；组内非移除广告达 3 条上限拒建不代删；文案校验（3-15 标题 30 字符、2-4 描述
+  90 字符、pin 1/2/3）；创建后回读验证并打印审核状态。新广告会进审核；回滚 = 暂停新广告。
 - ad-copy-rewrite [risk_class: external]：改 ad copy（文案是对外资产，有客户批文背书才自动，否则停人）。
   执行器 rsa-copy-update（2026-09-09 上线，Alvin 解冻）：全量替换语义（spec 给改后完整集合），
   改前打印原文案全套（回滚依据），条数/字符/pin 校验，回读逐条比对。铁律：文案更新触发广告重审，

@@ -15,6 +15,13 @@
                        spec: {ad_id, headlines:[{text,pin?}], descriptions:[{text}]}，给的是改后的完整集合。
                        流程：读原文案全套打印（回滚依据）→ 校验条数/字符/pin → 与原集合相同则 noop →
                        mutate 手写 mask → 回读逐条比对。注意：文案更新会触发广告重审）
+  keyword-add          --ad-group-id N --text 词 --match broad|phrase|exact [--final-url URL] [--cpc-bid-micros N]
+                       （structural：往既有组加正向词，预算中性但扩大触发面。查重拒绝同词同匹配重复，
+                       建 ENABLED 后回读验证；--final-url 顺带设关键词级最终到达网址）
+  keyword-final-url    --criterion-resource RES --new-url URL   给既有关键词设关键词级 final URL（旧值先打印再改）
+  ad-create            --spec - 从 stdin 读 JSON 在既有组新建一条 RSA（structural：不动预算与既有广告。
+                       spec: {ad_group_id, final_url, path1?, path2?, headlines:[{text,pin?}], descriptions:[{text}]}。
+                       流程：查组在且组内非移除广告少于 3 条 → 校验文案 → 创建 → 回读验证。新广告会进审核）
   schedule-adjust      未实现，直接拒，转人工
 铁律（脚本硬闸，不靠调用方自觉）:
   - 改前必查旧值并打印（JSON 行，回滚依据）；mutate 后回读验证并打印新值。
@@ -31,7 +38,8 @@ import sys
 
 ENV_FILE = "/data/aira/.env.google-ads"
 OPS = ["final-url-change", "ad-pause", "adgroup-pause", "keyword-pause", "negative-keyword-add",
-       "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "schedule-adjust"]
+       "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "keyword-add", "keyword-final-url",
+       "ad-create", "schedule-adjust"]
 MATCH_TYPES = {"broad": "BROAD", "phrase": "PHRASE", "exact": "EXACT",
                "BROAD": "BROAD", "PHRASE": "PHRASE", "EXACT": "EXACT"}
 
@@ -489,6 +497,183 @@ def op_rsa_copy_update(client, cid, args):
          "budget_impact": 0, "note": "文案已更新并回读一致，广告将重新进入审核"})
 
 
+def op_keyword_add(client, cid, args):
+    """往既有 ad group 加一条正向关键词（2026-09-11 W17，ctomi #678 缺口）。
+    预算中性但扩大触发面，risk_class structural：有客户批文自动，无批文停人。"""
+    if not args.ad_group_id or not args.text:
+        die("keyword-add 需要 --ad-group-id 与 --text")
+    match = MATCH_TYPES.get(args.match or "")
+    if not match:
+        die("match 只认 broad|phrase|exact")
+    text = str(args.text).strip()
+    if args.final_url and not args.final_url.startswith("https://"):
+        die("final-url 必须是 https 绝对地址")
+    rows = gaql(client, cid,
+                "SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group "
+                "WHERE ad_group.id = " + str(int(args.ad_group_id)))
+    if not rows:
+        die("ad group " + str(args.ad_group_id) + " 不存在")
+    if "REMOVED" in str(rows[0].ad_group.status):
+        die("ad group " + str(args.ad_group_id) + " 已移除")
+    dup = gaql(client, cid,
+               "SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, "
+               "ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.negative "
+               "FROM ad_group_criterion WHERE ad_group.id = " + str(int(args.ad_group_id)) +
+               " AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'")
+    for r in dup:
+        if (not r.ad_group_criterion.negative
+                and r.ad_group_criterion.keyword.text.strip().lower() == text.lower()
+                and match in str(r.ad_group_criterion.keyword.match_type)):
+            die("同词同匹配已存在（criterion " + str(r.ad_group_criterion.criterion_id) +
+                "，status " + str(r.ad_group_criterion.status) + "），拒绝重复加词")
+    out({"step": "before", "op": "keyword-add", "ad_group_id": args.ad_group_id,
+         "ad_group_name": rows[0].ad_group.name, "text": text, "match": match,
+         "final_url": args.final_url or None, "cpc_bid_micros": args.cpc_bid_micros or None})
+    if args.dry_run:
+        out({"ok": True, "dry_run": True, "would_create": {"text": text, "match": match}})
+        return
+    svc = client.get_service("AdGroupCriterionService")
+    op = client.get_type("AdGroupCriterionOperation")
+    c = op.create
+    c.ad_group = client.get_service("AdGroupService").ad_group_path(cid, int(args.ad_group_id))
+    c.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+    c.keyword.text = text
+    c.keyword.match_type = getattr(client.enums.KeywordMatchTypeEnum, match)
+    if args.final_url:
+        c.final_urls.append(args.final_url)
+    if args.cpc_bid_micros:
+        c.cpc_bid_micros = int(args.cpc_bid_micros)
+    res = svc.mutate_ad_group_criteria(customer_id=cid, operations=[op])
+    rn = res.results[0].resource_name
+    rows2 = gaql(client, cid,
+                 "SELECT ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.final_urls "
+                 "FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + rn.replace("'", "") + "'")
+    if not rows2 or "ENABLED" not in str(rows2[0].ad_group_criterion.status):
+        die("回读验证失败：新词状态不是 ENABLED，人工核对 " + rn, 1)
+    if args.final_url and args.final_url not in list(rows2[0].ad_group_criterion.final_urls):
+        die("回读验证失败：关键词级 final URL 未生效，人工核对 " + rn, 1)
+    out({"ok": True, "op": "keyword-add", "resource_name": rn, "text": text, "match": match,
+         "final_url": args.final_url or None,
+         "budget_impact": "0（预算与出价策略未动；新词扩大触发面，回滚 = 暂停该词）"})
+
+
+def op_keyword_final_url(client, cid, args):
+    """给既有关键词设关键词级 final URL（2026-09-11 W17，ctomi #678 缺口）。reversible。"""
+    if not args.criterion_resource or not args.new_url:
+        die("keyword-final-url 需要 --criterion-resource 与 --new-url")
+    if not args.new_url.startswith("https://"):
+        die("new-url 必须是 https 绝对地址")
+    res_name = args.criterion_resource.replace("'", "")
+    rows = gaql(client, cid,
+                "SELECT ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.final_urls, "
+                "ad_group_criterion.negative FROM ad_group_criterion "
+                "WHERE ad_group_criterion.resource_name = '" + res_name + "'")
+    if not rows:
+        die("criterion 不存在")
+    if rows[0].ad_group_criterion.negative:
+        die("目标是否定关键词，设不了 final URL")
+    old_urls = list(rows[0].ad_group_criterion.final_urls)
+    kw = rows[0].ad_group_criterion.keyword.text
+    out({"step": "before", "op": "keyword-final-url", "keyword": kw, "old_final_urls": old_urls})
+    if old_urls == [args.new_url]:
+        out({"ok": True, "noop": True, "note": "关键词级 final URL 已是目标值，零改动"})
+        return
+    if args.dry_run:
+        out({"ok": True, "dry_run": True, "would_set": [args.new_url]})
+        return
+    svc = client.get_service("AdGroupCriterionService")
+    op = client.get_type("AdGroupCriterionOperation")
+    op.update.resource_name = res_name
+    del op.update.final_urls[:]
+    op.update.final_urls.append(args.new_url)
+    op.update_mask.CopyFrom(field_mask(["final_urls"]))
+    svc.mutate_ad_group_criteria(customer_id=cid, operations=[op])
+    rows2 = gaql(client, cid,
+                 "SELECT ad_group_criterion.final_urls FROM ad_group_criterion "
+                 "WHERE ad_group_criterion.resource_name = '" + res_name + "'")
+    new_urls = list(rows2[0].ad_group_criterion.final_urls) if rows2 else []
+    if new_urls != [args.new_url]:
+        die("回读验证失败：期望 [" + args.new_url + "]，读到 " + json.dumps(new_urls))
+    out({"ok": True, "op": "keyword-final-url", "keyword": kw,
+         "old_final_urls": old_urls, "new_final_urls": new_urls, "budget_impact": 0})
+
+
+def op_ad_create(client, cid, args):
+    """在既有 ad group 新建一条 RSA（2026-09-11 W17，ctomi #678 缺口）。
+    不动预算与既有广告，risk_class structural：有客户批文自动，无批文停人。新广告会进审核。"""
+    raw = sys.stdin.read() if (args.spec or "") == "-" else None
+    if raw is None:
+        die("ad-create 需要 --spec -（JSON 走 stdin）")
+    try:
+        spec = json.loads(raw)
+    except Exception as e:
+        die("spec JSON 解析失败: " + str(e)[:200])
+    ag_id = int(spec.get("ad_group_id") or 0)
+    if not ag_id:
+        die("spec 缺 ad_group_id")
+    url = str(spec.get("final_url") or "")
+    if not url.startswith("https://"):
+        die("final_url 必须是 https 绝对地址")
+    hs = spec.get("headlines") or []
+    ds = spec.get("descriptions") or []
+    err = _rsa_texts_validate(hs, ds)
+    if err:
+        die("文案校验不过: " + err)
+    rows = gaql(client, cid,
+                "SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE ad_group.id = " + str(ag_id))
+    if not rows:
+        die("ad group " + str(ag_id) + " 不存在")
+    if "REMOVED" in str(rows[0].ad_group.status):
+        die("ad group " + str(ag_id) + " 已移除")
+    ex = gaql(client, cid,
+              "SELECT ad_group_ad.ad.id, ad_group_ad.status FROM ad_group_ad "
+              "WHERE ad_group.id = " + str(ag_id) + " AND ad_group_ad.status != 'REMOVED'")
+    if len(ex) >= 3:
+        die("组内非移除广告已有 " + str(len(ex)) + " 条（RSA 上限 3），先暂停或删一条旧广告再建，本操作不代删")
+    out({"step": "before", "op": "ad-create", "ad_group_id": ag_id, "ad_group_name": rows[0].ad_group.name,
+         "existing_ads": [str(r.ad_group_ad.ad.id) for r in ex],
+         "note": "既有广告一条不动，新建一条 RSA"})
+    if args.dry_run:
+        out({"ok": True, "dry_run": True,
+             "would_create": {"final_url": url, "headlines": len(hs), "descriptions": len(ds)}})
+        return
+    svc = client.get_service("AdGroupAdService")
+    op = client.get_type("AdGroupAdOperation")
+    ada = op.create
+    ada.ad_group = client.get_service("AdGroupService").ad_group_path(cid, ag_id)
+    ada.status = client.enums.AdGroupAdStatusEnum.ENABLED
+    ada.ad.final_urls.append(url)
+    if spec.get("path1"):
+        ada.ad.responsive_search_ad.path1 = str(spec["path1"])[:15]
+    if spec.get("path2"):
+        ada.ad.responsive_search_ad.path2 = str(spec["path2"])[:15]
+    for h in hs:
+        a = client.get_type("AdTextAsset")
+        a.text = str(h["text"])
+        if h.get("pin") in (1, 2, 3):
+            a.pinned_field = getattr(client.enums.ServedAssetFieldTypeEnum, "HEADLINE_" + str(h["pin"]))
+        ada.ad.responsive_search_ad.headlines.append(a)
+    for d in ds:
+        a = client.get_type("AdTextAsset")
+        a.text = str(d["text"])
+        ada.ad.responsive_search_ad.descriptions.append(a)
+    res = svc.mutate_ad_group_ads(customer_id=cid, operations=[op])
+    rn = res.results[0].resource_name
+    new_ad_id = int(rn.split("~")[-1]) if "~" in rn else 0
+    rows2 = gaql(client, cid,
+                 "SELECT ad_group_ad.ad.id, ad_group_ad.status, ad_group_ad.policy_summary.approval_status, "
+                 "ad_group_ad.ad.final_urls FROM ad_group_ad "
+                 "WHERE ad_group.id = " + str(ag_id) + " AND ad_group_ad.ad.id = " + str(new_ad_id))
+    if not rows2:
+        die("回读验证失败：新广告读不到，人工核对 " + rn, 1)
+    if url not in list(rows2[0].ad_group_ad.ad.final_urls):
+        die("回读验证失败：final URL 不符，人工核对 " + rn, 1)
+    out({"ok": True, "op": "ad-create", "resource_name": rn, "ad_id": new_ad_id,
+         "approval_status": str(rows2[0].ad_group_ad.policy_summary.approval_status),
+         "headlines": len(hs), "descriptions": len(ds),
+         "budget_impact": "0（预算与既有广告未动；新广告进审核，回滚 = 暂停新广告）"})
+
+
 def op_keyword_bid_adjust(client, cid, args):
     if not args.criterion_resource or not args.new_bid_micros:
         die("keyword-bid-adjust 需要 --criterion-resource 与 --new-bid-micros")
@@ -531,6 +716,8 @@ def main():
     p.add_argument("--criterion-resource")
     p.add_argument("--new-bid-micros", type=int)
     p.add_argument("--spec")
+    p.add_argument("--final-url")
+    p.add_argument("--cpc-bid-micros", type=int)
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
     cid = args.customer_id.replace("-", "")
@@ -545,7 +732,10 @@ def main():
          "negative-keyword-add": op_negative_keyword_add,
          "keyword-bid-adjust": op_keyword_bid_adjust,
          "adgroup-create": op_adgroup_create,
-         "rsa-copy-update": op_rsa_copy_update}[args.op](client, cid, args)
+         "rsa-copy-update": op_rsa_copy_update,
+         "keyword-add": op_keyword_add,
+         "keyword-final-url": op_keyword_final_url,
+         "ad-create": op_ad_create}[args.op](client, cid, args)
     except SystemExit:
         raise
     except Exception as e:

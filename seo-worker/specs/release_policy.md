@@ -38,7 +38,7 @@ fable 在频道判定后可派改动类任务（dispatch kind=change，ops 必�
 - external 类 op：派单里引用了已确认的客户批文 fact（backing_fact）按 auto 走，无背书 confirm。
 - spend / irreversible：永远 **confirm**，背书救不了；方案出来停在待放行，频道一句
   「放行 #N 加标题片段」（双锚校验）或看板点放行。
-- structural 类（version 4 新增，2026-09-08 Alvin 批）：预算中性新建，目前只有 adgroup-create。
+- structural 类（version 4 新增，2026-09-08 Alvin 批）：预算中性新建。version 5（2026-09-11 W17）起为 adgroup-create、keyword-add、ad-create 三个（keyword-final-url 为 reversible）。
   定义硬边界：在既有 campaign 内新建、不动任何 campaign 预算与出价策略，总花费上限不变，
   风险实质是流量再分配。放行规则同 external：有客户批文 backing 即 auto，无背书 confirm。
   真 spend（预算变动、出价策略、新 campaign）不在此列，永远人放行。
