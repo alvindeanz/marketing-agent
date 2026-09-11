@@ -61,15 +61,26 @@ function ledgerSection(tasks, limits) {
   if (!list.length) return 'EXISTING TASK LEDGER\nempty, this is the first plan';
   const rows = list
     .slice(0, limits.tasks)
-    .map((t) =>
-      [
+    .map((t) => {
+      /* 结束类型要露出来（2026-09-11 ctomi 复盘）：killed 在库里也是 done，简报只写 done
+         的话，模型会把「人工叫停重来」的任务当成正常完成，还会指路别人去放行一个死任务。
+         killed 连砍单理由一起带上，重启指引往往就写在那句理由里。 */
+      let shown = t.status || 'nostatus';
+      let tail = '';
+      const note = String(t.result_note || '');
+      const km = note.match(/\[(killed|dropped|merged)\]([^\n]{0,220})/);
+      if (shown === 'done' && km) {
+        shown = km[1];
+        if (km[1] === 'killed') tail = ' :: ' + truncate(km[2].replace(/^[：:\s]+/, ''), 180);
+      }
+      return [
         '#' + t.id,
         t.module || 'nomodule',
         t.owner_type || 'noowner',
-        t.status || 'nostatus',
-        t.title || t.name || '(untitled)',
-      ].join(' | ')
-    );
+        shown,
+        (t.title || t.name || '(untitled)') + tail,
+      ].join(' | ');
+    });
   const more = list.length > rows.length ? '\n(and ' + (list.length - rows.length) + ' more)' : '';
   return (
     'EXISTING TASK LEDGER (id | module | owner_type | status | title)\n' + rows.join('\n') + more

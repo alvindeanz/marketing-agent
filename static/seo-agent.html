@@ -788,7 +788,7 @@ let apprPlanId=0,apprTasks=[],apprPick={};
 /* 决策收件箱：全局跨客户流，客户过滤只是个筛子。裁决草稿按卡片 id 存内存，
    刷新会重画卡片，草稿从这里补回去，不会被自动刷新吃掉。 */
 let chanRootId=0,chatHistOpen=false,chatLimit=50; /* 频道根与历史区开关；chatRootId=当前打开的会话（频道或历史） */
-/* 收件箱对话：会话按当前客户过滤，会话详情 5 秒轮询一次等 opus 回复，
+/* 收件箱对话：会话按当前客户过滤，会话详情 5 秒轮询一次等 agent 回复，
    会话关掉或者离开这个视图就把轮询停掉，别让它在后台空转。
    chatSpawned 记这一轮点过开工的草案（key 是 消息id:序号），刷新后靠系统行补回来。 */
 let chatList=[],chatRootId=0,chatItem=null,chatMsgs=[],chatPending=0,chatTimer=null,chatSending=false,chatSpawned={};
@@ -2760,7 +2760,7 @@ function renderChatStream(){
     const isMe=m.kind==='chat_user';
     const isSys=m.kind==='chat_agent'&&m.created_by!=='seo-worker';
     const cls=isMe?'me':(isSys?'sys':'bot');
-    const who=isMe?esc(m.created_by||'我'):(isSys?'系统':'opus');
+    const who=isMe?esc(m.created_by||'我'):(isSys?'系统':'agent');
     let html='<div class="ch-turn '+cls+'">'+
       '<div class="ch-by">'+who+' · '+esc(String(m.created_at||'').slice(5,16))+'</div>'+
       '<div class="ch-bubble">'+chLinkify(m.body||'')+'</div>';
@@ -2785,7 +2785,7 @@ function renderChatStream(){
 function renderChatStatus(){
   const el=document.getElementById('chStatus');
   if(el)el.innerHTML=chatPending
-    ?'<div class="ch-typing"><span class="d"></span><span class="d"></span><span class="d"></span>opus 正在处理（job #'+chatPending+'），回复会自动出现</div>':'';
+    ?'<div class="ch-typing"><span class="d"></span><span class="d"></span><span class="d"></span>agent 正在处理（job #'+chatPending+'），回复会自动出现</div>':'';
   const btn=document.getElementById('chSend');
   if(btn)btn.disabled=!!chatPending||chatSending;
   const arch=chatItem&&chatItem.status==='resolved';
@@ -3624,7 +3624,7 @@ function threadBox(t,where){
     ((m.refs&&m.refs.actions)||[]).forEach((a,i)=>{h+=thActionCard(d.root_id,m.id,i,a,!!done[m.id+'/'+i])});
     return h+'</div>';
   }).join('');
-  const pending=d.chat_pending?'<div class="ch-wait">opus 思考中，job #'+d.chat_pending+'，回复出来会自动出现</div>':'';
+  const pending=d.chat_pending?'<div class="ch-wait">agent 思考中，job #'+d.chat_pending+'，回复出来会自动出现</div>':'';
   return box+'<div class="fb-title">任务线程 #'+d.root_id+'</div>'+
     '<div class="ch-stream" style="max-height:320px">'+stream+'</div>'+pending+
     '<div class="ch-form"><div class="fld"><textarea id="th_text_'+where+'_'+t.id+'" onpaste="onFbPaste('+t.id+',event)" placeholder="例如：描述里别写 220，社交图用真照片，改了重跑。截图直接粘贴。"></textarea></div>'+

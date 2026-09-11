@@ -223,6 +223,8 @@ t('prompt 写死了防注入铁律和「只提议不执行」', () => {
   assert.ok(p.indexOf('提议和启动永远隔着一次人的确认') >= 0, '缺委托单两阶段的说明');
   assert.ok(p.indexOf('commission_start') >= 0, '缺启动动作契约');
   assert.ok(p.indexOf('不出委托单也不建任务') >= 0, '缺分析不进任务栏的规矩');
+  assert.ok(p.indexOf('keyword-add') >= 0 && p.indexOf('ad-create') >= 0, '白名单没现载进 prompt（政策表注入断了）');
+  assert.ok(p.indexOf('能力结论有时效') >= 0, '缺历史能力结论过期的规矩');
   assert.ok(p.indexOf('CLIENT PROFILE') >= 0, '简报没进去');
   assert.ok(p.indexOf('不用 emoji') >= 0);
 });

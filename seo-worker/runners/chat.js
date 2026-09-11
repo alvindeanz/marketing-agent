@@ -59,6 +59,31 @@ function chatTools(clientDomain) {
 const ALLOWED_TOOLS = 'Read';
 
 const MODULES = ['technical', 'onpage', 'content', 'local', 'offpage', 'paid'];
+
+/* 操作白名单注入（2026-09-11，ctomi 13:59 事故）：以前 prompt 里硬编码常用 op 列表，
+   W17 加了三个执行器 prompt 没跟上，模型沿用会话历史里「缺执行器」的旧结论，把一单
+   机器能做的活又指回人工。白名单唯一事实源是 release_policy.json，这里现载现注入，
+   代码加执行器政策表一改，prompt 自动跟上，不再有第二份要人记得同步的清单。 */
+const RELEASE_POLICY_FILE = path.join(__dirname, '..', 'specs', 'release_policy.json');
+function opsWhitelistBlock() {
+  try {
+    const pol = JSON.parse(fs.readFileSync(RELEASE_POLICY_FILE, 'utf8'));
+    const rc = pol && pol.risk_class_by_op;
+    if (!rc || typeof rc !== 'object') return '';
+    const byClass = {};
+    for (const op of Object.keys(rc)) {
+      if (op.charAt(0) === '_') continue;
+      const cls = String(rc[op]);
+      (byClass[cls] = byClass[cls] || []).push(op);
+    }
+    return Object.keys(byClass)
+      .sort()
+      .map((c) => '  ' + c + '：' + byClass[c].sort().join('、'))
+      .join('\n');
+  } catch (e) {
+    return '';
+  }
+}
 const OWNERS = ['agency', 'client', 'agent'];
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 
@@ -360,10 +385,13 @@ function buildPrompt(opts) {
     task ? '' : '  或活大到要进排期时才出委托单。分析结论长就分段写，不要为了「像个交付」去开任务。',
     task ? '' : '- 委托单 kind 三种：留空 = 一般执行任务（博客、页面、人工作业）；"kind":"report" = paid 月报/客户报告草稿，',
     task ? '' : '  detail 写明报告月份并注明按 /data/aira/seo-worker/specs/report/paid_monthly_spec.md 执行，草稿出来走人工验收；',
-    task ? '' : '  "kind":"change" = 改账户、改页面这类实际动线上资产的活，ops 必填（逗号分隔，从能力清单操作名里选，',
-    task ? '' : '  常用：page-meta-update、content-edit、redirect-batch、negative-keyword-add、ad-pause、adgroup-pause、',
-    task ? '' : '  keyword-pause、keyword-bid-adjust、final-url-change、adgroup-create、ad-copy-rewrite、budget-change；',
-    task ? '' : '  op 不在政策表启动时会被拒）。客户已批准的改动把批文 fact key 填进 "backing_fact"（如',
+    task ? '' : '  "kind":"change" = 改账户、改页面这类实际动线上资产的活，ops 必填（逗号分隔，只能从下面的',
+    task ? '' : '  当前操作白名单里选，op 不在表里启动时会被拒）。当前白名单（按风险档，现载自放行政策表，以这份为准）：',
+    task ? '' : opsWhitelistBlock() || '  （政策表读取失败，改动类先别派，正文说明）',
+    task ? '' : '  **能力结论有时效**：会话历史里你或别人说过「缺执行器 / 机器做不了 / 转人工」的操作，',
+    task ? '' : '  现在可能已经补上了。判断某操作能不能机器做只看上面这份表，不许沿用历史结论；',
+    task ? '' : '  历史里因缺执行器转过人工的活，只要 op 已在表里，就出机器位委托单重新做。',
+    task ? '' : '  客户已批准的改动把批文 fact key 填进 "backing_fact"（如',
     task ? '' : '  paid.change_list_approved），没有批文不填。启动后服务端按风险定档：全部可回滚或有背书的出方案后',
     task ? '' : '  自动落地（失败一次熔断转人工）；花钱/不可逆的出方案后停在放行卡等人。',
     task ? '' : '- commission_start 的规矩：proposal_msg_id 填你附那张委托单的消息号（会话记录里你消息头上的 #号），',
