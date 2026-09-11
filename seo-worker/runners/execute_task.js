@@ -244,10 +244,14 @@ function buildPreparePrompt(opts) {
     '{"target_urls":["https://example.co.nz/some-page/"],"files":["pages/index.html","config.json"],' +
       '"items":[{"op":"final-url-change","entity":"ad 811766076864（Men-Hair Thinning 组）","target":"https://example.co.nz/products/pack"}]}',
     '```',
-    '  items 是本方案的变更条目账本（一处写入一行）：op 填能力清单里的操作名，该写入没有对应执行器',
-    '  或方案本就指定人工做的填 "manual"；entity 是被改对象（广告/关键词/页面，带 id 或 URL）；',
-    '  target 是目标值一句话。方案里每一处写入都必须出现在 items 里，执行状态按它逐条对账，',
-    '  漏一行等于那处写入不被跟踪。无变更方案写空数组。',
+    '  items 是本方案的变更条目账本（一处写入一行）：op 填能力清单里的操作名，**执行器未覆盖也要填',
+    '  真实 op 名**（账本按它记执行器缺口，写成 manual 缺口就漏计了）；"manual" 只用于人类才能做的',
+    '  （要客户素材、要客户点头、纯人工判断）。entity 是被改对象（广告/关键词/页面，带 id 或 URL）；',
+    '  target 是目标值一句话。有前置条件的写入（「过审后」「到货后」「等客户图」这类）必须把条件',
+    '  结构化标在该条目的 "condition" 字段，不许只写在散文里，语法三选一：',
+    '  ad_approved:<广告id>（某广告过审后）；after:YYYY-MM-DD（某日期后）；manual_signal:<一句话>（等人来说）。',
+    '  方案里每一处写入都必须出现在 items 里，执行状态按它逐条对账，漏一行等于那处写入不被跟踪。',
+    '  无变更方案写空数组。',
     '  files 是本方案会写到的平台文件清单，与第 2 节末尾「涉及文件」一致，apply 结束用它和 changeset 比对。',
     '  target_urls 是本方案**将会改动**的页面完整 URL 列表，写规范域、零跳转的那一个',
     '  （拿不准就 curl -L -w "%{num_redirects}" 验一下，必须是 0）。放行的人先看这几个地址',
@@ -394,6 +398,7 @@ function planItems(output, task) {
       op: String(it.op || '').trim().slice(0, 60),
       entity,
       target_value: String(target == null ? '' : target).slice(0, 2000),
+      condition: String(it.condition || '').trim().slice(0, 120),
     });
   }
   if (!items.length) {
@@ -1995,16 +2000,19 @@ async function runOne(ctx, context, workspace, taskId) {
   // Deliverables before the result: by the time the card shows up on the board
   // its downloads are already attached to it.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
-  await api.postTaskResult(taskId, { output_url: '', note: clientLinks + note });
+  // W15/F1：条目先上账再传 result。服务端拆条发现零机器条目会直接把母任务收敛成 merged
+  // （不出放行卡），随后的 postTaskResult 撞终态闸只留痕，误导性的「请放行」不再出现。
+  let noteFinal = clientLinks + note;
   if (prepare) {
-    // W15 条目账本：方案落库即拆条上账，服务端做机器/人工分流（人工条目直接生成 split 工单）。
     try {
       const r = await api.postTaskItems(taskId, { mode: 'plan', items: planItems(output, task) });
-      log('task ' + taskId + ': 条目账本 ' + (r.items || 0) + ' 条' + (r.blocked ? ('，人工 ' + r.blocked + ' 条，split 工单 #' + (r.split_task || '?')) : ''));
+      log('task ' + taskId + ': 条目账本 ' + (r.items || 0) + ' 条' + (r.blocked ? ('，人工 ' + r.blocked + ' 条，split 工单 #' + (r.split_task || '?')) : '') + (r.merged ? '，母任务已收敛' : ''));
+      if (r.merged) noteFinal = '方案全文在任务附件与 change-plan 文件。拆条后全部条目需人工，母任务已并入人工工单 #' + (r.split_task || '?') + '，不出放行卡。';
     } catch (e) {
       log('task ' + taskId + ': 条目账本写入失败（方案照常待放行，账本缺行需人工补）:: ' + e.message);
     }
   }
+  await api.postTaskResult(taskId, { output_url: '', note: noteFinal });
   log(
     'task ' +
       taskId +

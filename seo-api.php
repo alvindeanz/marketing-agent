@@ -1931,6 +1931,25 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         $backW=false;
         if(preg_match('/\[backing\]\s*(\S+)/u',(string)($cr['detail']??''),$bm))$backW=dispatch_backing_ok($cidW,$bm[1]);
         $gradeW=dispatch_grade($opsW,release_policy_load(),$backW);
+        /* F2 条目就绪度（2026-09-11，#680 教训，PJ 基准：等条件就挂起到点自己续，不硬跑一次失败）：
+           机器条目全部带未消费前置条件的，不排 apply，任务挂 blocked 等条件巡检（worker 零 LLM
+           轮询）到点续跑。授权是委托单那一次给的，巡检只推迟执行时点。 */
+        ensure_change_items();
+        $cqI=db()->prepare("SELECT condition_ready FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized')");
+        $cqI->execute([$tid]);
+        $mItems=$cqI->fetchAll();
+        $condsW=[];$allCondW=count($mItems)>0;
+        foreach($mItems as $miR){
+            $cv=trim((string)$miR['condition_ready']);
+            if($cv==='')$allCondW=false;
+            elseif(!in_array($cv,$condsW,true))$condsW[]=$cv;
+        }
+        if($allCondW&&$condsW){
+            db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[wait-condition] 等待：'.mb_substr(implode('；',$condsW),0,300,'UTF-8').'。条件满足由巡检自动续跑（授权已含在委托单里）');
+            if($rootW)chat_msg_insert($rootW,'chat_agent','任务 #'.$tid.'「'.$cr['title'].'」方案已出，但有前置条件：'.mb_substr(implode('；',$condsW),0,200,'UTF-8').'。已挂起等条件，巡检到条件满足会自动续跑并回报，不用人盯。','seo-worker');
+            res(200,['ok'=>true,'dispatch_grade'=>'wait-condition','conditions'=>$condsW]);
+        }
         if($gradeW==='auto'){
             list($ajW,)=queue_task_jobs($cidW,'apply_task',[$tid],'chat-dispatch-auto','seo_tasks_release');
             if($ajW){
@@ -2048,6 +2067,10 @@ function ensure_change_items(){
         KEY idx_task(task_id),
         KEY idx_client_state(client_id,state)
     ) DEFAULT CHARSET=utf8mb4");
+    /* F2 条目就绪度（2026-09-11）：condition 是机器可判的前置条件描述，惰性补列。
+       语法 V1：ad_approved:<ad_id> / after:YYYY-MM-DD / manual_signal:<一句话>。 */
+    $col=db()->query("SHOW COLUMNS FROM seo_change_items LIKE 'condition_ready'")->fetch();
+    if(!$col)db()->exec("ALTER TABLE seo_change_items ADD COLUMN condition_ready VARCHAR(120) NOT NULL DEFAULT ''");
 }
 define('ITEM_STATES',['proposed','authorized','landed','verified','blocked']);
 
@@ -2129,22 +2152,26 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
             'state'=>in_array((string)($it['state']??''),ITEM_STATES,true)?(string)$it['state']:'',
             'evidence'=>mb_substr(trim((string)($it['evidence']??'')),0,500,'UTF-8'),
             'block_reason'=>mb_substr(trim((string)($it['block_reason']??'')),0,500,'UTF-8'),
+            'condition_ready'=>mb_substr(trim((string)($it['condition']??$it['condition_ready']??'')),0,120,'UTF-8'),
         ];
     }
     if($mode==='plan'){
         db()->prepare("DELETE FROM seo_change_items WHERE task_id=?")->execute([$tid]);
-        $ins=db()->prepare("INSERT INTO seo_change_items(client_id,task_id,seq,op,entity,target_value,state,owner,block_reason)VALUES(?,?,?,?,?,?,?,?,?)");
+        $ins=db()->prepare("INSERT INTO seo_change_items(client_id,task_id,seq,op,entity,target_value,state,owner,block_reason,condition_ready)VALUES(?,?,?,?,?,?,?,?,?,?)");
+        /* 缺口按 op 去重计数（F3）：同一方案同一 op 只记一次，21 条素材项不该把 asset-create 灌成 21 hits */
+        $gapHits=[];
+        foreach($clean as $c){
+            $missing=$c['op']!==''&&$c['op']!=='manual'&&!isset($rc[$c['op']]);
+            if($missing&&!isset($gapHits[$c['op']]))$gapHits[$c['op']]=capability_gap_bump($c['op'],$tid);
+        }
         $blocked=[];$seq=0;
         foreach($clean as $c){
             $machine=$c['op']!==''&&$c['op']!=='manual'&&isset($rc[$c['op']]);
             $state=$machine?'proposed':'blocked';
             $owner=$machine?'machine':'agency';
             $why=$machine?'':($c['op']===''||$c['op']==='manual'?'方案指定人工':'缺执行器 op '.$c['op']);
-            if(!$machine&&$c['op']!==''&&$c['op']!=='manual'){
-                $hitsG=capability_gap_bump($c['op'],$tid);
-                if($hitsG>=2)$why.='（缺口第 '.$hitsG.' 次，按定则该补执行器了）';
-            }
-            $ins->execute([$cid,$tid,$seq,$c['op'],$c['entity'],$c['target_value'],$state,$owner,$why]);
+            if(!$machine&&isset($gapHits[$c['op']])&&$gapHits[$c['op']]>=2)$why.='（缺口第 '.$gapHits[$c['op']].' 次，按定则该补执行器了）';
+            $ins->execute([$cid,$tid,$seq,$c['op'],$c['entity'],$c['target_value'],$state,$owner,$why,$c['condition_ready']]);
             if(!$machine)$blocked[]=$c;
             $seq++;
         }
@@ -2175,8 +2202,25 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
                 }
             }else{$splitTid=(int)$sr['id'];}
         }
-        audit('seo-worker','seo_task_items_plan',(string)$tid,['items'=>count($clean),'blocked'=>count($blocked),'split_task'=>$splitTid]);
-        res(200,['ok'=>true,'items'=>count($clean),'blocked'=>count($blocked),'split_task'=>$splitTid]);
+        /* F1 母任务收敛（2026-09-11，#681 空放行卡教训，PJ 基准：全是人工活就把机器单收了）：
+           拆条后机器条目为零且已有 split 工单的，母任务直接 merged 关闭，不出放行卡，
+           不排必然中止的 apply。worker 现在先传条目再传 result，postTaskResult 会撞终态闸
+           只留痕不改状态，误导性的「请放行」消息不再出现。 */
+        $mergedM=false;
+        if($blocked&&count($blocked)===count($clean)&&$splitTid&&(string)$task['owner_type']==='agent'&&(string)$task['status']!=='done'){
+            $errM=task_close($tid,'merged','全部 '.count($clean).' 处条目均需人工，已并入人工工单 #'.$splitTid.'（判定期收敛，不出放行卡）','seo-worker');
+            if(!$errM){
+                $mergedM=true;
+                if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$task['origin'],$omM)){
+                    $rqM=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+                    $rqM->execute([(int)$omM[2]]);
+                    $rootM=$rqM->fetch();
+                    if($rootM)chat_msg_insert($rootM,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$task['title'],0,50,'UTF-8').'」拆条后无机器可落项，母任务已收敛（并入 #'.$splitTid.'），不出放行卡；活全部在人工工单 #'.$splitTid.'，做完在频道说一声我拉回读。','seo-worker');
+                }
+            }
+        }
+        audit('seo-worker','seo_task_items_plan',(string)$tid,['items'=>count($clean),'blocked'=>count($blocked),'split_task'=>$splitTid,'merged'=>$mergedM]);
+        res(200,['ok'=>true,'items'=>count($clean),'blocked'=>count($blocked),'split_task'=>$splitTid,'merged'=>$mergedM]);
     }
     /* mode=apply：按 entity 对账 */
     $upd=db()->prepare("UPDATE seo_change_items SET op=IF(?='',op,?),state=IF(?='',state,?),old_value=IF(?='',old_value,?),evidence=IF(?='',evidence,?),block_reason=IF(?='',block_reason,?),owner=IF(?='blocked' AND owner='machine','agency',owner) WHERE id=?");
@@ -2227,6 +2271,60 @@ if($m==='GET'&&$ROUTE==='/capability_gaps'){
     ensure_capability_gaps();
     $rows=db()->query("SELECT op,hits,last_task_id,created_at,updated_at FROM seo_capability_gaps ORDER BY hits DESC,updated_at DESC LIMIT 100")->fetchAll();
     res(200,['gaps'=>$rows]);
+}
+
+// GET /tasks/pending_conditions -> 条件巡检取数（worker 零 LLM 轮询用）。
+// 挂在 [wait-condition] 上的 blocked 任务及其机器条目的未消费条件，带 ads_customer_id 供 GAQL 核对。
+if($m==='GET'&&$ROUTE==='/tasks/pending_conditions'){
+    auth_worker();
+    ensure_change_items();
+    ensure_task_origin();
+    $rows=db()->query("SELECT t.id,t.client_id,t.title,p.ads_customer_id FROM seo_tasks t LEFT JOIN seo_profiles p ON p.client_id=t.client_id WHERE t.status='blocked' AND t.result_note LIKE '%[wait-condition]%' ORDER BY t.id DESC LIMIT 50")->fetchAll();
+    $out=[];
+    $iq=db()->prepare("SELECT DISTINCT condition_ready FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized') AND condition_ready<>''");
+    foreach($rows as $r){
+        $iq->execute([(int)$r['id']]);
+        $conds=array_map(function($x){return $x['condition_ready'];},$iq->fetchAll());
+        if($conds)$out[]=['task_id'=>(int)$r['id'],'client_id'=>(int)$r['client_id'],'title'=>$r['title'],'ads_customer_id'=>(string)($r['ads_customer_id']??''),'conditions'=>$conds];
+    }
+    res(200,['tasks'=>$out]);
+}
+
+// POST /tasks/{id}/condition_met -> 巡检确认全部条件满足，续跑（PJ 基准：到点自己继续，授权是原来那次）。
+// 条件消费掉（防循环），任务回 review 再按政策定档：auto 排 apply，confirm 回频道要一句放行。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/condition_met$#',$ROUTE,$mm)){
+    auth_worker();
+    ensure_change_items();
+    ensure_task_origin();
+    $tid=(int)$mm[1];
+    $tq=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");
+    $tq->execute([$tid]);
+    $t=$tq->fetch();
+    if(!$t)res(404,['error'=>'Task not found']);
+    if((string)$t['status']!=='blocked'||strpos((string)$t['result_note'],'[wait-condition]')===false)res(400,['error'=>'任务不在等条件状态']);
+    $i=input();
+    $why=mb_substr(trim((string)($i['evidence']??'')),0,300,'UTF-8');
+    db()->prepare("UPDATE seo_change_items SET condition_ready='' WHERE task_id=? AND owner='machine'")->execute([$tid]);
+    db()->prepare("UPDATE seo_tasks SET status='review' WHERE id=?")->execute([$tid]);
+    task_append_note($tid,'[condition-met] 条件已满足'.($why!==''?('：'.$why):'').'，续跑');
+    $cidC=(int)$t['client_id'];
+    $rootC=null;
+    if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$t['origin'],$omC)){
+        $rqC=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+        $rqC->execute([(int)$omC[2]]);
+        $rootC=$rqC->fetch();
+    }
+    $opsC2=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
+    $backC2=false;
+    if(preg_match('/\[backing\]\s*(\S+)/u',(string)$t['detail'],$bmC))$backC2=dispatch_backing_ok($cidC,$bmC[1]);
+    $gC=dispatch_grade($opsC2,release_policy_load(),$backC2);
+    if($gC==='auto'){
+        list($ajC2,)=queue_task_jobs($cidC,'apply_task',[$tid],'condition-probe','seo_tasks_release');
+        if($rootC)chat_msg_insert($rootC,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」前置条件已满足'.($why!==''?('（'.$why.'）'):'').'，按原授权自动续跑落地（apply job #'.($ajC2?$ajC2[0]:0).'），落完回报。','seo-worker');
+        res(200,['ok'=>true,'did'=>'apply','job_id'=>$ajC2?$ajC2[0]:0]);
+    }
+    if($rootC)chat_msg_insert($rootC,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」前置条件已满足'.($why!==''?('（'.$why.'）'):'').'，含需人确认项：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
+    res(200,['ok'=>true,'did'=>'ask-release']);
 }
 
 // POST /tasks/{id}/feedback_result -> worker files what it made of a human note.

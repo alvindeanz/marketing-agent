@@ -298,6 +298,16 @@ class Api {
     return this.req('POST', '/tasks/' + encodeURIComponent(taskId) + '/items', body);
   }
 
+  /** GET /tasks/pending_conditions -> 等条件的任务与各自的机器条目条件（F2 巡检取数）。 */
+  async getPendingConditions() {
+    return this.req('GET', '/tasks/pending_conditions');
+  }
+
+  /** POST /tasks/{id}/condition_met body {evidence} -> 条件满足续跑（授权沿用委托单那次）。 */
+  async postConditionMet(taskId, evidence) {
+    return this.req('POST', '/tasks/' + encodeURIComponent(taskId) + '/condition_met', { evidence });
+  }
+
   /**
    * POST /reports body
    * { client_id, period_type, period_start, period_end, url, html_path,

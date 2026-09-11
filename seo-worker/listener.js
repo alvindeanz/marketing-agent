@@ -20,6 +20,7 @@ const { fork } = require('node:child_process');
 const { load } = require('./lib/config');
 const { Api } = require('./lib/api');
 const blogreview = require('./lib/blogreview');
+const { conditionProbeTick } = require('./lib/conditions');
 const { LANE_NAMES, laneOf } = require('./lib/lanes');
 const { ts, makeStdoutLogger, summarize } = require('./lib/util');
 
@@ -415,8 +416,15 @@ server.listen(cfg.wakePort, cfg.bindHost, () => {
 // Fallback poll. Claims only. If the table has no human queued job, nothing runs.
 // The blog review sweep rides the same tick, after the drain so it never
 // competes with a job for the box. It is independent of the drain's outcome.
+// 条件巡检（F2，零 LLM）每 12 tick 一轮（默认 300s tick 即约每小时）：核对等条件任务，
+// 满足的经 condition_met 续跑。巡检自身只读，续跑的授权在委托单那一次。
+let probeTickCount = 0;
 const pollTimer = setInterval(() => {
   drain('poll').then(blogReviewTick, blogReviewTick);
+  probeTickCount += 1;
+  if (probeTickCount % 12 === 0) {
+    conditionProbeTick(api, log).catch((e) => log('条件巡检本轮异常 :: ' + e.message));
+  }
 }, cfg.pollIntervalSec * 1000);
 
 // ---------------------------------------------------------------------------
