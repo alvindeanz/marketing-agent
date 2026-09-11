@@ -1139,9 +1139,11 @@ function inbox_actions_norm($v){
         }
         if($type==='commission_start'){
             /* 委托单启动（2026-09-11 W13）：提议消息号 + 第几张 + 标题锚 + 人的确认引语。
-               缺任何一样整条丢：启动即建任务，宁可让人再说一遍也不许模糊启动。 */
+               缺任何一样整条丢：启动即建任务，宁可让人再说一遍也不许模糊启动。
+               快路（同日 Alvin 批）：proposal_msg_id=0 表示引用本轮回复自带的委托单，
+               引语必须命中最新一条人类消息，风险闸在 exec 里。 */
             $pmN=(int)($a['proposal_msg_id']??0);
-            if($pmN<=0)continue;
+            if($pmN<0)continue;
             $row['proposal_msg_id']=$pmN;
             $row['proposal_idx']=max(0,(int)($a['proposal_idx']??0));
             $mdN=trim((string)($a['mandate']??''));
@@ -1232,33 +1234,52 @@ function thread_action_exec($root,$t,$a,$by){
    模型引用确认原话作 mandate，这里双验：提议必须存在于更早的 agent 消息；确认引语必须
    逐字命中提议之后的人类消息（时序即授权，同轮直接派单的 dispatch 字段已作废）。
    风险分档不动：change 类按 dispatch_grade 定档，origin=chatw: 走既有的方案后自动落地或放行卡。 */
-function commission_start_exec($root,$a,$asker){
+function commission_start_exec($root,$a,$asker,$sameTurnDrafts=null,$curMsgId=0){
     $rootId=(int)$root['id'];
     $cid=(int)($root['client_id']??0);
     if(!$cid)return ['ok'=>false,'what'=>'本频道没有客户归属，建不了任务'];
     if(ops_halted($cid))return ['ok'=>false,'what'=>'止损闩生效中（/stop），解闩发 /resume 后再确认'];
     $pmid=(int)($a['proposal_msg_id']??0);
     $pidx=max(0,(int)($a['proposal_idx']??0));
-    $mq=db()->prepare("SELECT id,kind,refs FROM seo_inbox WHERE id=? AND reply_to=?");
-    $mq->execute([$pmid,$rootId]);
-    $pm=$mq->fetch();
-    $mq->closeCursor();
-    if(!$pm||$pm['kind']!=='chat_agent')return ['ok'=>false,'what'=>'找不到消息 #'.$pmid.' 上的委托单提议（必须是本频道更早的 agent 消息）'];
-    $prefs=inbox_refs_norm($pm['refs']);
-    $draft=$prefs['drafts'][$pidx]??null;
-    if(!$draft)return ['ok'=>false,'what'=>'消息 #'.$pmid.' 上没有第 '.$pidx.' 号委托单'];
-    $tc=trim((string)($a['title_check']??''));
-    if($tc===''||mb_stripos((string)$draft['title'],$tc)===false)return ['ok'=>false,'what'=>'委托单标题与「'.$tc.'」对不上，可能引错了单，请人工确认'];
     $mandate=trim((string)($a['mandate']??''));
     $mNorm=preg_replace('/\s+/u','',$mandate);
     if($mNorm==='')return ['ok'=>false,'what'=>'缺确认引语'];
-    $hq=db()->prepare("SELECT body FROM seo_inbox WHERE reply_to=? AND kind='chat_user' AND id>? ORDER BY id");
-    $hq->execute([$rootId,$pmid]);
-    $found=false;
-    foreach($hq->fetchAll() as $hr){
-        if(strpos(preg_replace('/\s+/u','',(string)$hr['body']),$mNorm)!==false){$found=true;break;}
+    $tc=trim((string)($a['title_check']??''));
+    $fastPath=($pmid===0);
+    if($fastPath){
+        /* 快路（2026-09-11 Alvin 批，monica ctomi 重试的摩擦教训）：最新一条人类消息本身
+           就是明确执行指令时，同轮「附委托单 + 启动」一步走。三道收紧顶掉那轮确认：
+           引语必须逐字命中触发本轮的最新人类消息（不许翻历史凑授权）；正文必须复述范围
+           （prompt 层约束）；风险档必须直落（change 全 reversible 或 structural/external
+           有已确认批文），含花钱/不可逆或无背书的照旧留卡等下一轮人确认。 */
+        $draft=is_array($sameTurnDrafts)?($sameTurnDrafts[$pidx]??null):null;
+        if(!$draft)return ['ok'=>false,'what'=>'快路启动引用了本轮第 '.$pidx.' 号委托单，但本轮回复没有这张卡'];
+        $lq=db()->prepare("SELECT body FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
+        $lq->execute([$rootId]);
+        $lr=$lq->fetch();
+        $lq->closeCursor();
+        if(!$lr||strpos(preg_replace('/\s+/u','',(string)$lr['body']),$mNorm)===false){
+            return ['ok'=>false,'what'=>'快路引语必须一字不改来自最新一条人类消息，对不上，未启动（历史指令不作数，委托单卡已留，回一句确认即可）'];
+        }
+        $pmid=$curMsgId;
+    }else{
+        $mq=db()->prepare("SELECT id,kind,refs FROM seo_inbox WHERE id=? AND reply_to=?");
+        $mq->execute([$pmid,$rootId]);
+        $pm=$mq->fetch();
+        $mq->closeCursor();
+        if(!$pm||$pm['kind']!=='chat_agent')return ['ok'=>false,'what'=>'找不到消息 #'.$pmid.' 上的委托单提议（必须是本频道更早的 agent 消息）'];
+        $prefs=inbox_refs_norm($pm['refs']);
+        $draft=$prefs['drafts'][$pidx]??null;
+        if(!$draft)return ['ok'=>false,'what'=>'消息 #'.$pmid.' 上没有第 '.$pidx.' 号委托单'];
+        $hq=db()->prepare("SELECT body FROM seo_inbox WHERE reply_to=? AND kind='chat_user' AND id>? ORDER BY id");
+        $hq->execute([$rootId,$pmid]);
+        $found=false;
+        foreach($hq->fetchAll() as $hr){
+            if(strpos(preg_replace('/\s+/u','',(string)$hr['body']),$mNorm)!==false){$found=true;break;}
+        }
+        if(!$found)return ['ok'=>false,'what'=>'确认引语对不上提议之后的人类消息（确认必须发生在提议之后，引语一字不改），未启动'];
     }
-    if(!$found)return ['ok'=>false,'what'=>'确认引语对不上提议之后的人类消息（确认必须发生在提议之后，引语一字不改），未启动'];
+    if($tc===''||mb_stripos((string)$draft['title'],$tc)===false)return ['ok'=>false,'what'=>'委托单标题与「'.$tc.'」对不上，可能引错了单，请人工确认'];
     /* 防重复启动：同频道同标题只建一次，人说两遍或模型重发都不该变成两个任务 */
     $dq=db()->prepare("SELECT id FROM seo_tasks WHERE client_id=? AND title=? AND origin IN(?,?,?) LIMIT 1");
     $dq->execute([$cid,(string)$draft['title'],'chatw:'.$rootId,'report:'.$rootId,'spawn:'.$rootId]);
@@ -1274,11 +1295,12 @@ function commission_start_exec($root,$a,$asker){
         $hasBack=$backKey!==''&&dispatch_backing_ok($cid,$backKey);
         $gradeC=dispatch_grade($opsArr,release_policy_load(),$hasBack);
         if(strpos($gradeC,'invalid')===0)return ['ok'=>false,'what'=>$gradeC.'。执行器未覆盖的操作启动不了机器位，该项留人工或等执行器排期'];
+        if($fastPath&&$gradeC!=='auto')return ['ok'=>false,'what'=>'快路只放直落档（全 reversible，或 structural/external 有已确认批文）。本单含需人确认项，委托单卡已留在本轮回复上，回一句确认即启动'];
         if(!$hasBack)$backKey='';
     }
     list($t,$err)=task_fields_clean($draft,['status_force'=>'approved']);
     if($err)return ['ok'=>false,'what'=>'委托单字段不合法：'.$err];
-    $t['detail']=trim($t['detail'])."\n\n[委托单] 频道 #".$rootId." 消息 #".$pmid."/".$pidx." 提议，".$asker." 确认启动\n[授权引语] ".mb_substr($mandate,0,200,'UTF-8');
+    $t['detail']=trim($t['detail'])."\n\n[委托单] 频道 #".$rootId." 消息 #".$pmid."/".$pidx.($fastPath?' 快路同轮启动（指令即确认）':' 提议').'，'.$asker." 确认启动\n[授权引语] ".mb_substr($mandate,0,200,'UTF-8');
     if($backKey!=='')$t['detail'].="\n[backing] ".$backKey;
     $origin=$kind==='change'?('chatw:'.$rootId):($kind==='report'?('report:'.$rootId):('spawn:'.$rootId));
     $tid=task_insert($cid,$t,$asker,$origin);
@@ -3933,6 +3955,52 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
     $rootRefs=inbox_refs_norm($root['refs']);
     $actions=inbox_actions_norm($i['actions']??null);
     $msgId=chat_msg_insert($root,'chat_agent',$body,'seo-worker',['drafts'=>$drafts,'actions'=>$actions]);
+    /* facts 先于 actions 处理（2026-09-11 快路，Alvin 批）：同轮「落批文 fact + 快路启动」
+       要求 fact 在定档之前已是 confirmed，否则 structural/external 的背书永远晚一步。 */
+    /* facts：人在会话里明确要求记录或更新的客户事实（含微信截图转述），模型翻译成
+       结构化写入（2026-09-07 Alvin 定，PJ 式：直接改，复述即确认，版本账即日志）。
+       记在最后发言的同事名下，opus 只是笔；origin chat:{root}/{触发消息 id}，
+       全量走 fact_history，可回滚。只能写 facts 这一格，动客户资产照旧走任务与放行。 */
+    $factWrites=[];
+    $factsIn=is_array($i['facts']??null)?array_values($i['facts']):[];
+    if($factsIn&&$root['client_id']!==null){
+        if(count($factsIn)>8)$factsIn=array_slice($factsIn,0,8);
+        $cidF=(int)$root['client_id'];
+        $mq=db()->prepare("SELECT id,created_by FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
+        $mq->execute([$rootId]);
+        $um=$mq->fetch();
+        $authorF=($um&&$um['created_by']!=='')?(string)$um['created_by']:'seo-worker';
+        $originF='chat:'.$rootId.'/'.($um?(int)$um['id']:0);
+        $lookF=db()->prepare("SELECT id,value,source,status FROM seo_facts WHERE client_id=? AND fact_key=?");
+        $updF=db()->prepare("UPDATE seo_facts SET value=?,source='manual',status='confirmed',updated_by=? WHERE id=?");
+        $insF=db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)VALUES(?,?,?,'manual','confirmed',?)");
+        foreach($factsIn as $f){
+            if(!is_array($f))continue;
+            $k=trim((string)($f['key']??$f['fact_key']??''));
+            $v=trim((string)($f['value']??''));
+            if($k===''||$v===''||mb_strlen($k,'UTF-8')>100)continue;
+            if(mb_strlen($v,'UTF-8')>2000)$v=mb_substr($v,0,2000,'UTF-8');
+            $lookF->execute([$cidF,$k]);
+            $ex=$lookF->fetch();
+            $lookF->closeCursor();
+            if($ex){
+                if((string)$ex['value']===$v)continue;
+                fact_history_snapshot((int)$ex['id'],$cidF,$k,$ex,$v,$authorF,$originF);
+                $updF->execute([$v,$authorF,(int)$ex['id']]);
+                $factWrites[]=['key'=>$k,'old'=>(string)$ex['value'],'new'=>$v];
+            }else{
+                $insF->execute([$cidF,$k,$v,$authorF]);
+                fact_history_snapshot((int)db()->lastInsertId(),$cidF,$k,null,$v,$authorF,$originF);
+                $factWrites[]=['key'=>$k,'old'=>null,'new'=>$v];
+            }
+        }
+        if($factWrites){
+            $linesF=array_map(function($w){
+                return $w['key'].($w['old']===null?'：新增「':'：由「'.mb_substr($w['old'],0,60,'UTF-8').'」改为「').mb_substr($w['new'],0,120,'UTF-8').'」';
+            },$factWrites);
+            chat_msg_insert($root,'chat_agent',"已更新档案（记在 ".$authorF." 名下，版本账可回滚）：\n".implode("\n",$linesF),$authorF);
+        }
+    }
     /* 任务线程的自动执行：白名单里的看板层动作在回复落库的同一刻执行，系统行记账，
        前端看到的就是「已执行」。release 留卡给人点。指令来源是人在线程里说的话，
        模型只是把它翻译成动作，和裁决 runner 一个道理。 */
@@ -3973,8 +4041,9 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 chat_msg_insert($root,'chat_agent','频道指令 '.$msgId.'/'.$idx.' 未执行：'.$why,'seo-worker');
             };
             if($a['type']==='commission_start'){
-                /* 委托单启动没有既有任务可锚，走自己的双验（提议时序 + 确认引语） */
-                $rC=commission_start_exec($root,$a,$askerA);
+                /* 委托单启动没有既有任务可锚，走自己的双验（提议时序 + 确认引语）。
+                   本轮 drafts 与消息号传进去给快路（proposal_msg_id=0）用。 */
+                $rC=commission_start_exec($root,$a,$askerA,$drafts,$msgId);
                 if($rC['ok']){
                     chat_msg_insert($root,'chat_agent','已执行频道指令：'.$rC['what'].'（确认人 '.$askerA.'），进展会回频道。','seo-worker',['tasks'=>[(int)($rC['task_id']??0)]]);
                     $executed[]=['idx'=>$idx,'type'=>'commission_start','ok'=>true,'task_id'=>(int)($rC['task_id']??0)];
@@ -4043,50 +4112,6 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」延后挂起。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
                 $executed[]=['idx'=>$idx,'type'=>'later','ok'=>true,'task_id'=>$tidA];
             }
-        }
-    }
-    /* facts：人在会话里明确要求记录或更新的客户事实（含微信截图转述），模型翻译成
-       结构化写入（2026-09-07 Alvin 定，PJ 式：直接改，复述即确认，版本账即日志）。
-       记在最后发言的同事名下，opus 只是笔；origin chat:{root}/{触发消息 id}，
-       全量走 fact_history，可回滚。只能写 facts 这一格，动客户资产照旧走任务与放行。 */
-    $factWrites=[];
-    $factsIn=is_array($i['facts']??null)?array_values($i['facts']):[];
-    if($factsIn&&$root['client_id']!==null){
-        if(count($factsIn)>8)$factsIn=array_slice($factsIn,0,8);
-        $cidF=(int)$root['client_id'];
-        $mq=db()->prepare("SELECT id,created_by FROM seo_inbox WHERE reply_to=? AND kind='chat_user' ORDER BY id DESC LIMIT 1");
-        $mq->execute([$rootId]);
-        $um=$mq->fetch();
-        $authorF=($um&&$um['created_by']!=='')?(string)$um['created_by']:'seo-worker';
-        $originF='chat:'.$rootId.'/'.($um?(int)$um['id']:0);
-        $lookF=db()->prepare("SELECT id,value,source,status FROM seo_facts WHERE client_id=? AND fact_key=?");
-        $updF=db()->prepare("UPDATE seo_facts SET value=?,source='manual',status='confirmed',updated_by=? WHERE id=?");
-        $insF=db()->prepare("INSERT INTO seo_facts(client_id,fact_key,value,source,status,updated_by)VALUES(?,?,?,'manual','confirmed',?)");
-        foreach($factsIn as $f){
-            if(!is_array($f))continue;
-            $k=trim((string)($f['key']??$f['fact_key']??''));
-            $v=trim((string)($f['value']??''));
-            if($k===''||$v===''||mb_strlen($k,'UTF-8')>100)continue;
-            if(mb_strlen($v,'UTF-8')>2000)$v=mb_substr($v,0,2000,'UTF-8');
-            $lookF->execute([$cidF,$k]);
-            $ex=$lookF->fetch();
-            $lookF->closeCursor();
-            if($ex){
-                if((string)$ex['value']===$v)continue;
-                fact_history_snapshot((int)$ex['id'],$cidF,$k,$ex,$v,$authorF,$originF);
-                $updF->execute([$v,$authorF,(int)$ex['id']]);
-                $factWrites[]=['key'=>$k,'old'=>(string)$ex['value'],'new'=>$v];
-            }else{
-                $insF->execute([$cidF,$k,$v,$authorF]);
-                fact_history_snapshot((int)db()->lastInsertId(),$cidF,$k,null,$v,$authorF,$originF);
-                $factWrites[]=['key'=>$k,'old'=>null,'new'=>$v];
-            }
-        }
-        if($factWrites){
-            $linesF=array_map(function($w){
-                return $w['key'].($w['old']===null?'：新增「':'：由「'.mb_substr($w['old'],0,60,'UTF-8').'」改为「').mb_substr($w['new'],0,120,'UTF-8').'」';
-            },$factWrites);
-            chat_msg_insert($root,'chat_agent',"已更新档案（记在 ".$authorF." 名下，版本账可回滚）：\n".implode("\n",$linesF),$authorF);
         }
     }
     /* dispatch 同轮直接派单已作废（2026-09-11 W13 契约闸，Alvin 定）：chat 建任务一律走

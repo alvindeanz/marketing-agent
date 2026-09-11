@@ -397,6 +397,13 @@ function buildPrompt(opts) {
     task ? '' : '- commission_start 的规矩：proposal_msg_id 填你附那张委托单的消息号（会话记录里你消息头上的 #号），',
     task ? '' : '  proposal_idx 是第几张（从 0 数），title_check 原样抄单标题前十几个字，mandate 一字不改引用人的',
     task ? '' : '  确认原话。服务端双验：提议必须在更早的 agent 消息上，引语必须逐字命中提议之后的人类消息。',
+    task ? '' : '- **快路（指令即确认）**：触发本轮的最新人类消息本身就是明确、完整的执行指令时（范围写死在消息',
+    task ? '' : '  或它引用的定稿文档里，没有要对齐的歧义），不必等下一轮：同一个 json 里附委托单 drafts 并直接发',
+    task ? '' : '  commission_start，proposal_msg_id 填 0（表示本轮自带的卡），mandate 一字不改引用那条最新消息里的',
+    task ? '' : '  指令句，正文必须复述改什么动哪些资产。快路只放直落档：非改动类，或改动类全 reversible、',
+    task ? '' : '  structural/external 有已确认批文 fact。含花钱/不可逆项或口径还在变的，照旧两阶段。',
+    task ? '' : '  客户批准的证据（截图/原话）同轮先写进 facts 数组落成批文 fact（起 key 如 paid.xxx_approved），',
+    task ? '' : '  facts 先于启动生效，backing_fact 填同一个 key 即可同轮吃到背书。',
     task ? '' : '  人的确认语宽泛（「可以」「就这么办」）也算数，但正文里必须复述启动的是哪一单、动哪些资产；',
     task ? '' : '  人一次确认多张就发多个 commission_start。三类永远不算确认：转述客户（「客户说/客户想」是材料，',
     task ? '' : '  同事自己下令才算）；探讨语气（要不要/看看/是不是/我在想）；你自己的建议被沉默跳过。',
@@ -506,12 +513,14 @@ function cleanChanActions(json, log) {
     const type = String(a.type || '').trim();
     if (type !== 'kill' && type !== 'later' && type !== 'release' && type !== 'machine_run' && type !== 'commission_start') { say('对话：频道动作只认 commission_start/kill/later/release/machine_run，丢弃 ' + type); continue; }
     if (type === 'commission_start') {
-      const pmid = Number(a.proposal_msg_id) || 0;
+      /* proposal_msg_id 0 = 快路：引用本轮回复自带的委托单，服务端验最新人类消息引语与风险档。 */
+      const pmidRaw = Number(a.proposal_msg_id);
+      const pmid = Number.isFinite(pmidRaw) && pmidRaw > 0 ? Math.floor(pmidRaw) : 0;
       const pidxRaw = Number(a.proposal_idx);
       const pidx = Number.isFinite(pidxRaw) && pidxRaw > 0 ? Math.floor(pidxRaw) : 0;
       const tcC = String(a.title_check || '').trim();
       const mandate = String(a.mandate || '').trim();
-      if (!pmid || tcC.length < 6 || mandate.length < 2) { say('对话：commission_start 缺 proposal_msg_id / title_check / mandate，丢弃'); continue; }
+      if (tcC.length < 6 || mandate.length < 2) { say('对话：commission_start 缺 title_check / mandate，丢弃'); continue; }
       out.push({ type, proposal_msg_id: pmid, proposal_idx: pidx, title_check: tcC.slice(0, 120), mandate: mandate.slice(0, 300), reason: summarize(a.reason, 500) });
       continue;
     }

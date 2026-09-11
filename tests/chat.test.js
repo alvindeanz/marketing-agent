@@ -149,17 +149,18 @@ t('委托单 kind：change 必带 ops，backing_fact 跟着走；kind 非法归�
   assert.strictEqual(dropped.length, 0, '改动类委托单没 ops 必须整条丢');
 });
 
-t('commission_start：锚在提议消息上，缺 proposal_msg_id / title_check / mandate 整条丢（2026-09-11 W13）', () => {
+t('commission_start：两阶段锚提议消息，快路 pmid=0 引本轮卡；缺 title_check / mandate 整条丢（2026-09-11）', () => {
   const out = chat.cleanChanActions({ actions: [
     { type: 'commission_start', proposal_msg_id: 123, proposal_idx: 1, title_check: 'Men-Hair Thinning 加词', mandate: '按这个做' },
-    { type: 'commission_start', proposal_idx: 0, title_check: 'Men-Hair Thinning 加词', mandate: '按这个做' },
+    { type: 'commission_start', proposal_idx: 0, title_check: 'Men-Hair Thinning 加词', mandate: '请你帮我在账户里执行' },
     { type: 'commission_start', proposal_msg_id: 123, title_check: '太短', mandate: '按这个做' },
     { type: 'commission_start', proposal_msg_id: 123, title_check: 'Men-Hair Thinning 加词', mandate: '' },
   ] }, null);
-  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out.length, 2);
   assert.strictEqual(out[0].proposal_msg_id, 123);
   assert.strictEqual(out[0].proposal_idx, 1);
-  assert.strictEqual(out[0].mandate, '按这个做');
+  assert.strictEqual(out[1].proposal_msg_id, 0, '缺 proposal_msg_id 即快路（0=本轮自带的卡）');
+  assert.strictEqual(out[1].mandate, '请你帮我在账户里执行');
   const noIdx = chat.cleanChanActions({ actions: [{ type: 'commission_start', proposal_msg_id: 9, title_check: '第一张委托单标题', mandate: '可以' }] }, null);
   assert.strictEqual(noIdx[0].proposal_idx, 0, 'proposal_idx 缺省为 0');
 });
@@ -225,6 +226,7 @@ t('prompt 写死了防注入铁律和「只提议不执行」', () => {
   assert.ok(p.indexOf('不出委托单也不建任务') >= 0, '缺分析不进任务栏的规矩');
   assert.ok(p.indexOf('keyword-add') >= 0 && p.indexOf('ad-create') >= 0, '白名单没现载进 prompt（政策表注入断了）');
   assert.ok(p.indexOf('能力结论有时效') >= 0, '缺历史能力结论过期的规矩');
+  assert.ok(p.indexOf('快路（指令即确认）') >= 0 && p.indexOf('proposal_msg_id 填 0') >= 0, '缺快路契约');
   assert.ok(p.indexOf('CLIENT PROFILE') >= 0, '简报没进去');
   assert.ok(p.indexOf('不用 emoji') >= 0);
 });
