@@ -2281,13 +2281,35 @@ if($m==='GET'&&$ROUTE==='/tasks/pending_conditions'){
     ensure_task_origin();
     $rows=db()->query("SELECT t.id,t.client_id,t.title,p.ads_customer_id FROM seo_tasks t LEFT JOIN seo_profiles p ON p.client_id=t.client_id WHERE t.status='blocked' AND t.result_note LIKE '%[wait-condition]%' ORDER BY t.id DESC LIMIT 50")->fetchAll();
     $out=[];
-    $iq=db()->prepare("SELECT DISTINCT condition_ready FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized') AND condition_ready<>''");
+    $iq=db()->prepare("SELECT DISTINCT condition_ready FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized','blocked') AND condition_ready<>''");
     foreach($rows as $r){
         $iq->execute([(int)$r['id']]);
         $conds=array_map(function($x){return $x['condition_ready'];},$iq->fetchAll());
         if($conds)$out[]=['task_id'=>(int)$r['id'],'client_id'=>(int)$r['client_id'],'title'=>$r['title'],'ads_customer_id'=>(string)($r['ads_customer_id']??''),'conditions'=>$conds];
     }
     res(200,['tasks'=>$out]);
+}
+
+// POST /tasks/{id}/park body {condition, note?} -> 人工把任务挂起等条件（admin）。
+// 给存量任务和人工判断用：机器条目统一挂上条件，任务 blocked 加 [wait-condition] 标记，巡检接管。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/park$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_change_items();
+    $tid=(int)$mm[1];
+    $tq=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");
+    $tq->execute([$tid]);
+    $t=$tq->fetch();
+    if(!$t)res(404,['error'=>'Task not found']);
+    if((string)$t['status']==='done')res(400,['error'=>'任务已结束，挂不了']);
+    $i=input();
+    $cond=mb_substr(trim((string)($i['condition']??'')),0,120,'UTF-8');
+    if($cond==='')res(400,['error'=>'condition required（如 ad_approved:12345 / after:2026-09-12）']);
+    db()->prepare("UPDATE seo_change_items SET condition_ready=? WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized','blocked')")->execute([$cond,$tid]);
+    db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
+    $noteP=mb_substr(trim((string)($i['note']??'')),0,200,'UTF-8');
+    task_append_note($tid,'[wait-condition] 等待：'.$cond.'（'.$u['username'].' 手工挂起'.($noteP!==''?('，'.$noteP):'').'），条件满足由巡检自动续跑');
+    audit($u['username'],'seo_task_park',(string)$tid,['condition'=>$cond]);
+    res(200,['ok'=>true,'condition'=>$cond]);
 }
 
 // POST /tasks/{id}/condition_met -> 巡检确认全部条件满足，续跑（PJ 基准：到点自己继续，授权是原来那次）。
