@@ -21,6 +21,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-11 AIRA 完成：W13-W17 全部落地并部署（rev 3487897，api+worker）
+
+- W13 契约闸（504e715）：chat_reply 的 dispatch 停用；drafts 升级委托单（kind/backing_fact）；新频道动作 commission_start（双验提议时序+确认引语，防重复启动）；spawn_task 按钮路径同权定档；chatModel 默认 fable；政策 dispatch_rules v5。
+- W15+W16（e9c023d）：新表 seo_change_items（惰性DDL）+ POST/GET /tasks/{id}/items + GET /items/unowned；plan 模式按政策分机器/人工条目，白名单外自动生成 split 人工工单并回频道；queue_task_jobs 排 apply 集中转 authorized；execute/apply（ads 路径）双时刻上账；失败/中止事件推回发起频道；POST /tasks/{id}/thread 冻结（存量只读 410 新建）；前端任务卡线程按钮换条目账本；ma skill v1.2 加 items 动词。
+- W17（3487897）：ads_mutate.py 新增 keyword-add / keyword-final-url / ad-create（均带查重/回读/硬校验），googleads.md V4 + 政策表同步；seo_capability_gaps 缺口台账 + GET /capability_gaps。
+- 三个新执行器未经真实账户首跑，首个 apply 必须盯 log（同 2026-09-08 上线纪律）。webforger/shopify apply 路径的条目对账下批接。
+- 测试：node 全套绿 + chatapi 24 过（250 远端 php）+ php -l 过；部署后线上冒烟：/capability_gaps、/items/unowned、items 空表、线程冻结 410、存量线程只读均验证通过。
+- 影响 Aiden：chat_reply 不再收 dispatch（发了只留说明行）；前端 spawnTask 传 kind/backing_fact；任务线程端点行为变更如上。
+
 ### 2026-09-11 AIRA 登记：W13-W17 交互模型重构开工（Alvin 拍板，含跨界授权）
 
 - 背景：ctomi #670/#678 复盘暴露结构问题（任务线程追执行隔靴搔痒、探讨误派单靠叫停兜底、能力缺口转人工无落点、killed 渲染成 done）。Alvin 定三决定：任务去线程；chat 建任务须讨论定型后人频道一句话确认才建；咨询/分析类不进任务栏。全程由 Aira 做，含 seo-api.php 与前端（Alvin 2026-09-11 明确授权跨界），本条即登记。
