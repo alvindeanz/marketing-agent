@@ -21,6 +21,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-11 AIRA：执行层补时机维度 F1-F4（rev 412b11b，Alvin 定「harness match PJ 动作」基准）
+
+- 背景：#681 空放行卡（拆条 0 机器项仍等放行）与 #680 必败 apply（「过审后」条件被当即执行）暴露条目缺「何时可执行」维度、母任务缺收敛规则。
+- F1 拆条零机器项 → 母任务自动 merged 进 split 工单，不出放行卡；worker 改条目先上账 result 后传（postTaskResult 撞终态闸只留痕）。
+- F2 条目加 condition_ready（ad_approved:<id> / after:date / manual_signal），方案契约强制结构化；全条件任务挂 blocked，listener 每 12 tick（约 1 小时）零 LLM GAQL 巡检（lib/conditions.js），条件满足 condition_met 续跑按政策定档。新端点 GET /tasks/pending_conditions、POST /tasks/{id}/condition_met、POST /tasks/{id}/park（admin 手工挂起）。
+- F3 条目必须写真实 op 名（manual 只留人类专属），缺口按 op 每方案去重计数。
+- F4 apply 失败 note 强制中文人话；条件未满足步骤跳过报 blocked。
+- 存量：#681 已收敛 done(merged)→#682；#680 已 park 等 ad_approved:824204552784（实读已 APPROVED，等首轮巡检闭环验证）。conditions.test.js 新增，全套绿。
+- 影响 Aiden 侧：seo_change_items 加列 condition_ready；三个新端点如上；items plan 响应加 merged 字段。
+
 ### 2026-09-11 AIRA 追记：快路上线 + 三执行器真实账户首跑通过（rev 5f6f072）
 
 - 快路（Alvin 批）：最新人类消息即明确指令时 commission_start 可 proposal_msg_id=0 同轮启动，引语必须逐字命中该最新消息，仅限直落档；facts 前移到 actions 之前使同轮批文背书生效（03b259d）。
