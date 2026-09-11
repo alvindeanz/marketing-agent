@@ -241,8 +241,13 @@ function buildPreparePrompt(opts) {
     '- 缺章节的方案会被机械校验直接打回，等于这次 prepare 白跑。',
     '- 第 5 节之后直接附一个 json 块收尾，后面不要有任何内容：',
     '```json',
-    '{"target_urls":["https://example.co.nz/some-page/"],"files":["pages/index.html","config.json"]}',
+    '{"target_urls":["https://example.co.nz/some-page/"],"files":["pages/index.html","config.json"],' +
+      '"items":[{"op":"final-url-change","entity":"ad 811766076864（Men-Hair Thinning 组）","target":"https://example.co.nz/products/pack"}]}',
     '```',
+    '  items 是本方案的变更条目账本（一处写入一行）：op 填能力清单里的操作名，该写入没有对应执行器',
+    '  或方案本就指定人工做的填 "manual"；entity 是被改对象（广告/关键词/页面，带 id 或 URL）；',
+    '  target 是目标值一句话。方案里每一处写入都必须出现在 items 里，执行状态按它逐条对账，',
+    '  漏一行等于那处写入不被跟踪。无变更方案写空数组。',
     '  files 是本方案会写到的平台文件清单，与第 2 节末尾「涉及文件」一致，apply 结束用它和 changeset 比对。',
     '  target_urls 是本方案**将会改动**的页面完整 URL 列表，写规范域、零跳转的那一个',
     '  （拿不准就 curl -L -w "%{num_redirects}" 验一下，必须是 0）。放行的人先看这几个地址',
@@ -370,6 +375,33 @@ function extractTrailingJsonSafe(text) {
   } catch (e) {
     return null;
   }
+}
+
+/**
+ * 方案末尾 json 的 items（2026-09-11 W15 条目账本）。一处写入一行 {op, entity, target}。
+ * 模型没给就按任务 ops 兜底成一行一 op：账本可以粗，不许空，否则执行状态没得对账。
+ */
+function planItems(output, task) {
+  const json = extractTrailingJsonSafe(output);
+  const raw = json && Array.isArray(json.items) ? json.items : [];
+  const items = [];
+  for (const it of raw.slice(0, 80)) {
+    if (!it || typeof it !== 'object') continue;
+    const entity = String(it.entity || '').trim().slice(0, 255);
+    if (!entity) continue;
+    const target = it.target != null ? it.target : it.target_value;
+    items.push({
+      op: String(it.op || '').trim().slice(0, 60),
+      entity,
+      target_value: String(target == null ? '' : target).slice(0, 2000),
+    });
+  }
+  if (!items.length) {
+    for (const op of String((task && task.ops) || '').split(',').map((s) => s.trim()).filter(Boolean)) {
+      items.push({ op, entity: '（方案未拆条）' + op, target_value: '' });
+    }
+  }
+  return items;
 }
 
 /**
@@ -1964,6 +1996,15 @@ async function runOne(ctx, context, workspace, taskId) {
   // its downloads are already attached to it.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
   await api.postTaskResult(taskId, { output_url: '', note: clientLinks + note });
+  if (prepare) {
+    // W15 条目账本：方案落库即拆条上账，服务端做机器/人工分流（人工条目直接生成 split 工单）。
+    try {
+      const r = await api.postTaskItems(taskId, { mode: 'plan', items: planItems(output, task) });
+      log('task ' + taskId + ': 条目账本 ' + (r.items || 0) + ' 条' + (r.blocked ? ('，人工 ' + r.blocked + ' 条，split 工单 #' + (r.split_task || '?')) : ''));
+    } catch (e) {
+      log('task ' + taskId + ': 条目账本写入失败（方案照常待放行，账本缺行需人工补）:: ' + e.message);
+    }
+  }
   log(
     'task ' +
       taskId +

@@ -60,7 +60,28 @@ tasks)
   req GET "/tasks?client_id=$cid" | py '
 import json,sys
 ts=json.load(sys.stdin); ts=ts.get("tasks") or ts
-for t in ts: print("#%s\t%s\t%s\t%s\t%s"%(t["id"],t.get("status"),t.get("human_state",""),t.get("sprint",""),str(t.get("title"))[:90]))'
+for t in ts:
+    st=t.get("status") or ""
+    ck=t.get("closed_kind") or ""
+    if st=="done" and ck and ck!="done": st="done(%s)"%ck
+    print("#%s\t%s\t%s\t%s\t%s"%(t["id"],st,t.get("human_state",""),t.get("sprint",""),str(t.get("title"))[:90]))'
+  ;;
+items)
+  cid=$(resolve "${1:?用法: ma.sh items <客户> <任务id>}"); tid="${2:?任务id}"
+  req GET "/tasks/$tid/items" | py '
+import json,sys
+d=json.load(sys.stdin)
+rows=d.get("items") or []
+if not rows: print("（这个任务没有条目账本）"); sys.exit()
+lab={"proposed":"待授权","authorized":"已授权","landed":"已落地","verified":"已验证","blocked":"落不了"}
+for r in rows:
+    line="[%s] %s"%(lab.get(r.get("state"),r.get("state")),r.get("entity"))
+    if r.get("op"): line+=" op=%s"%r["op"]
+    if r.get("target_value"): line+=" -> %s"%str(r["target_value"])[:100]
+    if r.get("old_value"): line+=" (旧 %s)"%str(r["old_value"])[:60]
+    if r.get("state")=="blocked": line+=" | %s owner=%s"%(r.get("block_reason",""),r.get("owner",""))
+    elif r.get("evidence"): line+=" | %s"%r["evidence"]
+    print(line)'
   ;;
 task)
   cid=$(resolve "${1:?用法: ma.sh task <客户> <任务id>}"); tid="${2:?任务id}"
@@ -70,7 +91,7 @@ ts=json.load(sys.stdin); ts=ts.get("tasks") or ts
 t=[x for x in ts if str(x["id"])==os.environ["TID"]]
 if not t: print("该客户下没有这个任务", file=sys.stderr); sys.exit(3)
 t=t[0]
-for k in ("id","title","status","human_state","wait_reason","sprint","priority","module","ops","detail","review_verdict","review_reason","review_adjust","result_note"):
+for k in ("id","title","status","closed_kind","human_state","wait_reason","sprint","priority","module","ops","detail","review_verdict","review_reason","review_adjust","result_note"):
     v=t.get(k)
     if v not in (None,""): print("%s:\n  %s\n"%(k,str(v)[:3000]))'
   ;;
@@ -134,6 +155,7 @@ task-feedback) # 把一线观察写回某个任务（走 feedback 抽取管线�
   clients                         全部客户 (id/name/domain)
   context <客户>                  干活前拉全上下文: 档案+facts+开放任务
   tasks <客户> | task <客户> <id> 任务列表 / 单任务全文
+  items <客户> <任务id>           变更条目账本 (哪处落了哪处没落, 一行一处写入)
   facts <客户> [关键词]           事实台账 (注意 unconfirmed 标记)
   plan <客户>                     活跃 90 天方案全文
   queue                           worker 队列

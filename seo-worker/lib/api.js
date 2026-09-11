@@ -289,6 +289,16 @@ class Api {
   }
 
   /**
+   * POST /tasks/{id}/items body { mode:'plan'|'apply', items:[...] }
+   * 变更条目账本（W15）：execute 出方案时 mode=plan 整表重建（服务端按放行政策
+   * 分机器/人工条目，人工条目直接 blocked+agency 并自动生成 split 工单）；
+   * apply 落地后 mode=apply 按 entity 对账更新。
+   */
+  async postTaskItems(taskId, body) {
+    return this.req('POST', '/tasks/' + encodeURIComponent(taskId) + '/items', body);
+  }
+
+  /**
    * POST /reports body
    * { client_id, period_type, period_start, period_end, url, html_path,
    *   facts_pack, narrative_status } -> { ok, id, version }

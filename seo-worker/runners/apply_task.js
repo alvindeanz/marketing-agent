@@ -687,9 +687,14 @@ function buildAdsPrompt(opts) {
     '',
     '执行完输出执行记录（中文），最后附一个 json 代码块，块后不许再有文字：',
     '```json',
-    '{"status":"success","checks_passed":4,"affected":["改动对象清单"],"old_values":["每个改动的旧值"],"note":"一句话结论"}',
+    '{"status":"success","checks_passed":4,"affected":["改动对象清单"],"old_values":["每个改动的旧值"],"note":"一句话结论",' +
+      '"items":[{"entity":"ad 811766076864（Men-Hair Thinning 组）","op":"final-url-change","state":"landed","old":"旧值","evidence":"回读一句话"}]}',
     '```',
     'status 只能是 success / failed / aborted。任何一步没过，status 不许写 success。',
+    'items 是条目账本对账（一处写入一行，entity 写法照抄方案 items 段）：state 用 landed（本轮改到目标值）/',
+    'verified（改完且回读验证过）/ blocked（这轮落不了，block_reason 写一句原因）。实读发现已在目标状态的',
+    '也算 landed，evidence 写清是谁先前落的（如「已在目标状态，#670 apply 落地」），别写成「他人」。',
+    '方案里有而你完全没碰的条目不用写，账本保持原状态。',
   ].join('\n');
 }
 
@@ -732,6 +737,25 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
   const affected = Array.isArray(j.affected) ? j.affected.map(String).slice(0, 20) : [];
   const oldVals = Array.isArray(j.old_values) ? j.old_values.map(String).slice(0, 20) : [];
   const checks = Number(j.checks_passed) || 0;
+  // W15 条目账本对账：成功失败都上账，中止的轮次账本正是「哪些落了哪些没落」的答案。
+  const itemsA = Array.isArray(j.items) ? j.items.slice(0, 80) : [];
+  if (itemsA.length) {
+    try {
+      const rows = itemsA.map((it) => {
+        const oldRaw = it && (it.old != null ? it.old : it.old_value);
+        return {
+          entity: String((it && it.entity) || '').slice(0, 255),
+          op: String((it && it.op) || '').slice(0, 60),
+          state: ['landed', 'verified', 'blocked'].indexOf(String((it && it.state) || '')) !== -1 ? String(it.state) : 'landed',
+          old_value: String(oldRaw == null ? '' : oldRaw).slice(0, 2000),
+          evidence: String((it && it.evidence) || '').slice(0, 500),
+          block_reason: String((it && it.block_reason) || '').slice(0, 500),
+        };
+      }).filter((x) => x.entity);
+      const rI = await api.postTaskItems(taskId, { mode: 'apply', items: rows });
+      log('task ' + taskId + ': 条目账本对账，更新 ' + (rI.updated || 0) + ' 补录 ' + (rI.inserted || 0));
+    } catch (e) { log('task ' + taskId + ': 条目账本对账失败（执行结果不受影响）:: ' + e.message); }
+  }
   const head = [
     '受影响: ' + (affected.join('；') || '（未声明）'),
     '改前旧值: ' + (oldVals.join('；') || '（见执行记录）'),

@@ -3482,7 +3482,8 @@ function taskCard(t,col){
   if(hs==='wait_ext')acts+='<button class="btn tiny green" onclick="decideTask('+t.id+',true)">现在做</button>';
   /* 机器判失败但人看过站点认为成了，或者人手工做完了：置完成，理由必填 */
   if(hs==='wait_me'||hs==='wait_ext')acts+='<button class="btn tiny ghost" onclick="finishTask('+t.id+')">置完成</button>';
-  acts+='<button class="btn tiny ghost" onclick="toggleThread('+t.id+')">'+(thOpen[t.id]?'收起线程':'线程')+'</button>';
+  /* W16（2026-09-11 Alvin 定）：任务不再有线程，沟通统一走客户频道；执行状态看条目账本。 */
+  acts+='<button class="btn tiny ghost" onclick="toggleItems('+t.id+')">'+(itOpen[t.id]?'收起条目':'条目')+'</button>';
   acts+=dlAddBtn(t,'lane');
   const dl=String(t.detail||'');
   const clip=dl.length>150&&!detailOpen[t.id];
@@ -3497,7 +3498,7 @@ function taskCard(t,col){
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+acts+'</div>'+
     (t.status==='review'&&isBlogTask(t)?blogDeliverable(t):'')+
     fileDeliverables(t)+
-    (thOpen[t.id]?threadBox(t,'lane'):'')+'</div>';
+    (itOpen[t.id]?itemsBox(t):'')+'</div>';
 }
 async function finishTask(id){
   const note=prompt('把 #'+id+' 置为完成。为什么人认它成了？一句话，必填（会记进任务备注）。');
@@ -3567,6 +3568,42 @@ function thActionCard(rootId,msgId,idx,a,done){
       :'<button class="btn tiny" onclick="thRunAction('+rootId+','+msgId+','+idx+',this)">执行</button>'+
        '<span class="plan-meta">点了才动看板，不点就只是一张卡。</span>')+'</div></div>';
 }
+/* ---- 变更条目账本（2026-09-11 W15）----
+   一处写入一行，执行状态的唯一视图：谁问「改了没」，答案就是这张表。
+   任务线程已下线（W16），旧线程数据冻结在库里，入口不再提供。 */
+var itOpen={},itData={};
+const IT_STATE_LABEL={proposed:'待授权',authorized:'已授权',landed:'已落地',verified:'已验证',blocked:'落不了'};
+function toggleItems(id){
+  itOpen[id]=!itOpen[id];
+  if(itOpen[id]&&!itData[id]){loadItems(id);return}
+  renderLanes();
+}
+async function loadItems(id){
+  const d=await api('/tasks/'+id+'/items','GET');
+  if(!d||d._status>=400){itData[id]={items:[]};renderLanes();return}
+  itData[id]=d;
+  renderLanes();
+}
+function itemsBox(t){
+  const d=itData[t.id];
+  if(!d)return '<div class="plan-meta" style="margin-top:6px">条目载入中…</div>';
+  const rows=d.items||[];
+  if(!rows.length)return '<div class="plan-meta" style="margin-top:6px">这个任务没有条目账本（旧任务或无变更方案）。</div>';
+  const landed=rows.filter(r=>r.state==='landed'||r.state==='verified').length;
+  const blocked=rows.filter(r=>r.state==='blocked').length;
+  const head='<div style="font-weight:700;margin:8px 0 4px">条目 '+rows.length+'：落地 '+landed+'，人工 '+blocked+'，其余待跑</div>';
+  return head+'<div style="display:flex;flex-direction:column;gap:4px">'+rows.map(r=>{
+    const st=String(r.state||'');
+    const cls=st==='landed'||st==='verified'?'done':(st==='blocked'?'review':'mod');
+    const tail=st==='blocked'?(' · '+esc(r.block_reason||'')+' · owner '+esc(r.owner||'?'))
+      :(r.evidence?(' · '+esc(r.evidence)):'');
+    const tgt=r.target_value?(' → '+esc(String(r.target_value).slice(0,120))):'';
+    const old=r.old_value?('（旧值 '+esc(String(r.old_value).slice(0,80))+'）'):'';
+    return '<div style="font-size:12px;line-height:1.5"><span class="badge '+cls+'">'+esc(IT_STATE_LABEL[st]||st)+'</span> '+
+      esc(r.entity||'')+(r.op?' <span class="plan-meta">'+esc(r.op)+'</span>':'')+tgt+old+tail+'</div>';
+  }).join('')+'</div>';
+}
+
 function threadBox(t,where){
   const d=thData[t.id];
   const box='<div class="fb-box" id="th_'+where+'_'+t.id+'">';
@@ -4242,9 +4279,9 @@ function renderRelease(){
       fileDeliverables(t)+
       '<div class="tcard-meta">'+attnBadge(t)+'<span class="badge mod">'+esc(t.module)+'</span>'+opsTags(t)+link+
       '<button class="btn tiny ghost" onclick="setTaskStatus('+t.id+',\'done\')">直接置完成</button>'+
-      '<button class="btn tiny ghost" onclick="toggleThread('+t.id+')">'+(thOpen[t.id]?'收起线程':'线程')+'</button>'+
+      '<button class="btn tiny ghost" onclick="toggleItems('+t.id+')">'+(itOpen[t.id]?'收起条目':'条目')+'</button>'+
       dlAddBtn(t,'rel')+'</div>'+
-      (thOpen[t.id]?threadBox(t,'rel'):'')+'</div></div>';
+      (itOpen[t.id]?itemsBox(t):'')+'</div></div>';
   }).join('');
   renderRelCount();
 }

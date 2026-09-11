@@ -74,10 +74,14 @@ t('closed column shows when 显示已结束 is on', () => {
     assert.ok(out.indexOf('#' + x.id + '</span>') > -1, 'closed task #' + x.id + ' missing');
   });
 });
-t('a card with an open thread renders the thread box', () => {
+t('a card with an open items panel renders the item ledger (W15; task threads retired by W16)', () => {
   const id = fixture.tasks[0].id;
-  vm.runInContext('thOpen[' + id + ']=true;thData[' + id + ']={root_id:1,replies:[],chat_pending:0};renderLanes();thOpen[' + id + ']=false', ctx);
-  assert.ok(el('lanes').innerHTML.indexOf('任务线程 #1') > -1);
+  vm.runInContext('itOpen[' + id + ']=true;itData[' + id + ']={items:[{seq:0,op:"final-url-change",entity:"ad 811766076864",state:"landed",owner:"machine",evidence:"回读一致"},{seq:1,op:"keyword-add",entity:"14 行加词",state:"blocked",owner:"agency",block_reason:"缺执行器 op keyword-add"}]};renderLanes();itOpen[' + id + ']=false', ctx);
+  const html = el('lanes').innerHTML;
+  assert.ok(html.indexOf('已落地') > -1, '缺已落地条目');
+  assert.ok(html.indexOf('落不了') > -1, '缺 blocked 条目');
+  assert.ok(html.indexOf('缺执行器 op keyword-add') > -1, '缺 block_reason');
+  assert.ok(html.indexOf('>线程<') === -1, '任务卡不该再有线程按钮');
 });
 t('queue strip and pick hint render', () => {
   vm.runInContext('qsQueue={running:[{id:1,client_name:"L",type:"execute_task",task_id:' + fixture.tasks[0].id + ',elapsed_sec:70}],queued:[{id:2,lane:"light"}]};renderQueueStrip();renderPickHint()', ctx);

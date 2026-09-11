@@ -1584,6 +1584,9 @@ function queue_task_jobs($cid,$type,$ids,$user,$auditAction){
         audit($user,$auditAction,(string)$jid,['client_id'=>$cid,'type'=>$type,'task_id'=>$tid,'payload'=>$payload]);
     }
     if($jids)fire_wake($jids[0]);
+    /* 排 apply 即授权（2026-09-11 W15）：放行路径有多条（看板按钮、频道 release、
+       L0 自动、chatw 自动落地），全部经过这里，机器条目在此集中转 authorized。 */
+    if($type==='apply_task'&&$jids)items_mark_authorized($ids);
     return [$jids,$skipped];
 }
 
@@ -1865,6 +1868,18 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     $cq->execute([$tid]);
     $cr=$cq->fetch();
     $cq->closeCursor();
+    /* 事件回流（2026-09-11 W16）：apply 失败/中止不再只躺在 result_note 里等人来问。
+       chat 系来源的任务，失败与中止事件当场推回发起频道，附条目账本口径的一句话。
+       「人来问进度」按新度量算流程失败，所以状态变化必须主动出现在人眼前。 */
+    if($note!==''&&preg_match('/(执行失败|执行中止)：/u',$note)&&preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)($cr['origin']??''),$omE)){
+        $rqE=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+        $rqE->execute([(int)$omE[2]]);
+        $rootE=$rqE->fetch();
+        if($rootE){
+            $whyE=preg_match('/(执行失败|执行中止)：([^\n]{0,160})/u',$note,$wm)?($wm[1].'：'.$wm[2]):'执行没有完成';
+            chat_msg_insert($rootE,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$cr['title'],0,50,'UTF-8').'」'.$whyE.' 哪些落了哪些没落看任务卡「条目」，接手安排也在那里。','seo-worker');
+        }
+    }
     /* Chat 分级派单的改动类（origin chatw:，2026-09-08 Alvin 定）：方案已出（本端点刚置 review），
        此刻按政策重算风险档（派单后 facts 可能变了，以此刻为准）：
        auto 直接排 apply；confirm 回频道要一句放行。
@@ -1979,6 +1994,174 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/complete$#',$ROUTE,$mm)){
     }
     audit('seo-worker','seo_task_complete',(string)$tid,['note'=>$note]);
     res(200,['ok'=>true]);
+}
+
+/* ===== 变更条目账本（2026-09-11 W15，交互模型重构）=====
+   任务是授权容器，账户状态的真相在条目：一处写入一行，状态机
+   proposed（方案拆出）→ authorized（排 apply 即授权）→ landed（已落地）→ verified（回读验证）；
+   落不了的进 blocked，必须带 block_reason 和 owner。
+   守恒律：authorized/blocked 的条目任何时刻必须有 owner（machine/agency/client），
+   无主条目 = 结构性事故，GET /items/unowned 是报警口。
+   worker 在两个时刻写：execute 出方案时（mode=plan，整表重建），apply 落地后（mode=apply，按对象更新）。
+   VARCHAR 不用 ENUM（MariaDB 静默截断坑）。 */
+function ensure_change_items(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_change_items(
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT NOT NULL,
+        task_id INT NOT NULL,
+        seq INT NOT NULL DEFAULT 0,
+        op VARCHAR(60) NOT NULL DEFAULT '',
+        entity VARCHAR(255) NOT NULL DEFAULT '',
+        target_value TEXT NULL,
+        old_value TEXT NULL,
+        state VARCHAR(20) NOT NULL DEFAULT 'proposed',
+        owner VARCHAR(60) NOT NULL DEFAULT '',
+        block_reason VARCHAR(500) NOT NULL DEFAULT '',
+        evidence VARCHAR(500) NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_task(task_id),
+        KEY idx_client_state(client_id,state)
+    ) DEFAULT CHARSET=utf8mb4");
+}
+define('ITEM_STATES',['proposed','authorized','landed','verified','blocked']);
+
+/* 任务的机器条目在排 apply 的那一刻集中转 authorized（queue_task_jobs 里挂钩），
+   放行路径有好几条（看板按钮、频道 release、L0 自动、chatw 自动落地），钩在队列入口一处不漏。 */
+function items_mark_authorized($ids){
+    if(!$ids)return;
+    ensure_change_items();
+    $in=implode(',',array_fill(0,count($ids),'?'));
+    db()->prepare("UPDATE seo_change_items SET state='authorized' WHERE task_id IN ($in) AND state='proposed' AND owner='machine'")
+        ->execute(array_map('intval',$ids));
+}
+
+// POST /tasks/{id}/items -> worker 写条目账本。
+// body { mode:'plan'|'apply', items:[{op,entity,target_value,old,state,evidence,block_reason}] }
+// plan：整表重建。op 在放行政策表内 = machine 条目（proposed）；op 空/manual/未知 = 人工条目，
+//       直接 blocked+owner=agency（判定期分流：apply 不再跑到一半才发现干不了）。
+//       有人工条目且母任务是机器位时，自动生成一张有主的 agency 工单（split:{母任务}，只生成一次），
+//       并回发起频道说一声。「转人工」三个字不落成工单就等于扔进虚空（ctomi #678 教训）。
+// apply：按 entity 对账更新，账本没有的对象补一行（apply 实读发现的新对象）。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
+    auth_worker();
+    ensure_change_items();
+    ensure_task_origin();
+    $tid=(int)$mm[1];
+    $tq=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");
+    $tq->execute([$tid]);
+    $task=$tq->fetch();
+    if(!$task)res(404,['error'=>'Task not found']);
+    $cid=(int)$task['client_id'];
+    $i=input();
+    $mode=(string)($i['mode']??'');
+    $itemsIn=is_array($i['items']??null)?array_values($i['items']):[];
+    if(!in_array($mode,['plan','apply'],true))res(400,['error'=>'mode 必须是 plan 或 apply']);
+    if(count($itemsIn)>80)$itemsIn=array_slice($itemsIn,0,80);
+    $pol=release_policy_load();
+    $rc=is_array($pol)&&isset($pol['risk_class_by_op'])&&is_array($pol['risk_class_by_op'])?$pol['risk_class_by_op']:[];
+    $clean=[];
+    foreach($itemsIn as $it){
+        if(!is_array($it))continue;
+        $entity=mb_substr(trim((string)($it['entity']??'')),0,255,'UTF-8');
+        if($entity==='')continue;
+        $clean[]=[
+            'op'=>mb_substr(trim((string)($it['op']??'')),0,60,'UTF-8'),
+            'entity'=>$entity,
+            'target_value'=>mb_substr((string)($it['target_value']??$it['target']??''),0,2000,'UTF-8'),
+            'old_value'=>mb_substr((string)($it['old_value']??$it['old']??''),0,2000,'UTF-8'),
+            'state'=>in_array((string)($it['state']??''),ITEM_STATES,true)?(string)$it['state']:'',
+            'evidence'=>mb_substr(trim((string)($it['evidence']??'')),0,500,'UTF-8'),
+            'block_reason'=>mb_substr(trim((string)($it['block_reason']??'')),0,500,'UTF-8'),
+        ];
+    }
+    if($mode==='plan'){
+        db()->prepare("DELETE FROM seo_change_items WHERE task_id=?")->execute([$tid]);
+        $ins=db()->prepare("INSERT INTO seo_change_items(client_id,task_id,seq,op,entity,target_value,state,owner,block_reason)VALUES(?,?,?,?,?,?,?,?,?)");
+        $blocked=[];$seq=0;
+        foreach($clean as $c){
+            $machine=$c['op']!==''&&$c['op']!=='manual'&&isset($rc[$c['op']]);
+            $state=$machine?'proposed':'blocked';
+            $owner=$machine?'machine':'agency';
+            $why=$machine?'':($c['op']===''||$c['op']==='manual'?'方案指定人工':'缺执行器 op '.$c['op']);
+            $ins->execute([$cid,$tid,$seq,$c['op'],$c['entity'],$c['target_value'],$state,$owner,$why]);
+            if(!$machine)$blocked[]=$c;
+            $seq++;
+        }
+        $splitTid=0;
+        if($blocked&&(string)$task['owner_type']==='agent'&&(string)$task['status']!=='done'){
+            $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
+            $sq->execute(['split:'.$tid]);
+            $sr=$sq->fetch();
+            $sq->closeCursor();
+            if(!$sr){
+                $lines=[];
+                foreach($blocked as $b)$lines[]='- '.$b['entity'].($b['target_value']!==''?('：'.mb_substr($b['target_value'],0,200,'UTF-8')):'').($b['op']!==''&&$b['op']!=='manual'?'（缺执行器 '.$b['op'].'）':'');
+                list($ts,$te)=task_fields_clean([
+                    'title'=>mb_substr('人工落地：#'.$tid.' '.$task['title'],0,255,'UTF-8'),
+                    'detail'=>"母任务 #".$tid." 的方案里以下 ".count($blocked)." 处写入不在机器白名单，按判定期分流转人工。逐条做完在母任务条目账本上对账（或在本任务备注写明），验收标准以母任务方案为准。\n\n".implode("\n",$lines),
+                    'module'=>(string)$task['module'],'owner_type'=>'agency','priority'=>(string)$task['priority'],'ops'=>'','sprint'=>(string)$task['sprint'],
+                ],['status_force'=>'approved']);
+                if(!$te){
+                    $splitTid=task_insert($cid,$ts,'seo-worker','split:'.$tid);
+                    task_append_note($tid,'[split] 方案含 '.count($blocked).' 处白名单外写入，已生成人工工单 #'.$splitTid.'（判定期分流，不再等 apply 中止）');
+                    /* 回发起频道：让提需求的人知道哪部分是机器落、哪部分给了人 */
+                    if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$task['origin'],$om)){
+                        $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+                        $rq->execute([(int)$om[2]]);
+                        $rootN=$rq->fetch();
+                        if($rootN)chat_msg_insert($rootN,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$task['title'],0,50,'UTF-8').'」方案已拆条：'.(count($clean)-count($blocked)).' 处机器落地，'.count($blocked).' 处白名单外已生成人工工单 #'.$splitTid.'，执行状态看任务卡条目账本。','seo-worker');
+                    }
+                }
+            }else{$splitTid=(int)$sr['id'];}
+        }
+        audit('seo-worker','seo_task_items_plan',(string)$tid,['items'=>count($clean),'blocked'=>count($blocked),'split_task'=>$splitTid]);
+        res(200,['ok'=>true,'items'=>count($clean),'blocked'=>count($blocked),'split_task'=>$splitTid]);
+    }
+    /* mode=apply：按 entity 对账 */
+    $upd=db()->prepare("UPDATE seo_change_items SET op=IF(?='',op,?),state=IF(?='',state,?),old_value=IF(?='',old_value,?),evidence=IF(?='',evidence,?),block_reason=IF(?='',block_reason,?),owner=IF(?='blocked' AND owner='machine','agency',owner) WHERE id=?");
+    $look=db()->prepare("SELECT id FROM seo_change_items WHERE task_id=? AND entity=? LIMIT 1");
+    $maxq=db()->prepare("SELECT COALESCE(MAX(seq),-1) m FROM seo_change_items WHERE task_id=?");
+    $insA=db()->prepare("INSERT INTO seo_change_items(client_id,task_id,seq,op,entity,target_value,old_value,state,owner,block_reason,evidence)VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+    $updated=0;$inserted=0;
+    foreach($clean as $c){
+        $st=$c['state']!==''?$c['state']:'landed';
+        $look->execute([$tid,$c['entity']]);
+        $row=$look->fetch();
+        $look->closeCursor();
+        if($row){
+            $upd->execute([$c['op'],$c['op'],$st,$st,$c['old_value'],$c['old_value'],$c['evidence'],$c['evidence'],$c['block_reason'],$c['block_reason'],$st,(int)$row['id']]);
+            $updated++;
+        }else{
+            $maxq->execute([$tid]);
+            $mrow=$maxq->fetch();
+            $maxq->closeCursor();
+            $insA->execute([$cid,$tid,((int)$mrow['m'])+1,$c['op'],$c['entity'],$c['target_value'],$c['old_value'],$st,$st==='blocked'?'agency':'machine',$c['block_reason'],$c['evidence']]);
+            $inserted++;
+        }
+    }
+    audit('seo-worker','seo_task_items_apply',(string)$tid,['updated'=>$updated,'inserted'=>$inserted]);
+    res(200,['ok'=>true,'updated'=>$updated,'inserted'=>$inserted]);
+}
+
+// GET /tasks/{id}/items -> 条目账本，看板执行状态区与 diff 视图的数据源。
+if($m==='GET'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
+    auth_user();
+    ensure_change_items();
+    $q=db()->prepare("SELECT id,seq,op,entity,target_value,old_value,state,owner,block_reason,evidence,updated_at FROM seo_change_items WHERE task_id=? ORDER BY seq,id");
+    $q->execute([(int)$mm[1]]);
+    res(200,['items'=>$q->fetchAll()]);
+}
+
+// GET /items/unowned -> 无主守恒律的报警口：authorized/blocked 且没有 owner 的条目，结构上应为 0。
+if($m==='GET'&&$ROUTE==='/items/unowned'){
+    auth_user();
+    ensure_change_items();
+    $rows=db()->query("SELECT i.id,i.task_id,i.client_id,i.entity,i.op,i.state,i.block_reason,t.title FROM seo_change_items i LEFT JOIN seo_tasks t ON t.id=i.task_id WHERE i.state IN('authorized','blocked') AND i.owner='' ORDER BY i.id DESC LIMIT 100")->fetchAll();
+    res(200,['count'=>count($rows),'items'=>$rows]);
 }
 
 // POST /tasks/{id}/feedback_result -> worker files what it made of a human note.
@@ -3916,7 +4099,8 @@ function task_thread_view($root){
     return ['ok'=>true,'root_id'=>(int)$root['id'],'item'=>inbox_row_out($root),'replies'=>$replies,'chat_pending'=>chat_job_inflight((int)$root['id'])];
 }
 
-// POST /tasks/{id}/thread -> 取或建这个任务的线程，回完整视图。
+// POST /tasks/{id}/thread -> 任务线程已下线（2026-09-11 W16，Alvin 定：任务不再有线程）。
+// 存量线程只读返回（冻结），没有线程的任务不再新建：沟通走客户频道，执行状态看条目账本。
 if($m==='POST'&&preg_match('#^/tasks/(\d+)/thread$#',$ROUTE,$mm)){
     $u=auth_user();
     ensure_inbox_schema();
@@ -3925,7 +4109,12 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/thread$#',$ROUTE,$mm)){
     $tq->execute([$tid]);
     $task=$tq->fetch();
     if(!$task)res(404,['error'=>'Task not found']);
-    res(200,task_thread_view(task_thread_root($task,$u['username'])));
+    $q=db()->prepare("SELECT * FROM seo_inbox WHERE kind='chat_root' AND client_id=? AND refs LIKE ? ORDER BY id DESC LIMIT 1");
+    $q->execute([(int)$task['client_id'],'%"tasks":['.$tid.']%']);
+    $r=$q->fetch();
+    $q->closeCursor();
+    if($r)res(200,task_thread_view($r));
+    res(410,['error'=>'任务线程已下线：这个任务的问题去客户频道说（带 #'.$tid.'），执行状态看任务卡「条目」']);
 }
 
 // POST /inbox/{root_id}/thread_action body { message_id, idx } -> 人点了线程里某条提议的「执行」。

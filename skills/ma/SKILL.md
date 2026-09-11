@@ -17,6 +17,7 @@ version: 1
 ```
 bash /data/aira/skills/ma/ma.sh context <客户>       # 动笔前拉：档案+facts+开放任务
 bash /data/aira/skills/ma/ma.sh task <客户> <id>     # 单任务全文（含 fable 判决与方案摘要）
+bash /data/aira/skills/ma/ma.sh items <客户> <id>    # 变更条目账本：哪处落了哪处没落（追执行状态用这个，别考古 result_note）
 bash /data/aira/skills/ma/ma.sh plan <客户>          # 活跃 90 天方案
 bash /data/aira/skills/ma/ma.sh facts <客户> [词]    # 事实台账
 bash /data/aira/skills/ma/ma.sh chat <客户> <问题>   # 问 MA（触发一次看板会话）
@@ -53,3 +54,4 @@ bash /data/aira/skills/ma/ma.sh task-feedback <客户> <任务id> <正文>  # �
 变更记录：
 - v1 2026-09-07 首版：读五件套（clients/context/tasks/facts/plan/queue）+ chat + task-feedback。
 - v1.1 2026-09-07 账号定稿：共用账号 agent-bot 为 admin 角色（Alvin 定），权限边界改为动词纪律 + 审计，规矩第 1 条相应改写。
+- v1.2 2026-09-11 W15/W16：新增 items（变更条目账本）；tasks/task 输出带 closed_kind（done(killed) 不再伪装成正常完成）；任务线程已下线，任务相关的问题走客户频道。
