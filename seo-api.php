@@ -4057,7 +4057,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
             if(!$t2){$failLine('任务 #'.$tidA.' 不存在');continue;}
             if((int)$t2['client_id']!==$cidA){$failLine('任务 #'.$tidA.' 属于其他客户，频道只能动本客户的任务');continue;}
             if(mb_stripos((string)$t2['title'],$tcA)===false){$failLine('任务 #'.$tidA.' 的标题与「'.$tcA.'」对不上，可能记错号，请人工确认');continue;}
-            if(in_array($t2['status'],['done'],true)){$failLine('任务 #'.$tidA.' 已经结束');continue;}
+            if(in_array($t2['status'],['done'],true)){$failLine('任务 #'.$tidA.' 已经结束（结果备注里有结束类型与原因）。要重做这件事请出新的委托单，明确指令可走快路同轮启动，别复用死任务');continue;}
             if($a['type']==='kill'){
                 /* 在跑保护：queued 的 job 随砍随撤，running 的拒砍 */
                 $jq=db()->prepare("SELECT id,status FROM agent_jobs WHERE client_id=? AND status IN('queued','running') AND payload LIKE ? ORDER BY id");
