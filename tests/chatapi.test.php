@@ -163,6 +163,21 @@ t('没有标题的丢掉',function()use($GOOD){
     eq(count(inbox_drafts_norm([$bad])),0,'没标题的草案不该留下');
 });
 
+t('委托单 kind（2026-09-11 W13）：change 必带 ops，backing_fact 只随 change 走，kind 非法归空',function()use($GOOD){
+    $chg=$GOOD;$chg['kind']='change';$chg['ops']='final-url-change';$chg['backing_fact']='paid.change_list_approved';
+    $rep=$GOOD;$rep['kind']='report';$rep['title']='月报草稿';$rep['backing_fact']='x.y';
+    $bad=$GOOD;$bad['kind']='verify';$bad['title']='普通活';
+    $out=inbox_drafts_norm([$chg,$rep,$bad]);
+    eq(count($out),3,'三条都该留下');
+    eq($out[0]['kind'],'change','change kind 丢了');
+    eq($out[0]['backing_fact'],'paid.change_list_approved','backing_fact 丢了');
+    eq($out[1]['kind'],'report','report kind 丢了');
+    eq($out[1]['backing_fact'],'','非 change 不该带 backing_fact');
+    eq($out[2]['kind'],'','kind 非法要归空');
+    $noops=$GOOD;$noops['kind']='change';$noops['ops']='';
+    eq(count(inbox_drafts_norm([$noops])),0,'change 没 ops 必须整条丢');
+});
+
 t('超过上限只留前 N 条',function()use($GOOD){
     $many=[];
     for($i=0;$i<CHAT_MAX_DRAFTS+4;$i++){$d=$GOOD;$d['title']='t'.$i;$many[]=$d;}

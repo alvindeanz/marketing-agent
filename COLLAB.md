@@ -21,6 +21,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-11 AIRA 登记：W13-W17 交互模型重构开工（Alvin 拍板，含跨界授权）
+
+- 背景：ctomi #670/#678 复盘暴露结构问题（任务线程追执行隔靴搔痒、探讨误派单靠叫停兜底、能力缺口转人工无落点、killed 渲染成 done）。Alvin 定三决定：任务去线程；chat 建任务须讨论定型后人频道一句话确认才建；咨询/分析类不进任务栏。全程由 Aira 做，含 seo-api.php 与前端（Alvin 2026-09-11 明确授权跨界），本条即登记。
+- 批次：W13 契约闸（chat 同轮 dispatch 作废，改委托单两阶段：agent 先提议、人后确认、服务端双验时序与引语）；W14 咨询频道内闭环；W15 条目账本 seo_change_items + 无主守恒 + 判定期通道分流；W16 事件回流 + 任务线程下线；W17 keyword-add / keyword-final-url / ad-create 三执行器 + capability-gap 登记。
+- 影响 Aiden 侧接口：POST /inbox/{root}/chat_reply 的 dispatch 字段停用（改 commission 流），任务线程端点冻结。细节每批落地时在本账本追记。
+- 每批推送前 node tests/ 全套 + php -l 全绿，部署我自己跑。
+
 ### 2026-09-10 AIRA (cr) 登记：reasoning 类预览页停发，人看结论不看过程（Alvin 定），动你领地三处（报备）
 
 - 背景：Alvin 点名 task-619/670 两张预览页是垃圾，agent reasoning（能力核对、工具路径、resource_name、铁律 dump）不该给人看；产出要么 concise 上卡，要么是能转客户的干净页。

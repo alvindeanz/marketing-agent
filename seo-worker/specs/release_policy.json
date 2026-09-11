@@ -1,8 +1,9 @@
 {
   "_doc": "放行分级政策，类目无关（SEO 与 paid 同一份，Alvin 拥有，Aira 起草）。risk_class 定义在各渠道/平台能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行与 Chat 分级派单（dispatch_rules），deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
-  "version": 4,
+  "version": 5,
   "dispatch_rules": {
-    "_doc": "Chat 分级派单（2026-09-08 Alvin 定：决策权还给 fable）。fable 在频道判定后可派改动类任务（ops 必填），服务端按本表定档：全部 ops reversible 且不在 l0_exclude_ops 为 auto（出方案直接落地，失败一次熔断转人工，不自动重试）；external 与 structural（预算中性新建，2026-09-08 Alvin 批）有已确认客户批文 fact 背书按 auto，无背书 confirm；spend/irreversible 永远 confirm（出方案后停在待放行，频道一句「放行 #N」或看板点放行）。定档在派单与方案产出两个时刻各算一次，以后者为准。",
+    "_doc": "委托单两阶段（2026-09-11 W13 契约闸，Alvin 定，取代 2026-09-08 的「频道判定即派」）：chat 建任务一律 agent 先出委托单提议卡（refs.drafts，kind 空/report/change），人在之后的消息里一句话确认或卡上点开工，模型下一轮 commission_start 启动，服务端双验提议时序与确认引语（引语逐字命中提议之后的人类消息）。只读分析/建议在频道内工具带直接答，不建任务。启动后按本表定档：全部 ops reversible 且不在 l0_exclude_ops 为 auto（出方案直接落地，失败一次熔断转人工，不自动重试）；external 与 structural（预算中性新建，2026-09-08 Alvin 批）有已确认客户批文 fact 背书按 auto，无背书 confirm；spend/irreversible 永远 confirm（出方案后停在待放行，频道一句「放行 #N」或看板点放行）。定档在启动与方案产出两个时刻各算一次，以后者为准。",
+    "commission_two_phase": true,
     "auto_tiers": ["reversible"],
     "external_with_backing_fact": "auto",
     "structural_with_backing_fact": "auto",

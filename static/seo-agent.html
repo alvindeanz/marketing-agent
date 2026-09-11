@@ -2730,13 +2730,15 @@ function chDraftCard(msgId,idx,d,doneId){
   const rows=['module '+esc(d.module||''),'owner '+esc(d.owner_type||'agency'),esc(d.priority||'P2')];
   if(d.sprint)rows.push('sprint '+esc(d.sprint));
   if(d.ops)rows.push('ops '+esc(d.ops));
+  if(d.kind)rows.push('kind '+esc(d.kind));
+  if(d.backing_fact)rows.push('批文 '+esc(d.backing_fact));
   const act=doneId
     ? '<span class="badge done">已开工 #'+doneId+'</span>'+
       '<span class="sb-act" onclick="navTo('+curId+',\'tasks\')">去任务看板</span>'
     : '<button class="btn tiny" id="ch_sp_'+key.replace(':','_')+'" onclick="spawnTask('+msgId+','+idx+')">开工</button>'+
       '<span class="plan-meta">开工即排产：建任务并直接进执行队列（客户侧任务只挂看板），detail 末尾会带上来源行。</span>';
   return '<div class="ch-draft">'+
-    '<div class="dt">任务草案：'+esc(d.title||'')+'</div>'+
+    '<div class="dt">委托单：'+esc(d.title||'')+'</div>'+
     (d.detail?'<div class="dd">'+esc(d.detail)+'</div>':'')+
     '<div class="df">'+rows.map(r=>'<span>'+r+'</span>').join('')+'</div>'+
     '<div class="da">'+act+'</div>'+
@@ -2904,7 +2906,8 @@ async function spawnTask(msgId,idx){
   if(btn)btn.disabled=true;
   const d=await api('/inbox/'+chatRootId+'/spawn_task','POST',{
     title:d0.title,detail:d0.detail||'',module:d0.module,owner_type:d0.owner_type||'agency',
-    priority:d0.priority||'P2',sprint:d0.sprint||'',ops:d0.ops||''
+    priority:d0.priority||'P2',sprint:d0.sprint||'',ops:d0.ops||'',
+    kind:d0.kind||'',backing_fact:d0.backing_fact||''
   });
   if(btn)btn.disabled=false;
   if(fail(d,'开工失败'))return;

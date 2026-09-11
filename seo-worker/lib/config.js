@@ -45,7 +45,8 @@ const DEFAULTS = {
   rulingModel: 'fable',
   // 收件箱对话。人在工作台按客户跟它聊数据、聊博客规划，只读加提议，
   // 唯一的产物是任务草案，人点开工才落账。谈的是策略，所以给大模型。
-  chatModel: 'opus',
+  /* 2026-09-11 Alvin 定：频道对话与 PJ 对齐走 fable（周配额观察 5 天，快超再降 opus）。 */
+  chatModel: 'fable',
   // 任务判定：一批任务该不该做，按 specs/review_principles.md 判。一次判错就是
   // 一个不该做的任务进队列烧 10 分钟，或一个该做的被砍，所以给大模型。
   reviewModel: 'fable',
