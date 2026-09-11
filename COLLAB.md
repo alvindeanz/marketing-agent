@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-11 AIRA 追记：快路上线 + 三执行器真实账户首跑通过（rev 5f6f072）
+
+- 快路（Alvin 批）：最新人类消息即明确指令时 commission_start 可 proposal_msg_id=0 同轮启动，引语必须逐字命中该最新消息，仅限直落档；facts 前移到 actions 之前使同轮批文背书生效（03b259d）。
+- 补两条时效规则进 chat prompt：能力结论与任务生死都以当前表/账为准，历史消息不算数（108092a/6a4d181，13:59 与 machine_run 复活死任务两起事故的根因）；死任务动作拒绝语指路新委托单。
+- 首跑（ctomi #679）：快路建单 → 方案 → 自动落地一条龙，keyword-add 14 行、keyword-final-url 2 条、ad-create 1 条全部成功且逐条回读验证，条目账本 17 条全 verified，无主条目 0，改动清单已回频道。三执行器解除「未经首跑」状态。
+
 ### 2026-09-11 AIRA 完成：W13-W17 全部落地并部署（rev 3487897，api+worker）
 
 - W13 契约闸（504e715）：chat_reply 的 dispatch 停用；drafts 升级委托单（kind/backing_fact）；新频道动作 commission_start（双验提议时序+确认引语，防重复启动）；spawn_task 按钮路径同权定档；chatModel 默认 fable；政策 dispatch_rules v5。
