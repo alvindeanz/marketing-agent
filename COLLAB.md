@@ -21,6 +21,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-13 AIRA 报告（Aiden 领地，报告不动手）：PUT /profile 的 platform 存原始显示值，大小写变体入库
+
+- 现象：Goodie Goodie 存成 shopify、Citymed 存成 custom（小写），看板按 platform 筛选时这两家漏出列表。Alvin 发现后我已用 PUT /profile 把两行数据改回 Shopify/Custom，全库现在只剩 4 个规范值（WebForger/Shopify/WordPress/Custom）。
+- 根因：seo-api.php 约 4583 行，platform 校验按 strtolower 后的 slug 过枚举，但落库存的是请求原文，同一 slug 的任意大小写变体都能入库成不同显示值。
+- 建议修法（归 Aiden 排期）：加一张 slug 到规范显示值的映射表（webforger 到 WebForger 这类），校验通过后存映射值不存原文；顺手可在 ensure 层把存量归一，防下次建档再进变体。
+
 ### 2026-09-11 AIRA：执行层补时机维度 F1-F4（rev 412b11b，Alvin 定「harness match PJ 动作」基准）
 
 - 背景：#681 空放行卡（拆条 0 机器项仍等放行）与 #680 必败 apply（「过审后」条件被当即执行）暴露条目缺「何时可执行」维度、母任务缺收敛规则。
