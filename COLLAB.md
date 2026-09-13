@@ -22,6 +22,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-13 AIRA：卡反馈第一性闭环上线（rev f15f533，api+worker 已部署）
+
+- 背景：sammichelle #306 客户在方向卡上表态 10 条（含反复表态与埋在 other 里的新需求）无人接，任务停在 review。Alvin 定第一性方案：一条反馈翻任务状态，harness 读状态分岔，不上 webhook 不上巡检。
+- api：POST /card_feedback 24h 同款防重 + 写入置 seo_tasks.card_feedback_at（ensure_review_schema 惰性加列 + 存量回填 note 里有 [客户反馈] 未折叠的卡）；GET /card_feedback?task_id= 读行；PATCH /tasks 收 card_feedback_done 清位。
+- worker：harness foldCards 在确认闸前跑。零 LLM 折叠（lib/cardfold.js，同项取最后一次表态）；agree/文本立跟进任务自动排闸A；hold 落 facts（source=client）；方向卡发出超 --card-grace-days（默认 14 天）零反馈到期视同同意。
+- 验证：tests/cardfold.test.js 8 例（#306 真实序列），全套 16 件绿；部署后 #306 状态位被回填点亮，GET 行数 10，harness --dry 折出「同意 4 项，文本 2 条」后被两闸正常拦（sammichelle 未过闸，折叠先于闸设计生效）。
+- 坑：加列前的存量反馈不会翻状态位，靠 ensure 里的幂等回填补；卡的验收关闭仍走频道 accepted 流程，本闭环不动 task_close。
+
 ### 2026-09-13 AIRA 追记：认领改版 + platform 归一已修复部署（rev 7326785）
 
 - Alvin 定：Aira 转 MA 主力开发全仓可动，Aiden 辅助，认领登记节已改版。下条报告里「归 Aiden 排期」随之作废，我直接修了。
