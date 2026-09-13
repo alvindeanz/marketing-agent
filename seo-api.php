@@ -4587,6 +4587,10 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     if(!in_array($pfSlug,$PLATFORM_SLUGS,true)){
         res(400,['error'=>'platform「'.$vals['platform'].'」不在注册车道枚举里（'.implode('/',$PLATFORM_SLUGS).'）。新平台先建能力清单再扩枚举']);
     }
+    /* 存规范显示值不存请求原文：前端是自由文本框，shopify/custom 这类大小写变体
+       入库后平台筛选会漏行（COLLAB 2026-09-13），校验过枚举后统一映射再落库。 */
+    $PLATFORM_DISPLAY=['webforger'=>'WebForger','shopify'=>'Shopify','wordpress'=>'WordPress','woocommerce'=>'WooCommerce','googleads'=>'GoogleAds','umbraco'=>'Umbraco','shopline'=>'Shopline','wix'=>'Wix','squarespace'=>'Squarespace','custom'=>'Custom'];
+    $vals['platform']=$PLATFORM_DISPLAY[$pfSlug];
     if(array_key_exists('target_keywords',$i)){
         $kw=$i['target_keywords'];
         if(is_array($kw))$kwJson=json_encode(array_values($kw),JSON_UNESCAPED_UNICODE);
