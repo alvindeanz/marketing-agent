@@ -500,6 +500,9 @@ function ensure_review_schema(){
            待补跑的清单本身从 result_note 的「检查: … 待人工 N 项（…）」那行解析，不另存。 */
         'manual_done_at'=>"DATETIME DEFAULT NULL",
         'manual_done_note'=>"VARCHAR(400) NOT NULL DEFAULT ''",
+        /* 2026-09-13 卡反馈状态位：客户在方向卡上提交反馈即置 NOW()，harness 见非空
+           走折叠分支，处理完经 PATCH card_feedback_done 清空。NULL = 无待处理反馈。 */
+        'card_feedback_at'=>"DATETIME DEFAULT NULL",
     ];
     $in=implode(',',array_fill(0,count($cols),'?'));
     $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_tasks' AND COLUMN_NAME IN ($in)");
@@ -513,6 +516,10 @@ function ensure_review_schema(){
     /* 2026-08-27 加哈希列前已有的判决没有哈希，用当前内容回填一次（假定内容未变，
        变了也只是少报一次过期，下次重判自然覆盖）。幂等：只补空的。 */
     db()->exec("UPDATE seo_tasks SET review_text_hash=MD5(CONCAT(IFNULL(title,''),'|',IFNULL(detail,''))) WHERE review_verdict IS NOT NULL AND review_text_hash IS NULL");
+    /* 2026-09-13 存量回填：card_feedback_at 加列前已有客户反馈落在 note 里的卡
+       （如 sammichelle #306），补状态位让 harness 接手。折叠过（note 有标记）或
+       已结案的不动。幂等：折叠会写入标记并清空状态位，此后不再命中。 */
+    db()->exec("UPDATE seo_tasks SET card_feedback_at=updated_at WHERE card_feedback_at IS NULL AND status<>'done' AND result_note LIKE '%[客户反馈]%' AND result_note NOT LIKE '%[卡反馈折叠%'");
     ensure_job_types();
 }
 
@@ -4680,10 +4687,33 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_card_fb_task (task_id, id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    /* 防重（2026-09-13）：同任务同项同表态同文本 24 小时内只记一次，连击与 widget 重发
+       不再刷屏 note。24 小时后同款提交视为客户重申，照常入库。 */
+    $dq=db()->prepare("SELECT id FROM seo_card_feedback WHERE task_id=? AND item=? AND choice=? AND IFNULL(fb,'')=? AND created_at>DATE_SUB(NOW(),INTERVAL 24 HOUR) LIMIT 1");
+    $dq->execute([$tid,$item,$choice,$txt]);
+    if($dq->fetch())res(200,['ok'=>true,'dedup'=>true]);
     db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb)VALUES(?,?,?,?)")->execute([$tid,$item,$choice,$txt]);
     $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单'][$choice];
     task_append_note($tid,'[客户反馈] '.($item!==''?($item.'：'):'').$label.($txt!==''?('：'.$txt):''));
+    /* 状态翻转（2026-09-13 Alvin 定第一性原则）：一条反馈就改变任务状态，
+       harness 下一轮读到 card_feedback_at 非空自然分岔，不需要 webhook 或巡检。 */
+    ensure_review_schema();
+    db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
     res(200,['ok'=>true]);
+}
+
+/* GET /card_feedback?task_id= -> 该卡的全部反馈行（id 升序即时间序），harness 折叠用。 */
+if($m==='GET'&&$ROUTE==='/card_feedback'){
+    auth_any();
+    $tid=(int)($_GET['task_id']??0);
+    if(!$tid)res(400,['error'=>'task_id required']);
+    $rows=[];
+    try{
+        $q=db()->prepare("SELECT id,item,choice,fb,created_at FROM seo_card_feedback WHERE task_id=? ORDER BY id");
+        $q->execute([$tid]);
+        $rows=$q->fetchAll();
+    }catch(Exception $e){/* 表还没建过（从未有人提交过反馈）就是空 */}
+    res(200,['rows'=>$rows]);
 }
 
 // GET /plans?client_id=
@@ -5643,6 +5673,8 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     if(isset($i['result_note'])){$sets[]='result_note=?';$args[]=(string)$i['result_note'];}
     if(array_key_exists('attention',$i)){$sets[]='attention=?';$args[]=empty($i['attention'])?0:1;}
     if(array_key_exists('plan_id',$i)){$sets[]='plan_id=?';$args[]=$i['plan_id']?(int)$i['plan_id']:null;}
+    /* 卡反馈处理完毕的收口：只许清空不许手写时间，时间只由 /card_feedback 写入。 */
+    if(!empty($i['card_feedback_done'])){ensure_review_schema();$sets[]='card_feedback_at=NULL';}
     if(!$sets)res(400,['error'=>'nothing to update']);
     $args[]=$tid;
     db()->prepare("UPDATE seo_tasks SET ".implode(',',$sets)." WHERE id=?")->execute($args);

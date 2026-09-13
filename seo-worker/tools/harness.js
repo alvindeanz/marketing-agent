@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { foldCardFeedback, summariseFold } = require('../lib/cardfold');
 const API = process.env.SEO_API_BASE || 'https://always.horntech-dev.com/seo-api.php';
 const TOKEN = process.env.SEO_AGENT_TOKEN || '';
 const TODO = process.env.MA_TODO || '/data/aira/projects/MA/memory/TODO.md';
@@ -20,6 +21,7 @@ const cid = parseInt(argv[0], 10);
 const DRY = argv.includes('--dry');
 const NO_TODO = argv.includes('--no-todo');
 const IDS = (() => { const i = argv.indexOf('--ids'); return i === -1 ? null : String(argv[i + 1] || '').split(',').map((x) => parseInt(x, 10)).filter(Boolean); })();
+const GRACE_DAYS = (() => { const i = argv.indexOf('--card-grace-days'); return i === -1 ? 14 : (parseInt(argv[i + 1], 10) || 14); })();
 const POLL_MS = 45000;
 const BUDGET_MS = 3 * 60 * 60 * 1000;
 if (!cid || !TOKEN) { console.error('用法：SEO_AGENT_TOKEN=... node tools/harness.js <client_id> [--dry] [--no-todo]'); process.exit(2); }
@@ -48,9 +50,73 @@ function humanDecisions(note) {
   return m[1].split('\n').map((s) => s.trim()).filter((s) => /^\d+[.)]|^[-*]/.test(s)).map((s) => s.replace(/^(\d+[.)]|[-*])\s*/, ''));
 }
 
+/* 0. 卡反馈折叠（2026-09-13 Alvin 定第一性版）：客户在方向卡上提交过反馈的任务
+   card_feedback_at 非空，harness 读到就分岔，不靠 webhook 不靠巡检。放在确认闸之前：
+   反馈处理是已发出卡的收口，不该被 onboard 闸挡住。零 LLM：表态折叠是确定性规则
+   （lib/cardfold.js），agree 项与文本反馈立跟进任务，POST /tasks 自动排闸A，
+   后续走既有 判决 -> 放行 -> 执行 链。到期兜底同在这里：发出超过 --card-grace-days
+   （默认 14 天）零反馈的方向卡，按卡上「未回复按建议执行」承诺视同同意。 */
+async function foldCards(sprint) {
+  const all = await tasks();
+  const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
+  for (const card of all.filter((t) => t.card_feedback_at)) {
+    const rows = (await call('GET', '/card_feedback?task_id=' + card.id)).rows || [];
+    const f = foldCardFeedback(rows);
+    if (!f.hasAny) { if (!DRY) await call('PATCH', '/tasks/' + card.id, { card_feedback_done: 1 }); continue; }
+    const summary = summariseFold(f);
+    log('#' + card.id + ' 卡反馈折叠：' + summary);
+    if (DRY) continue;
+    let followId = null;
+    if (f.agreed.length || f.texts.length) {
+      const lines = [];
+      if (f.agreed.length) {
+        lines.push('客户已同意的项，按卡内建议落地（放行按 release_policy 分档，卡：' + (card.output_url || '#' + card.id) + '）：');
+        for (const a of f.agreed) lines.push('- ' + a.item + (a.choice === 'flag' && a.fb ? '（勾选：' + a.fb.slice(0, 200) + '）' : ''));
+      }
+      if (f.holds.length) lines.push('客户要求保持观察不动：' + f.holds.map((x) => x.item).join('、'));
+      if (f.texts.length) {
+        lines.push('客户文本反馈（逐条处置：是纠偏写 facts，是新需求单独立项，不许留在本任务里烂掉）：');
+        for (const x of f.texts) lines.push('- [' + x.item + '] ' + x.text.slice(0, 500));
+      }
+      lines.push('来源：方向卡 #' + card.id + ' 的客户反馈折叠，表态历史见该任务 note。');
+      const r = await call('POST', '/tasks', {
+        client_id: cid,
+        title: '卡反馈落地：' + String(card.title).replace(/^(\[[^\]]*\]\s*)+/, '').slice(0, 60),
+        module: card.module || 'technical', sprint, priority: 'P1', owner_type: 'agent',
+        detail: lines.join('\n'),
+      });
+      followId = r.id;
+      log('#' + card.id + ' -> 跟进任务 #' + followId + '，闸A 已排（job ' + (r.review_job_id || '?') + '）');
+    }
+    await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '方向卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）客户表态：' + summary + (followId ? '。跟进任务 #' + followId : '。全部保持观察，无跟进'), source: 'client', status: 'confirmed' });
+    await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + summary + (followId ? '，跟进 #' + followId : '，无需跟进'), card_feedback_done: 1 });
+  }
+  // 到期视同同意：只认已出客户版（有 deliverable 时间）的方向卡，折叠过的不重跑
+  const auto = all.filter((t) => t.status === 'review' && !t.card_feedback_at
+    && /方向卡|direction/i.test(String(t.title) + ' ' + String(t.ops || ''))
+    && !/\[卡反馈折叠/.test(String(t.result_note || '')));
+  for (const card of auto) {
+    const sent = (card.deliverables || []).map((d) => String(d.created_at || '')).sort().pop();
+    if (!sent) continue;
+    const days = (Date.now() - new Date(sent.replace(' ', 'T')).getTime()) / 86400000;
+    if (!(days >= GRACE_DAYS)) continue;
+    log('#' + card.id + ' 发出 ' + Math.floor(days) + ' 天零反馈，到期视同同意');
+    if (DRY) continue;
+    const r = await call('POST', '/tasks', {
+      client_id: cid,
+      title: '卡到期落地（视同同意）：' + String(card.title).replace(/^(\[[^\]]*\]\s*)+/, '').slice(0, 60),
+      module: card.module || 'technical', sprint, priority: 'P1', owner_type: 'agent',
+      detail: '方向卡 #' + card.id + ' 发出 ' + Math.floor(days) + ' 天无客户反馈，按卡上「未回复将按建议执行」的承诺落地全部建议项。卡：' + (card.output_url || '（无链接，见任务 note）'),
+    });
+    await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] 到期（' + Math.floor(days) + ' 天）零反馈视同同意，跟进 #' + r.id });
+  }
+}
+
 async function main() {
   const bc = await boardClient();
   if (!bc) throw new Error('board 上没有 client ' + cid);
+  const sprintEarly = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
+  await foldCards(sprintEarly);
   // 入 sprint 前的两道客户确认闸（2026-09-09 Alvin 定的全局流程：轻链方向卡 → 客户确认关键词 →
   // 客户确认 mapping → 才进 sprint）。证据看 facts：词表确认与 mapping 确认各要一条 confirmed 记录。
   // --skip-gates 显式跳过（如老客户补跑、或本次 --ids 只跑与词表无关的技术项），跳过原因进日志。
