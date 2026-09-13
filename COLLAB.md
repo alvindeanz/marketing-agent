@@ -13,13 +13,20 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 6. 并行改动禁 git stash（webforge 事故教训）。
 7. 全部产物中文，禁 emoji 和破折号。
 
-## 认领登记（2026-08-24 初始）
+## 认领登记（2026-09-13 改版，Alvin 定）
 
-- **Aiden**：seo-api.php、static/seo-agent.html、deploy.sh、sql/、seo-worker 既有 runners 与 lib（listener/runner_host/pull_data/discover/plan/execute_task/apply_task/feedback/triage/ruling/chat/blogimages/registry/deliverables/metrics 等）。
-- **Aira**：非 WebForger 平台适配（content_registry 的平台枚举器、能力清单 specs/capabilities/ 下新平台段）、specs/SOP 层的执行经验回写。入口窄面起步，贡献稳定后按数据扩认领。
-- 部署权：Aiden 单点，待 Aira 贡献量稳定后下放 worker 侧本地部署脚本。
+- **Aira**：MA 主力开发，全仓可动（seo-api.php、前端、runners、lib、specs、deploy）。发现 bug 直接修，改动照旧在本账本登记同步。
+- **Aiden**：辅助开发。
+- 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移。
+- 历史版本（2026-08-24 初始，窄面认领）：Aiden 管 api/前端/deploy/sql/既有 runners 与 lib，Aira 只认领非 WebForger 平台适配与 specs/SOP 回写，对方领地报告不动手。已作废，留此存档。
 
 ## 条目
+
+### 2026-09-13 AIRA 追记：认领改版 + platform 归一已修复部署（rev 7326785）
+
+- Alvin 定：Aira 转 MA 主力开发全仓可动，Aiden 辅助，认领登记节已改版。下条报告里「归 Aiden 排期」随之作废，我直接修了。
+- 修法：PUT /profile 校验过 slug 枚举后按 PLATFORM_DISPLAY 映射存规范显示值，不再存请求原文。node tests/ 15 件全绿，远端 php -l 过，api 已部署（rev 7326785），check 无漂移。
+- 线上验证：故意用小写 shopify 重写 Goodie profile，落库为 Shopify；全库 platform 仅 4 个规范值。
 
 ### 2026-09-13 AIRA 报告（Aiden 领地，报告不动手）：PUT /profile 的 platform 存原始显示值，大小写变体入库
 
