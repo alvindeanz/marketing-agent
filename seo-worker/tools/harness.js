@@ -126,7 +126,11 @@ async function main() {
     const fr = await call('GET', '/facts?client_id=' + cid);
     const facts = (fr.facts || []).filter((f) => String(f.status || '') === 'confirmed');
     const kwOk = facts.some((f) => /^keywords\./.test(f.fact_key) && /(锁定|确认|lock|confirm)/i.test(String(f.fact_key) + String(f.value)));
-    const mapOk = facts.some((f) => /^seo\.mapping/.test(f.fact_key) && /(确认|定稿|confirm)/i.test(String(f.fact_key) + String(f.value)));
+    // mapping 定稿的 confirmed fact 命名历史上不统一（seo.mapping_state / seo.page_mapping /
+    // seo.money_pages_and_mapping 都是页面词映射定稿），旧正则只认 ^seo\.mapping，把用
+    // seo.page_mapping 记录的老客户（Apollo/Ben's NZ/Kuddles 等）误判成 mapping 未定稿。
+    // facts 已过滤 status=confirmed，confirmed 本身即表定稿，不再叠加 value 文本匹配。
+    const mapOk = facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key));
     if (!kwOk || !mapOk) {
       throw new Error('两道确认闸未过：' + (kwOk ? '' : '关键词未经客户确认（缺 keywords.* 的 confirmed 锁定记录）；')
         + (mapOk ? '' : 'mapping 未定稿（缺 seo.mapping* 的 confirmed 记录）；')

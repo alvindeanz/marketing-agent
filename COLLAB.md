@@ -22,6 +22,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-15 AIRA：老客户静默 onboard + mapping 闸正则修复
+
+- 背景：Alvin 定老客户内部静默走完 onboard 两闸直接进 sprint。关键词方向在导入建档时已定义(profile target_keywords)、合作月报持续沿用；mapping 也都做过。不为形式重出客户确认卡。快赢优先(流量曝光)。
+- 修复：harness 的 mapping 闸正则 `^seo\.mapping` 太窄，漏认 `seo.page_mapping`、`seo.money_pages_and_mapping`，把用这些命名记 mapping 的老客户(Apollo/Ben's NZ/Kuddles/Power Dekor)误判成 mapping 未定稿。改为 `^seo\.(mapping|page_mapping|money_pages)`，并去掉冗余的 value 文本匹配(facts 已 filter status=confirmed，confirmed 即定稿)。tools/harness.js L128 附近。
+- 静默 onboard：7 家 WF SEO 老客户(8 Apollo/15 PowerDekor/16 Louvresky/23 Sammichelle/45 Ben's NZ/46 Ben's AU/47 Kuddles)补 `keywords.lock_state` confirmed(source=manual，value 标明导入建档定义+合作确认+快赢优先)；16/23 另补 `seo.mapping_confirmed`(其余 5 家 mapping fact 已有，靠正则修复认出)。含 dogfood(52/53)共 9 家 WF SEO 客户全部过两道闸，harness 不再需 --skip-gates。
+- 确认边界(Alvin 2026-09-15)：方向层(关键词/mapping)老客户内部静默确认；对外新发布内容(博客)走博客确认卡(含关键词规划+内链，快赢导向，spec 升级排下轮)；mapping 内页面执行(承接页 title/meta 改写)静默 sprint 不逐次确认。
+- 测试：node 全套 18 文件退出码全 0，node --check harness.js 过。
+- 待部署：harness.js 属 worker，deploy worker。
+
 ### 2026-09-15 AIRA：card_feedback 两处机制缺陷修复（博客确认卡的前置）
 
 - 背景：09-14 louvresky #146 内部测试点击被 harness 折叠成客户同意的事故根因修复。Alvin 定博客走确认卡（复用 card_feedback，客户 agree 后下一轮 harness 处理发布），这两处缺陷是博客卡复用 card_feedback 前必须先修的（博客误折叠后果是直接对外发布，比关键词卡误开跟进任务重）。
