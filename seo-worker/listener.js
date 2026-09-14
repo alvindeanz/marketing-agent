@@ -15,6 +15,7 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 const path = require('node:path');
+const fs = require('node:fs');
 const { fork } = require('node:child_process');
 
 const { load } = require('./lib/config');
@@ -200,11 +201,44 @@ function runJob(job, lane) {
         await api.patchJob(job.id, body);
       } catch (e) {
         log(jobTag + ': could not PATCH terminal status :: ' + e.message);
+        pendingTerminalPark(job.id, body);
       }
-      // No retry. A failed job stays failed until a human queues a new one.
+      // No retry of the JOB. A failed job stays failed until a human queues a
+      // new one; only the terminal STATUS gets re-delivered via the pending file.
       resolve();
     }
   });
+}
+
+/* 终态回写掉线暂存（2026-09-14 演练发现：API 死在 job 飞行中时终态 PATCH 失败即失联，
+   job 永远停在 running，chat 线程 409 拒收新消息，只有重启收尸能救；且收尸会把本该
+   done 的记成 failed。改法：回写失败先落本地暂存，poll 每 tick 与启动时（先于收尸）
+   补投，成功即销账。暂存文件损坏按空处理，宁可靠收尸兜底也不让坏文件炸监听。 */
+const PENDING_TERMINAL_FILE = path.join(__dirname, 'logs', 'pending_terminal.json');
+function pendingTerminalPark(jobId, body) {
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(PENDING_TERMINAL_FILE, 'utf8')); } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  list = list.filter((x) => x && x.job_id !== jobId);
+  list.push({ job_id: jobId, body, at: ts() });
+  try {
+    fs.mkdirSync(path.dirname(PENDING_TERMINAL_FILE), { recursive: true });
+    fs.writeFileSync(PENDING_TERMINAL_FILE, JSON.stringify(list));
+    log('job#' + jobId + ' 终态已暂存待补投（挂账 ' + list.length + ' 条）');
+  } catch (e) { log('终态暂存写盘失败，只能等收尸兜底 :: ' + e.message); }
+}
+async function pendingTerminalFlush() {
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(PENDING_TERMINAL_FILE, 'utf8')); } catch (e) { return; }
+  if (!Array.isArray(list) || !list.length) return;
+  const keep = [];
+  for (const it of list) {
+    if (!it || !it.job_id) continue;
+    try { await api.patchJob(it.job_id, it.body || {}); log('job#' + it.job_id + ' 暂存终态补投成功'); }
+    catch (e) { keep.push(it); }
+  }
+  try { fs.writeFileSync(PENDING_TERMINAL_FILE, JSON.stringify(keep)); } catch (e) {}
+  if (keep.length) log('终态补投：' + keep.length + ' 条仍投不出去，下个 tick 再试');
 }
 
 // ---------------------------------------------------------------------------
@@ -403,8 +437,9 @@ server.listen(cfg.wakePort, cfg.bindHost, () => {
   // restart, crash, OOM). Recovery must not depend on the dying process having
   // cooperated (2026-09-04 job390 zombie). Reap failure does not block the
   // drain: better to run jobs past a zombie row than to run nothing.
-  api
-    .reapJobs()
+  pendingTerminalFlush()
+    .catch(() => {})
+    .then(() => api.reapJobs())
     .then((r) => {
       const ids = (r && Array.isArray(r.reaped) && r.reaped) || [];
       if (ids.length) log('startup reap: ' + ids.length + ' orphaned running job(s) -> failed: #' + ids.join(' #'));
@@ -420,6 +455,7 @@ server.listen(cfg.wakePort, cfg.bindHost, () => {
 // 满足的经 condition_met 续跑。巡检自身只读，续跑的授权在委托单那一次。
 let probeTickCount = 0;
 const pollTimer = setInterval(() => {
+  pendingTerminalFlush().catch(() => {});
   drain('poll').then(blogReviewTick, blogReviewTick);
   probeTickCount += 1;
   if (probeTickCount % 12 === 0) {
