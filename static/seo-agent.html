@@ -3599,9 +3599,24 @@ function itemsBox(t){
       :(r.evidence?(' · '+esc(r.evidence)):'');
     const tgt=r.target_value?(' → '+esc(String(r.target_value).slice(0,120))):'';
     const old=r.old_value?('（旧值 '+esc(String(r.old_value).slice(0,80))+'）'):'';
+    /* 人工位条目未收口的给对账按钮（2026-09-14 人工通道打通）：人做完一条上一条账 */
+    const book=(r.owner&&r.owner!=='machine'&&st!=='landed'&&st!=='verified')
+      ?' <button class="btn tiny ghost" onclick="bookItem('+r.id+','+t.id+')">对账</button>':'';
     return '<div style="font-size:12px;line-height:1.5"><span class="badge '+cls+'">'+esc(IT_STATE_LABEL[st]||st)+'</span> '+
-      esc(r.entity||'')+(r.op?' <span class="plan-meta">'+esc(r.op)+'</span>':'')+tgt+old+tail+'</div>';
+      esc(r.entity||'')+(r.op?' <span class="plan-meta">'+esc(r.op)+'</span>':'')+tgt+old+tail+book+'</div>';
   }).join('')+'</div>';
+}
+async function bookItem(iid,tid){
+  const ev=prompt('人工对账：这条做完了？写证据（做了什么、在哪能核对），必填。做不了请写「blocked: 原因」。');
+  if(ev==null)return;
+  const s=String(ev).trim();
+  if(!s){toast('证据必填',true);return}
+  const isBlk=/^blocked[:：]/i.test(s);
+  const body=isBlk?{state:'blocked',block_reason:s.replace(/^blocked[:：]\s*/i,'')}:{state:'landed',evidence:s};
+  const d=await api('/items/'+iid,'PATCH',body);
+  if(fail(d,'对账失败'))return;
+  toast('已对账'+(d.remaining_manual?('，人工位还剩 '+d.remaining_manual+' 条'):'，人工位全部收口'));
+  delete itData[tid];loadItems(tid);
 }
 
 function threadBox(t,where){

@@ -2215,11 +2215,16 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
             if($missing&&!isset($gapHits[$c['op']]))$gapHits[$c['op']]=capability_gap_bump($c['op'],$tid);
         }
         $blocked=[];$seq=0;
+        $pendOps=executor_pending_ops();
         foreach($clean as $c){
-            $machine=$c['op']!==''&&$c['op']!=='manual'&&isset($rc[$c['op']]);
+            /* 机器条目 = 政策表有档「且」执行器已实现（2026-09-14 ctomi #682 教训：
+               asset-create 政策表有档但 ads_mutate 没实现，被标成机器位，apply 才中止。
+               executor_pending 的条目按人工分流，走 F1 有主工单，不再空转到 apply）。 */
+            $machine=$c['op']!==''&&$c['op']!=='manual'&&isset($rc[$c['op']])&&!in_array($c['op'],$pendOps,true);
             $state=$machine?'proposed':'blocked';
             $owner=$machine?'machine':'agency';
-            $why=$machine?'':($c['op']===''||$c['op']==='manual'?'方案指定人工':'缺执行器 op '.$c['op']);
+            $why=$machine?'':($c['op']===''||$c['op']==='manual'?'方案指定人工'
+                :(in_array($c['op'],$pendOps,true)?'执行器未实现 op '.$c['op'].'（政策表有档，落地工具没这功能）':'缺执行器 op '.$c['op']));
             if(!$machine&&isset($gapHits[$c['op']])&&$gapHits[$c['op']]>=2)$why.='（缺口第 '.$gapHits[$c['op']].' 次，按定则该补执行器了）';
             $ins->execute([$cid,$tid,$seq,$c['op'],$c['entity'],$c['target_value'],$state,$owner,$why,$c['condition_ready']]);
             if(!$machine)$blocked[]=$c;
@@ -2305,6 +2310,37 @@ if($m==='GET'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
     $q=db()->prepare("SELECT id,seq,op,entity,target_value,old_value,state,owner,block_reason,evidence,updated_at FROM seo_change_items WHERE task_id=? ORDER BY seq,id");
     $q->execute([(int)$mm[1]]);
     res(200,['items'=>$q->fetchAll()]);
+}
+
+/* PATCH /items/{id} -> 人工对账（2026-09-14：人工通道打通的最后一格）。人照方案在外部系统
+   做完一条，就在这把该条目置 landed/verified 并写证据；发现做不了置 blocked 带原因。
+   只许动人工位（owner 非 machine）的条目：机器条目的状态由 apply 对账写，人不越位。
+   证据必填（landed/verified 时）：无证据不上账，同 task_close applied 的纪律。 */
+if($m==='PATCH'&&preg_match('#^/items/(\d+)$#',$ROUTE,$mm)){
+    $u=auth_admin();
+    ensure_change_items();
+    $iid=(int)$mm[1];
+    $q=db()->prepare("SELECT * FROM seo_change_items WHERE id=?");
+    $q->execute([$iid]);
+    $it=$q->fetch();
+    if(!$it)res(404,['error'=>'条目不存在']);
+    if((string)$it['owner']==='machine')res(400,['error'=>'机器条目的状态由 apply 对账写，人工对账只动人工位条目']);
+    $i=input();
+    $st=(string)($i['state']??'');
+    if(!in_array($st,['landed','verified','blocked'],true))res(400,['error'=>'state 只许 landed / verified / blocked']);
+    $ev=mb_substr(trim((string)($i['evidence']??'')),0,500,'UTF-8');
+    if($st!=='blocked'&&$ev==='')res(400,['error'=>'人工对账必须带证据：做了什么、在哪能核对']);
+    $why=mb_substr(trim((string)($i['block_reason']??'')),0,500,'UTF-8');
+    if($st==='blocked'&&$why==='')res(400,['error'=>'置 blocked 必须写原因']);
+    db()->prepare("UPDATE seo_change_items SET state=?,evidence=?,block_reason=? WHERE id=?")
+        ->execute([$st,$ev,$st==='blocked'?$why:(string)$it['block_reason'],$iid]);
+    task_append_note((int)$it['task_id'],'[人工对账] '.$u['username'].'：'.($it['op']!==''?$it['op'].' ':'').mb_substr((string)$it['entity'],0,80,'UTF-8').' → '.$st.($ev!==''?('：'.$ev):($why!==''?('：'.$why):'')));
+    audit($u['username'],'seo_item_manual_book',(string)$iid,['task_id'=>(int)$it['task_id'],'state'=>$st]);
+    /* 顺手报全账：该任务还剩几条人工位没收口，给前端和频道一句话素材 */
+    $left=db()->prepare("SELECT COUNT(*) c FROM seo_change_items WHERE task_id=? AND owner<>'machine' AND state NOT IN('landed','verified')");
+    $left->execute([(int)$it['task_id']]);
+    $lr=$left->fetch();
+    res(200,['ok'=>true,'remaining_manual'=>(int)($lr['c']??0)]);
 }
 
 // GET /items/unowned -> 无主守恒律的报警口：authorized/blocked 且没有 owner 的条目，结构上应为 0。
