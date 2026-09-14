@@ -713,6 +713,9 @@ function buildAdsPrompt(opts) {
     '===== 变更方案开始（' + planFile + '）=====',
     plan,
     '===== 变更方案结束 =====',
+    String(task.review_adjust || '').trim()
+      ? '\n===== 判定前提修正（复审后的硬约束，与方案冲突时以本段为准）=====\n' + String(task.review_adjust).trim() + '\n===== 前提修正结束 ====='
+      : '',
     '',
     '任务 #' + task.id + '：' + (task.title || ''),
     '',
@@ -865,6 +868,9 @@ function buildShopifyPrompt(opts) {
     '===== 变更方案开始（' + planFile + '）=====',
     plan,
     '===== 变更方案结束 =====',
+    String(task.review_adjust || '').trim()
+      ? '\n===== 判定前提修正（复审后的硬约束，与方案冲突时以本段为准）=====\n' + String(task.review_adjust).trim() + '\n===== 前提修正结束 ====='
+      : '',
     '',
     '任务 #' + task.id + '：' + (task.title || ''),
     '',
