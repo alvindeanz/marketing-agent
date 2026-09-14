@@ -503,6 +503,10 @@ function ensure_review_schema(){
         /* 2026-09-13 卡反馈状态位：客户在方向卡上提交反馈即置 NOW()，harness 见非空
            走折叠分支，处理完经 PATCH card_feedback_done 清空。NULL = 无待处理反馈。 */
         'card_feedback_at'=>"DATETIME DEFAULT NULL",
+        /* 2026-09-15 卡发出锚点：人工前端把方向卡/确认卡发给客户后标记（PATCH card_sent），
+           「到期视同同意」的时钟从这里算，不再锚在 deliverable 产出时间。NULL = 未发出不计时，
+           修复卡产出当天即被误触到期的缺陷（#145 事故，见 DEFECTS 2026-09-14）。 */
+        'sent_at'=>"DATETIME DEFAULT NULL",
     ];
     $in=implode(',',array_fill(0,count($cols),'?'));
     $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_tasks' AND COLUMN_NAME IN ($in)");
@@ -516,10 +520,11 @@ function ensure_review_schema(){
     /* 2026-08-27 加哈希列前已有的判决没有哈希，用当前内容回填一次（假定内容未变，
        变了也只是少报一次过期，下次重判自然覆盖）。幂等：只补空的。 */
     db()->exec("UPDATE seo_tasks SET review_text_hash=MD5(CONCAT(IFNULL(title,''),'|',IFNULL(detail,''))) WHERE review_verdict IS NOT NULL AND review_text_hash IS NULL");
-    /* 2026-09-13 存量回填：card_feedback_at 加列前已有客户反馈落在 note 里的卡
-       （如 sammichelle #306），补状态位让 harness 接手。折叠过（note 有标记）或
-       已结案的不动。幂等：折叠会写入标记并清空状态位，此后不再命中。 */
-    db()->exec("UPDATE seo_tasks SET card_feedback_at=updated_at WHERE card_feedback_at IS NULL AND status<>'done' AND result_note LIKE '%[客户反馈]%' AND result_note NOT LIKE '%[卡反馈折叠%'");
+    /* 2026-09-13 曾有一段按 result_note 文本（含 [客户反馈]）每请求回填 card_feedback_at 的
+       存量迁移，已于 2026-09-15 删除：它每次 ensure 都重跑，把人显式清空（card_feedback_done）
+       的状态位按 note 文本复活，导致内部测试点击被 harness 折叠成客户同意（louvresky #146 事故，
+       见 DEFECTS 2026-09-14）。card_feedback_at 现在只由 /card_feedback 写入、由 card_feedback_done
+       清空，清空是人的显式动作必须持久，不再有任何自动回填。不要再加回来。 */
     ensure_job_types();
 }
 
@@ -5760,6 +5765,10 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     if(array_key_exists('plan_id',$i)){$sets[]='plan_id=?';$args[]=$i['plan_id']?(int)$i['plan_id']:null;}
     /* 卡反馈处理完毕的收口：只许清空不许手写时间，时间只由 /card_feedback 写入。 */
     if(!empty($i['card_feedback_done'])){ensure_review_schema();$sets[]='card_feedback_at=NULL';}
+    /* 卡发出标记（2026-09-15）：人工前端把卡发给客户后打点，只许写当前时间不许手填，
+       「到期视同同意」的时钟锚在这里；发错重置传 card_sent_clear。 */
+    if(!empty($i['card_sent'])){ensure_review_schema();$sets[]='sent_at=NOW()';}
+    if(!empty($i['card_sent_clear'])){ensure_review_schema();$sets[]='sent_at=NULL';}
     if(!$sets)res(400,['error'=>'nothing to update']);
     $args[]=$tid;
     db()->prepare("UPDATE seo_tasks SET ".implode(',',$sets)." WHERE id=?")->execute($args);

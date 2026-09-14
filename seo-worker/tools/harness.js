@@ -91,12 +91,14 @@ async function foldCards(sprint) {
     await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '方向卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）客户表态：' + summary + (followId ? '。跟进任务 #' + followId : '。全部保持观察，无跟进'), source: 'client', status: 'confirmed' });
     await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + summary + (followId ? '，跟进 #' + followId : '，无需跟进'), card_feedback_done: 1 });
   }
-  // 到期视同同意：只认已出客户版（有 deliverable 时间）的方向卡，折叠过的不重跑
-  const auto = all.filter((t) => t.status === 'review' && !t.card_feedback_at
+  // 到期视同同意：只认已标记发出（sent_at）的方向卡，折叠过的不重跑。
+  // 锚点是发出时间不是产出时间：卡产出后没发给客户不该开始计时，否则卡还没发就被
+  // 误触到期（#145 事故，见 DEFECTS 2026-09-14）。sent_at 由人工前端发卡后 PATCH card_sent 打点。
+  const auto = all.filter((t) => t.status === 'review' && !t.card_feedback_at && t.sent_at
     && /方向卡|direction/i.test(String(t.title) + ' ' + String(t.ops || ''))
     && !/\[卡反馈折叠/.test(String(t.result_note || '')));
   for (const card of auto) {
-    const sent = (card.deliverables || []).map((d) => String(d.created_at || '')).sort().pop();
+    const sent = String(card.sent_at || '');
     if (!sent) continue;
     const days = (Date.now() - new Date(sent.replace(' ', 'T')).getTime()) / 86400000;
     if (!(days >= GRACE_DAYS)) continue;

@@ -22,6 +22,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-15 AIRA：card_feedback 两处机制缺陷修复（博客确认卡的前置）
+
+- 背景：09-14 louvresky #146 内部测试点击被 harness 折叠成客户同意的事故根因修复。Alvin 定博客走确认卡（复用 card_feedback，客户 agree 后下一轮 harness 处理发布），这两处缺陷是博客卡复用 card_feedback 前必须先修的（博客误折叠后果是直接对外发布，比关键词卡误开跟进任务重）。
+- 修复一（惰性回填复活已清状态位）：seo-api.php ensure_review_schema 删掉那段按 result_note 文本（含 [客户反馈]）每请求回填 card_feedback_at 的存量迁移。它每次 ensure 重跑，把人显式清空（card_feedback_done）的状态位按 note 文本复活，测试点击于是被折叠成客户同意。card_feedback_at 此后只由 /card_feedback 写、card_feedback_done 清，清空持久。存量早在 2026-09-13 加列当天回填并持久化，删除不丢数据。
+- 修复二（到期锚点错位）：加 seo_tasks.sent_at（惰性 DDL 进 ensure_review_schema）。「到期视同同意」时钟从 deliverable 产出时间改锚在 sent_at，空则不计时。修复卡产出即计时、卡没发给客户就被误触到期（#145）。harness.js foldCards 到期分支同步改用 sent_at（filter 加 t.sent_at，锚点用 card.sent_at）。
+- 接口约定：人工前端把方向卡/确认卡发给客户后，对该任务 PATCH {card_sent:1} 打发出点（只写 NOW() 不许手填）；发错重置 PATCH {card_sent_clear:1}。到期时钟从此点算。
+- 测试：node 全套 18 文件退出码全 0（cardfold/review/plan_review/apply/chat 等），php -l seo-api.php 过（250），php tests/chatapi.test.php 24 passed。DB 变更走惰性 DDL 先例。
+- 待部署：Aira 已推 main，待 deploy.sh 部署（api + worker 两台）。sent_at 是新列，部署后首次请求 ensure_review_schema 自动加。
+
 ### 2026-09-14 AIRA：ads agent 泳道上线并首跑收口（rev 05c4b0b/d7df6b2/f910f58，ctomi #682 验收）
 
 - Alvin 定调：白名单是路由偏好不是能力天花板，MA agent 做不了转人工是伪命题。apply 的 ads 通道检测到 executor_pending op 即解锁 Write+Bash(python3) 工具面，agent 自写 google-ads 脚本落地；安全底从前置白名单换成 lib/ads_audit 零模型后置对账（按条目 resource name GAQL 硬读账户，失败或零行可审不许收口）。API 侧撤掉上午的三道 pending 拦截（条目分类/chatw 转人工/machine_run 拒转/L0 跳过），意图携带的真障碍从四种减为三种。CLAUDE.md 硬规矩二改版，旧「模型只提议」废止。
