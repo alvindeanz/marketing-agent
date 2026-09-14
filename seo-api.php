@@ -933,7 +933,30 @@ function dispatch_grade($ops,$pol,$hasBacking){
     return $needConfirm?'confirm':'auto';
 }
 
+/* 频道意图携带三件套（2026-09-14 Alvin 定：意图表达过一次就够，二次放行是重复采集）。
+   task_mandate_ok：任务是否带已验证的频道执行意图。两种凭证：chatw 两阶段委托
+   （确认引语在 commission_start 时服务端双验过）；频道线程动作 machine_run 转位
+   （detail 带 [machine-run ] 标记，动作本身出自人类频道消息的裁决管道）。 */
+function task_mandate_ok($t){
+    if(strpos((string)($t['origin']??''),'chatw:')===0)return true;
+    return strpos((string)($t['detail']??''),'[machine-run ')!==false;
+}
 /* CHAT-PURE-END */
+
+/* 执行器未实现清单：政策表有档但落地工具没这功能的 op（ctomi #682 空转一圈的教训）。 */
+function executor_pending_ops(){
+    $pol=release_policy_load();
+    return isset($pol['executor_pending_ops']['ops'])&&is_array($pol['executor_pending_ops']['ops'])?$pol['executor_pending_ops']['ops']:[];
+}
+/* 范围漂移检查：方案机器条目的 op 必须都落在任务申报的 ops 集内，越界的意图携带作废。 */
+function mandate_scope_ok($tid,$ops){
+    try{
+        $q=db()->prepare("SELECT DISTINCT op FROM seo_change_items WHERE task_id=? AND owner='machine'");
+        $q->execute([(int)$tid]);
+        foreach($q->fetchAll() as $r){if(!in_array(trim((string)$r['op']),$ops,true))return false;}
+    }catch(Exception $e){return false;/* 条目表读不到就不携带，从严 */}
+    return true;
+}
 
 /* release_policy.json 只读加载，L0 自动放行与分级派单共用（review_result 里的历史内联加载不动）。 */
 function release_policy_load(){
@@ -1222,6 +1245,10 @@ function thread_action_exec($root,$t,$a,$by){
         if($bkKey!=='')$bkM=dispatch_backing_ok($cid,$bkKey);
         $gM=dispatch_grade($opsM,release_policy_load(),$bkM);
         if(strpos($gM,'invalid')===0)return ['ok'=>false,'what'=>$gM.'。执行器未覆盖的操作转不了机器，在任务上标记 [capability-gap] 等排期'];
+        /* 政策表有档不等于执行器会做（2026-09-14 ctomi #682 教训：asset-create 转位后
+           放行到 apply 才发现建不了，空转一圈）。转位前查 executor_pending 清单。 */
+        $pendM=array_values(array_intersect($opsM,executor_pending_ops()));
+        if($pendM)return ['ok'=>false,'what'=>'执行器未实现：'.implode('、',$pendM).'（政策表有风险档，落地工具没这功能）。转不了机器位，留人工照方案落地，或等执行器补齐后再转'];
         $modM=(string)($a['module']??'');
         $sets=['owner_type=?','ops=?','status=?'];$args=['agent',implode(',',$opsM),'approved'];
         if(in_array($modM,['technical','onpage','content','local','offpage','paid'],true)){ensure_task_module();$sets[]='module=?';$args[]=$modM;}
@@ -1964,7 +1991,23 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
                 if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，风险档可回滚，自动落地中（apply job #'.$ajW[0].'），落完回报。','seo-worker');
             }
         }else{
-            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出（放行卡在任务卡上），含花钱/不可逆/无背书对外项：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
+            /* 频道意图携带（2026-09-14 Alvin 定）：chatw 委托本身就是双验过的人类执行意图，
+               confirm 档不再二次停放行卡。只有四种真障碍才停（政策 mandate_doc）：
+               执行器没实现、范围漂移、熔断、止损闩（后两者在上方已查过）。 */
+            $pendW=array_values(array_intersect($opsW,executor_pending_ops()));
+            $polW=release_policy_load();
+            if($pendW){
+                task_append_note($tid,'[executor-pending] '.implode('、',$pendW).' 执行器未实现，机器落不了，转人工照方案落地并在条目账本对账');
+                if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，但 '.implode('、',$pendW).' 执行器还没实现，机器落不了：需人工照方案落地，做完在任务卡「条目」对账。','seo-worker');
+            }elseif(!empty($polW['dispatch_rules']['mandate_carries_release'])&&mandate_scope_ok($tid,$opsW)){
+                list($ajM,)=queue_task_jobs($cidW,'apply_task',[$tid],'mandate-carry','seo_tasks_release');
+                if($ajM){
+                    task_append_note($tid,'[mandate-apply] 频道委托的执行意图视同放行（意图凭证见委托记录），不二次停卡，落地 apply job #'.$ajM[0].'，失败即熔断转人工');
+                    if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，委托时的执行意图视同放行，落地中（apply job #'.$ajM[0].'），落完回报。','seo-worker');
+                }
+            }else{
+                if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出但范围越出委托申报（条目含申报外操作），放行卡在任务卡上：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
+            }
         }
         res(200,['ok'=>true,'dispatch_grade'=>$gradeW]);
     }
@@ -5015,7 +5058,18 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
            spend/不可逆/排除表/未知 op 一律停人。与 Chat 派单同一个函数同一份政策，不许分叉。 */
         $bk0=false;
         if(preg_match('/\[backing\]\s*(\S+)/u',(string)($t['detail']??''),$bm0))$bk0=dispatch_backing_ok($cid,$bm0[1]);
-        if(dispatch_grade($ops,$pol,$bk0)!=='auto')continue;
+        $grade0=dispatch_grade($ops,$pol,$bk0);
+        $mand0=false;
+        if($grade0!=='auto'){
+            /* 频道意图携带（2026-09-14 Alvin 定）：confirm 档但执行意图已在频道表达过
+               （chatw 委托或 machine_run 转位），且 op 执行器已实现、条目未越出申报范围，
+               视同已放行。真障碍照停：executor_pending / 漂移 / 下方熔断 / 上方止损闩。 */
+            if(strpos($grade0,'invalid')===0)continue;
+            $pend0=array_intersect($ops,executor_pending_ops());
+            $mand0=!$pend0&&!empty($pol['dispatch_rules']['mandate_carries_release'])
+                &&task_mandate_ok($t)&&mandate_scope_ok($tid,$ops);
+            if(!$mand0)continue;
+        }
         /* 熔断（2026-09-08 job577-586 空转教训，与 chatw 派单同一条规矩）：同任务只自动放行一次。
            apply 失败会经 /tasks/{id}/result 把任务送回判定，没有这道闸就是
            review→auto-release→apply→review 的死循环（bm 事故根因）。有任何 apply 历史一律留人。 */
@@ -5026,9 +5080,11 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
             task_append_note($tid,'[auto-release 熔断] 已有 apply 历史，不再自动放行，留人处理');
             continue;
         }
-        list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],'release-policy-l0','seo_tasks_release');
+        list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],$mand0?'mandate-carry':'release-policy-l0','seo_tasks_release');
         if($aj){
-            task_append_note($tid,'[auto-release L0] 复审判 do 且风险档 auto（全部可回滚'.($bk0?'，或预算中性/对外类有客户批文背书':'').'），按放行政策自动放行（apply job '.$aj[0].'），月度抽查');
+            task_append_note($tid,$mand0
+                ?'[auto-release mandate] 复审判 do，频道执行意图视同放行（意图凭证见任务记录），落地 apply job '.$aj[0].'，失败即熔断转人工'
+                :'[auto-release L0] 复审判 do 且风险档 auto（全部可回滚'.($bk0?'，或预算中性/对外类有客户批文背书':'').'），按放行政策自动放行（apply job '.$aj[0].'），月度抽查');
             $auto[]=['task_id'=>$tid,'job_id'=>$aj[0]];
         }
     }
