@@ -22,6 +22,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-14 AIRA：人工通道全流程演练（HornTech NZ #52 自家账户，线程 #288），两条路打通，追修两处（rev 0e02997 / 41c3293）
+
+- 场景 B（意图携带直落）：频道两句话（提议卡+确认）后零人工停顿：commission → 方案 → [mandate-apply] 不停卡 → apply 真落自家账户（SEO核心词组新增 EXACT「外贸独立站 seo 服务」，criterion 2499502615609，GAQL 独立回读一致）→ [applied] 自动收口。这是 mandate 直落的首个真实闭环。
+- 场景 A（executor_pending 人工分流）：故意点 budget-change（执行器未实现），条目层新分类直接 blocked+agency（理由带「政策表有档，落地工具没这功能」），F1 拆出人工工单 #738，频道通知清楚，零 apply 空转，零放行卡。人工对账 PATCH /items 与 kill 收口都真点验证。
+- 追修一（41c3293）：终态回写掉线暂存。250 被打死期间 job761 卡 running、线程 409、收尸误标 failed。listener 新增 pending_terminal 本地暂存，poll 每 tick 与启动时（先于收尸）补投。
+- 追修二（41c3293）：chat 简报话术还在承诺「花钱档停放行卡」，与意图携带行为不一致，已改为 mandate 版（列四种真停机障碍）。
+- 追修三（0e02997）：items plan 分类只看政策表不看执行器实现，pending op 被标机器位 → 已改为双条件，配 PATCH /items 人工对账口与看板对账按钮。
+- 插曲：演练中 250 因 WooCommerce 站被攻击整机 web 层瘫痪约 10 分钟（Alvin 面板恢复），与流水线无关，但正好把追修一的场景打了出来。
+
 ### 2026-09-14 AIRA：意图携带放行 + executor_pending 闸（rev 39efae3，api+worker 已部署，policy v6）
 
 - 背景：ctomi #682（客户已批的 PMax 男士素材组）被要求第三次人工放行，Alvin 定性流程 bug：「意图在 chat 表达过一次就够，二次放行是重复采集」。同单还暴露第二个 bug：chat 拿政策风险表冒充执行器能力表转机器位，放行到 apply 才发现 ads_mutate 没实现 asset-create，全链空转。
