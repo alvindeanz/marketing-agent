@@ -2,7 +2,7 @@
   "_doc": "放行分级政策，类目无关（SEO 与 paid 同一份，Alvin 拥有，Aira 起草）。risk_class 定义在各渠道/平台能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行与 Chat 分级派单（dispatch_rules），deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
   "version": 6,
   "executor_pending_ops": {
-    "_doc": "政策表里有风险档、但执行器还没实现落地的 op（googleads 线以 ads_mutate.py 的 OPS 白名单为准，tests/policy_executor.test.js 断言两处一致）。这些 op 只能 agent 备料人落地：机器位拒转（machine_run 直接拒）、意图携带不放行、L0 不自动放行、chatw 方案出来直接转人工说明而不是挂放行卡。执行器补上某个 op 时从本表删掉并在同一 commit 里过测试。2026-09-14 起因：ctomi #682 的 asset-create 被当已覆盖转机器位，放行后 apply 才发现建不了 PMax 素材组，空转一整圈。",
+    "_doc": "无 L1 确定性实现的 op 清单（googleads 线以 ads_mutate.py 的 OPS 白名单为准，tests/policy_executor.test.js 断言两处一致）。2026-09-14 下午 Alvin 定下放后，本表含义从「拦截」变为「路由」：这些 op 照常派单、转位、放行，apply 阶段由无头 agent 泳道直接执行（Write + python3 受控工具面，PAUSED 先建、逐位核值），收口前过 lib/ads_audit 的零模型后置对账，账户硬读全符才算落地。白名单从能力天花板降级为路由偏好：有 L1 走 L1（零模型成本 + 天然幂等），没 L1 走 agent 泳道。肌肉回流铁律不变：agent 泳道每成功一种 op，其执行记录即 L1 实现规格，两次内长进 ads_mutate 并从本表删除。",
     "ops": [
       "budget-change",
       "campaign-pause",
@@ -16,7 +16,7 @@
     "_doc": "委托单两阶段（2026-09-11 W13 契约闸，Alvin 定，取代 2026-09-08 的「频道判定即派」）：chat 建任务一律 agent 先出委托单提议卡（refs.drafts，kind 空/report/change），人在之后的消息里一句话确认或卡上点开工，模型下一轮 commission_start 启动，服务端双验提议时序与确认引语（引语逐字命中提议之后的人类消息）。只读分析/建议在频道内工具带直接答，不建任务。启动后按本表定档：全部 ops reversible 且不在 l0_exclude_ops 为 auto（出方案直接落地，失败一次熔断转人工，不自动重试）；external 与 structural（预算中性新建，2026-09-08 Alvin 批）有已确认客户批文 fact 背书按 auto，无背书 confirm；spend/irreversible 永远 confirm（出方案后停在待放行，频道一句「放行 #N」或看板点放行）。定档在启动与方案产出两个时刻各算一次，以后者为准。快路（2026-09-11 同日 Alvin 批）：最新一条人类消息本身是明确执行指令时允许同轮附卡即启动（proposal_msg_id=0），引语必须逐字命中该最新消息，且仅限直落档（非改动类，或 change 全 reversible / structural/external 有已确认批文）；含花钱/不可逆或引语只在历史消息里的，仍走两阶段。",
     "commission_two_phase": true,
     "mandate_carries_release": true,
-    "mandate_doc": "频道意图携带（2026-09-14 Alvin 定：意图表达过一次就够，二次放行是重复采集，是流程 bug）。任务的执行意图已由人在频道表达过（chatw 两阶段委托的确认引语服务端双验过，或线程动作 machine_run 转位），该意图就是放行凭证：方案出来判 do 后不再停放行卡，含 spend/irreversible 档。仍然停下的只有四种真障碍：条目 op 越出任务申报 ops 集（范围漂移）、op 在 executor_pending_ops（执行器没实现）、同任务已有 apply 历史（熔断）、止损闩 /stop 生效中。",
+    "mandate_doc": "频道意图携带（2026-09-14 Alvin 定：意图表达过一次就够，二次放行是重复采集，是流程 bug）。任务的执行意图已由人在频道表达过（chatw 两阶段委托的确认引语服务端双验过，或线程动作 machine_run 转位），该意图就是放行凭证：方案出来判 do 后不再停放行卡，含 spend/irreversible 档。仍然停下的只有三种真障碍：条目 op 越出任务申报 ops 集（范围漂移）、同任务已有 apply 历史（熔断）、止损闩 /stop 生效中。executor_pending 的 op 不再是障碍：apply 的 agent 泳道执行 + 零模型后置对账（同日下午下放版）。",
     "auto_tiers": [
       "reversible"
     ],

@@ -1245,10 +1245,8 @@ function thread_action_exec($root,$t,$a,$by){
         if($bkKey!=='')$bkM=dispatch_backing_ok($cid,$bkKey);
         $gM=dispatch_grade($opsM,release_policy_load(),$bkM);
         if(strpos($gM,'invalid')===0)return ['ok'=>false,'what'=>$gM.'。执行器未覆盖的操作转不了机器，在任务上标记 [capability-gap] 等排期'];
-        /* 政策表有档不等于执行器会做（2026-09-14 ctomi #682 教训：asset-create 转位后
-           放行到 apply 才发现建不了，空转一圈）。转位前查 executor_pending 清单。 */
-        $pendM=array_values(array_intersect($opsM,executor_pending_ops()));
-        if($pendM)return ['ok'=>false,'what'=>'执行器未实现：'.implode('、',$pendM).'（政策表有风险档，落地工具没这功能）。转不了机器位，留人工照方案落地，或等执行器补齐后再转'];
+        /* executor_pending 的 op 不再拒转（2026-09-14 下午下放版）：apply 的 agent 泳道
+           直接执行 + 零模型后置对账，政策表有档即可转位。 */
         $modM=(string)($a['module']??'');
         $sets=['owner_type=?','ops=?','status=?'];$args=['agent',implode(',',$opsM),'approved'];
         if(in_array($modM,['technical','onpage','content','local','offpage','paid'],true)){ensure_task_module();$sets[]='module=?';$args[]=$modM;}
@@ -1992,14 +1990,11 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
             }
         }else{
             /* 频道意图携带（2026-09-14 Alvin 定）：chatw 委托本身就是双验过的人类执行意图，
-               confirm 档不再二次停放行卡。只有四种真障碍才停（政策 mandate_doc）：
-               执行器没实现、范围漂移、熔断、止损闩（后两者在上方已查过）。 */
-            $pendW=array_values(array_intersect($opsW,executor_pending_ops()));
+               confirm 档不再二次停放行卡。真障碍只剩三种（政策 mandate_doc）：
+               范围漂移、熔断、止损闩（后两者在上方已查过）。executor_pending 的 op
+               不再拦：apply 的 agent 泳道直接执行 + 零模型后置对账（同日下午下放版）。 */
             $polW=release_policy_load();
-            if($pendW){
-                task_append_note($tid,'[executor-pending] '.implode('、',$pendW).' 执行器未实现，机器落不了，转人工照方案落地并在条目账本对账');
-                if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，但 '.implode('、',$pendW).' 执行器还没实现，机器落不了：需人工照方案落地，做完在任务卡「条目」对账。','seo-worker');
-            }elseif(!empty($polW['dispatch_rules']['mandate_carries_release'])&&mandate_scope_ok($tid,$opsW)){
+            if(!empty($polW['dispatch_rules']['mandate_carries_release'])&&mandate_scope_ok($tid,$opsW)){
                 list($ajM,)=queue_task_jobs($cidW,'apply_task',[$tid],'mandate-carry','seo_tasks_release');
                 if($ajM){
                     task_append_note($tid,'[mandate-apply] 频道委托的执行意图视同放行（意图凭证见委托记录），不二次停卡，落地 apply job #'.$ajM[0].'，失败即熔断转人工');
@@ -2215,16 +2210,14 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
             if($missing&&!isset($gapHits[$c['op']]))$gapHits[$c['op']]=capability_gap_bump($c['op'],$tid);
         }
         $blocked=[];$seq=0;
-        $pendOps=executor_pending_ops();
         foreach($clean as $c){
-            /* 机器条目 = 政策表有档「且」执行器已实现（2026-09-14 ctomi #682 教训：
-               asset-create 政策表有档但 ads_mutate 没实现，被标成机器位，apply 才中止。
-               executor_pending 的条目按人工分流，走 F1 有主工单，不再空转到 apply）。 */
-            $machine=$c['op']!==''&&$c['op']!=='manual'&&isset($rc[$c['op']])&&!in_array($c['op'],$pendOps,true);
+            /* 机器条目 = 政策表有档（2026-09-14 下午 Alvin 定下放后回归此口径：
+               executor_pending 的 op 由 apply 的 agent 泳道直接执行 + 零模型后置对账，
+               不再当人工分流；上午那版「pending 即人工」只活了半天，特此留档）。 */
+            $machine=$c['op']!==''&&$c['op']!=='manual'&&isset($rc[$c['op']]);
             $state=$machine?'proposed':'blocked';
             $owner=$machine?'machine':'agency';
-            $why=$machine?'':($c['op']===''||$c['op']==='manual'?'方案指定人工'
-                :(in_array($c['op'],$pendOps,true)?'执行器未实现 op '.$c['op'].'（政策表有档，落地工具没这功能）':'缺执行器 op '.$c['op']));
+            $why=$machine?'':($c['op']===''||$c['op']==='manual'?'方案指定人工':'缺执行器 op '.$c['op']);
             if(!$machine&&isset($gapHits[$c['op']])&&$gapHits[$c['op']]>=2)$why.='（缺口第 '.$gapHits[$c['op']].' 次，按定则该补执行器了）';
             $ins->execute([$cid,$tid,$seq,$c['op'],$c['entity'],$c['target_value'],$state,$owner,$why,$c['condition_ready']]);
             if(!$machine)$blocked[]=$c;
@@ -5098,11 +5091,11 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $mand0=false;
         if($grade0!=='auto'){
             /* 频道意图携带（2026-09-14 Alvin 定）：confirm 档但执行意图已在频道表达过
-               （chatw 委托或 machine_run 转位），且 op 执行器已实现、条目未越出申报范围，
-               视同已放行。真障碍照停：executor_pending / 漂移 / 下方熔断 / 上方止损闩。 */
+               （chatw 委托或 machine_run 转位），条目未越出申报范围即视同已放行。
+               executor_pending 不再拦（下放版：agent 泳道执行 + 后置对账）。
+               真障碍照停：漂移 / 下方熔断 / 上方止损闩。 */
             if(strpos($grade0,'invalid')===0)continue;
-            $pend0=array_intersect($ops,executor_pending_ops());
-            $mand0=!$pend0&&!empty($pol['dispatch_rules']['mandate_carries_release'])
+            $mand0=!empty($pol['dispatch_rules']['mandate_carries_release'])
                 &&task_mandate_ok($t)&&mandate_scope_ok($tid,$ops);
             if(!$mand0)continue;
         }

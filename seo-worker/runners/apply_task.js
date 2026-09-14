@@ -21,6 +21,7 @@ const { extractTrailingJson } = require('../lib/mdjson');
 const deliverables = require('../lib/deliverables');
 const { publishFile } = require('../lib/publish');
 const { ensureClientWorkspace, clientDirName, summarize, truncate, localYmd } = require('../lib/util');
+const { auditAgentItems } = require('../lib/ads_audit');
 
 // 2026-08-29：加机器补验工具。浏览器类检查（横滚、JSON-LD、页面文本、状态码）不再标待人工，worker 自己跑。
 const VERIFY_TOOL = '/data/aira/tools/verify/verify.js';
@@ -649,6 +650,35 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
 const ADS_GAQL = '/data/aira/seo-worker/lib/gaql_query.py';
 const ADS_MUTATE = '/data/aira/seo-worker/lib/ads_mutate.py';
 const ADS_TOOLS = 'Read,Bash(curl:*),Bash(python3 ' + ADS_GAQL + ':*),Bash(python3 ' + ADS_MUTATE + ':*)';
+/* agent 泳道（2026-09-14 Alvin 定下放）：白名单外 op 由无头 agent 自写 python 落地，
+   工具面放开 Write 与 python3；安全底从前置白名单换成 lib/ads_audit 的零模型后置对账。 */
+const ADS_TOOLS_AGENT = ADS_TOOLS + ',Glob,Write,Bash(python3:*)';
+
+function adsAgentLaneOps(taskOps) {
+  try {
+    const pol = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'specs', 'release_policy.json'), 'utf8'));
+    const pend = (pol.executor_pending_ops && pol.executor_pending_ops.ops) || [];
+    return (taskOps || []).filter((op) => pend.indexOf(op) !== -1);
+  } catch (e) { return []; }
+}
+
+function buildAdsAgentLaneSection(agentOps, customerId) {
+  if (!agentOps || !agentOps.length) return '';
+  return [
+    '',
+    '下放泳道（2026-09-14 Alvin 定：白名单是路由偏好不是能力天花板）：本任务包含白名单外操作：' + agentOps.join('、') + '。',
+    'ads_mutate 还没实现这些 op，由你直接执行：用 Write 在工作区写 python 脚本（google-ads 库），跑法照',
+    ADS_GAQL + ' 的凭据套路：逐行读 /data/aira/.env.google-ads 进环境变量，login_customer_id 用',
+    'GOOGLE_ADS_MCC_ID（去横杠），customer_id 恒为 ' + customerId + '。下放的规矩比白名单内更严：',
+    '- 新建实体一律先 PAUSED 创建，逐项回读与方案全对之后才允许置 ENABLED；有一项对不上就留在 PAUSED 报 aborted。',
+    '- 每个 mutate 前先读现值打印（新建的打印查证「不存在」），mutate 后回读打印，两者都进执行记录。',
+    '- 白名单内的 op 照旧走 ads_mutate，不许用自写脚本绕白名单的硬闸。',
+    '- 图片素材优先引用账户既有 asset 的 resource name；确需新图，只用方案指定的本地文件（核 md5），裁剪用 PIL 只裁不改内容，禁自造图。',
+    '- 预算、出价类数值必须与方案逐位一致，禁四舍五入。',
+    '- **items 对账行的 entity 必须写 API 返回的完整 resource name**（customers/.../assetGroups/... 这种格式），',
+    '  这是零模型对账巡检的钥匙：巡检会按 resource name 硬读账户核对，没有它或对不上，任务不能收口。',
+  ].join('\n');
+}
 
 function buildAdsPrompt(opts) {
   const { task, plan, planFile, customerId, manifest } = opts;
@@ -675,6 +705,7 @@ function buildAdsPrompt(opts) {
     '- 方案没写的资产一根手指都不许碰。响应与方案预期不符就停手（aborted），不要随机应变。',
     '- 涉及 final URL 的，提交前先 curl -sIL 验证目标 URL 200 且零跳转（Location 链为空），不过就停手。',
     '- 每个 mutate 的旧值必须出现在你的执行记录里（回滚依据）。',
+    buildAdsAgentLaneSection(opts.agentOps, customerId),
     '',
     '能力清单（风险注记必须遵守）：',
     manifest || '（清单缺失，只许执行方案里明确写出的白名单操作）',
@@ -719,14 +750,16 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
   }
   if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
   const manifest = capabilities.fullText('googleads');
-  const prompt = buildAdsPrompt({ task, plan, planFile, customerId, manifest });
-  log('task ' + taskId + ': ads apply, customer ' + customerId + ', model ' + cfg.applyModel);
+  const taskOps = String(task.ops || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const agentOps = adsAgentLaneOps(taskOps);
+  const prompt = buildAdsPrompt({ task, plan, planFile, customerId, manifest, agentOps });
+  log('task ' + taskId + ': ads apply, customer ' + customerId + ', model ' + cfg.applyModel + (agentOps.length ? ', agent 泳道 op: ' + agentOps.join(',') : ''));
   const res = await runClaude(cfg, {
     prompt,
     cwd: workspace,
     log,
     model: cfg.applyModel,
-    allowedTools: ADS_TOOLS,
+    allowedTools: agentOps.length ? ADS_TOOLS_AGENT : ADS_TOOLS,
     label: 'ads apply task ' + taskId,
   });
   const output = String(res.stdout || '').trim();
@@ -760,11 +793,33 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
       log('task ' + taskId + ': 条目账本对账，更新 ' + (rI.updated || 0) + ' 补录 ' + (rI.inserted || 0));
     } catch (e) { log('task ' + taskId + ': 条目账本对账失败（执行结果不受影响）:: ' + e.message); }
   }
+  /* agent 泳道钢板：模型报 success 只是必要条件，零模型对账硬读账户全符才算数。
+     对账不过：任务留 review 转人，条目账本保持模型上报值供人比对差异。 */
+  let auditLine = '';
+  if (agentOps.length && status === 'success') {
+    let audit;
+    try { audit = auditAgentItems(customerId, itemsA, null); }
+    catch (e) { audit = { ok: false, checked: 0, unaudited: 0, failures: [{ entity: '(audit)', why: '对账器异常：' + String(e.message).slice(0, 120) }] }; }
+    if (audit.ok) {
+      auditLine = '对账: 零模型硬读 ' + audit.checked + ' 项全符' + (audit.unaudited ? '（另 ' + audit.unaudited + ' 行无资源名未硬审）' : '');
+      log('task ' + taskId + ': agent 泳道对账通过，硬读 ' + audit.checked + ' 项');
+    } else {
+      const why = audit.failures.map((f) => f.entity + '：' + f.why).join('；') || '零行可硬审（条目缺 resource name，不符下放契约）';
+      const headA = [
+        '受影响: ' + (affected.join('；') || '（未声明）'),
+        '改前旧值: ' + (oldVals.join('；') || '（见执行记录）'),
+        '对账: 未过（' + summarize(why, 260) + '）',
+      ].join('\n');
+      await fail(headA + '\n执行完成但零模型对账未过，不能收口：账户实况与条目上报不符，人工核对后处置。 执行记录 ' + path.basename(logFile));
+      log('task ' + taskId + ': agent 泳道对账未过 :: ' + truncate(why, 200));
+      return { taskId, status: 'failed', logFile };
+    }
+  }
   const head = [
     '受影响: ' + (affected.join('；') || '（未声明）'),
     '改前旧值: ' + (oldVals.join('；') || '（见执行记录）'),
     '检查: 通过 ' + checks + ' 项，待人工 0 项',
-    '预算影响: 0（白名单内 reversible 操作）',
+    agentOps.length ? '预算影响: 按方案声明（agent 泳道，' + (auditLine || '对账见执行记录') + '）' : '预算影响: 0（白名单内 reversible 操作）',
   ].join('\n');
   if (status === 'success' && affected.length) {
     await api.completeTask(taskId, {
