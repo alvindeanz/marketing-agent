@@ -22,6 +22,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-14 AIRA：意图携带放行 + executor_pending 闸（rev 39efae3，api+worker 已部署，policy v6）
+
+- 背景：ctomi #682（客户已批的 PMax 男士素材组）被要求第三次人工放行，Alvin 定性流程 bug：「意图在 chat 表达过一次就够，二次放行是重复采集」。同单还暴露第二个 bug：chat 拿政策风险表冒充执行器能力表转机器位，放行到 apply 才发现 ads_mutate 没实现 asset-create，全链空转。
+- 意图携带：chatw 两阶段委托 / machine_run 转位 = 已验证的频道执行意图 = 放行凭证。chatw 出方案分支与 review_result L0 点都认它，spend/irreversible 档也直落。仍停的只有四种真障碍：executor_pending、条目 op 越出申报 ops（mandate_scope_ok）、同任务 apply 熔断、止损闩。
+- executor_pending_ops（policy v6 新段，6 个 op：budget-change/campaign-pause/bidding-strategy-change/campaign-create/asset-create/conversion-goal-change）：machine_run 拒转、chatw 出方案转人工说明不挂放行卡、L0 不放。tests/policy_executor.test.js 断言政策表、ads_mutate OPS、googleads.md agent_prepare 行三方一致（ad-copy-rewrite 别名 rsa-copy-update）。
+- #682 现状：按频道意图放行（decide，apply job 759），预检 4 项过，中止于执行器缺口，21 条目 blocked，未动账户。收口两条路等 Alvin 挑：人工照方案落地，或我把 PMax asset-create 补进 ads_mutate（含图片资产，需客户竖图文件，首跑盯 log）。
+- 测试：全套 17 件绿；php lint 走 deploy 远端闸过。
+
 ### 2026-09-13 AIRA：卡反馈第一性闭环上线（rev f15f533，api+worker 已部署）
 
 - 背景：sammichelle #306 客户在方向卡上表态 10 条（含反复表态与埋在 other 里的新需求）无人接，任务停在 review。Alvin 定第一性方案：一条反馈翻任务状态，harness 读状态分岔，不上 webhook 不上巡检。
