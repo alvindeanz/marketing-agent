@@ -22,6 +22,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-14 AIRA：ads agent 泳道上线并首跑收口（rev 05c4b0b/d7df6b2/f910f58，ctomi #682 验收）
+
+- Alvin 定调：白名单是路由偏好不是能力天花板，MA agent 做不了转人工是伪命题。apply 的 ads 通道检测到 executor_pending op 即解锁 Write+Bash(python3) 工具面，agent 自写 google-ads 脚本落地；安全底从前置白名单换成 lib/ads_audit 零模型后置对账（按条目 resource name GAQL 硬读账户，失败或零行可审不许收口）。API 侧撤掉上午的三道 pending 拦截（条目分类/chatw 转人工/machine_run 拒转/L0 跳过），意图携带的真障碍从四种减为三种。CLAUDE.md 硬规矩二改版，旧「模型只提议」废止。
+- 首跑（#682 建 PMax 素材组）：第一轮活全干成（PAUSED 建组→25 素材逐字核对→启用，两图 PIL 裁剪上传，AG1/预算零触碰）但 agent 幻想「后台 15:06 复查」不敢报 success 就退了；apply prompt 补一次性进程纪律（异步审核状态不阻塞 success）后第三轮幂等复入报 success，零模型对账硬读 5 项全符，[applied] 收口，条目 19 verified。
+- 教训入 prompt：一次性进程没有后台；REVIEW_IN_PROGRESS/Ad Strength 计算中不算未完成。判定前提修正（review_adjust）现在随 ads/shopify apply prompt 下发，复审硬约束优先于方案。
+- 肌肉回流欠账：asset-create 的 agent 执行记录（apply-log-task-682 三份）就是 L1 实现规格，按铁律两次内进 ads_mutate 并从 pending 表删除，认领 Aira。
+
 ### 2026-09-14 AIRA：人工通道全流程演练（HornTech NZ #52 自家账户，线程 #288），两条路打通，追修两处（rev 0e02997 / 41c3293）
 
 - 场景 B（意图携带直落）：频道两句话（提议卡+确认）后零人工停顿：commission → 方案 → [mandate-apply] 不停卡 → apply 真落自家账户（SEO核心词组新增 EXACT「外贸独立站 seo 服务」，criterion 2499502615609，GAQL 独立回读一致）→ [applied] 自动收口。这是 mandate 直落的首个真实闭环。
