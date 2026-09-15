@@ -22,6 +22,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-15 AIRA：GBP 读写分离，核查现状加出方案下放 agent（gbp-audit）
+
+- 背景：Apex #661 客户甩来 GBP 链接问要不要更新，chat 只能「我不读 share.google、请人把现状贴进来」再给通用清单（Alvin 指出 agent 该直接接手）。根因：gbp-update 整块 human_only 把只读核查也一并挡在人工。
+- 改法（照 ga4-audit / gsc-audit 的 agent_readonly 模式拆开读写）：新增 **gbp-audit**（agent_readonly，risk_class reversible）：agent 用 WebFetch 读客户**公开** GBP 现状（类目、服务区、营业时间、电话、简介、服务、照片数、评价、帖子）出具体补齐方案，一步出报告、放行即验收、不走 prepare/apply，读不到的项标「需人工补」。**gbp-update** 保留 human_only 但只管实际写入（改资料与类目、发帖、回问答、citation）。
+- 落点：specs/capabilities/webforger.md（gbp-audit 行 + risk_class + 段落注释改读写分离）+ specs/release_policy.json（gbp-audit reversible）+ seo-api.php $READONLY_OPS 加 gbp-audit。execute 不改（agent_readonly 复用 analysis 路径 execute_task L1901）；chat 不改代码（读能力清单全文，更新即生效）。
+- 效果：客户甩 GBP 链接，chat 派 gbp-audit，agent 自己读公开现状出方案，人工只做最后的改。GBP 公开资料无需后台 API 即可读；实际写入仍无可靠 API 走人工。
+- 测试：specs 两处一致、node 全套 19 文件退出码全 0、php -l 过。
+- 待部署：api（seo-api.php）+ worker（specs 在白名单）。
+
 ### 2026-09-15 AIRA：ops agent 前端侧边栏改版（收起栏 + 平台 icon + per-user 星标 + 三色徽标）
 
 Alvin 提的四项客户栏改造：

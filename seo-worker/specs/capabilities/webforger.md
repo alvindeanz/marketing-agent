@@ -33,7 +33,8 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | gsc-audit | agent_readonly | 只读审计 GSC 索引覆盖、手动操作、安全问题、站点地图状态，一步出结果不走 prepare/apply |
 | ga4-config-update | agent_prepare | GA4 配置变更：key event 标记、事件建改、数据流设置 |
 | gtm-edit | agent_prepare | GTM 容器变更：标签、触发器、变量，发布留人放行 |
-| gbp-update | human_only | GBP 一切事项（资料、类目、发帖、问答）归人工，agent 不碰不发（Alvin 2026-09-09 定） |
+| gbp-audit | agent_readonly | 只读审计 GBP 现状（主类目与附加类目、地址是否显示还是服务区、服务区列了哪些、营业时间、电话、网站链接、简介、服务列表、照片数、评价数与评分、有没有历史帖子），对着现状出具体补齐方案，一步出结果不走 prepare/apply。客户甩来 GBP 链接问要不要更新就派这个（Alvin 2026-09-15 定：核查现状加出方案 agent 自己做，不再让人贴现状）。现状读不到的项在报告里标「需人工补」 |
+| gbp-update | human_only | GBP 的实际写入（改资料与类目、发帖、回问答、citation）归人工，agent 不发不改（无可靠 API 加政策，Alvin 2026-09-09 定）。只是核查现状加出方案改走 gbp-audit，不再整块挡在人工 |
 <!-- PLANNING_VIEW_END -->
 
 <!-- RISK_CLASS_START：放行分级输入（见 ../release_policy.md），与 release_policy.json 一致由 specs 测试断言 -->
@@ -51,6 +52,7 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 - gtm-edit: reversible（L0 排除：追踪链路）
 - ga4-config-update: irreversible
 - gbp-update: external
+- gbp-audit: reversible
 - gsc-audit: reversible
 - ga4-audit: reversible
 <!-- RISK_CLASS_END -->
@@ -265,7 +267,7 @@ WebForger 客户的 GA4、GSC、GTM、GBP 由 agency 账号托管，agent 已获
 
 ## ga4-config-update / gtm-edit（agent_prepare）；gbp-update（human_only，2026-09-09 Alvin 定）
 
-GA4/GTM 两类产出变更方案文档：改什么、改成什么、为什么、怎么验证、怎么回滚。**注意：apply 自动化通道尚未接通（worker 侧没有 GTM 写入工具链），人放行后由人照方案执行，方案要写到人能直接照做的粒度。** 通道接通前不要在方案里假设 apply_task 会自动执行。GTM 发布（publish container version）永远留人确认。\n\n**GBP 全类目 human_only（Alvin 2026-09-09 定）：agent 搞不定 GBP，也无法发帖。规划时 GBP 相关任务一律 owner=agency，不给 agent 派 GBP 的核查、方案或落地；已有的 GBP 分析产出只作为人工执行的参考材料。**
+GA4/GTM 两类产出变更方案文档：改什么、改成什么、为什么、怎么验证、怎么回滚。**注意：apply 自动化通道尚未接通（worker 侧没有 GTM 写入工具链），人放行后由人照方案执行，方案要写到人能直接照做的粒度。** 通道接通前不要在方案里假设 apply_task 会自动执行。GTM 发布（publish container version）永远留人确认。\n\n**GBP 读写分离（Alvin 2026-09-15 更新，取代 2026-09-09 的整块 human_only）：核查现状加出补齐方案走 gbp-audit（agent_readonly，agent 用 WebFetch 读客户公开 GBP 现状，一步出方案报告，放行等于验收，不走 prepare/apply）；实际写入（改资料与类目、发帖、回问答、citation）走 gbp-update（human_only，无可靠 API 加政策，人照方案执行）。客户甩来 GBP 链接问要不要更新，派 gbp-audit 让 agent 自己读现状出具体方案，不再让人贴现状、不再把核查也整块挡在人工；现状读不到的项报告里标「需人工补」。**
 
 - 重定向：改完 `GET /redirects` 回读，确认 key 在、value 对；有条件的话 `curl -sI https://{域名}{旧路径}` 看到 301 且 Location 正确。
 - 页面正文与元数据：`GET /api/pages/{siteId}` 或 `GET /api/content/{siteId}/elements?page=` 回读比对预期值。
