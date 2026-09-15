@@ -22,6 +22,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-16 AIRA：任务视图三改（已结束拆分 / 确认卡进人工泳道 / 判定四件下线）
+
+Alvin 看 Apex 任务页提的三项，全在 static/seo-agent.html 展示层：
+1. **已结束与进行中完全拆分**：taskVisible 改互斥视图，「显示已结束」开=只看已结束（受时间档约束），关=只看进行中；按钮态切「返回进行中」，泳道计数与提示行文案随视图切换。Chat 筛选下 chat 任务在进行中视图仍可见（沿用 2026-09-08 例外）。
+2. **客户确认卡进人工泳道**：新增 isPendingClientCard/laneKeyOf，review 状态且未折叠（result_note 无 [卡反馈折叠] 标）的词卡/素材卡（ops 匹配）与博客/内容确认卡（note 或 output_url 匹配 确认卡/blog_confirmation 等）显示进人工泳道（发卡与跟客户确认是人的活），折叠完自动回 Agent 泳道。只改展示层，owner_type 数据与产线不动。
+3. **判定四件下线**：任务工具栏「新增任务/判定/全部按推荐/执行选中任务」四按钮移除（判定已收进 harness 与 Chat 派单），函数与端点原样保留，renderReviewButtons/renderPickHint 均有判空不受影响；jobs 面板的执行按钮不在本次范围未动。
+- 测试：node tests/ 全套 19 文件退出码全 0。
+- 待部署：api 模式（seo-agent.html 上 250）。
+
 ### 2026-09-15 AIRA：存量方向卡迁入新契约 + legacy 通道（频道改卡链路打通）
 
 - 背景：Alvin 要能在频道跟 chat 说「改某张卡的文案 / 链接」。链路本身通（chat 出委托单 → 放行 → execute_task 改 data.json 重渲染 → scp 覆盖同名文件，客户链接与 t/k 参数不变），堵点是窗口定版后五张存量卡是旧契约（手写 period_label，实际窗口也不合新规则），新渲染器直接拒收。

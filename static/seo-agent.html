@@ -535,12 +535,9 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn ghost" id="og_chat" onclick="setOriginScope('chat')">Chat</button>
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
-              <!-- 手动挡（2026-09-07 Alvin 定收起）：判定与执行由 harness 与 Chat 派单自动跑，
-                   这些按钮只留给应急人工干预，函数与端点原样保留 -->
-              <button class="btn ghost" onclick="toggleAddTask()">新增任务</button>
-              <button class="btn ghost" id="rvBtn" onclick="reviewTasks(this,'all')" title="手动触发 Fable 判定（正常由产线自动跑）">判定</button>
-              <button class="btn ghost" id="rvApplyBtn" onclick="applyVerdicts(this,'all')" style="display:none" title="手动按判决处理（正常由 harness 收口）">全部按推荐</button>
-              <button class="btn ghost" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
+              <!-- 手动挡四件（新增任务/判定/全部按推荐/执行选中任务）已下线（2026-09-16 Alvin 定：
+                   判定功能已收进 harness 与 Chat 派单，看板不再提供）。函数与端点原样保留，
+                   应急人工干预走控制台或 API。 -->
               <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
               <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
                 <option value="0">全部时间</option>
@@ -3284,11 +3281,14 @@ function withinWindow(t){
   if(isNaN(ms))return true;
   return (Date.now()-ms)<=taskDays*86400000;
 }
+/* 已结束与进行中完全拆分（2026-09-16 Alvin 定）：开「显示已结束」只看已结束，
+   关掉只看进行中，两个视图互斥不再混排折叠。 */
 function taskVisible(t){
-  if((t.human_state||(t.status==='done'?'closed':'wait_me'))!=='closed')return true;
-  /* Chat 单天生完结，选中 Chat 筛选时不受「隐藏已结束」影响（2026-09-08） */
+  const closed=(t.human_state||(t.status==='done'?'closed':'wait_me'))==='closed';
+  if(showDone)return closed&&withinWindow(t);
+  /* Chat 单天生完结，选中 Chat 筛选时在进行中视图仍可见（2026-09-08） */
   if(originScope==='chat'&&taskOrigin(t)==='chat')return true;
-  return showDone&&withinWindow(t);
+  return !closed;
 }
 function toggleShowDone(){showDone=!showDone;renderLanes()}
 function setTaskDays(v){taskDays=parseInt(v,10)||0;renderLanes()}
@@ -3386,12 +3386,23 @@ var hideEmptyLanes=true;
    结束的默认藏，「显示已结束」打开，受时间档约束。空泳道按开关隐藏。 */
 const HS_ORDER={wait_me:0,running:1,wait_ext:2,closed:3};
 function hsOf(t){return t.human_state||(t.status==='done'?'closed':'wait_me')}
+/* 客户确认卡类任务（博客/网站内容确认卡、ads 词卡素材卡）在等客户点头期间算人的活
+   （发卡、跟客户确认），显示进人工泳道；反馈折叠完（result_note 带 [卡反馈折叠]）
+   agent 接手，回 Agent 泳道（2026-09-16 Alvin 定）。只改展示层，owner_type 数据不动。 */
+function isPendingClientCard(t){
+  if(t.status!=='review')return false;
+  const s=String(t.result_note||'');
+  if(/\[卡反馈折叠/.test(s))return false;
+  if(/keyword-direction|creative-direction/.test(String(t.ops||'')))return true;
+  return /确认卡|blog_confirmation|keyword_direction_|creative_direction_/.test(s+String(t.output_url||''));
+}
+function laneKeyOf(t){return isPendingClientCard(t)?'human':(t.owner_type==='agent'?'agent':'human')}
 function renderLanes(){
   const cur=currentSprint(tasksData);
   let laterTotal=0,doneHiddenTotal=0;
   const laneHtml=[];const hiddenNames=[];
   LANES.forEach(lane=>{
-    const rows=tasksData.filter(t=>lane.keys.indexOf(t.owner_type)!==-1&&(catScope==='all'||taskCat(t)===catScope)&&(originScope==='all'||taskOrigin(t)===originScope));
+    const rows=tasksData.filter(t=>laneKeyOf(t)===lane.key&&(catScope==='all'||taskCat(t)===catScope)&&(originScope==='all'||taskOrigin(t)===originScope));
     const afterDone=rows.filter(taskVisible);
     const vis=afterDone.filter(t=>withinScope(t,cur))
       .sort((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id));
@@ -3399,11 +3410,11 @@ function renderLanes(){
     const doneHidden=rows.length-afterDone.length;
     laterTotal+=later;doneHiddenTotal+=doneHidden;
     let body=vis.map(t=>taskCard(t,t.owner_type)).join('');
-    if(!body)body='<div class="lane-empty">'+(later?'本期没有任务。':(doneHidden?'只有已结束任务，已按当前筛选隐藏。':'暂无任务。'))+'</div>';
+    if(!body)body='<div class="lane-empty">'+(showDone?'没有已结束任务。':(later?'本期没有任务。':(doneHidden?'只有已结束任务，点「显示已结束」查看。':'暂无任务。')))+'</div>';
     const waitMe=vis.filter(t=>hsOf(t)==='wait_me').length;
     const html='<div class="lane"><div class="lane-head"><span class="lane-name">'+lane.name+'</span>'+
       '<span class="lane-count">'+vis.length+(waitMe?' <span style="color:#fbbf24">等我 '+waitMe+'</span>':'')+
-      (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' 已结束)</span>':'')+
+      (doneHidden?' <span class="lane-hidden">(+'+doneHidden+' '+(showDone?'进行中':'已结束')+')</span>':'')+
 
       '</span></div><div class="lane-body">'+body+'</div></div>';
     const empty=!vis.length; /* 只看本视图可见的卡；未来任务本来就不显示，不算数（2026-08-31 Agency 空泳道藏不掉的修复） */
@@ -3420,7 +3431,7 @@ function renderLanes(){
     lanesEl.innerHTML=laneHtml.join('');
   }
   const tg=document.getElementById('doneToggle');
-  if(tg)tg.className=showDone?'btn':'btn ghost';
+  if(tg){tg.className=showDone?'btn':'btn ghost';tg.textContent=showDone?'返回进行中':'显示已结束'}
   ['current','near','all'].forEach(k=>{
     const b=document.getElementById('sc_'+k);
     if(b)b.className=(sprintScope===k)?'btn':'btn ghost';
@@ -3446,7 +3457,7 @@ function renderLanes(){
     }
     bits.push(head+(sprintScope==='near'?' 加后两个 sprint':''));
     if(laterTotal)bits.push('另有 '+laterTotal+' 个排在后面');
-    if(doneHiddenTotal)bits.push('已藏 '+doneHiddenTotal+' 个已结束');
+    if(doneHiddenTotal)bits.push(showDone?('另有 '+doneHiddenTotal+' 个进行中，点「返回进行中」查看'):('已结束 '+doneHiddenTotal+' 个不在此列，点「显示已结束」查看'));
     hint.textContent=bits.join('，');
   }
   renderPickHint();
