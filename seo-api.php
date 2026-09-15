@@ -4801,11 +4801,6 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
     $tid=(int)($i['task_id']??0);
     $tok=(string)($i['token']??'');
     if(!$tid||!hash_equals(md5('cardfb'.$tid.$WORKER_TKN),$tok))res(403,['error'=>'bad token']);
-    $item=mb_substr(trim((string)($i['item']??'')),0,120,'UTF-8');
-    $choice=(string)($i['choice']??'');
-    if(!in_array($choice,['agree','hold','other','flag'],true))res(400,['error'=>'bad choice']);
-    $txt=mb_substr(trim((string)($i['text']??'')),0,2000,'UTF-8');
-    if($choice==='other'&&$txt==='')$choice='hold';
     $g=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
     $g->execute([$tid]);
     if(!$g->fetch())res(404,['error'=>'task not found']);
@@ -4818,19 +4813,40 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         KEY idx_card_fb_task (task_id, id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    /* 签章列（2026-09-16 Alvin 定：卡上显示最后一次反馈时间与 IP），惰性补列 */
+    $ipCol=db()->query("SELECT COUNT(*) c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_card_feedback' AND COLUMN_NAME='ip'")->fetch();
+    if(!(int)($ipCol['c']??0))db()->exec("ALTER TABLE seo_card_feedback ADD COLUMN ip VARCHAR(64) NOT NULL DEFAULT ''");
+    /* 客户端 IP：同域中继带 X-Forwarded-For（只有中继一跳，取第一段即客户真实 IP），直连取 REMOTE_ADDR */
+    $ip=trim(explode(',',(string)($_SERVER['HTTP_X_FORWARDED_FOR']??''))[0]);
+    if($ip==='')$ip=(string)($_SERVER['REMOTE_ADDR']??'');
+    $ip=substr($ip,0,64);
+    /* status 查询模式（2026-09-16 签章回显）：token 过验即可读本卡每个 item 的最后一次表态
+       （choice/时间/IP，不回 fb 文本），卡页加载时用来画「已反馈」签章。 */
+    if(!empty($i['status'])){
+        $q=db()->prepare("SELECT item,choice,created_at,ip FROM seo_card_feedback WHERE task_id=? ORDER BY id");
+        $q->execute([$tid]);
+        $last=[];
+        foreach($q->fetchAll() as $r)$last[$r['item']]=['item'=>$r['item'],'choice'=>$r['choice'],'at'=>$r['created_at'],'ip'=>(string)($r['ip']??'')];
+        res(200,['ok'=>true,'items'=>array_values($last)]);
+    }
+    $item=mb_substr(trim((string)($i['item']??'')),0,120,'UTF-8');
+    $choice=(string)($i['choice']??'');
+    if(!in_array($choice,['agree','hold','other','flag'],true))res(400,['error'=>'bad choice']);
+    $txt=mb_substr(trim((string)($i['text']??'')),0,2000,'UTF-8');
+    if($choice==='other'&&$txt==='')$choice='hold';
     /* 防重（2026-09-13）：同任务同项同表态同文本 24 小时内只记一次，连击与 widget 重发
        不再刷屏 note。24 小时后同款提交视为客户重申，照常入库。 */
-    $dq=db()->prepare("SELECT id FROM seo_card_feedback WHERE task_id=? AND item=? AND choice=? AND IFNULL(fb,'')=? AND created_at>DATE_SUB(NOW(),INTERVAL 24 HOUR) LIMIT 1");
+    $dq=db()->prepare("SELECT id,created_at,ip FROM seo_card_feedback WHERE task_id=? AND item=? AND choice=? AND IFNULL(fb,'')=? AND created_at>DATE_SUB(NOW(),INTERVAL 24 HOUR) LIMIT 1");
     $dq->execute([$tid,$item,$choice,$txt]);
-    if($dq->fetch())res(200,['ok'=>true,'dedup'=>true]);
-    db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb)VALUES(?,?,?,?)")->execute([$tid,$item,$choice,$txt]);
+    if($dup=$dq->fetch())res(200,['ok'=>true,'dedup'=>true,'at'=>$dup['created_at'],'ip'=>(string)($dup['ip']??'')]);
+    db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip)VALUES(?,?,?,?,?)")->execute([$tid,$item,$choice,$txt,$ip]);
     $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单'][$choice];
     task_append_note($tid,'[客户反馈] '.($item!==''?($item.'：'):'').$label.($txt!==''?('：'.$txt):''));
     /* 状态翻转（2026-09-13 Alvin 定第一性原则）：一条反馈就改变任务状态，
        harness 下一轮读到 card_feedback_at 非空自然分岔，不需要 webhook 或巡检。 */
     ensure_review_schema();
     db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
-    res(200,['ok'=>true]);
+    res(200,['ok'=>true,'at'=>date('Y-m-d H:i:s'),'ip'=>$ip]);
 }
 
 /* GET /card_feedback?task_id= -> 该卡的全部反馈行（id 升序即时间序），harness 折叠用。 */

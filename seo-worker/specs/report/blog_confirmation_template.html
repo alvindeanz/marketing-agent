@@ -67,6 +67,7 @@ h2{font-size:1.16rem;font-weight:800;letter-spacing:-.2px}
 .fbmsg{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.65}
 .fbmsg.ok{color:#047857;font-weight:700}
 .fbmsg.err{color:#b45309;font-weight:700}
+.fbstamp{align-self:center;font-size:12px;color:#047857;font-weight:700;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:6px 10px}
 .fb.off .fbb{opacity:.5;cursor:default}
 
 footer{background:var(--surface);border-top:1px solid var(--border);padding:20px 0 26px;font-size:12px;color:var(--muted);line-height:1.85}
@@ -223,7 +224,7 @@ footer b{color:#334155}
       return res;
     }, function () { return postTo(API_FALLBACK, body); }).then(function (res) {
       if (!res.ok) { throw new Error('HTTP ' + res.status); }
-      return true;
+      return res.json().catch(function () { return {}; });
     });
   }
 
@@ -232,6 +233,30 @@ footer b{color:#334155}
     function p(n) { return (n < 10 ? '0' : '') + n; }
     return d.getFullYear() + ' 年 ' + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
+
+  /* 已反馈签章（2026-09-16）：按钮右侧显示最后一次表态的时间与 IP，加载时回填现状。 */
+  var CHOICE_LABEL = { agree: '同意发布', hold: '保持草稿', other: '有修改意见' };
+  function setStamp(itemName, choice, at, ip) {
+    var fb = document.querySelector('.fb[data-item="' + itemName + '"]');
+    var host = fb && fb.querySelector('.fbrow');
+    if (!host) { return; }
+    var el = host.querySelector('.fbstamp');
+    if (!el) { el = document.createElement('span'); el.className = 'fbstamp'; host.appendChild(el); }
+    el.textContent = '已反馈：' + (CHOICE_LABEL[choice] || choice) + ' · ' + String(at || '').slice(0, 16) + (ip ? ' · IP ' + ip : '');
+  }
+  function loadStamps() {
+    var body = JSON.stringify({ task_id: taskId, token: token, status: 1 });
+    postTo(API, body).then(function (res) {
+      if (res.status === 404 || res.status === 405 || res.status === 403) { return postTo(API_FALLBACK, body); }
+      return res;
+    }, function () { return postTo(API_FALLBACK, body); }).then(function (res) {
+      if (!res.ok) { return; }
+      return res.json().then(function (d) {
+        ((d && d.items) || []).forEach(function (r) { setStamp(r.item, r.choice, r.at, r.ip); });
+      });
+    }).catch(function () {});
+  }
+  loadStamps();
 
   Array.prototype.forEach.call(document.querySelectorAll('.fb'), function (group) {
     var item = group.getAttribute('data-item');
@@ -252,9 +277,10 @@ footer b{color:#334155}
       btn.disabled = true;
       msg.className = 'fbmsg';
       msg.textContent = '正在保存……';
-      post(item, choice, text).then(function () {
+      post(item, choice, text).then(function (d) {
         btn.disabled = false;
         lock(btn, label);
+        if (d && d.at) { setStamp(item, choice, d.at, d.ip); }
       }).catch(function () {
         btn.disabled = false;
         msg.className = 'fbmsg err';

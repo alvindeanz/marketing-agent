@@ -3404,8 +3404,12 @@ function renderLanes(){
   LANES.forEach(lane=>{
     const rows=tasksData.filter(t=>laneKeyOf(t)===lane.key&&(catScope==='all'||taskCat(t)===catScope)&&(originScope==='all'||taskOrigin(t)===originScope));
     const afterDone=rows.filter(taskVisible);
+    /* 已结束视图按结束时间倒序（2026-09-16 Alvin 定：刚完成的排最上，人工顺着审）；
+       进行中视图沿用 等我>在跑>等外部 加优先级。 */
     const vis=afterDone.filter(t=>withinScope(t,cur))
-      .sort((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id));
+      .sort(showDone
+        ?((a,b)=>String(taskTime(b)).localeCompare(String(taskTime(a)))||(b.id-a.id))
+        :((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id)));
     const later=afterDone.length-vis.length;
     const doneHidden=rows.length-afterDone.length;
     laterTotal+=later;doneHiddenTotal+=doneHidden;
