@@ -542,7 +542,6 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
               <button class="btn ghost" id="rvApplyBtn" onclick="applyVerdicts(this,'all')" style="display:none" title="手动按判决处理（正常由 harness 收口）">全部按推荐</button>
               <button class="btn ghost" id="taskRunBtn" onclick="fireJob('execute_task',this)" disabled>执行选中任务</button>
               <button class="btn ghost" id="doneToggle" onclick="toggleShowDone()">显示已结束</button>
-              <button class="btn ghost" id="emptyLaneToggle" onclick="toggleHideEmptyLanes()" title="人工泳道常年为空时隐藏，Agent 泳道撑满宽度">隐藏空泳道</button>
               <select class="tb-select" id="taskDays" onchange="setTaskDays(this.value)">
                 <option value="0">全部时间</option>
                 <option value="7">近 7 天</option>
@@ -3379,15 +3378,8 @@ function widenSprintScope(){
   renderLanes();
 }
 
-/* 空泳道隐藏：默认开，记在本机 localStorage（纯界面偏好）。全空时不隐藏，免得整块消失。 */
+/* 空泳道默认隐藏，无开关（2026-09-15 Alvin 定去掉按钮）。全空时不隐藏，免得整块消失（renderLanes 里判断）。 */
 var hideEmptyLanes=true;
-try{hideEmptyLanes=(localStorage.getItem('seo_hide_empty_lanes')||'1')==='1'}catch(e){}
-function toggleHideEmptyLanes(){
-  hideEmptyLanes=!hideEmptyLanes;
-  try{localStorage.setItem('seo_hide_empty_lanes',hideEmptyLanes?'1':'0')}catch(e){}
-  renderLanes();
-}
-window.toggleHideEmptyLanes=toggleHideEmptyLanes;
 
 /* 泳道按负责方（Agency / Client / Agent），泳道内不再按 status 分组：
    每张卡自己带一行状态（等我 / 在跑 / 等外部 / 结束），排序先等我、再在跑、再等外部，同档按优先级。
@@ -3427,8 +3419,6 @@ function renderLanes(){
     lanesEl.style.gridTemplateColumns=window.innerWidth>900?('repeat('+laneHtml.length+',1fr)'):'';
     lanesEl.innerHTML=laneHtml.join('');
   }
-  const et=document.getElementById('emptyLaneToggle');
-  if(et){et.className=hideEmptyLanes?'btn':'btn ghost';et.textContent=hideEmptyLanes&&hiddenNames.length?('隐藏空泳道（'+hiddenNames.length+'）'):'隐藏空泳道'}
   const tg=document.getElementById('doneToggle');
   if(tg)tg.className=showDone?'btn':'btn ghost';
   ['current','near','all'].forEach(k=>{
