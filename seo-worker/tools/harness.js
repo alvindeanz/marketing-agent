@@ -66,6 +66,33 @@ async function foldCards(sprint) {
     const summary = summariseFold(f);
     log('#' + card.id + ' 卡反馈折叠：' + summary);
     if (DRY) continue;
+    // 博客确认卡（publish_blog）不走泛方向卡折叠：agree 的凭证要留在 seo_card_feedback 表里，
+    // 供博客任务 apply 时查（runBlogPublish 硬闸），发布靠该任务自身放行，这里不开泛落地任务；
+    // 只有客户写了修改意见才开修订任务。card_feedback_done 只清 card_feedback_at 标记不删表行。
+    if (rows.some((r) => String(r.item) === 'publish_blog')) {
+      const pub = rows.filter((r) => String(r.item) === 'publish_blog');
+      const lastPub = pub[pub.length - 1];
+      let revId = null;
+      if (f.texts.length) {
+        const lines = ['客户对这篇博客的修改意见（逐条处理，改完重新产确认卡再走客户确认）：'];
+        for (const x of f.texts) lines.push('- ' + x.text.slice(0, 500));
+        lines.push('来源：博客确认卡 #' + card.id + '，表态历史见该任务 note。');
+        const r = await call('POST', '/tasks', {
+          client_id: cid,
+          title: '博客修订：' + String(card.title).replace(/^(\[[^\]]*\]\s*)+/, '').slice(0, 52),
+          module: card.module || 'content', sprint, priority: 'P1', owner_type: 'agent',
+          detail: lines.join('\n'),
+        });
+        revId = r.id;
+        log('#' + card.id + ' -> 博客修订任务 #' + revId);
+      }
+      const state = lastPub.choice === 'agree' ? '客户同意发布，等本任务放行时 apply 发布'
+        : lastPub.choice === 'hold' ? '客户暂不发布，保持草稿'
+          : '客户有修改意见' + (revId ? '，已开修订 #' + revId : '');
+      await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '博客确认卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）：' + summary + (revId ? '。修订 #' + revId : ''), source: 'client', status: 'confirmed' });
+      await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + state, card_feedback_done: 1 });
+      continue;
+    }
     let followId = null;
     if (f.agreed.length || f.texts.length) {
       const lines = [];

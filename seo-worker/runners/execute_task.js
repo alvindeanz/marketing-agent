@@ -1658,12 +1658,69 @@ async function runBlogTask(ctx, context, workspace, task) {
     (review.verdict === 'revise' && review.issues.length && !/审稿修改/.test(reviewNote)) ? '审稿意见（未能自动落实）：' + review.issues.join('；') : '',
   ].filter(Boolean).join('\n');
 
+  // 博客确认卡（2026-09-15 Alvin 定）：老客户 sprint 内博客发布前的唯一客户确认闸。
+  // 从 draft 自动组卡（关键词用主词 + 正文 H2 子题、内链从正文提取、draft 预览按钮），
+  // 渲染成客户版卡，output_url 指向卡（带 t/k）。人工前端把这个链接发给客户，客户在卡上
+  // 点「同意，安排发布」(publish_blog=agree)，apply 才放行 publish（发布门有硬闸查这个）。
+  let cardUrl = '';
+  try {
+    const bcRender = require('../specs/report/render_blog_confirmation.js');
+    const clean = (s) => String(s || '').replace(/—/g, '，').replace(/\s+/g, ' ').trim();
+    const bodyMd = String(placedBody || draft.body_markdown || '');
+    const linksOut = [];
+    const seenLink = {};
+    const linkRe = /\[([^\]]{1,60})\]\((\/[^)\s]+)\)/g;
+    let lm;
+    while ((lm = linkRe.exec(bodyMd)) && linksOut.length < 6) {
+      if (seenLink[lm[2]]) continue;
+      seenLink[lm[2]] = 1;
+      linksOut.push({ page: lm[2], anchor: clean(lm[1]) });
+    }
+    const keywords = [{ term: clean(draft.keyword || draft.title), intent: '搜这个词的人正在找这方面的答案，站内目前没有页面接得住' }];
+    const h2s = (bodyMd.match(/^##\s+(.+)$/gm) || []).slice(0, 3).map((h) => clean(h.replace(/^##\s+/, '')));
+    for (const h of h2s) if (/[A-Za-z]/.test(h)) keywords.push({ term: h, intent: '文章覆盖的一个子问题' });
+    const cardData = {
+      title: clean(draft.title),
+      period_label: '草稿待您确认 · ' + new Date().toISOString().slice(0, 7),
+      oneline: clean(draft.excerpt || draft.meta_description || draft.title).slice(0, 120),
+      draft_url: previewUrl,
+      draft_hint: '这是只有您能看到的预览链接，文章还没对外发布。',
+      keywords,
+      links_out: linksOut,
+      images_line: imagesMissing ? '配图还差几张，发布前会补齐。' : '文章已配好图，具体见预览。',
+      decision: {
+        q: '这篇文章可以发布吗？',
+        situation: '围绕「' + clean(draft.keyword || draft.title) + '」这个搜索，站内还没有页面接得住',
+        recommendation: '发出去能接住搜这个问题的访客，顺势把他们引到相关的产品或服务页',
+        no_reply: '不回复我们就先留着不发，等您确认',
+        item: 'publish_blog',
+        textarea_hint: '哪里想改直接写：标题、措辞、事实、配图都行。',
+      },
+      window_line: '数据与口径见任务附件。',
+      attach_line: '完整文章见上方预览链接。',
+    };
+    const cardHtml = bcRender.renderCard(cardData);
+    const rdir = path.join(workspace, 'reports');
+    fs.mkdirSync(rdir, { recursive: true });
+    const cardName = 'blog_confirmation_task-' + taskId + '.html';
+    fs.writeFileSync(path.join(rdir, cardName), cardHtml, 'utf8');
+    const res = await publishFile(ctx.cfg, path.basename(workspace), '', cardName, path.join(rdir, cardName), log);
+    if (res && res.url) {
+      const fbTok = require('node:crypto').createHash('md5').update('cardfb' + taskId + ctx.cfg.serviceToken).digest('hex');
+      cardUrl = res.url + '?t=' + taskId + '&k=' + fbTok;
+      log('task ' + taskId + '：博客确认卡已发布 ' + res.url);
+    }
+  } catch (e) {
+    log('task ' + taskId + '：博客确认卡生成失败，output_url 退回平台预览链接（发布门仍要求客户同意）:: ' + e.message);
+  }
+
   // Anything the pass left in the task's deliverable directory goes up before
   // the result, so the card and its downloads appear together.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
+  const noteWithCard = cardUrl ? ('博客确认卡（发给客户，客户点同意才发布）: ' + cardUrl + '\n' + note) : note;
   // 图没齐就打 attention：稿子进待放行，但人得先补图，发布门会拦。
-  await api.postTaskResult(taskId, { output_url: previewUrl, note, attention: imagesMissing });
-  log('task ' + taskId + '：已交付，任务进 review 等人转发客户' + (imagesMissing ? '（配图不齐，已标需人判断）' : ''));
+  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: noteWithCard, attention: imagesMissing });
+  log('task ' + taskId + '：已交付，任务进 review，' + (cardUrl ? '确认卡已出待客户同意发布' : '确认卡缺失退回预览链接') + (imagesMissing ? '（配图不齐，已标需人判断）' : ''));
   return draftFile;
 }
 

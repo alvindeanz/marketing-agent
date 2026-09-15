@@ -22,6 +22,20 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-15 AIRA：博客确认卡上线（对外博客发布前的客户确认闸）
+
+- 背景：Alvin 定博客发布走确认卡（复用 card_feedback 状态机）。老客户方向层已静默 onboard，博客确认卡是老客户 sprint 内唯一的客户确认闸。前置的 card_feedback 两缺陷已修（rev cb00641）。
+- 新增卡型：`specs/report/blog_confirmation_template.html` + `render_blog_confirmation.js` + `blog_confirmation_data.schema.json` + `blog_confirmation_spec.md`，复用 direction_card_lib 渲染引擎与同一条反馈脚本。卡含 draft 预览大按钮、关键词规划（快赢导向）、内链规划、配图、发布决策（agree 同意发布 / hold 保持草稿 / other 修改）。decision.item 固定 `publish_blog`。
+- 集成四处：
+  1. execute_task 博客产 draft 后自动组卡（关键词=主词+正文 H2 子题、内链从正文 markdown 链接提取、draft_url=平台预览链接），渲染上传，output_url=卡链接（带 t/k）；create 与 revise 通用。
+  2. apply_task runBlogPublish 加客户同意硬闸：发布前查 seo_card_feedback 有 `publish_blog=agree`（以最后表态为准），否则抛错不发。杜绝未确认草稿被误发（#138/#139 收账误放行事故）。
+  3. harness foldCards 博客确认卡分支：agree 的凭证留在 seo_card_feedback 表供 apply 查、不开泛落地任务（card_feedback_done 只清标记不删表行）；客户写了修改意见才开修订任务。
+  4. 修 blog-edit 泳道 bug：apply_task BLOG_OPS 补 `blog-edit`（#96 死于此，改稿掉进通用 change-plan 分支必失败），改稿也走 runBlogPublish + 同一确认闸。
+  - lib/api.js 加 `cardFeedback(taskId)`。
+- 闭环：execute 产 draft+确认卡 → 人工前端把卡链接发客户 → 客户点「同意，安排发布」(publish_blog=agree) → 下一轮 harness apply 查到凭证才 publish。到期自动发布对博客不启用（博客卡标题不含「方向卡/direction」，不命中 harness 到期分支）。
+- 测试：node 全套 19 文件退出码全 0（新增 blog_confirmation.test.js 7 项），node --check 改动文件全过。
+- 待部署：worker（execute/apply/harness/lib/specs 都属 worker），specs 在 deploy 白名单内。
+
 ### 2026-09-15 AIRA：老客户静默 onboard + mapping 闸正则修复
 
 - 背景：Alvin 定老客户内部静默走完 onboard 两闸直接进 sprint。关键词方向在导入建档时已定义(profile target_keywords)、合作月报持续沿用；mapping 也都做过。不为形式重出客户确认卡。快赢优先(流量曝光)。

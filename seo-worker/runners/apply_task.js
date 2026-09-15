@@ -29,7 +29,11 @@ const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*),Bash(node ' + VERIFY
 const OUTPUT_DIRNAME = 'seo-agent-output';
 const CHANGE_PLAN_PREFIX = 'change-plan-task-';
 const STATUSES = ['success', 'aborted', 'failed'];
-const BLOG_OPS = ['blog-draft', 'blog-publish'];
+// blog-edit（已发布文章就地改稿）也是博客 op：execute 判「是博客」只看 isBlogUrl，
+// apply 这里漏了 blog-edit 会让改稿掉进通用 change-plan 分支必然失败（#96 事故）。
+// 三者都走 runBlogPublish（内部按发布前状态分 draft 发布 / 已发布改稿两条路），
+// 都过客户同意发布硬闸。
+const BLOG_OPS = ['blog-draft', 'blog-publish', 'blog-edit'];
 
 /** Same shape as execute_task's helper. Kept local so runners stay independent. */
 function taskOps(task) {
@@ -527,6 +531,19 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   });
   const who = await client.login(cred.email, cred.password);
   record('已登录 WebForger，siteId ' + who.siteId);
+
+  // 客户同意发布是硬前置（2026-09-15）：博客对外发布的终局裁决权在客户，fable 判 do、
+  // 人放行都不构成发布凭证，必须确认卡上客户点过「同意，安排发布」(publish_blog=agree，
+  // 以最后一次表态为准)。杜绝未经客户确认的草稿被误发（#138/#139 收账时误放行事故）。
+  const fbres = await api.cardFeedback(taskId).catch(() => ({ rows: [] }));
+  const pub = (fbres.rows || []).filter((r) => String(r.item) === 'publish_blog');
+  const lastPub = pub.length ? pub[pub.length - 1] : null;
+  if (!lastPub || String(lastPub.choice) !== 'agree') {
+    throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
+      + (lastPub ? '，当前最后表态是 ' + lastPub.choice : '，卡上没有任何发布表态') + '）。'
+      + '不发布。等客户在确认卡上点「同意，安排发布」后再放行。');
+  }
+  record('客户确认卡已同意发布（publish_blog=agree），继续');
 
   const slug = wf.slugFromBlogUrl(previewUrl);
   if (!slug) throw new Error('task ' + taskId + '：从 output_url 解析不出 slug：' + previewUrl);

@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "博客确认卡数据契约（blog-confirmation）",
+  "description": "老客户 sprint 内博客发布前的唯一客户确认卡。模型只产数据，render_blog_confirmation.js 渲染成客户版 HTML。语言铁律见 blog_confirmation_spec.md。draft_url 与 window_line/attach_line 由 execute 组装填入（模型不写链接）。",
+  "type": "object",
+  "required": ["title", "period_label", "oneline", "keywords", "images_line", "decision"],
+  "additionalProperties": true,
+  "properties": {
+    "title": { "type": "string", "description": "博客标题（客户看到的中文说明标题，非 SEO title）" },
+    "period_label": { "type": "string", "description": "如「草稿待您确认 · 2026-09」" },
+    "oneline": { "type": "string", "description": "一句话这篇写什么、能接住哪类搜索（快赢角度，客户能懂的人话）" },
+    "draft_url": { "type": "string", "description": "博客草稿预览链接（execute 填入，带平台 preview token；模型可留空）" },
+    "draft_hint": { "type": "string", "description": "预览链接说明（execute 可用默认，如「只有您能看到，还没对外发布」）" },
+    "keywords": {
+      "type": "array",
+      "minItems": 1,
+      "description": "这篇针对的搜索（快赢优先：高意向、站内还没覆盖、可赢的词排前）",
+      "items": {
+        "type": "object",
+        "required": ["term", "intent"],
+        "properties": {
+          "term": { "type": "string", "description": "目标搜索词（英文原词，不翻译）" },
+          "intent": { "type": "string", "description": "搜这个词的人想要什么（买前顾虑 / 找方案 / 比价等，人话）" },
+          "note": { "type": "string", "description": "可选：为什么值得做（有量、站内空白、易赢等）" }
+        }
+      }
+    },
+    "links_out": {
+      "type": "array",
+      "description": "这篇连去站内哪些页（引读者到成交页 + SEO 页面关系）",
+      "items": {
+        "type": "object",
+        "required": ["page"],
+        "properties": {
+          "page": { "type": "string", "description": "目标页面（客户能认的名字 + 路径）" },
+          "anchor": { "type": "string", "description": "可选：锚文本" }
+        }
+      }
+    },
+    "links_in": {
+      "type": "array",
+      "description": "站内哪些页会连到这篇（可选）",
+      "items": {
+        "type": "object",
+        "required": ["page"],
+        "properties": { "page": { "type": "string" } }
+      }
+    },
+    "images_line": { "type": "string", "description": "配图说明（几张、什么图）；没配图写明" },
+    "decision": {
+      "type": "object",
+      "required": ["q", "situation", "recommendation", "no_reply", "item", "textarea_hint"],
+      "properties": {
+        "q": { "type": "string", "description": "决策问句，固定语义「这篇文章可以发布吗？」" },
+        "situation": { "type": "string", "description": "这篇针对的机会/空白一句话" },
+        "recommendation": { "type": "string", "description": "发布之后能带来什么（快赢、引流到成交页）" },
+        "no_reply": { "type": "string", "description": "不回复的默认：先留草稿不发，等确认" },
+        "item": { "const": "publish_blog", "description": "固定 publish_blog，foldCards 靠它认出「同意发布」" },
+        "textarea_hint": { "type": "string", "description": "反馈框占位提示" }
+      }
+    },
+    "window_line": { "type": "string", "description": "footer 口径行（execute 可填默认）" },
+    "attach_line": { "type": "string", "description": "footer 附件行（execute 可填默认）" }
+  }
+}

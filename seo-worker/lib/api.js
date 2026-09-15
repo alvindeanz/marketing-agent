@@ -48,6 +48,12 @@ class Api {
     return this.req('POST', '/tasks/' + encodeURIComponent(id) + '/result', body);
   }
 
+  /** GET /card_feedback?task_id= -> { rows } 该卡的全部反馈，id 升序即时间序。
+      博客发布前查客户是否已在确认卡上点同意（publish_blog=agree）。 */
+  async cardFeedback(taskId) {
+    return this.req('GET', '/card_feedback?task_id=' + encodeURIComponent(taskId));
+  }
+
   /** POST /plans body { client_id, body, authored_by } -> { ok, id, version } */
   async postPlan(body) {
     return this.req('POST', '/plans', body);

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{title}}</title>
+<style>
+:root{--bg:#f0f4f8;--surface:#fff;--surface2:#f6f9fc;--border:#e2e8f0;--primary:#0057b8;--primary-bg:#eff6ff;--green:#16a34a;--green-bg:#ecfdf5;--green-bd:#a7f3d0;--amber:#d97706;--amber-bg:#fffbeb;--amber-bd:#fcd34d;--grey:#475569;--text:#0f172a;--muted:#64748b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.75;font-size:15px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px}
+
+header{background:var(--surface);border-bottom:3px solid var(--primary);padding:26px 0 24px}
+.badge{display:inline-block;padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.6px;background:var(--primary-bg);color:var(--primary);border:1px solid #bfdbfe;margin-bottom:11px}
+h1{font-size:1.42rem;font-weight:800;letter-spacing:-.3px;line-height:1.35}
+.period{font-size:13.5px;color:var(--muted);margin-top:3px}
+.oneline{margin:18px 0 16px;background:var(--primary-bg);border:1px solid #bfdbfe;border-left:5px solid var(--primary);border-radius:10px;padding:16px 20px}
+.oneline .lab{font-size:11px;font-weight:800;letter-spacing:.8px;color:var(--primary);display:block;margin-bottom:5px}
+.oneline .txt{font-size:19px;font-weight:800;color:#14396b;line-height:1.5;letter-spacing:-.2px}
+.draftbtn{display:inline-block;margin-top:6px;padding:13px 24px;border-radius:9px;background:var(--primary);color:#fff;font-size:15.5px;font-weight:800;text-decoration:none;box-shadow:0 3px 10px rgba(0,60,130,.22)}
+.draftbtn:hover{background:#0a4fa3}
+.drafthint{font-size:12.5px;color:var(--muted);margin-top:8px;line-height:1.6}
+
+section{padding:26px 0;border-bottom:1px solid var(--border)}
+section:last-of-type{border-bottom:none}
+.shead{display:flex;align-items:center;margin-bottom:5px}
+.snum{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--primary-bg);color:var(--primary);font-size:12px;font-weight:800;margin-right:9px;flex:0 0 25px}
+h2{font-size:1.16rem;font-weight:800;letter-spacing:-.2px}
+.sdesc{color:var(--muted);font-size:13px;margin-bottom:16px;line-height:1.7}
+
+.box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 19px;font-size:13.5px;line-height:1.85}
+.box p{margin-bottom:10px}
+.box p:last-child{margin-bottom:0}
+
+.kw{display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-bottom:1px dashed var(--border)}
+.kw:last-child{border-bottom:none}
+.kw .kwt{flex:0 0 auto;font-size:14px;font-weight:800;color:#14396b}
+.kw .kwd{flex:1;font-size:13px;color:#475569;line-height:1.7}
+.kw .kwd .kwi{color:var(--muted);font-size:12.5px}
+
+.lk{display:flex;gap:9px;align-items:baseline;padding:8px 0;border-bottom:1px dashed var(--border);font-size:13px;line-height:1.7}
+.lk:last-child{border-bottom:none}
+.lk .lkl{flex:0 0 92px;font-size:11.5px;font-weight:800;color:var(--muted)}
+.lk .lkb{flex:1}
+.lk .lkb b{color:#334155}
+
+.dec{background:var(--surface);border:1px solid var(--border);border-left:5px solid var(--primary);border-radius:10px;padding:17px 20px}
+.dec .q{font-size:15.5px;font-weight:800;line-height:1.55;margin-bottom:11px;color:#14396b}
+.dec .row{display:flex;gap:10px;margin-bottom:9px;font-size:13.5px;line-height:1.75}
+.dec .row .rl{flex:0 0 84px;font-size:11px;font-weight:800;letter-spacing:.4px;padding-top:4px}
+.dec .row.rec .rl{color:var(--green)}
+.dec .row.dl .rl{color:var(--amber)}
+.dec .row .rb{flex:1}
+
+.fb{margin-top:13px;border-top:1px solid var(--border);padding-top:12px}
+.fbrow{display:flex;gap:8px;flex-wrap:wrap}
+.fbb{font-family:inherit;font-size:13px;font-weight:700;line-height:1.4;padding:9px 15px;border-radius:8px;border:1px solid #bfdbfe;background:var(--primary-bg);color:var(--primary);cursor:pointer}
+.fbb:hover{background:#e0edff}
+.fbb.done{background:var(--primary);border-color:var(--primary);color:#fff}
+.fbb[disabled]{opacity:.65;cursor:default}
+.fbwrap{margin-top:10px;display:none}
+.fbwrap.open{display:block}
+.fbwrap textarea{width:100%;min-height:78px;font-family:inherit;font-size:13.5px;line-height:1.7;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical}
+.fbwrap textarea:focus{outline:none;border-color:#bfdbfe;background:#fff}
+.fbwrap .fbb{margin-top:8px}
+.fbmsg{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.65}
+.fbmsg.ok{color:#047857;font-weight:700}
+.fbmsg.err{color:#b45309;font-weight:700}
+.fb.off .fbb{opacity:.5;cursor:default}
+
+footer{background:var(--surface);border-top:1px solid var(--border);padding:20px 0 26px;font-size:12px;color:var(--muted);line-height:1.85}
+footer b{color:#334155}
+
+.floatfb{position:fixed;right:18px;bottom:18px;z-index:50;font-family:inherit}
+.floatfb-btn{font-family:inherit;font-size:13px;font-weight:800;padding:11px 18px;border-radius:24px;border:none;background:var(--primary);color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,60,130,.28)}
+.floatfb-btn:hover{background:#0a4fa3}
+.floatfb-panel{display:none;position:absolute;right:0;bottom:52px;width:300px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:0 8px 30px rgba(15,23,42,.18)}
+.floatfb.open .floatfb-panel{display:block}
+.floatfb-title{font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px;line-height:1.5}
+.floatfb-panel textarea{width:100%;min-height:90px;font-family:inherit;font-size:13px;line-height:1.6;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical}
+.floatfb-panel textarea:focus{outline:none;border-color:#bfdbfe;background:#fff}
+.floatfb-panel .fbb{margin-top:8px;width:100%}
+@media(max-width:640px){
+  body{font-size:14px}
+  .wrap{padding:0 14px}
+  h1{font-size:1.2rem}
+  .oneline .txt{font-size:16.5px}
+  .dec .row,.kw,.lk{flex-direction:column;gap:2px}
+  .dec .row .rl,.lk .lkl{flex:none;padding-top:0}
+  .fbrow{flex-direction:column}
+  .fbb{width:100%}
+  .draftbtn{display:block;text-align:center}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">{{badge}}</span>
+    <h1>{{title}}</h1>
+    <div class="period">{{period_label}}</div>
+
+    <div class="oneline">
+      <span class="lab">这篇文章</span>
+      <span class="txt">{{oneline}}</span>
+    </div>
+
+    <a class="draftbtn" href="{{draft_url}}" target="_blank" rel="noopener">先看这篇文章的完整预览 →</a>
+    <div class="drafthint">{{draft_hint}}</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="shead"><span class="snum">1</span><h2>{{s_kw_title}}</h2></div>
+  <div class="sdesc">{{s_kw_desc}}</div>
+  <div class="box">
+{{#keywords}}    <div class="kw">
+      <span class="kwt">{{term}}</span>
+      <span class="kwd">{{intent}}{{#note}} <span class="kwi">{{note}}</span>{{/note}}</span>
+    </div>
+{{/keywords}}  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">2</span><h2>{{s_link_title}}</h2></div>
+  <div class="sdesc">{{s_link_desc}}</div>
+  <div class="box">
+{{#links_out}}    <div class="lk"><span class="lkl">这篇连去</span><span class="lkb"><b>{{page}}</b>{{#anchor}}（锚文本：{{anchor}}）{{/anchor}}</span></div>
+{{/links_out}}{{#links_in}}    <div class="lk"><span class="lkl">从哪连来</span><span class="lkb"><b>{{page}}</b></span></div>
+{{/links_in}}  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">3</span><h2>{{s_img_title}}</h2></div>
+  <div class="box"><p>{{images_line}}</p></div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">4</span><h2>{{s_dec_title}}</h2></div>
+  <div class="sdesc">{{s_dec_desc}}</div>
+  <div class="dec">
+    <div class="q">{{decision.q}}</div>
+    <div class="row"><span class="rl">这篇针对</span><span class="rb">{{decision.situation}}</span></div>
+    <div class="row rec"><span class="rl">发布之后</span><span class="rb">{{decision.recommendation}}</span></div>
+    <div class="row dl"><span class="rl">不回复</span><span class="rb">{{decision.no_reply}}</span></div>
+    <div class="fb" data-item="{{decision.item}}">
+      <div class="fbrow">
+        <button type="button" class="fbb" data-choice="agree">同意，安排发布</button>
+        <button type="button" class="fbb" data-choice="hold">先不发，保持草稿</button>
+        <button type="button" class="fbb" data-role="toggle">需要修改</button>
+      </div>
+      <div class="fbwrap" data-role="wrap">
+        <textarea placeholder="{{decision.textarea_hint}}"></textarea>
+        <button type="button" class="fbb" data-role="submit">提交反馈</button>
+      </div>
+      <div class="fbmsg" data-role="msg"></div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<div class="floatfb" id="floatfb">
+  <button type="button" class="floatfb-btn" data-role="float-open">留言给我们</button>
+  <div class="floatfb-panel" data-role="float-panel">
+    <div class="floatfb-title">对这篇文章的任何意见，写在这里直接发给我们</div>
+    <textarea data-role="float-text" placeholder="想到什么写什么：标题、措辞、事实、配图，都可以。"></textarea>
+    <button type="button" class="fbb" data-role="float-send">发送留言</button>
+    <div class="fbmsg" data-role="float-msg"></div>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <b>{{title}}</b>，{{period_label}}。<br>
+    {{window_line}}<br>
+    {{attach_line}}
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  /* 与方向卡同一条反馈通路（2026-09-08）：首选同域中继 /reports/card_feedback.php，
+     中继没落位或不可用时退回看板域直连。博客确认卡的 agree 表示同意发布，
+     harness 下一轮折叠时排发布任务。 */
+  var API = '/reports/card_feedback.php';
+  var API_FALLBACK = 'https://always.horntech-dev.com/seo-api.php/card_feedback';
+  var params = new URLSearchParams(window.location.search);
+  var taskId = parseInt(params.get('t'), 10);
+  var token = params.get('k');
+  var live = !!(token && taskId);
+
+  function msgEl(scope, role) { return scope.querySelector('[data-role="' + role + '"]'); }
+
+  if (!live) {
+    Array.prototype.forEach.call(document.querySelectorAll('.fb, .floatfb'), function (n) {
+      n.classList.add('off');
+      Array.prototype.forEach.call(n.querySelectorAll('.fbb, .floatfb-btn'), function (b) { b.disabled = true; });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.fbmsg'), function (m) {
+      m.textContent = '当前是预览模式，按钮不能提交。客户请用我们发出的那条链接打开本页；团队同事的意见请走任务线程，本页按钮的记录会被当作客户意见处理。';
+    });
+    return;
+  }
+
+  function postTo(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    });
+  }
+
+  function post(item, choice, text) {
+    var body = JSON.stringify({ task_id: taskId, token: token, item: item, choice: choice, text: text || '' });
+    return postTo(API, body).then(function (res) {
+      if (res.status === 404 || res.status === 405 || res.status === 403) { return postTo(API_FALLBACK, body); }
+      return res;
+    }, function () { return postTo(API_FALLBACK, body); }).then(function (res) {
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+      return true;
+    });
+  }
+
+  function stamp() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + ' 年 ' + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fb'), function (group) {
+    var item = group.getAttribute('data-item');
+    var msg = msgEl(group, 'msg');
+    var wrap = msgEl(group, 'wrap');
+    var toggle = msgEl(group, 'toggle');
+    var submit = msgEl(group, 'submit');
+    var buttons = group.querySelectorAll('.fbb[data-choice]');
+
+    function lock(active, label) {
+      Array.prototype.forEach.call(group.querySelectorAll('.fbb'), function (b) { b.classList.remove('done'); });
+      if (active) { active.classList.add('done'); }
+      msg.className = 'fbmsg ok';
+      msg.textContent = '已记录：' + label + '（' + stamp() + '）。想改主意就再点一次，以最后一次为准。';
+    }
+
+    function fire(btn, choice, text, label) {
+      btn.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在保存……';
+      post(item, choice, text).then(function () {
+        btn.disabled = false;
+        lock(btn, label);
+      }).catch(function () {
+        btn.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没保存成功，请过一会儿再点一次，或者直接回复邮件告诉我们。';
+      });
+    }
+
+    Array.prototype.forEach.call(buttons, function (btn) {
+      btn.addEventListener('click', function () {
+        fire(btn, btn.getAttribute('data-choice'), '', btn.textContent.trim());
+      });
+    });
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        wrap.classList.toggle('open');
+        if (wrap.classList.contains('open')) { wrap.querySelector('textarea').focus(); }
+      });
+    }
+
+    if (submit) {
+      submit.addEventListener('click', function () {
+        var box = wrap.querySelector('textarea');
+        var text = box.value.trim();
+        if (!text) {
+          fire(submit, 'hold', '', '先不发，保持草稿');
+          return;
+        }
+        fire(submit, 'other', text, '您的反馈已收到');
+      });
+    }
+  });
+
+  (function () {
+    var box = document.getElementById('floatfb');
+    if (!box) { return; }
+    var openBtn = box.querySelector('[data-role="float-open"]');
+    var panel = box.querySelector('[data-role="float-panel"]');
+    var text = box.querySelector('[data-role="float-text"]');
+    var send = box.querySelector('[data-role="float-send"]');
+    var msg = box.querySelector('[data-role="float-msg"]');
+    openBtn.addEventListener('click', function () { box.classList.toggle('open'); if (box.classList.contains('open')) { text.focus(); } });
+    send.addEventListener('click', function () {
+      var v = text.value.trim();
+      if (!v) { msg.className = 'fbmsg err'; msg.textContent = '留言是空的，写一句再发。'; return; }
+      send.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在发送……';
+      post('global_note', 'other', v).then(function () {
+        send.disabled = false;
+        text.value = '';
+        msg.className = 'fbmsg ok';
+        msg.textContent = '已发给我们（' + stamp() + '）。还有想说的可以继续写。';
+      }).catch(function () {
+        send.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没发出去，请过一会儿再试，或直接回复邮件。';
+      });
+    });
+  })();
+})();
+</script>
+</body>
+</html>
