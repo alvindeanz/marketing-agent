@@ -16,8 +16,7 @@
     "confirm",
     "glossary",
     "attach_line",
-    "issued",
-    "window"
+    "issued"
   ],
   "additionalProperties": false,
   "properties": {
@@ -282,6 +281,35 @@
     "period_note": {
       "type": "string",
       "description": "追加在周期行日期后的半句（如 首版，无上期结论），可省略"
+    },
+    "legacy_window": {
+      "type": "object",
+      "required": [
+        "period_label",
+        "window_line"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "period_label": {
+          "type": "string"
+        },
+        "window_line": {
+          "type": "string"
+        }
+      },
+      "description": "仅限 2026-10 前发出的存量卡迁移：原周期行与窗口行原样保留，渲染器不做窗口数学；issued 为 2026-10 及之后时渲染器拒绝本字段，新卡一律走 window 规则窗"
     }
-  }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "window"
+      ]
+    },
+    {
+      "required": [
+        "legacy_window"
+      ]
+    }
+  ]
 }

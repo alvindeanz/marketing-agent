@@ -22,7 +22,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
-### 2026-09-15 AIRA：方向卡数据窗口与节奏定版（渲染器强制，日期不经模型的手）
+### 2026-09-15 AIRA：存量方向卡迁入新契约 + legacy 通道（频道改卡链路打通）
+
+- 背景：Alvin 要能在频道跟 chat 说「改某张卡的文案 / 链接」。链路本身通（chat 出委托单 → 放行 → execute_task 改 data.json 重渲染 → scp 覆盖同名文件，客户链接与 t/k 参数不变），堵点是窗口定版后五张存量卡是旧契约（手写 period_label，实际窗口也不合新规则），新渲染器直接拒收。
+- **legacy 通道（时间盒）**：applyWindow 加 `legacy_window{period_label,window_line}`，原周期行原样保留不做窗口数学；只认 issued < 2026-10 的存量卡，新卡给这个字段直接拒，window 与 legacy_window 二选一。schema 同步（oneOf），kd_render 加 3 例回归。
+- **五张存量卡已迁**（workspaceRoot 就是 /data/aira/clients，agent 本来就够得着，无需另收档）：louvresky 词卡 S1 与素材卡 2026-08、benscurtainsnz 词卡 S1、haakaa 词卡 S2、sanmichelle 词卡 S1，全部迁成 issued + legacy_window，新渲染器重渲染验证通过。
+- **顺手修**：louvresky 两张与 sanmichelle 一张的线上版还是 2026-09-08 的单端点 widget（无降级备胎），已用现行模板重渲染覆盖发布（URL 不变，正文零差异，diff 只有 widget 块）；bens NZ 线上已是最新。中继 card_feedback.php 实测通路正常（403 是上游对假 token 的正常拒绝）。haakaa S2 无线上版，不代发。
+- 测试：node tests/ 全套退出码全 0。
+- **部署依赖：worker 必须先部署本批 specs，否则线上旧渲染器读不了迁移后的 data.json，改卡任务一跑就炸。**
 
 - 背景：Alvin 问方向卡是不是按「过去 60 天」出数，核查结论是根本没有统一窗口：spec 只有 period_label 示例（sprint 两周），窗口由执行 agent 现场自选，已产四张词卡加一张素材卡五种口径（28 天 / 两周 / 三个月不等）。Alvin 拍板定口径。
 - 口径（两卡同一条规则）：**数据窗口 = 发卡月往前两个完整自然月**（2026-10 发卡 = 8/1 至 9/30），整月不滚动；**节奏 = 每客户每月一张，词卡与素材卡逐月交替**（2026-09 词卡、2026-10 素材卡），单卡型各两月一张、窗口首尾相接不重叠。唯一例外：账户投放不足两个月 start 按实际首日且必须写 exception_note，end 永远是发卡月上一个自然月最后一天。

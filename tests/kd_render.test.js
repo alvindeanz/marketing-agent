@@ -55,4 +55,15 @@ assert.throws(() => validate(hand), /渲染器/, '模型手写 period_label 必�
 const xy = base(); xy.issued = '2027-01'; xy.window = { start: '2026-11-01', end: '2026-12-31' };
 assert(renderCard(xy).includes('2026 年 11 月 1 日至 12 月 31 日'), '跨年窗口日期正确');
 
+// 6) 存量卡 legacy 通道：2026-10 前原样保留旧周期行，之后关死
+const leg = base(); delete leg.window;
+leg.legacy_window = { period_label: '2026 年 8 月 1 日至 8 月 28 日', window_line: '数据窗口：旧口径原文。' };
+const legHtml = renderCard(leg);
+assert(legHtml.includes('8 月 28 日') && legHtml.includes('旧口径原文'), 'legacy 周期行原样进卡');
+const legNew = base(); delete legNew.window; legNew.issued = '2026-10';
+legNew.legacy_window = { period_label: 'p', window_line: 'w' };
+assert.throws(() => validate(legNew), /2026-10/, 'legacy 通道对 2026-10 起的新卡关死');
+const legBoth = base(); legBoth.legacy_window = { period_label: 'p', window_line: 'w' };
+assert.throws(() => validate(legBoth), /二选一/, 'window 与 legacy_window 不许同时给');
+
 console.log('kd_render.test ok');

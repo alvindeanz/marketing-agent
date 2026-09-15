@@ -106,6 +106,18 @@ function applyWindow(d) {
     throw new Error('period_label / window_line 由渲染器从 window 生成，数据 JSON 不再提供这两个槽');
   }
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(d.issued || ''))) throw new Error('缺 issued（发卡月，YYYY-MM）');
+  // 存量卡通道（时间盒）：规则定版（2026-09-15）前发出的卡窗口口径各异，迁移时把原周期行
+  // 原样搬进 legacy_window，不做窗口数学；issued 2026-10 起此门关死，新卡一律规则窗。
+  if (d.legacy_window) {
+    if (!(String(d.issued) < '2026-10')) throw new Error('legacy_window 只认 2026-10 前发出的存量卡，新卡走 window 规则窗');
+    if (d.window) throw new Error('window 与 legacy_window 只许二选一');
+    for (const k of ['period_label', 'window_line']) {
+      if (!String(d.legacy_window[k] || '').trim()) throw new Error('legacy_window 缺 ' + k);
+    }
+    d.period_label = String(d.legacy_window.period_label);
+    d.window_line = String(d.legacy_window.window_line);
+    return d;
+  }
   const w = d.window || {};
   for (const k of ['start', 'end']) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(w[k] || ''))) throw new Error('window.' + k + ' 必须是 YYYY-MM-DD');
