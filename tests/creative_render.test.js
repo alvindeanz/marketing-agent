@@ -5,7 +5,8 @@ const { renderCard, validate } = require('../seo-worker/specs/report/render_crea
 
 function base() {
   return {
-    title: 'T 搜索广告素材方向', period_label: '2026 年 8 月', oneline: '方向。', scope_line: '询价只算表单。',
+    title: 'T 搜索广告素材方向', issued: '2026-10', window: { start: '2026-08-01', end: '2026-09-30' },
+    oneline: '方向。', scope_line: '询价只算表单。',
     bignums: [{ k: '花了', v: '1', s: 's' }, { k: '最佳广告换来', v: '2', unit: '条', s: 'Free Quotation 那条' }, { k: '一条', v: '3', s: 's' }],
     fineprint: ['<b>询价</b>口径。'],
     s1_desc: 'd', s2_desc: 'd',
@@ -13,7 +14,7 @@ function base() {
       picks: { ph: 'p', save_item: 'zero_impression_cleanup', entries: [{ kw: 'a', label: 'A', note: 'n' }] } }],
     families: [{ name: 'louvre roof 组的广告一', cls: 'g', state_label: '保持', brief: 'b', spent: 'a', got: 'b', next: 'c', evidence: 'e' }],
     negatives: ['清理段。'], confirm: ['首版。'],
-    glossary: [{ term: '询价', def: 'd' }], window_line: 'w', attach_line: '随附文件：无',
+    glossary: [{ term: '询价', def: 'd' }], attach_line: '随附文件：无',
   };
 }
 
@@ -32,5 +33,10 @@ assert.throws(() => validate(s1), /立场 1/);
 // A31
 const zh = base(); zh.families[0].name = '百叶顶组的广告';
 assert.throws(() => validate(zh), /copy_rules A31/);
+
+// 数据窗口共用守卫（细则回归在 kd_render.test.js，这里只验素材卡同样接线）
+assert(html.includes('2026 年 8 月 1 日至 9 月 30 日'), '窗口日期由渲染器生成');
+const wBad = base(); wBad.window.end = '2026-10-05';
+assert.throws(() => validate(wBad), /上一个自然月最后一天/);
 
 console.log('creative_render.test ok');

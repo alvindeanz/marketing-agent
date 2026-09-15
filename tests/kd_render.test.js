@@ -5,14 +5,15 @@ const { renderCard, validate } = require('../seo-worker/specs/report/render_keyw
 
 function base() {
   return {
-    title: 'T 搜索广告关键词方向', period_label: '2026 年 9 月 1 日至 9 月 14 日期', oneline: '方向。', scope_line: '询价只算表单。',
+    title: 'T 搜索广告关键词方向', issued: '2026-09', window: { start: '2026-07-01', end: '2026-08-31' },
+    oneline: '方向。', scope_line: '询价只算表单。',
     bignums: [{ k: 'a', v: '1', s: 's' }, { k: 'b', v: '2', s: 's' }, { k: 'c', v: '3', s: 's' }],
     fineprint: ['<b>询价</b>口径。'],
     s1_desc: 'd', s2_desc: 'd',
     decisions: [{ q: 'q', situation: 's', recommendation: 'r', no_reply: 'n', item: 'x_y', textarea_hint: 'h' }],
     families: [{ name: 'louvre roof 类搜索', cls: 'g', state_label: '加大投入', brief: 'b', spent: 'a', got: 'b', next: 'c', evidence: 'e' }],
     negatives: ['n'], confirm: ['c'],
-    glossary: [{ term: '询价', def: 'd' }], window_line: 'w', attach_line: 'a',
+    glossary: [{ term: '询价', def: 'd' }], attach_line: 'a',
   };
 }
 
@@ -39,5 +40,19 @@ const bad = base(); bad.negatives = ['<script>x</script>'];
 assert.throws(() => validate(bad), /script/);
 const jargon = base(); jargon.negatives = ['CTR 高'];
 assert.throws(() => validate(jargon), /内部术语/);
+
+// 5) 数据窗口（2026-09-15 Alvin 口径：发卡月前两个完整自然月，日期渲染器生成）
+assert(html.includes('2026 年 7 月 1 日至 8 月 31 日'), '周期与窗口日期由渲染器从 window 生成');
+const wEnd = base(); wEnd.window.end = '2026-09-14';
+assert.throws(() => validate(wEnd), /上一个自然月最后一天/, 'end 不是上月末必须拒');
+const wStart = base(); wStart.window.start = '2026-07-12';
+assert.throws(() => validate(wStart), /exception_note/, '窗口不足两整月且无说明必须拒');
+wStart.window.exception_note = '账户 2026 年 7 月 12 日才开始投放，按实际天数计。';
+const shortHtml = renderCard(wStart);
+assert(shortHtml.includes('7 月 12 日') && shortHtml.includes('按实际天数计'), '例外窗口带说明放行且进页脚');
+const hand = base(); hand.period_label = '手写周期';
+assert.throws(() => validate(hand), /渲染器/, '模型手写 period_label 必须拒');
+const xy = base(); xy.issued = '2027-01'; xy.window = { start: '2026-11-01', end: '2026-12-31' };
+assert(renderCard(xy).includes('2026 年 11 月 1 日至 12 月 31 日'), '跨年窗口日期正确');
 
 console.log('kd_render.test ok');

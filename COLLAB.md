@@ -22,6 +22,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-15 AIRA：方向卡数据窗口与节奏定版（渲染器强制，日期不经模型的手）
+
+- 背景：Alvin 问方向卡是不是按「过去 60 天」出数，核查结论是根本没有统一窗口：spec 只有 period_label 示例（sprint 两周），窗口由执行 agent 现场自选，已产四张词卡加一张素材卡五种口径（28 天 / 两周 / 三个月不等）。Alvin 拍板定口径。
+- 口径（两卡同一条规则）：**数据窗口 = 发卡月往前两个完整自然月**（2026-10 发卡 = 8/1 至 9/30），整月不滚动；**节奏 = 每客户每月一张，词卡与素材卡逐月交替**（2026-09 词卡、2026-10 素材卡），单卡型各两月一张、窗口首尾相接不重叠。唯一例外：账户投放不足两个月 start 按实际首日且必须写 exception_note，end 永远是发卡月上一个自然月最后一天。
+- 机制（不靠模型自觉）：数据 JSON 改为只写 `issued`（发卡月）+ `window{start,end,exception_note,note}`，**period_label 与 window_line 两个日期槽由渲染器从 window 生成，数据里出现即拒**（2026-08-31 widget 参数事故同源治理：日期不经模型的手）；窗口不合规则渲染器直接拒收。词卡文件名从 {sprint} 改 {YYYY-MM}。
+- 落点：direction_card_lib.js 加 applyWindow（守卫加日期生成，两渲染器接线）、两 schema 升 V2（issued/window/period_note 换掉 period_label/window_line）、keyword_direction_spec 升 V6、creative_direction_spec 升 V3（各加数据窗口与节奏节）、plan_experience 词卡每 sprint 条改月度交替（取代 2026-08-31 决定）、googleads.md 能力清单补节奏窗口一行。
+- 测试：kd_render 加窗口 6 例（末日不合拒、短窗无说明拒、带说明放行、手写日期拒、跨年、生成日期进 HTML）、creative_render 加接线 2 例，node tests/ 全套 19 文件退出码全 0。
+- 存量：已发的四张卡不追改，下一张起生效。已存在的旧 data.json 是旧契约，重渲染需先迁字段。
+- 待部署：worker（specs 目录在白名单）。给 Aiden：execute_task 接 keyword-direction / creative-direction 渲染产线时（你认领的两分支），brief 里发卡月给 issued，窗口日期不用喂给模型，渲染器会算会拦。
+
 ### 2026-09-15 AIRA：chat 加 finish 动作（人工完成收口）
 
 - 背景：Alvin 要能在 chat 里把人工在外面做完的任务收口。原来 chat 任务线程七种动作（redispatch/kill/later/set_verdict/edit_task/release/machine_run）里没有「人工完成验收」这一种，只有 kill（放弃）和 release（放行给机器去做）。

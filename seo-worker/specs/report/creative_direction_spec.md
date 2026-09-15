@@ -1,13 +1,23 @@
 # 素材方向卡规格（creative-direction 任务的唯一产出契约）
 
-<!-- CREATIVE-DIRECTION-SPEC-V2：2026-09-01 随词卡减法版同步（共用模板 v2：席位表手风琴、scope_line、无独立新发现节、词汇表折叠）。V1 内容其余不变。词卡的姊妹卡：
+<!-- CREATIVE-DIRECTION-SPEC-V3：2026-09-15 数据窗口与节奏定版（Alvin 定：窗口 = 发卡月前两个
+     完整自然月；节奏 = 与词卡逐月交替，各两个月一张）。窗口日期改由渲染器从 window 对象生成，
+     模型不再手写 period_label / window_line（schema V2）。
+     V2：2026-09-01 随词卡减法版同步（共用模板 v2：席位表手风琴、scope_line、无独立新发现节、词汇表折叠）。V1 内容其余不变。词卡的姊妹卡：
      广告素材（文案与资产）的客户版决策文档。读者优先级：客户老板 > sales > 我们自己。
      与词卡同构：模板 direction_card_template.html、widget、A31 全部继承，出生即模板化，
      模型只产数据 JSON 不写 HTML。 -->
 
 ## 形态（模板 + 数据，模型不写 HTML）
 
-产出分两层。**模型只产数据 JSON**，契约见同目录 `creative_direction_data.schema.json`（与词卡槽位同构，语义换成广告与素材），文件名 `creative_direction_{client}_{YYYY-MM}.data.json`。**HTML 由零 LLM 渲染器生成**：`node specs/report/render_creative_direction.js <data.json> > creative_direction_{client}_{YYYY-MM}.html`。周期用年月不用 S 号：素材卡每月一张（词卡每 sprint），素材判断要更长数据窗。单页 HTML，手机可读，一月一版只增不改。
+产出分两层。**模型只产数据 JSON**，契约见同目录 `creative_direction_data.schema.json`（与词卡槽位同构，语义换成广告与素材），文件名 `creative_direction_{client}_{YYYY-MM}.data.json`。**HTML 由零 LLM 渲染器生成**：`node specs/report/render_creative_direction.js <data.json> > creative_direction_{client}_{YYYY-MM}.html`。周期用年月不用 S 号。单页 HTML，手机可读，一月一版只增不改。
+
+## 数据窗口与节奏（2026-09-15 Alvin 定，词卡素材卡同一条规则）
+
+- **窗口 = 发卡月往前两个完整自然月**。例：2026-10 月初发卡，窗口 2026-08-01 至 2026-09-30。整月不滚动，理由：口径可复现、客户好解释、天然剔掉近窗未熟的转化滞后数据。
+- 数据 JSON 只写 `issued`（发卡月）与 `window.start/end`，**页脚的周期行与窗口行由渲染器生成，模型不写日期**。窗口不合规则渲染器直接拒绝。
+- 例外只有一个：账户投放不足两个月，`start` 按实际首日，必须写 `window.exception_note`；`end` 任何情况都是发卡月上一个自然月最后一天。
+- **节奏：每客户每月一张方向卡，词卡与素材卡逐月交替**（2026-09 词卡、2026-10 素材卡，依此类推），单卡型各自两个月一张，窗口正好首尾相接不重叠。趋势对照要看更长历史可以进折叠层，第一屏大数字与判断一律用主窗。
 
 ## 五条立场（写死，渲染器强制其中两条）
 

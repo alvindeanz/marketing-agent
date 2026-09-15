@@ -1,10 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "素材方向卡数据契约 V1（与词卡同构槽位，模型只产本 JSON，HTML 由 render_creative_direction.js 出）",
+  "title": "素材方向卡数据契约 V2（与词卡同构槽位，模型只产本 JSON，HTML 由 render_creative_direction.js 出；窗口日期由渲染器生成）",
   "type": "object",
   "required": [
     "title",
-    "period_label",
     "oneline",
     "bignums",
     "scope_line",
@@ -16,18 +15,15 @@
     "negatives",
     "confirm",
     "glossary",
-    "window_line",
-    "attach_line"
+    "attach_line",
+    "issued",
+    "window"
   ],
   "additionalProperties": false,
   "properties": {
     "title": {
       "type": "string",
       "description": "客户名 + 搜索广告关键词方向"
-    },
-    "period_label": {
-      "type": "string",
-      "description": "本期周期，日期写法，如 2026 年 8 月 31 日至 9 月 13 日期"
     },
     "oneline": {
       "type": "string",
@@ -243,10 +239,6 @@
       },
       "description": "本卡概念一句话解释；Ad Strength 类评级不出现（立场 2）"
     },
-    "window_line": {
-      "type": "string",
-      "description": "页脚数据窗口一行"
-    },
     "attach_line": {
       "type": "string",
       "description": "页脚随附文件一行，无附件写 随附文件：无"
@@ -255,6 +247,44 @@
       "type": "string",
       "maxLength": 80,
       "description": "第一屏口径一行：询价只算什么，一句话；详情进 fineprint 折叠层"
+    },
+    "issued": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "description": "发卡月 YYYY-MM。数据窗口 = 发卡月往前两个完整自然月，渲染器按此校验 window"
+    },
+    "window": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "窗口首日。规则值 = 发卡月前推两个月的 1 日；账户投放不足两个月才许晚于规则日，且必须写 exception_note"
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "窗口末日，必须是发卡月上一个自然月的最后一天，无例外"
+        },
+        "exception_note": {
+          "type": "string",
+          "description": "窗口不足两个整月的原因一句话（如 账户 7 月 12 日才开始投放，按实际天数计），进页脚窗口行"
+        },
+        "note": {
+          "type": "string",
+          "description": "窗口补充说明（覆盖率、剔除区间、现拉日期一类），进页脚窗口行"
+        }
+      },
+      "description": "数据窗口，机器可读。period_label 与 window_line 两个页脚槽由渲染器从本对象生成，数据 JSON 里出现那两个键会被渲染器拒绝"
+    },
+    "period_note": {
+      "type": "string",
+      "description": "追加在周期行日期后的半句（如 首版，无上期结论），可省略"
     }
   }
 }

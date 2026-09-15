@@ -19,6 +19,7 @@ const TITLES = {
 };
 
 function validate(d) {
+  lib.applyWindow(d); // 窗口守卫 + period_label/window_line 生成，日期不经模型的手
   const need = ['title', 'period_label', 'oneline', 'bignums', 'scope_line', 's1_desc',
     'decisions', 's2_desc', 'families', 'negatives',
     'confirm', 'glossary', 'window_line', 'attach_line'];

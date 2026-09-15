@@ -91,6 +91,49 @@ function guardDecisions(decisions) {
   }
 }
 
+/* 数据窗口守卫与日期槽生成（2026-09-15 Alvin 定口径）：方向卡数据窗口一律是发卡月往前
+   两个完整自然月（如 2026-09 发卡 = 7 月 1 日至 8 月 31 日），词卡与素材卡逐月交替各两月一张。
+   period_label 与 window_line 由本函数从 window 算出，模型不写日期（2026-08-31 参数读反
+   事故同源治理：日期不经模型的手）。账户投放不足两个月时 start 允许晚于规则日，
+   但必须写 exception_note 说明，end 任何情况下都得是发卡月上一个自然月的最后一天。 */
+function pad2(n) { return String(n).padStart(2, '0'); }
+function cnDate(iso, withYear) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return (withYear ? y + ' 年 ' : '') + m + ' 月 ' + d + ' 日';
+}
+function applyWindow(d) {
+  if (d.period_label != null || d.window_line != null) {
+    throw new Error('period_label / window_line 由渲染器从 window 生成，数据 JSON 不再提供这两个槽');
+  }
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(d.issued || ''))) throw new Error('缺 issued（发卡月，YYYY-MM）');
+  const w = d.window || {};
+  for (const k of ['start', 'end']) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(w[k] || ''))) throw new Error('window.' + k + ' 必须是 YYYY-MM-DD');
+  }
+  const [iy, im] = d.issued.split('-').map(Number);
+  const sy = im <= 2 ? iy - 1 : iy;
+  const sm = ((im - 3 + 12) % 12) + 1;
+  const ey = im === 1 ? iy - 1 : iy;
+  const em = ((im - 2 + 12) % 12) + 1;
+  const ruleStart = sy + '-' + pad2(sm) + '-01';
+  const ruleEnd = ey + '-' + pad2(em) + '-' + pad2(new Date(Date.UTC(ey, em, 0)).getUTCDate());
+  if (w.end !== ruleEnd) {
+    throw new Error('window.end 必须是发卡月上一个自然月最后一天 ' + ruleEnd + '，实际 ' + w.end);
+  }
+  if (w.start !== ruleStart) {
+    if (!(String(w.exception_note || '').trim() && w.start > ruleStart && w.start < w.end)) {
+      throw new Error('window.start 必须是 ' + ruleStart + '（发卡月前两个完整自然月）；账户投放不足两个月才许晚于此日，且必须写 exception_note');
+    }
+  }
+  const crossYear = w.start.slice(0, 4) !== w.end.slice(0, 4);
+  const range = cnDate(w.start, true) + '至 ' + cnDate(w.end, crossYear);
+  d.period_label = range + (d.period_note ? '；' + String(d.period_note) : '');
+  d.window_line = '数据窗口：' + range + '，取发卡前两个完整自然月。'
+    + (w.exception_note ? String(w.exception_note) : '')
+    + (w.note ? String(w.note) : '');
+  return d;
+}
+
 const TPL_PATH = path.join(__dirname, 'direction_card_template.html');
 
 function renderWithTemplate(data, tplPath) {
@@ -101,4 +144,4 @@ function renderWithTemplate(data, tplPath) {
   return html;
 }
 
-module.exports = { render, renderWithTemplate, guardCommon, guardLatin, guardDecisions, esc, rich, TPL_PATH };
+module.exports = { render, renderWithTemplate, guardCommon, guardLatin, guardDecisions, applyWindow, esc, rich, TPL_PATH };
