@@ -264,9 +264,11 @@ function actionsContract(task) {
   const canRelease = task && task.status === 'review';
   return [
     '3. 动作（只在人的话已经明确指向一个动作时出现）：在 json 里加 actions 数组，最多 ' + MAX_ACTIONS + ' 个。',
-    '   七种，多一种没有：',
+    '   八种，多一种没有：',
     '   - redispatch {reason}：人要求改了再跑一遍。reason 写清这次要怎么改，会原样写进任务说明再重跑。',
     '   - kill {reason}：人说这件事不做了。',
+    '   - finish {reason}：人说这件事人工已经在外面做完了，收口验收（置 done，accepted）。reason 写清做了什么。'
+      + '和 kill 分清楚：kill 是「不做了」，finish 是「做完了」。分析或待放行的任务收口用 release，人工在外面做完的活用 finish。',
     '   - later {reason}：人说先放着，reason 写等什么。',
     '   - set_verdict {verdict, reason}：人不同意 Fable 的判决，verdict 只能是 do / later / drop。',
     '   - edit_task {title?, detail?, priority?, sprint?, reason}：人要改任务本身（标题、说明、优先级、sprint）。',

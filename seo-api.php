@@ -1143,12 +1143,12 @@ function inbox_refs_norm($v){
 /* 任务线程里模型提议的动作，存在 chat_agent 行的 refs.actions，人点「执行」才落账
    （POST /inbox/{root}/thread_action）。白名单五种，跟 spawn_task 的草案同一个道理：
    提议是卡片，不是账本上的一行。 */
-define('THREAD_ACTIONS',['redispatch','kill','later','set_verdict','edit_task','release','machine_run','commission_start']);
+define('THREAD_ACTIONS',['redispatch','kill','finish','later','set_verdict','edit_task','release','machine_run','commission_start']);
 /* 线程里人话已经明确指向的动作，模型回复落库时服务端立即执行，不等人再点一次：
    这些全是看板层改动，可逆，指令来源是人自己在线程里说的话。
    release 不在里面：放行动线上，永远留人点。
    machine_run 在里面（2026-09-08）：转执行位只花一次出方案，真正的风险闸在放行政策那层没动。 */
-define('THREAD_AUTO_ACTIONS',['redispatch','kill','later','set_verdict','edit_task','machine_run']);
+define('THREAD_AUTO_ACTIONS',['redispatch','kill','finish','later','set_verdict','edit_task','machine_run']);
 define('THREAD_MAX_ACTIONS',3);
 function inbox_actions_norm($v){
     if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
@@ -1224,6 +1224,13 @@ function thread_action_exec($root,$t,$a,$by){
         $err=task_close($tid,'killed','线程裁决不做：'.$reason);
         if($err)return ['ok'=>false,'what'=>$err];
         return ['ok'=>true,'what'=>'已按不做处理，置 done','job_ids'=>[]];
+    }
+    if($type==='finish'){
+        /* 人工在外面把活做完了，chat 里收口（2026-09-15）。accepted = 人认定完成，
+           与 kill(放弃) 区分。分析/待放行任务的收口走 release，这里专给人工完成的活。 */
+        $err=task_close($tid,'accepted','人工完成（chat 收口）：'.$reason,$by);
+        if($err)return ['ok'=>false,'what'=>$err];
+        return ['ok'=>true,'what'=>'已按人工完成验收，置 done','job_ids'=>[]];
     }
     if($type==='later'){
         if($t['status']==='done')return ['ok'=>false,'what'=>'任务已经结束'];

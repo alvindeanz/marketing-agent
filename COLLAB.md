@@ -22,6 +22,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-15 AIRA：chat 加 finish 动作（人工完成收口）
+
+- 背景：Alvin 要能在 chat 里把人工在外面做完的任务收口。原来 chat 任务线程七种动作（redispatch/kill/later/set_verdict/edit_task/release/machine_run）里没有「人工完成验收」这一种，只有 kill（放弃）和 release（放行给机器去做）。
+- 加 **finish**（第八种，进 THREAD_AUTO_ACTIONS 落库同刻执行）：task_close accepted，人认定人工已完成、置 done。语义与 kill（不做了）、release（放行给机器）都分清楚：分析或待放行任务收口走 release，人工在外面做完的活走 finish。
+- 落点：seo-api.php（THREAD_ACTIONS + THREAD_AUTO_ACTIONS + thread_action_exec 的 finish 分支）+ chat.js（actionsContract 加 finish，七种改八种）。
+- 测试：chat.test 37 过、node 全套 19 文件退出码全 0、php -l 过。
+- 待部署：api（seo-api.php）+ worker（chat.js）。
+
 ### 2026-09-15 AIRA：GBP 读写分离，核查现状加出方案下放 agent（gbp-audit）
 
 - 背景：Apex #661 客户甩来 GBP 链接问要不要更新，chat 只能「我不读 share.google、请人把现状贴进来」再给通用清单（Alvin 指出 agent 该直接接手）。根因：gbp-update 整块 human_only 把只读核查也一并挡在人工。
