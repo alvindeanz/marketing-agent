@@ -22,6 +22,17 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-16 AIRA：卡片已反馈签章（时间+IP）+ 已结束按结束时间倒序
+
+Alvin 两项：已结束视图按结束时间排（刚完成的在最上，顺着审）；发出去的卡每个反馈按钮右侧要有已反馈签章（最后一次表态时间+IP，人工打开卡就知道谁何时反馈过）。
+- **后端**（seo-api.php /card_feedback）：seo_card_feedback 惰性补 ip 列；写入记客户 IP（同域中继带 X-Forwarded-For 第一段，直连取 REMOTE_ADDR）；新增 status 查询模式（token 过验回每 item 最后一次 choice/时间/IP，不回 fb 文本）；写入与 24h 防重返回都带 at/ip 供页面即时画章。
+- **中继**（blogpreview webroot card_feedback.php，非本仓文件）：转发时补 X-Forwarded-For 头，改前留 .bak-20260916，php -l 过。
+- **模板**（direction_card_template.html + blog_confirmation_template.html 两份同改）：.fbstamp 样式；post() 改回传 JSON；loadStamps() 加载时回填签章；提交成功即更新签章。预览模式（无 t/k）不发请求。
+- **前端**（seo-agent.html）：已结束视图排序改 taskTime 倒序（进行中视图排序不变）。
+- **存量卡升级**：五张有 data.json 的重渲染（louvresky 词卡+素材卡、bens NZ、sanmichelle、haakaa），三张没留 data.json 的做脚本块移植（bens AU #145 词卡、apollo #103 与 kuddles #75 博客卡），七张线上同名覆盖发布（URL 与 t/k 不变），sanmichelle 卡实测 status 通路 OK（历史反馈行 ip 为空属预期，新反馈起记录）。apex #672 是 kickoff 产线独立模板，未纳入本次，待该产线固化时一并接签章。
+- 测试：node tests/ 全套 19 文件退出码全 0；relay 实测 bad token 403、真 token 回 items。
+- 已部署：api（rev c2950ec）。worker specs 随下次 worker 部署同步（渲染我在仓库直跑，不阻塞）。
+
 ### 2026-09-16 AIRA：任务视图三改（已结束拆分 / 确认卡进人工泳道 / 判定四件下线）
 
 Alvin 看 Apex 任务页提的三项，全在 static/seo-agent.html 展示层：
