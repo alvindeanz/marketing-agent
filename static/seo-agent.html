@@ -43,11 +43,30 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sb-row.on .sb-name{color:#f1f5f9;font-weight:600}
 .sb-row.arch .sb-name{color:#64748b}
 .sb-pill{font-size:10px;padding:1px 6px;border-radius:20px;font-weight:600;flex-shrink:0}
-.sb-pill.tasks{background:#1e3a5f;color:#60a5fa}
+/* 三色徽标，排序红橙蓝：红=人工任务待处理，橙=fact 待确认，蓝=agent 任务待做 */
+.sb-pill.manual{background:#450a0a;color:#f87171}
 .sb-pill.facts{background:#422006;color:#fb923c}
+.sb-pill.agent{background:#1e3a5f;color:#60a5fa}
+.sb-pill.tasks{background:#1e3a5f;color:#60a5fa}
 .sb-act{opacity:0;font-size:11px;color:#475569;cursor:pointer;flex-shrink:0;padding:0 2px}
 .sb-row:hover .sb-act{opacity:1}
 .sb-act:hover{color:#e2e8f0}
+/* 平台 icon（替代 #号码），内联 SVG，一目了然 */
+.sb-plat{width:15px;height:15px;flex-shrink:0;color:#64748b;display:inline-flex;align-items:center;justify-content:center}
+.sb-plat svg{width:15px;height:15px;display:block}
+.sb-row.on .sb-plat{color:#93c5fd}
+/* 客户星标（per-user，标自己负责的客户） */
+.sb-star{flex-shrink:0;cursor:pointer;font-size:14px;line-height:1;color:#3a4453;user-select:none;padding:0 1px}
+.sb-star.on{color:#fbbf24}
+.sb-star:hover{color:#fbbf24}
+/* 侧边栏收起 + 浮动召唤按钮 */
+.sidebar.collapsed{display:none}
+.sb-fab{position:fixed;left:0;top:70px;z-index:60;background:#1e2433;border:1px solid #2d3748;border-left:none;color:#94a3b8;border-radius:0 8px 8px 0;padding:11px 7px;cursor:pointer;font-size:15px;display:none;line-height:1}
+.sb-fab:hover{background:#242c3d;color:#e2e8f0}
+.sb-fab.show{display:block}
+.sb-icon-btn{background:transparent;border:1px solid #2d3748;color:#94a3b8;border-radius:6px;font-size:13px;padding:2px 8px;cursor:pointer;line-height:1.5}
+.sb-icon-btn:hover{border-color:#475569;color:#e2e8f0}
+.sb-icon-btn.on{background:#2f4d80;border-color:#3d64a8;color:#fbbf24;border-color:#8a6d1f}
 .sb-group{margin-top:14px;border-top:1px solid #1e293b;padding-top:10px}
 .sb-group-head{font-size:11px;color:#475569;padding:4px 9px;cursor:pointer;user-select:none}
 .sb-group-head:hover{color:#94a3b8}
@@ -431,11 +450,15 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
 <div class="console hidden" id="appView">
 
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div id="sbInbox"></div>
     <div class="sb-head">
       <span class="sb-title">客户</span>
-      <button class="sb-add" onclick="openAddClient()">+ 添加</button>
+      <span style="display:flex;gap:6px;align-items:center">
+        <button class="sb-icon-btn" id="sbStarBtn" title="只看星标客户" onclick="toggleStarFilter()">★</button>
+        <button class="sb-icon-btn" title="收起客户栏" onclick="collapseSidebar()">⟨ 收起</button>
+        <button class="sb-add" onclick="openAddClient()" title="添加客户">+</button>
+      </span>
     </div>
     <div class="sb-filter" id="sbFilter">
       <button class="sb-f on" data-svc="all" onclick="setSvcFilter('all')">全部</button>
@@ -448,6 +471,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
       <div id="sbArchived" class="hidden"></div>
     </div>
   </aside>
+  <button class="sb-fab" id="sbFab" title="展开客户栏" onclick="expandSidebar()">☰</button>
 
   <main class="content">
     <div class="client-head">
@@ -915,6 +939,31 @@ function setSvcFilter(v){
   document.querySelectorAll('#sbFilter .sb-f').forEach(b=>b.classList.toggle('on',b.dataset.svc===v));
   renderSidebar();
 }
+let starOnly=false;
+function toggleStarFilter(){
+  starOnly=!starOnly;
+  const b=document.getElementById('sbStarBtn');
+  if(b)b.classList.toggle('on',starOnly);
+  renderSidebar();
+}
+async function toggleStar(id,on){
+  const d=await api('/clients/'+id+'/star','POST',{on:!!on});
+  if(fail(d,'星标更新失败'))return;
+  const c=clientsData.find(x=>x.client_id===id);
+  if(c)c.starred=!!on;
+  renderSidebar();
+}
+function collapseSidebar(){
+  const sb=document.getElementById('sidebar');if(sb)sb.classList.add('collapsed');
+  const f=document.getElementById('sbFab');if(f)f.classList.add('show');
+  try{localStorage.setItem('sbCollapsed','1')}catch(e){}
+}
+function expandSidebar(){
+  const sb=document.getElementById('sidebar');if(sb)sb.classList.remove('collapsed');
+  const f=document.getElementById('sbFab');if(f)f.classList.remove('show');
+  try{localStorage.removeItem('sbCollapsed')}catch(e){}
+}
+try{if(localStorage.getItem('sbCollapsed')==='1')document.addEventListener('DOMContentLoaded',collapseSidebar)}catch(e){}
 async function loadClients(keepView){
   const d=await api('/clients');
   if(fail(d,'客户列表载入失败'))return;
@@ -923,17 +972,38 @@ async function loadClients(keepView){
   else router();
 }
 
+function platLabel(p){
+  const k=String(p||'').toLowerCase();
+  if(k.indexOf('wordpress')>=0||k==='wp')return 'WordPress';
+  if(k.indexOf('shopify')>=0)return 'Shopify';
+  if(k.indexOf('webforger')>=0||k==='wf')return 'WebForger';
+  return p||'其它';
+}
+function platformIcon(p){
+  const k=String(p||'').toLowerCase();
+  if(k.indexOf('wordpress')>=0||k==='wp')
+    return '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#3858e9"/><path d="M6 9l1.7 6 1.7-4.4L11 15l1.6-6M13.4 9l1.7 6 1.9-6" stroke="#fff" stroke-width="1.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  if(k.indexOf('shopify')>=0)
+    return '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="14" rx="2" fill="#95bf47"/><path d="M8.5 8a3.5 3.5 0 017 0" stroke="#4c6b26" stroke-width="1.4" fill="none"/></svg>';
+  if(k.indexOf('webforger')>=0||k==='wf')
+    return '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="#0ea5e9"/><rect x="3" y="5" width="18" height="4.2" rx="2" fill="#0369a1"/><circle cx="5.8" cy="7.1" r=".8" fill="#fff"/></svg>';
+  return '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="#64748b"/><circle cx="12" cy="12" r="3.2" fill="#e2e8f0"/></svg>';
+}
 function sbRow(c){
   const on=c.client_id===curId;
   const arch=c.status==='archived';
+  // 三色徽标，排序红橙蓝：红=人工任务待处理，橙=fact 待确认，蓝=agent 任务待做
   let pills='';
-  if(c.tasks_open)pills+='<span class="sb-pill tasks" title="待办任务">'+c.tasks_open+'</span>';
-  if(c.facts_pending)pills+='<span class="sb-pill facts" title="待确认 facts">'+c.facts_pending+'</span>';
+  if(c.manual_tasks_open)pills+='<span class="sb-pill manual" title="人工任务待处理">'+c.manual_tasks_open+'</span>';
+  if(c.facts_pending)pills+='<span class="sb-pill facts" title="fact 待确认">'+c.facts_pending+'</span>';
+  if(c.agent_tasks_open)pills+='<span class="sb-pill agent" title="agent 任务待做">'+c.agent_tasks_open+'</span>';
+  const star='<span class="sb-star'+(c.starred?' on':'')+'" title="'+(c.starred?'取消星标':'星标（标为我负责）')+'" onclick="event.stopPropagation();toggleStar('+c.client_id+','+(c.starred?0:1)+')">'+(c.starred?'★':'☆')+'</span>';
   const act=arch
     ? '<span class="sb-act" title="恢复" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'active\')">恢复</span>'
     : '<span class="sb-act" title="归档" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'archived\')">归档</span>';
   return '<div class="sb-row'+(on?' on':'')+(arch?' arch':'')+'" onclick="navTo('+c.client_id+',\''+curView+'\')">'+
-    '<span class="sb-name" title="#'+c.client_id+' '+esc(c.name)+'"><span class="muted">#'+c.client_id+'</span> '+esc(c.name)+'</span>'+pills+act+'</div>';
+    '<span class="sb-plat" title="'+esc(platLabel(c.platform))+' · #'+c.client_id+'">'+platformIcon(c.platform)+'</span>'+
+    '<span class="sb-name" title="#'+c.client_id+' '+esc(c.name)+'">'+esc(c.name)+'</span>'+pills+star+act+'</div>';
 }
 
 function renderSidebar(){
@@ -945,8 +1015,9 @@ function renderSidebar(){
     if(svcFilter==='paid')return v==='sem'||v==='paid'||v==='both';
     return true;
   };
-  const act=clientsData.filter(c=>c.status!=='archived'&&bySvc(c));
-  const arch=clientsData.filter(c=>c.status==='archived'&&bySvc(c));
+  const byStar=c=>!starOnly||c.starred;
+  const act=clientsData.filter(c=>c.status!=='archived'&&bySvc(c)&&byStar(c));
+  const arch=clientsData.filter(c=>c.status==='archived'&&bySvc(c)&&byStar(c));
   document.getElementById('sbList').innerHTML=act.length?act.map(sbRow).join(''):'<div class="sb-empty">还没有客户。</div>';
   const grp=document.getElementById('sbArchGroup');
   grp.classList.toggle('hidden',!arch.length);

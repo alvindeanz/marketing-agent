@@ -22,6 +22,17 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-15 AIRA：ops agent 前端侧边栏改版（收起栏 + 平台 icon + per-user 星标 + 三色徽标）
+
+Alvin 提的四项客户栏改造：
+1. **侧边栏可收起**：点「收起」全隐藏，左边缘出浮动召唤按钮(☰)再展开，状态存 localStorage。原「+添加」缩成 + 图标，同排加收起按钮与星标过滤。
+2. **#号码换平台 icon**：客户名前的 #号码换成内联 SVG 平台图标（WordPress/Shopify/WebForger/others，品牌色区分，一目了然），#号码移到 hover 提示。platform 字段 /clients 早已返回，纯前端加 platformIcon()。
+3. **per-user 星标**（Alvin 定：绑登录用户，同事各标各的负责客户，不共享不乱窜）：新表 seo_user_stars(username,client_id) 惰性建；POST /clients/{id}/star toggle；GET /clients 返回当前用户的 starred；前端每行名后星标 + sb-head「只看星标」过滤(sbStarBtn)。
+4. **徽标改三色排序红橙蓝**：原来两个(混合任务数+facts)，改成红=人工任务(owner agency/client)、橙=fact 待确认、蓝=agent 任务(owner agent)。后端 /clients 任务数按 owner_type 拆成 agent_tasks_open / manual_tasks_open（tasks_open 仍返回两者之和兼容旧用）。
+- 落点：seo-api.php（/clients 任务拆分 + starred、POST /clients/{id}/star、ensure_stars_schema）+ static/seo-agent.html（sbRow/platformIcon/platLabel/星标/收起展开/星标过滤/CSS）。
+- 测试：node 全套 19 文件退出码全 0（ui.test 含前端加载校验），php -l 过。DB 走惰性 DDL（seo_user_stars 首次 /clients 请求建）。
+- 待部署：deploy api（一并部署 seo-api.php + seo-agent.html 到 250）。
+
 ### 2026-09-15 AIRA：博客确认卡上线（对外博客发布前的客户确认闸）
 
 - 背景：Alvin 定博客发布走确认卡（复用 card_feedback 状态机）。老客户方向层已静默 onboard，博客确认卡是老客户 sprint 内唯一的客户确认闸。前置的 card_feedback 两缺陷已修（rev cb00641）。

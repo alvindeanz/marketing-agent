@@ -437,6 +437,22 @@ function metrics_rows_prepare($cid,$rows){
    resolved on arrival so that ?status=open returns exactly the cards that
    still want a human.
    Created lazily on first use, same pattern as seo_feedback. */
+/* per-user 客户星标（2026-09-15）：每个看板用户标记自己负责沟通的客户。
+   username 关联登录用户，同事各标各的，不共享。侧边栏「只看星标」靠它过滤。 */
+function ensure_stars_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_user_stars (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(64) NOT NULL,
+        client_id INT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_user_client (username, client_id),
+        KEY idx_user (username)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
 function ensure_inbox_schema(){
     static $done=false;
     if($done)return;
@@ -4488,7 +4504,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
 
 // GET /clients -> console sidebar: every onboarded client plus its counters
 if($m==='GET'&&$ROUTE==='/clients'){
-    auth_user();
+    $u=auth_user();
     /* The sidebar carries the decision inbox badge, so the table has to exist
        before the counts below are read. CREATE TABLE IF NOT EXISTS on an
        already migrated database is a no-op. */
@@ -4497,8 +4513,21 @@ if($m==='GET'&&$ROUTE==='/clients'){
     ensure_metrics_schema();
     $s=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status,p.services FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id ORDER BY FIELD(p.status,'active','archived'),c.name");
     $rows=$s->fetchAll();
-    $tasks=[];
-    foreach(db()->query("SELECT client_id,COUNT(*) AS n FROM seo_tasks WHERE status IN('proposed','in_progress','review') GROUP BY client_id")->fetchAll() as $r)$tasks[$r['client_id']]=(int)$r['n'];
+    /* 侧边栏三色徽标（红橙蓝）：人工任务(红)、待确认 facts(橙)、agent 任务(蓝)分别计数，
+       所以任务数按 owner_type 拆。agent 归 agent 泳道(蓝)，agency/client 归人工(红)。 */
+    $agentTasks=[];$manualTasks=[];
+    foreach(db()->query("SELECT client_id,owner_type,COUNT(*) AS n FROM seo_tasks WHERE status IN('proposed','in_progress','review') GROUP BY client_id,owner_type")->fetchAll() as $r){
+        $id=$r['client_id'];
+        if((string)$r['owner_type']==='agent')$agentTasks[$id]=($agentTasks[$id]??0)+(int)$r['n'];
+        else $manualTasks[$id]=($manualTasks[$id]??0)+(int)$r['n'];
+    }
+    /* per-user 星标（2026-09-15）：跟登录用户绑定，同事各标各的负责客户，不共享不乱窜。 */
+    ensure_stars_schema();
+    $me=(string)($u['username']??'');
+    $stars=[];
+    $sq=db()->prepare("SELECT client_id FROM seo_user_stars WHERE username=?");
+    $sq->execute([$me]);
+    foreach($sq->fetchAll() as $r)$stars[(int)$r['client_id']]=1;
     $facts=[];
     foreach(db()->query("SELECT client_id,COUNT(*) AS n FROM seo_facts WHERE status='unconfirmed' GROUP BY client_id")->fetchAll() as $r)$facts[$r['client_id']]=(int)$r['n'];
     $plans=[];
@@ -4513,14 +4542,32 @@ if($m==='GET'&&$ROUTE==='/clients'){
     foreach($rows as &$r){
         $id=$r['client_id'];
         $r['client_id']=(int)$id;
-        $r['tasks_open']=$tasks[$id]??0;
+        $r['agent_tasks_open']=$agentTasks[$id]??0;
+        $r['manual_tasks_open']=$manualTasks[$id]??0;
+        $r['tasks_open']=($agentTasks[$id]??0)+($manualTasks[$id]??0);
         $r['facts_pending']=$facts[$id]??0;
+        $r['starred']=isset($stars[(int)$id]);
         $r['inbox_open']=$inbox[$id]??0;
         $r['active_plan_version']=isset($plans[$id])?$plans[$id]:null;
         $r['last_job_at']=$jobs[$id]??null;
     }
     unset($r);
     res(200,['clients'=>$rows,'inbox_open_total'=>$inboxTotal]);
+}
+
+// POST /clients/{id}/star body { on: bool } -> 当前登录用户星标/取消星标该客户。
+// per-user：星标绑 username，同事各标各的负责客户，互不影响（2026-09-15 Alvin 定）。
+if($m==='POST'&&preg_match('#^/clients/(\d+)/star$#',$ROUTE,$mm)){
+    $u=auth_user();
+    ensure_stars_schema();
+    $me=(string)($u['username']??'');
+    if($me==='')res(403,['error'=>'no user']);
+    $cid=(int)$mm[1];
+    $i=input();
+    $on=!empty($i['on']);
+    if($on)db()->prepare("INSERT IGNORE INTO seo_user_stars(username,client_id)VALUES(?,?)")->execute([$me,$cid]);
+    else db()->prepare("DELETE FROM seo_user_stars WHERE username=? AND client_id=?")->execute([$me,$cid]);
+    res(200,['ok'=>true,'starred'=>$on]);
 }
 
 // GET /clients/available -> ops-tracker clients not yet onboarded here
