@@ -52,12 +52,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sb-row:hover .sb-act{opacity:1}
 .sb-act:hover{color:#e2e8f0}
 /* 平台 icon（替代 #号码），内联 SVG，一目了然 */
-.sb-plat{width:15px;height:15px;flex-shrink:0;color:#64748b;display:inline-flex;align-items:center;justify-content:center}
-.sb-plat svg{width:15px;height:15px;display:block}
-.sb-row.on .sb-plat{color:#93c5fd}
-/* 客户星标（per-user，标自己负责的客户） */
-.sb-star{flex-shrink:0;cursor:pointer;font-size:14px;line-height:1;color:#3a4453;user-select:none;padding:0 1px}
-.sb-star.on{color:#fbbf24}
+/* 平台字母 icon（wp/wf/sp/ot），品牌色小 badge */
+.sb-plat{width:22px;height:16px;flex-shrink:0;border-radius:4px;font-size:9px;font-weight:800;letter-spacing:.4px;display:inline-flex;align-items:center;justify-content:center;text-transform:uppercase;color:#fff}
+.sb-plat.wp{background:#3858e9}
+.sb-plat.wf{background:#0ea5e9}
+.sb-plat.sp{background:#95bf47;color:#25350f}
+.sb-plat.ot{background:#64748b}
+/* 客户星标（per-user）：六角大卫星，默认跟归档一起隐藏，hover 才出；已星标常亮 */
+.sb-star{flex-shrink:0;cursor:pointer;font-size:13px;line-height:1;color:#3a4453;user-select:none;padding:0 1px;opacity:0}
+.sb-row:hover .sb-star{opacity:1}
+.sb-star.on{opacity:1;color:#fbbf24}
 .sb-star:hover{color:#fbbf24}
 /* 侧边栏收起 + 浮动召唤按钮 */
 .sidebar.collapsed{display:none}
@@ -979,15 +983,12 @@ function platLabel(p){
   if(k.indexOf('webforger')>=0||k==='wf')return 'WebForger';
   return p||'其它';
 }
-function platformIcon(p){
+function platKey(p){
   const k=String(p||'').toLowerCase();
-  if(k.indexOf('wordpress')>=0||k==='wp')
-    return '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#3858e9"/><path d="M6 9l1.7 6 1.7-4.4L11 15l1.6-6M13.4 9l1.7 6 1.9-6" stroke="#fff" stroke-width="1.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  if(k.indexOf('shopify')>=0)
-    return '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="14" rx="2" fill="#95bf47"/><path d="M8.5 8a3.5 3.5 0 017 0" stroke="#4c6b26" stroke-width="1.4" fill="none"/></svg>';
-  if(k.indexOf('webforger')>=0||k==='wf')
-    return '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="#0ea5e9"/><rect x="3" y="5" width="18" height="4.2" rx="2" fill="#0369a1"/><circle cx="5.8" cy="7.1" r=".8" fill="#fff"/></svg>';
-  return '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="#64748b"/><circle cx="12" cy="12" r="3.2" fill="#e2e8f0"/></svg>';
+  if(k.indexOf('wordpress')>=0||k==='wp')return 'wp';
+  if(k.indexOf('shopify')>=0)return 'sp';
+  if(k.indexOf('webforger')>=0||k==='wf')return 'wf';
+  return 'ot';
 }
 function sbRow(c){
   const on=c.client_id===curId;
@@ -997,12 +998,12 @@ function sbRow(c){
   if(c.manual_tasks_open)pills+='<span class="sb-pill manual" title="人工任务待处理">'+c.manual_tasks_open+'</span>';
   if(c.facts_pending)pills+='<span class="sb-pill facts" title="fact 待确认">'+c.facts_pending+'</span>';
   if(c.agent_tasks_open)pills+='<span class="sb-pill agent" title="agent 任务待做">'+c.agent_tasks_open+'</span>';
-  const star='<span class="sb-star'+(c.starred?' on':'')+'" title="'+(c.starred?'取消星标':'星标（标为我负责）')+'" onclick="event.stopPropagation();toggleStar('+c.client_id+','+(c.starred?0:1)+')">'+(c.starred?'★':'☆')+'</span>';
+  const star='<span class="sb-star'+(c.starred?' on':'')+'" title="'+(c.starred?'取消星标':'星标（标为我负责）')+'" onclick="event.stopPropagation();toggleStar('+c.client_id+','+(c.starred?0:1)+')">✡</span>';
   const act=arch
     ? '<span class="sb-act" title="恢复" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'active\')">恢复</span>'
     : '<span class="sb-act" title="归档" onclick="event.stopPropagation();setClientStatus('+c.client_id+',\'archived\')">归档</span>';
   return '<div class="sb-row'+(on?' on':'')+(arch?' arch':'')+'" onclick="navTo('+c.client_id+',\''+curView+'\')">'+
-    '<span class="sb-plat" title="'+esc(platLabel(c.platform))+' · #'+c.client_id+'">'+platformIcon(c.platform)+'</span>'+
+    '<span class="sb-plat '+platKey(c.platform)+'" title="'+esc(platLabel(c.platform))+' · #'+c.client_id+'">'+platKey(c.platform)+'</span>'+
     '<span class="sb-name" title="#'+c.client_id+' '+esc(c.name)+'">'+esc(c.name)+'</span>'+pills+star+act+'</div>';
 }
 
