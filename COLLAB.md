@@ -22,6 +22,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-16 AIRA：weekly_run 加结构化收尾（Alvin 定：跑完要有总结与卡壳归因）
+
+weekly_run.sh 升级：跑前跑后各拍任务快照，新增 tools/weekly_digest.py diff 出结构化收尾——总结行（顺利跑完 X 家、卡壳 Y 家、收口 N 条）+ 每家收口/卡壳明细 + 按原因分组的人工修复清单（执行失败/卡待发/卡等客户/待放行真闸/等外部/判决在飞，各带一句修复动作），digest 落 /tmp 时间戳目录并打印，各家 harness 全量日志同目录。活体自测：对 Apollo/Sanmichelle 实拍快照跑 digest，正确归因（Apollo 三条判决在飞、Sanmichelle #673 待验收）。
+- 测试：bash -n、digest 活体自测；node tests/ 不涉及（纯工具层）。
+- 待部署：worker tools 随下次同步，批跑从仓库直跑不阻塞。
+
 ### 2026-09-16 AIRA：harness stale 判决自动重判 + weekly_run 批跑壳
 
 Alvin 定每周下班人触发跑三轮 harness 滚动 sprint，且「fable 带客户参数批量判决消耗不大」：
