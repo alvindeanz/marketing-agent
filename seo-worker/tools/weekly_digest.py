@@ -17,11 +17,14 @@ def req(path):
 def snapshot(out, cids):
     data = {}
     names = {}
+    cal = {}
+    for c in (req('/board').get('clients') or []):
+        cal[c.get('client_id')] = c.get('current_sprint')
     for c in (req('/clients').get('clients') or []):
         names[c.get('client_id')] = c.get('name')
     for cid in cids:
         ts = req('/tasks?client_id=%d' % cid)['tasks']
-        data[str(cid)] = {'name': names.get(cid, str(cid)), 'tasks': [
+        data[str(cid)] = {'name': names.get(cid, str(cid)), 'cal_sprint': cal.get(cid), 'tasks': [
             {k: t.get(k) for k in ('id', 'title', 'status', 'sprint', 'ops', 'owner_type',
                                    'human_state', 'wait_reason', 'closed_kind', 'sent_at',
                                    'card_feedback_at', 'result_note', 'review_verdict')}
@@ -71,14 +74,20 @@ def digest(before_f, after_f):
         bst = {t['id']: t for t in b['tasks']}
         done_new = [t for t in a['tasks'] if t.get('status') == 'done'
                     and bst.get(t['id'], {}).get('status') != 'done']
-        cur = cur_sprint(a['tasks'])
+        cal = a.get('cal_sprint')
+        task_cur = cur_sprint(a['tasks'])
+        # 当期口径与 harness 同源（日历）；任务只推进到日历之后 = 等日历翻页，不算卡壳
+        cur = cal if isinstance(cal, int) and cal else task_cur
+        ahead = (task_cur or 0) > (cur or 0)
         cur_open = [t for t in a['tasks'] if cur and str(t.get('sprint')) == 'S%d' % cur
                     and t.get('status') != 'done']
         stuck = [(t, classify(t)) for t in cur_open]
         stuck = [(t, c) for t, c in stuck if c]
         tot_done += len(done_new)
-        head = '## %s（本期 %s）：收口 %d，卡壳 %d' % (
-            a['name'], ('S%d' % cur) if cur else '全清', len(done_new), len(stuck))
+        head = '## %s（日历本期 %s%s）：收口 %d，卡壳 %d' % (
+            a['name'], ('S%d' % cur) if cur else '全清',
+            ('，本期活已干完等日历进 S%d' % task_cur) if (ahead and not cur_open) else '',
+            len(done_new), len(stuck))
         lines.append(head)
         for t in done_new:
             lines.append('- 收口 #%s %s（%s）' % (t['id'], str(t['title'])[:40], t.get('closed_kind') or 'done'))
