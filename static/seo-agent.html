@@ -626,6 +626,14 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
         </div>
         <div class="panel"><div id="repVersions"></div></div>
       </div>
+
+      <div class="sec">
+        <div class="sec-head">
+          <div class="sec-title">卡片</div>
+          <span class="plan-meta" id="repCardsMeta"></span>
+        </div>
+        <div class="panel"><div id="repCards"></div></div>
+      </div>
     </div>
 
     <div id="v_profile" class="hidden">
@@ -2313,7 +2321,7 @@ function repChanInit(){
   if(repChanChoice[curId]){repChan=repChanChoice[curId]}
   else if(svc==='sem'||svc==='paid'){repChan='paid'}
   else{repChan='seo'}
-  if(repChan==='paid'&&!(c&&insSvcPaid(c)))repChan='seo';
+  if(!(c&&insSvcPaid(c)))repChan='seo';
   repChanReady=true;
 }
 function setRepChan(v){
@@ -2322,16 +2330,14 @@ function setRepChan(v){
 }
 function repChanTabsHtml(){
   var c=repClientRow();
-  var cards='<button class="btn '+(repChan==='cards'?'':'ghost')+'" onclick="setRepChan(\'cards\')">卡片</button>';
-  if(!c||!insSvcPaid(c))return cards;
+  if(!c||!insSvcPaid(c))return '';
   return '<button class="btn '+(repChan==='seo'?'':'ghost')+'" onclick="setRepChan(\'seo\')">SEO</button>'+
-    '<button class="btn '+(repChan==='paid'?'':'ghost')+'" onclick="setRepChan(\'paid\')">Paid</button>'+cards;
+    '<button class="btn '+(repChan==='paid'?'':'ghost')+'" onclick="setRepChan(\'paid\')">Paid</button>';
 }
 /* 生成按钮合并为一颗：文案与行为跟随当前视图，视图即意图 */
 function renderRepGenBtn(){
   var b=document.getElementById('repGenBtn');
   if(!b)return;
-  b.style.display=(repChan==='cards')?'none':'';
   if(repChan==='paid'){
     b.textContent='生成 Paid 月报（内部草稿）';
     b.title='按 AU 基准口径出内部草稿，人工验收后才可对客';
@@ -2510,22 +2516,17 @@ async function repCheckJob(){
 /* ---- 版本列表 ---- */
 async function loadReportList(){
   if(!curId)return;
-  if(repChan==='cards'){
-    var tc=await api('/tasks?client_id='+curId);
-    if(!tc||tc._status>=400){fail(tc,'卡片列表载入失败');return}
-    repState.cards=(tc.tasks||[]).filter(isCardTask);
-    repState.client=curId;
-    renderReportList();
-    return;
-  }
   if(repChan==='paid'){
     var td=await api('/tasks?client_id='+curId);
     if(!td||td._status>=400){fail(td,'Paid 草稿列表载入失败');return}
     repState.paidDrafts=(td.tasks||[]).filter(function(t){return String(t.origin||'').indexOf('report:')===0});
+    repState.cards=(td.tasks||[]).filter(isCardTask);
     repState.client=curId;
     renderReportList();
     return;
   }
+  var tc=await api('/tasks?client_id='+curId);
+  repState.cards=((tc&&tc.tasks)||[]).filter(isCardTask);
   var d=await api('/reports?client_id='+curId);
   if(!d)return;
   if(fail(d,'报告版本载入失败'))return;
@@ -2611,15 +2612,21 @@ function repRow(r){
       (st==='sent'?'撤回为草稿':'标记已发送')+'</button>'+
     '</div>';
 }
+/* 卡片子块（2026-09-16 Alvin 定：放报告版本下面，跟当前 SEO/Paid 页签筛选卡型） */
+function renderCardsSec(){
+  var box=document.getElementById('repCards');
+  var meta=document.getElementById('repCardsMeta');
+  if(!box)return;
+  var paidView=(repChan==='paid');
+  var cards=(repState.cards||[]).filter(function(t){
+    var k=cardKind(t);
+    return paidView?(k==='词卡'||k==='素材卡'):(k==='博客卡'||k==='确认卡');
+  }).sort(function(a,b){return String(b.updated_at||'').localeCompare(String(a.updated_at||''))});
+  if(meta)meta.textContent=(paidView?'SEM 卡片（词卡 / 素材卡）':'SEO 卡片（博客与内容确认卡）')+' '+cards.length+' 张';
+  box.innerHTML=cards.length?cards.map(cardRow).join(''):'<span class="muted">'+(paidView?'还没有 SEM 卡片。':'还没有 SEO 卡片。')+'</span>';
+}
 function renderReportList(){
-  if(repChan==='cards'){
-    var boxC=document.getElementById('repVersions');
-    var metaC=document.getElementById('repVerMeta');
-    var cards=(repState.cards||[]).slice().sort(function(a,b){return String(b.updated_at||'').localeCompare(String(a.updated_at||''))});
-    if(metaC)metaC.textContent='卡片 '+cards.length+' 张（词卡 / 素材卡 / 博客与内容确认卡）';
-    if(boxC)boxC.innerHTML=cards.length?cards.map(cardRow).join(''):'<span class="muted">这个客户还没有出过卡片。</span>';
-    return;
-  }
+  renderCardsSec();
   if(repChan==='paid'){
     var box0=document.getElementById('repVersions');
     var meta0=document.getElementById('repVerMeta');
