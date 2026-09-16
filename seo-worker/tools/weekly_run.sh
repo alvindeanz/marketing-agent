@@ -9,8 +9,10 @@ API="${MA_API:-https://always.horntech-dev.com/seo-api.php}"
 TOKEN="${SEO_AGENT_TOKEN:-}"
 [ -z "$TOKEN" ] && { echo "缺 SEO_AGENT_TOKEN"; exit 2; }
 STAMP=$(date +%Y%m%d-%H%M)
-WORK="/tmp/weekly_run_${STAMP}"
+HIST="${WEEKLY_HIST:-/data/aira/projects/MA/weekly_runs}"
+WORK="$HIST/run_${STAMP}"
 mkdir -p "$WORK"
+PREV=$(ls -d "$HIST"/run_* 2>/dev/null | grep -v "run_${STAMP}" | sort | tail -1)
 
 if [ $# -gt 0 ]; then
   IDS="$*"
@@ -33,7 +35,7 @@ for cid in $IDS; do
 done
 
 python3 seo-worker/tools/weekly_digest.py snapshot "$WORK/after.json" $IDS
-python3 seo-worker/tools/weekly_digest.py digest "$WORK/before.json" "$WORK/after.json" > "$WORK/digest.md"
+python3 seo-worker/tools/weekly_digest.py digest "$WORK/before.json" "$WORK/after.json" "${PREV:+$PREV/after.json}" > "$WORK/digest.md"
 echo
 cat "$WORK/digest.md"
 echo

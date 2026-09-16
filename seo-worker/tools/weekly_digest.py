@@ -61,9 +61,12 @@ def classify(t):
         return ('判决缺失或在飞', '再跑一轮 harness 即消化；反复出现属异常，报 Aira')
     return ('其他', wr or hs)
 
-def digest(before_f, after_f):
+def digest(before_f, after_f, prev_f=None):
     B = json.load(open(before_f))
     A = json.load(open(after_f))
+    P = json.load(open(prev_f)) if prev_f and os.path.exists(prev_f) else None
+    def sig(t):
+        return (t.get('status'), t.get('human_state'), str(t.get('wait_reason') or ''), len(str(t.get('result_note') or '')))
     stamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
     lines = ['# 每周批跑收尾 ' + stamp, '']
     tot_done = 0
@@ -91,9 +94,13 @@ def digest(before_f, after_f):
         lines.append(head)
         for t in done_new:
             lines.append('- 收口 #%s %s（%s）' % (t['id'], str(t['title'])[:40], t.get('closed_kind') or 'done'))
+        pst = {x['id']: x for x in (P.get(cid, {}).get('tasks') or [])} if P else {}
         for t, (bucket, fix) in stuck:
-            lines.append('- 卡壳 #%s [%s] %s' % (t['id'], bucket, str(t['title'])[:40]))
+            stale2 = bool(pst) and t['id'] in pst and sig(pst[t['id']]) == sig(t)
+            lines.append('- 卡壳 #%s [%s]%s %s' % (t['id'], bucket, '【连续两轮零进展】' if stale2 else '', str(t['title'])[:40]))
             stuck_all.setdefault(bucket, []).append((a['name'], t['id'], fix))
+            if stale2:
+                stuck_all.setdefault('!连续两轮零进展（优先处理）', []).append((a['name'], t['id'], '两轮 harness 都没能推进一步，机制失效点，需要人拆'))
         lines.append('')
         (stuck_clients if stuck else smooth).append(a['name'])
     lines.insert(2, '**总结：顺利跑完 %d 家（%s），卡壳 %d 家，本轮共收口任务 %d 条。**' % (
@@ -101,7 +108,7 @@ def digest(before_f, after_f):
     lines.insert(3, '')
     if stuck_all:
         lines.append('## 人工修复清单（按原因分组）')
-        for bucket, rows in stuck_all.items():
+        for bucket, rows in sorted(stuck_all.items(), key=lambda kv: (not kv[0].startswith('!'), kv[0])):
             lines.append('### %s（%d 条）— %s' % (bucket, len(rows), rows[0][2]))
             for name, tid, _ in rows:
                 lines.append('- %s #%s' % (name, tid))
@@ -115,6 +122,6 @@ if __name__ == '__main__':
     if cmd == 'snapshot':
         snapshot(sys.argv[2], [int(x) for x in sys.argv[3:]])
     elif cmd == 'digest':
-        digest(sys.argv[2], sys.argv[3])
+        digest(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
     else:
         sys.exit('用法: snapshot <out.json> <cid...> | digest <before.json> <after.json>')
