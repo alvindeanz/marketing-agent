@@ -22,6 +22,18 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-16 AIRA：管线六修（第一性审阅后 Alvin 批全做）
+
+1. **发布路由**（seo-api）：blog_outline_stage 先查 publish_blog=agree 凭证，有即直通 apply 发布；判据读事实源不再猜 URL 形状（#103 误排重写教训）。
+2. **blogcheck 图片误判内链**（lib/blogcheck.js internalLinks）：剥 markdown 图片语法、/assets/ 路径不算内链，单测过。#139 两轮误杀的真根因即此；「修订通道整篇重生成」系误诊，revise 路径一直在。另补 revise 识别 note 兜底：卡机制后 output_url 是卡链接，修订轮从 result_note 找平台草稿链接（execute_task）。
+3. **ads_audit 补 campaignCriteria / adGroupCriteria**（lib/ads_audit.js）：agent 泳道最常写的两类不在 CHECKS 表，#740 六十行全带资源名仍「零行可硬审」（前诊「缺 resource name」有误）。对 #740 真实条目活体对账 3/3 硬读全符。
+4. **连续秒挂熔断**（listener.js）：连续 3 个 job 起跑 90 秒内即挂 → 写 .spawn_fuse 停领单报人，删文件恢复；替代被第一性推翻的「凭据预检」（预检防不住任意时刻过期）。
+5. **放行卡合并规则**（execute_task prompt）：超 3 个对象禁逐条列，合并类别行，逐条归第 3 节（#696/#112 超长病根）。
+6. **sent_at 自动打点**（seo-api /card_feedback status 分支）：卡页首次经中继打开（带 X-Forwarded-For）即打点——sent_at 本义就是客户可见时刻，人工「标记已发」降级为提前手段（今日六卡全漏打的教训）。
+- 附带：方向卡折叠即收口（harness，f018b61）同日上线，#672 实例收口。
+- 测试：node tests/ 19 文件全绿、blogcheck 与 ads_audit 单测/活体验证、node --check 全过。
+- 待部署：api + worker。
+
 ### 2026-09-16 AIRA：weekly_run 加结构化收尾（Alvin 定：跑完要有总结与卡壳归因）
 
 weekly_run.sh 升级：跑前跑后各拍任务快照，新增 tools/weekly_digest.py diff 出结构化收尾——总结行（顺利跑完 X 家、卡壳 Y 家、收口 N 条）+ 每家收口/卡壳明细 + 按原因分组的人工修复清单（执行失败/卡待发/卡等客户/待放行真闸/等外部/判决在飞，各带一句修复动作），digest 落 /tmp 时间戳目录并打印，各家 harness 全量日志同目录。活体自测：对 Apollo/Sanmichelle 实拍快照跑 digest，正确归因（Apollo 三条判决在飞、Sanmichelle #673 待验收）。

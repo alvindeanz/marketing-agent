@@ -191,6 +191,8 @@ function buildPreparePrompt(opts) {
     '## 0. 放行卡',
     '这一节是团队放行时**唯一会读**的东西，其余章节只有 apply 机器读。所以它必须短、必须是结论：',
     '- 改什么：每个被改的页面或对象一行，写「页面：字段，旧值 → 新值」。只写结果，不写怎么改。',
+    '  超过 3 个对象时不许逐条列：合并成类别行（如「31 篇博客的询盘链接改指 /quote/，清单见第 3 节」），',
+    '  一个类别一行。逐条对照永远属于第 3 节，放行人只要知道改动的形状和数量。',
     '- 为什么：一两句。',
     '- 风险与回滚：一两句，最坏情况是什么，怎么退回去。',
     '- 需要人定：只列必须由人拍板的点，没有就写「无」。',
@@ -1196,7 +1198,14 @@ async function runBlogTask(ctx, context, workspace, task) {
   let mode = 'create';
   let slug = '';
   let currentBody = '';
-  const outputUrl = String(task.output_url || '');
+  let outputUrl = String(task.output_url || '');
+  /* 2026-09-16：确认卡机制后 output_url 常是卡链接，不再指向草稿。修订轮识别草稿
+     加 note 兜底：output_url 不是博客地址时，从 result_note 里找平台预览/正文链接。 */
+  if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
+    const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
+    const alt = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
+    if (alt) { outputUrl = alt; }
+  }
   if (outputUrl && wf.isBlogUrl(outputUrl, profile.domain)) {
     slug = wf.slugFromBlogUrl(outputUrl);
     if (slug) {

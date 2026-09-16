@@ -17,6 +17,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 const { fork } = require('node:child_process');
+const FUSE_FILE = process.env.WORKER_FUSE_FILE || '/data/aira/seo-worker/.spawn_fuse';
 
 const { load } = require('./lib/config');
 const { Api } = require('./lib/api');
@@ -44,6 +45,7 @@ function laneState() {
 const state = {
   lanes: Object.fromEntries(LANE_NAMES.map((n) => [n, laneState()])),
   startedAt: Date.now(),
+  fastFails: 0,
   lastDrainAt: null,
   lastDrainReason: null,
   lastJob: null,
@@ -171,16 +173,31 @@ function runJob(job, lane) {
       finished = true;
       clearTimeout(killTimer);
       clearInterval(flushTimer);
+      const jobStartedAt = (ls.currentJobs[job.id] || {}).startedAt || 0;
       delete ls.currentJobs[job.id];
 
+      const runMs = jobStartedAt ? (Date.now() - jobStartedAt) : Infinity;
       if (err) {
         push('FAILED: ' + (err.stack || err.message));
         state.jobsFailed += 1;
         state.lastError = { job_id: job.id, at: ts(), message: summarize(err.message, 300) };
         log(jobTag + ': FAILED :: ' + summarize(err.message, 400));
+        /* 连续秒挂熔断（2026-09-16，登录过期连烧 5 个 job 的教训）：起跑即挂是环境病
+           （凭据/磁盘/网络），不是这单任务的病，连续 3 个就拉闸停领新单；预检防不住
+           任意时刻过期，熔断才是真兜底。人修好环境后删熔断文件恢复。 */
+        if (runMs < 90000) {
+          state.fastFails += 1;
+          if (state.fastFails >= 3 && !fs.existsSync(FUSE_FILE)) {
+            fs.writeFileSync(FUSE_FILE, JSON.stringify({ at: ts(), last_job: job.id, reason: summarize(err.message, 200), note: '连续 ' + state.fastFails + ' 个 job 起跑即挂，已停止领单。修好环境（多半是 claude 登录过期）后删除本文件恢复。' }, null, 1));
+            log('!! 熔断：连续 ' + state.fastFails + ' 个 job 秒挂，已写 ' + FUSE_FILE + '，停止领新单直到人工删除该文件');
+          }
+        } else {
+          state.fastFails = 0;
+        }
       } else {
         push('job completed ok');
         state.jobsDone += 1;
+        state.fastFails = 0;
         log(jobTag + ': done');
       }
       state.lastJob = {
@@ -272,6 +289,11 @@ async function drainLane(reason, lane) {
       if (state.shuttingDown) break;
       while (active.size < maxSlots && !stop) {
         let job;
+        if (fs.existsSync(FUSE_FILE)) {
+          log('熔断生效（' + FUSE_FILE + '），本轮不领单；修好环境后删除该文件恢复');
+          stop = true;
+          break;
+        }
         try {
           job = await api.claimJob(lane);
         } catch (e) {

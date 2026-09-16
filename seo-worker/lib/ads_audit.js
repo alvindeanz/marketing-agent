@@ -14,7 +14,7 @@ function runGaqlDefault(customerId, query) {
   return out.split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
-const RES_RE = /customers\/\d+\/(assetGroups|campaignBudgets|campaigns|conversionActions|assets|adGroups)\/[\w~-]+/;
+const RES_RE = /customers\/\d+\/(assetGroups|campaignBudgets|campaigns|conversionActions|assets|adGroups|campaignCriteria|adGroupCriteria)\/[\w~-]+/;
 
 /* 每类资源：查什么、怎么算符合。expectText 是条目 target_value+evidence 的合并文本，
    用来抠期望状态或 micros 数值。 */
@@ -65,6 +65,34 @@ const CHECKS = {
       const st = String(rows[0].ad_group_status || '');
       const want = (expectText.match(/\b(ENABLED|PAUSED)\b/) || [])[1];
       if (want && st !== want) return '期望 ' + want + ' 实际 ' + st;
+      return '';
+    },
+  },
+  /* 2026-09-16 #740 教训：agent 泳道最常写的恰是这两类（否词/关键词），不在表里
+     导致 60 行全带资源名仍「零行可硬审」。verify 从 expectText 抠期望的匹配类型与状态。 */
+  campaignCriteria: {
+    query: (rn) => "SELECT campaign_criterion.resource_name, campaign_criterion.status, campaign_criterion.negative, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type FROM campaign_criterion WHERE campaign_criterion.resource_name = '" + rn + "'",
+    verify(rows, expectText) {
+      if (!rows.length) return '账户里查无此 campaign criterion';
+      const st = String(rows[0].campaign_criterion_status || '');
+      const mt = String(rows[0].campaign_criterion_keyword_match_type || '');
+      const wantMt = (expectText.match(/\b(PHRASE|BROAD|EXACT)\b/) || [])[1];
+      if (wantMt && mt && mt !== wantMt) return '期望 ' + wantMt + ' 实际 ' + mt;
+      const wantSt = /\bPAUSED\b/.test(expectText) ? 'PAUSED' : 'ENABLED';
+      if (st && st !== wantSt) return '期望 ' + wantSt + ' 实际 ' + st;
+      return '';
+    },
+  },
+  adGroupCriteria: {
+    query: (rn) => "SELECT ad_group_criterion.resource_name, ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + rn + "'",
+    verify(rows, expectText) {
+      if (!rows.length) return '账户里查无此 ad group criterion';
+      const st = String(rows[0].ad_group_criterion_status || '');
+      const mt = String(rows[0].ad_group_criterion_keyword_match_type || '');
+      const wantMt = (expectText.match(/\b(PHRASE|BROAD|EXACT)\b/) || [])[1];
+      if (wantMt && mt && mt !== wantMt) return '期望 ' + wantMt + ' 实际 ' + mt;
+      const wantSt = /\bPAUSED\b/.test(expectText) ? 'PAUSED' : 'ENABLED';
+      if (st && st !== wantSt) return '期望 ' + wantSt + ' 实际 ' + st;
       return '';
     },
   },

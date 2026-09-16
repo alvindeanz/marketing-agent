@@ -666,6 +666,15 @@ function blog_outline_stage($t){
     $pq->closeCursor();
     $slug=strtolower(preg_replace('/[^a-z0-9_-]/i','',(string)($pr['platform']??'')));
     if($slug!=='webforger')return false;
+    /* 发布凭证优先于 URL 形状（2026-09-16，#103 误路由教训）：确认卡机制上线后
+       output_url 是卡链接不含 /blog/，按 URL 判会把「客户已同意发布」误路由成重写草稿。
+       凭证（publish_blog=agree）是真信号：有它就直通 apply 发布，判据读事实源不猜形状。 */
+    try{
+        $fb=db()->prepare("SELECT choice FROM seo_card_feedback WHERE task_id=? AND item='publish_blog' ORDER BY id DESC LIMIT 1");
+        $fb->execute([(int)$t['id']]);
+        $lastPub=$fb->fetch();
+        if($lastPub&&(string)$lastPub['choice']==='agree')return false;
+    }catch(Exception $e){/* 表未建 = 无凭证，走原判据 */}
     $u=(string)($t['output_url']??'');
     return ($u===''||strpos($u,'/blog/')===false);
 }
@@ -4823,6 +4832,13 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
     /* status 查询模式（2026-09-16 签章回显）：token 过验即可读本卡每个 item 的最后一次表态
        （choice/时间/IP，不回 fb 文本），卡页加载时用来画「已反馈」签章。 */
     if(!empty($i['status'])){
+        /* sent_at 自动打点（2026-09-16）：sent_at 的本义是「客户可见时刻」。客户打开卡时页面
+           必发一次 status 查询且经同域中继带 X-Forwarded-For；首次此类查询即打点，
+           人工「标记已发」降级为提前手段，忘打点不再让到期时钟停摆。内网直连（无 XFF）不打。 */
+        if(trim((string)($_SERVER['HTTP_X_FORWARDED_FOR']??''))!==''){
+            ensure_review_schema();
+            db()->prepare("UPDATE seo_tasks SET sent_at=NOW() WHERE id=? AND sent_at IS NULL")->execute([$tid]);
+        }
         $q=db()->prepare("SELECT item,choice,created_at,ip FROM seo_card_feedback WHERE task_id=? ORDER BY id");
         $q->execute([$tid]);
         $last=[];

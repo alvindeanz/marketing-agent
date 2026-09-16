@@ -104,7 +104,10 @@ function structure(body) {
 
 /** Every site relative link in the body, markdown and raw html. */
 function internalLinks(body) {
-  const clean = stripNoise(body);
+  /* 2026-09-16 #139 误杀修正：markdown 图片 ![alt](/assets/x.jpg) 的收尾也是 ](...)，
+     旧正则把配图全算成内链（计数爆表 + 判「不存在路径」双杀）。图先剥掉，
+     /assets/ 路径也不算内链——那是资源引用不是站内导流。 */
+  const clean = stripNoise(body).replace(/!\[[^\]]*\]\([^)]*\)/g, '');
   const out = [];
   const md = clean.match(/\]\((\/[^)\s]*)\)/g) || [];
   for (const hit of md) out.push(hit.slice(2, -1));
@@ -113,7 +116,7 @@ function internalLinks(body) {
     const m = hit.match(/["'](\/[^"']*)["']/);
     if (m) out.push(m[1]);
   }
-  return out.map((p) => p.split('#')[0].split('?')[0]).filter(Boolean);
+  return out.map((p) => p.split('#')[0].split('?')[0]).filter((p) => p && p.indexOf('/assets/') !== 0);
 }
 
 function normPath(p) {
