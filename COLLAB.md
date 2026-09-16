@@ -22,6 +22,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-16 AIRA：release_policy v7（l0_exclude 收缩）+ 已完成卡 concise 交付模块 + Apex paid 补位
+
+Alvin 定「等我的只留卡片反馈与生意闸」后的三件落地：
+1. **release_policy v6→v7**：l0_exclude_ops 从 page-rewrite/page-rebuild/styles-fragment/gtm-edit 收缩到只剩 gtm-edit（等 COLLAB bm 根因修复再评估）。效果 = 一切 reversible 改站任务闸A 判 do 直接 L0 落地不出放行卡。兜底三件套：改前存档 + 回读铁律（100% 覆盖，PD「PUT 回 ok 但零写入」实证了它比抽查硬）+ 周度 10% landed 条目独立复验（首轮已跑：#99 抽 4 篇+特例篇、#33 实读，零缺陷，抽查脚本自身两个坑已修：qa 参数撞站点白名单闸、slug 引用方案叙述短写）。
+2. **已完成卡片 concise 模块**（seo-agent.html doneBox）：closed 卡不再显示长 detail，改为一句话干了什么（result_note 最后终态标签首句）+ 人工验证链接 chips（受影响页面/客户版 URL 去重限 6，内部预览壳与附件下载不算），配合已结束视图按结束时间倒序，人工抽查顺着点。
+3. **Apex（44）paid 补位**：services 从 paid 改 both（SEO 线 9/10 已全面 onboard 字段没跟上）；预立三任务均条件 after:2026-09-22（客户观察期结束）：#744 转化双计修正方案（conversion-goal-change，irreversible 走放行）、#745 观察期复盘+2026-10 素材方向卡、#746 浴室落地页与 SEO 线协调。闸A job 852/853 已排。
+- 测试：node tests/ 全套 19 文件退出码全 0。
+- 部署：api（seo-api.php 无改动、seo-agent.html + release_policy.json 落 250）+ worker（specs 同步）。
+
 ### 2026-09-16 AIRA：卡片已反馈签章（时间+IP）+ 已结束按结束时间倒序
 
 Alvin 两项：已结束视图按结束时间排（刚完成的在最上，顺着审）；发出去的卡每个反馈按钮右侧要有已反馈签章（最后一次表态时间+IP，人工打开卡就知道谁何时反馈过）。

@@ -3541,6 +3541,34 @@ async function showJobLog(jobId){
 }
 var detailOpen={};
 function toggleDetail(id){detailOpen[id]=!detailOpen[id];renderLanes()}
+/* 已完成卡片的 concise 交付模块（2026-09-16 Alvin 定）：一句话干了什么 + 人工验证链接，
+   供「显示已结束」视图里的人工抽查。文字取 result_note 最后一个终态标签后的首句，
+   链接取 note 里的受影响页面/目标页面/客户版等 URL，去重限 6 条。 */
+function doneBox(t){
+  if((t.human_state||'')!=='closed')return '';
+  const note=String(t.result_note||'');
+  let summary='';
+  const tags=[...note.matchAll(/\[(applied|accepted|dropped|merged|killed|人工落地\+QA[^\]]*)\]\s*([^\n]{0,200})/g)];
+  if(tags.length)summary=tags[tags.length-1][2].replace(/^[：:，,。\s]+/,'').slice(0,140);
+  const urls=[];
+  const seen={};
+  (note.match(/https?:\/\/[^\s,，、）)"'<>]+/g)||[]).forEach(u=>{
+    u=u.replace(/[。；;.]+$/,'');
+    if(seen[u])return;seen[u]=1;
+    /* 内部壳与附件下载不算验证链接；客户版卡与线上页面都算 */
+    if(/\/preview\/task-|seo-api\.php|\/deliverables\//.test(u))return;
+    urls.push(u);
+  });
+  if(t.output_url&&!seen[t.output_url]&&!/\/preview\/task-/.test(t.output_url))urls.unshift(t.output_url);
+  const chips=urls.slice(0,6).map(u=>{
+    let label=u.replace(/^https?:\/\//,'').replace(/\?.*$/,'');
+    if(label.length>46)label=label.slice(0,44)+'…';
+    return '<a class="badge mod" style="text-decoration:none" target="_blank" rel="noopener" href="'+esc(u)+'">'+esc(label)+'</a>';
+  }).join(' ');
+  if(!summary&&!chips)return '';
+  return '<div class="tcard-detail" style="cursor:default">'+(summary?esc(summary):'')+
+    (chips?('<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">'+chips+'</div>'):'')+'</div>';
+}
 function taskCard(t,col){
   const hs=t.human_state||'wait_me';
   const pickable=(hs==='wait_me'&&t.owner_type==='agent'&&['proposed','approved'].indexOf(t.status)>=0&&!t.review_pending);
@@ -3569,7 +3597,7 @@ function taskCard(t,col){
     '<div class="tcard-top">'+cb+'<div class="tcard-title"><span class="badge mod" style="margin-right:6px">#'+t.id+'</span>'+esc(t.title)+'</div></div>'+
     stateLine(t)+
     rvLine(t)+
-    detail+
+    ((t.human_state||'')==='closed'?doneBox(t):detail)+
     '<div class="tcard-meta">'+priBadge+'<span class="badge mod">'+esc(t.module)+'</span>'+(taskOrigin(t)==='chat'?'<span class="badge review" title="Chat 来源：派单/开工/报告草稿">Chat</span>':'')+opsTags(t)+
     (t.owner_type!=='agent'?'<span class="badge mod">'+esc(t.owner_type)+'</span>':'')+
     (t.sprint?'<span class="plan-meta">'+esc(t.sprint)+'</span>':'')+acts+'</div>'+

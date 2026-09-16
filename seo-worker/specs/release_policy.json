@@ -1,6 +1,6 @@
 {
   "_doc": "放行分级政策，类目无关（SEO 与 paid 同一份，Alvin 拥有，Aira 起草）。risk_class 定义在各渠道/平台能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行与 Chat 分级派单（dispatch_rules），deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
-  "version": 6,
+  "version": 7,
   "executor_pending_ops": {
     "_doc": "无 L1 确定性实现的 op 清单（googleads 线以 ads_mutate.py 的 OPS 白名单为准，tests/policy_executor.test.js 断言两处一致）。2026-09-14 下午 Alvin 定下放后，本表含义从「拦截」变为「路由」：这些 op 照常派单、转位、放行，apply 阶段由无头 agent 泳道直接执行（Write + python3 受控工具面，PAUSED 先建、逐位核值），收口前过 lib/ads_audit 的零模型后置对账，账户硬读全符才算落地。白名单从能力天花板降级为路由偏好：有 L1 走 L1（零模型成本 + 天然幂等），没 L1 走 agent 泳道。肌肉回流铁律不变：agent 泳道每成功一种 op，其执行记录即 L1 实现规格，两次内长进 ads_mutate 并从本表删除。",
     "ops": [
@@ -37,11 +37,8 @@
     "auto_release": true,
     "audit": "monthly-sample",
     "l0_exclude_ops": {
-      "_doc": "机械上可回滚（有存档）但影响面大或回滚要人工（WebForger changeset revert 端点未上线），首版仍人点；观察一个月无事故再逐个降 L0。",
+      "_doc": "2026-09-16 Alvin 批（等我只留卡片反馈与生意闸）：page-rewrite / page-rebuild / styles-fragment 移出排除表，兜底 = 改前存档 + 回读铁律 + 周度 10% 随机抽查；gtm-edit 留到 COLLAB bm 的 L0 空转根因修复后再评估。原首版口径（全部人点观察一月）作废。",
       "ops": [
-        "page-rewrite",
-        "page-rebuild",
-        "styles-fragment",
         "gtm-edit"
       ]
     }
