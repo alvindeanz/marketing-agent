@@ -116,7 +116,10 @@ async function foldCards(sprint) {
       log('#' + card.id + ' -> 跟进任务 #' + followId + '，闸A 已排（job ' + (r.review_job_id || '?') + '）');
     }
     await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '方向卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）客户表态：' + summary + (followId ? '。跟进任务 #' + followId : '。全部保持观察，无跟进'), source: 'client', status: 'confirmed' });
-    await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + summary + (followId ? '，跟进 #' + followId : '，无需跟进'), card_feedback_done: 1 });
+    /* 折叠即收口（2026-09-16 Alvin 定）：卡的使命是收客户表态，表态已折叠、跟进任务
+       已接棒（或明确无跟进），卡任务当场置 done(accepted)，不再杵在泳道里等人批。
+       博客确认卡不走这里（挂在博客任务上，由发布流程收口）。 */
+    await call('PATCH', '/tasks/' + card.id, { status: 'done', result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + summary + (followId ? '，跟进 #' + followId : '，无需跟进') + '\n[accepted] 客户表态已折叠，卡使命完成，自动收口。', card_feedback_done: 1 });
   }
   // 到期视同同意：只认已标记发出（sent_at）的方向卡，折叠过的不重跑。
   // 锚点是发出时间不是产出时间：卡产出后没发给客户不该开始计时，否则卡还没发就被
@@ -137,7 +140,7 @@ async function foldCards(sprint) {
       module: card.module || 'technical', sprint, priority: 'P1', owner_type: 'agent',
       detail: '方向卡 #' + card.id + ' 发出 ' + Math.floor(days) + ' 天无客户反馈，按卡上「未回复将按建议执行」的承诺落地全部建议项。卡：' + (card.output_url || '（无链接，见任务 note）'),
     });
-    await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] 到期（' + Math.floor(days) + ' 天）零反馈视同同意，跟进 #' + r.id });
+    await call('PATCH', '/tasks/' + card.id, { status: 'done', result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] 到期（' + Math.floor(days) + ' 天）零反馈视同同意，跟进 #' + r.id + '\n[accepted] 到期视同同意，卡使命完成，自动收口。' });
   }
 }
 
