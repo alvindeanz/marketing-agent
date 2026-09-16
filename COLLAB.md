@@ -22,6 +22,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-16 AIRA：Aiden 平台三答收割，S1 平台侧堵点清零
+
+对应 Aiden 答复 /mnt/share/aira/to-aira-apollo-form-and-pd-item-writes-20260916.md（含两个深夜更新）：
+1. **Apollo #97 闭环**：平台 LEADS_JS 空防护修复部署后跑第三段验收：线上 /contact/ 新脚本实查（try 包 UI 段、缺 status 自动补 aria-live），按页面脚本口径测试提交，后台 inbox 首现 Contact Form:/contact/ 来源 lead（2026-09-16T20:14:51，已标注待删）。任务 done(accepted)，验证边界写明（DOM 事件链由平台 9 条回归测试覆盖）。
+2. **PD #742 机器线落地**：12 个 AquaREPEL item x 3 字段共 36 处，PUT items 串行执行（响应回显逐条比对、ignored 全空、独立回读 36/36、渲染抽查生效）。「缺执行器 collection-item-update」的前提修正：schema 本就含 SEO 字段，是快照看漏。
+3. **PD #743 机器线落地**：平台深夜解锁记录级 PUT 白名单后两字段落地，双品牌 title（79 字符）修为 59 字符规范形态。R2 collection「真墙」定性作废。
+- 执行器回流待办：collection-update / collection-item-update 按 Aiden 给的契约长进 seo-worker（ignored 非空=失败、同 collection 串行防 items.json 互踩、路由用 item.id、body 不带 id、seoTitle 品牌后缀预算），登记在 TODO 排期。
+- 关联：#33 的 capability-gap 尾项清零；PowerDekor S3 至此无平台侧阻塞。
+
 ### 2026-09-16 AIRA：Bens AU/NZ 词卡按窗口铁律重发 + 报告 tab 新增「卡片」类目
 
 1. **两张词卡重出**（Alvin 指出已发卡窗口口径不合「发卡月前两个整月」铁律）：窗口统一 2026-07-01 至 08-31，全部数字 GAQL 现测并与系列合计分毫对账（AU 搜索 54 条询价、NZ 搜索 10 条均对上）。判断随新窗数字更正并在卡上披露：AU「款式与做法」收缩改保持观察；NZ 三处（curtains 加码改保持、sheer 保持改收缩、blinds 收紧改保持）；NZ 停投归因按已查明事实改「账户验证问题」（更正付款方式误判）。决策卡截止日统一 2026-09-23（旧卡 no_reply 9/8 早于发卡日 9/15 的雷一并修）。同 URL 覆盖发布，t/k 与已收反馈不受影响，lint PASS、线上 200、周期行实测正确。数据 JSON 走新契约（issued+window，渲染器生成日期）。
