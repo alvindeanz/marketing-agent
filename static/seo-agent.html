@@ -2313,7 +2313,7 @@ function repChanInit(){
   if(repChanChoice[curId]){repChan=repChanChoice[curId]}
   else if(svc==='sem'||svc==='paid'){repChan='paid'}
   else{repChan='seo'}
-  if(!(c&&insSvcPaid(c)))repChan='seo';
+  if(repChan==='paid'&&!(c&&insSvcPaid(c)))repChan='seo';
   repChanReady=true;
 }
 function setRepChan(v){
@@ -2322,14 +2322,16 @@ function setRepChan(v){
 }
 function repChanTabsHtml(){
   var c=repClientRow();
-  if(!c||!insSvcPaid(c))return '';
+  var cards='<button class="btn '+(repChan==='cards'?'':'ghost')+'" onclick="setRepChan(\'cards\')">卡片</button>';
+  if(!c||!insSvcPaid(c))return cards;
   return '<button class="btn '+(repChan==='seo'?'':'ghost')+'" onclick="setRepChan(\'seo\')">SEO</button>'+
-    '<button class="btn '+(repChan==='paid'?'':'ghost')+'" onclick="setRepChan(\'paid\')">Paid</button>';
+    '<button class="btn '+(repChan==='paid'?'':'ghost')+'" onclick="setRepChan(\'paid\')">Paid</button>'+cards;
 }
 /* 生成按钮合并为一颗：文案与行为跟随当前视图，视图即意图 */
 function renderRepGenBtn(){
   var b=document.getElementById('repGenBtn');
   if(!b)return;
+  b.style.display=(repChan==='cards')?'none':'';
   if(repChan==='paid'){
     b.textContent='生成 Paid 月报（内部草稿）';
     b.title='按 AU 基准口径出内部草稿，人工验收后才可对客';
@@ -2508,6 +2510,14 @@ async function repCheckJob(){
 /* ---- 版本列表 ---- */
 async function loadReportList(){
   if(!curId)return;
+  if(repChan==='cards'){
+    var tc=await api('/tasks?client_id='+curId);
+    if(!tc||tc._status>=400){fail(tc,'卡片列表载入失败');return}
+    repState.cards=(tc.tasks||[]).filter(isCardTask);
+    repState.client=curId;
+    renderReportList();
+    return;
+  }
   if(repChan==='paid'){
     var td=await api('/tasks?client_id='+curId);
     if(!td||td._status>=400){fail(td,'Paid 草稿列表载入失败');return}
@@ -2522,6 +2532,40 @@ async function loadReportList(){
   repState.reports=d.reports||[];
   repState.client=curId;
   renderReportList();
+}
+/* 卡片类目（2026-09-16 Alvin 定：SEM 与 SEO 的客户确认卡都算报告，在报告版本下单列，
+   供人工检索与 chat 调整时引用）。识别看 ops 与产出链接，状态看发卡/反馈标记。 */
+function isCardTask(t){
+  var ops=String(t.ops||''),s=String(t.result_note||'')+String(t.output_url||'');
+  return /keyword-direction|creative-direction/.test(ops)||/blog_confirmation|确认卡|keyword_direction_|creative_direction_/.test(s);
+}
+function cardKind(t){
+  var ops=String(t.ops||''),s=String(t.result_note||'')+String(t.output_url||'');
+  if(/keyword-direction/.test(ops)||/keyword_direction_/.test(s))return '词卡';
+  if(/creative-direction/.test(ops)||/creative_direction_/.test(s))return '素材卡';
+  if(/blog_confirmation/.test(s))return '博客卡';
+  return '确认卡';
+}
+function cardState(t){
+  var note=String(t.result_note||'');
+  if(/\[卡反馈折叠/.test(note))return ['done','已处理'];
+  if(t.card_feedback_at)return ['review','有新反馈'];
+  if(t.sent_at)return ['review','已发待反馈'];
+  return ['pri P1','待发'];
+}
+function cardRow(t){
+  var note=String(t.result_note||'');
+  var link=t.output_url||'';
+  if(!link){var m=note.match(/(https?:\S+\?t=\d+&k=[a-f0-9]+)/);link=m?m[1]:''}
+  var st=cardState(t);
+  return '<div class="plan-row">'+
+    '<span class="badge mod">'+cardKind(t)+'</span>'+
+    '<span class="badge mod">#'+t.id+'</span>'+
+    '<span class="badge '+st[0]+'">'+st[1]+'</span>'+
+    '<span class="pr-main">'+esc(t.title)+'</span>'+
+    (link?'<a class="log-toggle" href="'+esc(link)+'" target="_blank" rel="noopener">打开卡片</a>':'<span class="muted">无链接</span>')+
+    '<span class="plan-meta">'+esc(String(t.updated_at||'').slice(0,16))+'</span>'+
+    '</div>';
 }
 function repPaidDraftRow(t){
   var note=String(t.result_note||'');
@@ -2568,6 +2612,14 @@ function repRow(r){
     '</div>';
 }
 function renderReportList(){
+  if(repChan==='cards'){
+    var boxC=document.getElementById('repVersions');
+    var metaC=document.getElementById('repVerMeta');
+    var cards=(repState.cards||[]).slice().sort(function(a,b){return String(b.updated_at||'').localeCompare(String(a.updated_at||''))});
+    if(metaC)metaC.textContent='卡片 '+cards.length+' 张（词卡 / 素材卡 / 博客与内容确认卡）';
+    if(boxC)boxC.innerHTML=cards.length?cards.map(cardRow).join(''):'<span class="muted">这个客户还没有出过卡片。</span>';
+    return;
+  }
   if(repChan==='paid'){
     var box0=document.getElementById('repVersions');
     var meta0=document.getElementById('repVerMeta');
