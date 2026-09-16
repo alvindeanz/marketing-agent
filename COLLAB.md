@@ -22,6 +22,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-16 AIRA：harness stale 判决自动重判 + weekly_run 批跑壳
+
+Alvin 定每周下班人触发跑三轮 harness 滚动 sprint，且「fable 带客户参数批量判决消耗不大」：
+1. **harness.js 闸A 排程扩面**：0.5 阶段除 proposed 无判决外，agent 位 approved/proposed 且 review_stale 的一并自动重判——换挡后老 plan 判决过期卡「待拍板」的模式就此消除（Apollo S3、Louvresky S4 两例实证）。判决 job 万级 token，批量 20 条一 job。
+2. **tools/weekly_run.sh**：顺序对全部 active 客户（或指定名单）跑 harness，一次一个防内存挤兑，单家失败不拖垮整轮，末尾汇总页（处置/放行卡/阻塞/闸中止）落 /tmp 并打印。人触发，不挂 cron。
+- 测试：node --check、bash -n、Louvresky dry 实跑（正确识别 2 条待处置）、node tests/ 19 文件全绿。
+- 待部署：worker（tools 与 harness 在白名单内随下次同步；批跑我从仓库直跑不阻塞）。
+
 ### 2026-09-16 AIRA：Aiden 平台三答收割，S1 平台侧堵点清零
 
 对应 Aiden 答复 /mnt/share/aira/to-aira-apollo-form-and-pd-item-writes-20260916.md（含两个深夜更新）：

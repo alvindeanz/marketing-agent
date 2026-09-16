@@ -173,9 +173,15 @@ async function main() {
   const inScope = (t) => (IDS ? IDS.includes(t.id) : t.sprint === sprint);
 
   // 0.5 本期还没有判决的任务（含 later 自动挪期后清了判决的）先排一轮闸A，判完再拍板。
+  // 2026-09-16 Alvin 定：stale 判决（老 plan 时代判的、detail 或事实已变）一并自动重判，
+  // 别让换挡后的新当期卡在「待拍板」（Apollo S3 与 Louvresky S4 两例实证；fable 批量判决
+  // 一个 job 万级 token，成本可忽略）。
   let all = await tasks();
-  const noVerdict = all.filter((t) => inScope(t) && t.status === 'proposed'
-    && !t.review_effective && !t.review_pending && !(t.job_state && t.job_state.status)).map((t) => t.id);
+  const noVerdict = all.filter((t) => inScope(t)
+    && !t.review_pending && !(t.job_state && t.job_state.status)
+    && ((t.status === 'proposed' && !t.review_effective)
+      || (['proposed', 'approved'].includes(t.status) && t.owner_type === 'agent'
+        && t.review_effective && t.review_stale))).map((t) => t.id);
   const pendingNow = all.filter((t) => inScope(t) && t.review_pending).map((t) => t.id);
   if ((noVerdict.length || pendingNow.length) && !DRY) {
     if (noVerdict.length) {
