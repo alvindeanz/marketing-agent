@@ -1003,9 +1003,20 @@ async function runOne(ctx, context, workspace, taskId) {
 
   // Blog publish is its own path: the deliverable is a draft on the platform,
   // not a change plan file, so the plan file requirement below does not apply.
+  // 路由按 ops 不按 URL 形状（2026-09-17 #138/#139 事故）：output_url 可能被换成确认卡
+  // 链接（预览 token 失效后的补救），博客任务掉进 change-plan 分支必然失败。URL 从
+  // note 兜底找平台文章链接，与 execute_task 的 revise 兜底同一口径。
   const ops = taskOps(task);
-  const outputUrl = String(task.output_url || '');
-  if (ops.some((op) => BLOG_OPS.indexOf(op) !== -1) && wf.isBlogUrl(outputUrl, profile.domain)) {
+  let outputUrl = String(task.output_url || '');
+  if (ops.some((op) => BLOG_OPS.indexOf(op) !== -1)) {
+    if (!wf.isBlogUrl(outputUrl, profile.domain)) {
+      const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
+      const alt = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
+      if (alt) outputUrl = alt;
+    }
+    if (!wf.isBlogUrl(outputUrl, profile.domain)) {
+      throw new Error('task ' + taskId + '：博客任务，但 output_url 和 note 里都找不到平台文章链接，无法定位目标文章，不发布');
+    }
     log('task ' + taskId + '：博客发布模式，目标 ' + wf.publicUrlOf(outputUrl));
     return runBlogPublish(ctx, task, workspace, profile, outputUrl);
   }
