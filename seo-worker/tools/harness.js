@@ -359,6 +359,26 @@ async function report(all, sprint, retried) {
   console.log('\n## 阻塞与待人定（' + blockers.length + '）');
   for (const b of blockers) console.log('- #' + b.id + ' ' + b.kind + '：' + b.text);
 
+  // 能力重绑定候选（2026-09-17，midea S1 实证：plan 是车道接通前建的，12 条全落人工位，
+  // 车道通了没人发现，只能人肉逐条 PATCH。原则：owner 位是建计划时的快照，能力表是活的，
+  // 每次 harness 跑都要把「人工位存量 × 已接通车道」摆到人眼前。只提示不自动转：
+  // 转位即 mandate（policy mandate_doc），必须人说了算。）
+  try {
+    const caps = require('../lib/capabilities');
+    const bcNow = await boardClient();
+    const manifest = caps.loadManifest(String((bcNow && bcNow.platform) || ''));
+    if (manifest.found) {
+      const cands = all.filter((t) => ['proposed', 'approved', 'blocked'].includes(t.status)
+        && String(t.owner_type || '') === 'agency');
+      if (cands.length) {
+        console.log('\n## 转位候选（' + cands.length + '，平台 ' + manifest.platform + ' 车道已接通，人工位存量建议逐条决定转或留）');
+        for (const t of cands.slice(0, 15)) console.log('- #' + t.id + ' [' + (t.sprint || '无期') + '] ' + t.title);
+        if (cands.length > 15) console.log('- …另有 ' + (cands.length - 15) + ' 条');
+        console.log('  转位：node tools/machine_run.js ' + cid + ' <id[:ops[:module]],...> --reason "..."（转完 harness 会自动重判再拍板）');
+      }
+    }
+  } catch (e) { log('转位候选段跳过：' + e.message); }
+
   // 追加到 TODO.md 批注段
   if (!NO_TODO && !DRY && fs.existsSync(TODO)) {
     const s = fs.readFileSync(TODO, 'utf8');
