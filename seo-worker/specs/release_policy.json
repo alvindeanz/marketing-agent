@@ -68,7 +68,7 @@
     "conversion-goal-change": "irreversible",
     "gsc-audit": "reversible",
     "ga4-audit": "reversible",
-    "gbp-audit": "reversible",
+    "gbp-align": "reversible",
     "ga4-config-update": "irreversible",
     "page-rewrite": "reversible",
     "page-rebuild": "reversible",

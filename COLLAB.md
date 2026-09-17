@@ -22,6 +22,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA：GBP 口径收窄为 gbp-align 两件套（Alvin 定：只做 SEO 收益可度量的）
+
+背景：#42 六项清单（补产品价、改 posts、补照片、重写描述、逐平台核对时间）是「为列而列」，收益不可度量且写侧全人工。新口径：GBP 任务唯一合法形态 = gbp-align 两件套——① 档案落 fact gbp.profile（NAP/类目/链接/营业时间照录，第三方旧址残留记备注，做 map citation 的原料）；② 站内 LocalBusiness schema 部署对齐（sameAs 指 GBP，机器可落）。citation 修正等 map citation 批次拿 fact 统一做；gbp-update（human_only）只在客户点名改 GBP 本体时用。
+- specs：webforger.md 能力表 gbp-audit 改 gbp-align 并重写定义、§268 段收窄；plan_experience 加一条；release_policy gbp-align=reversible；seo-api READONLY_OPS 加 gbp-align（gbp-audit 保留兼容存量判决）。
+- 存量：#42（PD）与 #392（KiaOraKids）改造为两件套并转 agent 位重判（job 887/888）；#385（Citymed S6 复盘）加注记只看洞察不出清单。
+- 测试：node tests/ 19 文件全绿。待部署 api + worker。
+
 ### 2026-09-16 AIRA：管线六修（第一性审阅后 Alvin 批全做）
 
 1. **发布路由**（seo-api）：blog_outline_stage 先查 publish_blog=agree 凭证，有即直通 apply 发布；判据读事实源不再猜 URL 形状（#103 误排重写教训）。
