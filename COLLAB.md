@@ -29,6 +29,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA (h)：闸门 false-positive 修复 + goodie 词卡发布 + 方向卡产出机制查清
+
+- **闸门修复**（harness.js，已 push，本机工具无需部署）：关键词/mapping 确认闸旧正则只要 fact_key 含 lock 就放行，被 keywords.lock_state（值写「未锁定/onboard gap」）骗过，luxelink/sunseeker/playmate 会被错误放行跑出没校准的 sprint。修法：排除值里否定语 + 要求肯定的锁定信号。实证 midea 过、luxelink 拦、badger 关键词过（leafblower 真客户确认）mapping 拦。
+- **方向卡产出机制查清并记档**（记忆 reference_direction_card_production）：keyword-direction/creative-direction 卡**不是 worker 自动产的**。execute 的 analysis agent 只读工具（无 Write/node），只出 markdown 分析；render_keyword_direction.js 在 execute/apply 里从未被调用。渲染成卡是操作者手动流程：gaql_query.py 拉 Ads → 聚词族 → 写 data.json（cls 用 g/h/a）→ render 脚本 → lint → republish。卡是 Ads 账户卡（三大数字=花费/下单/单成本，下单取 PURCHASE），Shopping 有逐词 PMax 没有。
+- **goodie 2026-09 词卡已出并发布**：gaql 直取账户 1332867293，12326 Shopping 搜索词聚 5 族，日系文具最划算（单成本 4.6）、b box 与 Sanrio 零转化疑品牌错配、长尾最贵。三张决策卡 + 否词 CSV 80 词。lint PASS，republish 回验 200。
+- **playmate 卡未成，两个真待决**（分析存 clients/playmate/notes/kw_direction_analysis_2026-09.md）：①渲染器中文写死，playmate 英语客户需先给渲染器加英文模式；②账户花费头部全是壮阳补充剂（sex pills/male enhancement/erection pills），content.compliance + Ads 政策双敏感且已有 #558 待客户决策，framing 要 Alvin 过目并与 #558 对齐，不宜无监督定稿。
+- 下一步/认领：goodie 卡等 Alvin 明早看；playmate 待 Alvin 定英文渲染方案（我可给 render + 模板加 i18n 一次性改+测试）与壮阳类目 framing。
+
 ### 2026-09-17 AIRA (g)：P1 两条（能力重绑定回路 + worker lint 路径核实并补全）
 
 - **能力重绑定回路**（tools/harness.js + 新 tools/machine_run.js，已部署无关，纯本机工具）：harness 每跑一次列「转位候选」= 人工位任务 × 已接通平台车道（读 lib/capabilities.loadManifest(bc.platform)）。machine_run.js 批量转位（owner→agent、补 ops、detail 盖印章、强制 --reason），ops 必须在 release_policy 表内否则拒转。转位印章改内容哈希使旧判决过期，下次 harness 的 0.5 段自动重排闸A 重判再拍板，全闭环零手工 PATCH。midea 498/499 实盘验证：转位→job 934 自动重判(do)→job 935/936 执行，无人肉干预。
