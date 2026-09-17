@@ -28,6 +28,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA (g)：P1 两条（能力重绑定回路 + worker lint 路径核实并补全）
+
+- **能力重绑定回路**（tools/harness.js + 新 tools/machine_run.js，已部署无关，纯本机工具）：harness 每跑一次列「转位候选」= 人工位任务 × 已接通平台车道（读 lib/capabilities.loadManifest(bc.platform)）。machine_run.js 批量转位（owner→agent、补 ops、detail 盖印章、强制 --reason），ops 必须在 release_policy 表内否则拒转。转位印章改内容哈希使旧判决过期，下次 harness 的 0.5 段自动重排闸A 重判再拍板，全闭环零手工 PATCH。midea 498/499 实盘验证：转位→job 934 自动重判(do)→job 935/936 执行，无人肉干预。
+- **worker lint 路径核实**（execute_task.js，**待部署**）：核实结论=有真缺口。①blogcheck.js 是 worker 执行侧唯一 JS lint，只读 banned_terms/absolute_claims/forbidden_openers 三键+硬编码 dash/emoji，不含 badge_count 及多数 Python lint 规则；②实测 worker 的无头 `claude -p`（cwd 在客户工作区）**不加载** /data/aira/.claude 的 PostToolUse lint 钩子（instrumented 测试：写坏 badge 文件 agent 无反应，--debug 无钩子机器日志）；③故 badge_count 等规则此前只在 ramp 后检（人触发）兜住，执行侧裸奔。补法：execute_task 发布每份客户版 HTML 前跑全量 deliverable_lint.py，PASS/FAIL 盖到卡 note（不拦发布，external 走客户卡人来定；永不抛错）。这让 blogcheck.js 的部分实现有了全量后盾，后检不必逐份重跑。deliverable_lint.py 本身无 worker 树副本（绝对路径 /data/aira/scripts 单份，hook 与 blogcheck 共用），无同步问题。
+- 测试全绿。execute_task 改动**待部署**（deploy.sh worker），部署前 498/499 等在途 job 仍走旧 worker 不带 lint 戳，属预期。
+- 归属：harness/machine_run/republish 是 tools，不进部署产物；execute_task 与之前 P0 无关，本条是唯一待部署项。
+
 ### 2026-09-17 AIRA (f)：P0 三修（harness 本期推导 + 空拍板逐条原因 + republish 回程通道），另纠正 (d) 条一处误诊
 
 - 先纠错：(d) 条报的「判决时效盲区」是误诊。attach_review_state 的 stale 判定早就是内容哈希锚（review_text_hash=MD5(title|detail)），转位 PATCH 不会作废判决；当日两次空拍板的真凶只有 sprint 口径一个，重排 job 916 是白烧的（且两次 fable 判决结论不同：915 判 496 并入 495，916 判 496 独立 do，本批按 916 执行）。误诊根因是 harness 无声失败逼人瞎猜，修复见下。
