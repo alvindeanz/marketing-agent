@@ -28,6 +28,19 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA (c)：release policy v8 客户卡放行 + shopify.md v2 船队扩容 + midea S1 试点开工
+
+- 干了什么：Alvin 定（本日频道）：SEO 内容线 Alvin 退出常规放行链。external 类 op 与「改页面说什么」批次的放行凭证改由客户卡采集（方向卡 / 网页调整卡，新 SOP specs/sops/client_cards.md），客户确认落 confirmed 批文 fact 走既有 external_with_backing_fact=auto 通道，**服务端零代码改动**；Alvin 只收异常件（bug/报错/权限/平台不支持）；ramp 期 auto 完成件全量人工后检，质量熔断暂不建。落地：release_policy.md 加「SEO 客户卡放行」节、json version 7→8（新增 seo_client_card 说明块，不改定档行为）、capabilities/shopify.md 升 v2（船队 10 店口径、article-meta-update 空补齐/改已有的卡片分界、sungait 专属铁律隔离、文案铁律改按客户 CLAUDE.md+facts 走）。测试：node tests/ 全套过（specs 一致性含新字段）；未动 seo-api.php 故 php -l 不适用。
+- 坑：article-meta-update 的「空补齐 vs 覆盖已有」分界服务端不区分（都是 reversible L0），靠 plan/execute 阶段 prompt 落实 + ramp 后检兜底，后检发现漏卡按 DEFECTS 流程收紧。
+- 下一步/认领：midea 定为 Shopify S1 harness 试点（Alvin 挑的方案，本日批）。我备导入包跑 onboard_chain；policy json 属 api 部署面，**待部署**（deploy.sh api），按政策维护回路放宽类 diff 给 Alvin 过目后我部署。
+
+### 2026-09-17 AIRA (b)：Shopify 船队收货验活，9/9 全绿
+
+- 干了什么：收 Aiden 回包（/mnt/share/aiden/to-aira-shopify-fleet-tokens-reply-20260917.md），9 家店（midea/sunseeker/badger/luxelink/ctomi/playmate/haakaa/goodiegoodie/dareu）已追加 stores.conf（/data/aira/tools/ 与 tools/shopseo/ 两份同步），逐店 whoami + articles list 全过：token 均 permanent、scopes 全量同 sungait 口径、店名域名逐一对上。文章量：haakaa 317、dareu 136、luxelink 85、midea 72、sunseeker 67、badger 65、playmate 61、ctomi 33、goodiegoodie 24。
+- 尾巴关掉一条：sunseeker 的 read_analytics 在最终 app 版本里，whoami 活体验证带着，不用 Alvin 确认也不用 Aiden 补。oakfurniture 仍 PENDING 等店主装 app，stores.conf 留注释占位，Alvin 去催。
+- 顺手修 shopseo 一个 bug：articles_json() 用 --argjson 把累积文章 JSON 塞命令行参数，payload 带 body_html 超 ARG_MAX 直接炸（badger 首撞，execve E2BIG）。改为临时文件 --slurpfile 累积，badger 重测过，其余店回归无异常。bash -n 过。Aiden 若改 shopseo 注意别回退这段（约 250 到 267 行）。
+- 下一步/认领：这批店进 sprint 排期（板上逐客户开）；collections 命令面 Aiden 已答复他来扩，做完 COLLAB 回包；oakfurniture 装好 Aiden 补 alias 后我再单独验活补登。
+
 ### 2026-09-17 AIRA：GBP 口径收窄为 gbp-align 两件套（Alvin 定：只做 SEO 收益可度量的）
 
 背景：#42 六项清单（补产品价、改 posts、补照片、重写描述、逐平台核对时间）是「为列而列」，收益不可度量且写侧全人工。新口径：GBP 任务唯一合法形态 = gbp-align 两件套——① 档案落 fact gbp.profile（NAP/类目/链接/营业时间照录，第三方旧址残留记备注，做 map citation 的原料）；② 站内 LocalBusiness schema 部署对齐（sameAs 指 GBP，机器可落）。citation 修正等 map citation 批次拿 fact 统一做；gbp-update（human_only）只在客户点名改 GBP 本体时用。

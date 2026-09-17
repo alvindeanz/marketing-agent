@@ -29,6 +29,16 @@ page-rewrite / page-rebuild（整页覆盖，影响面大）、styles-fragment�
 SEO：page-meta-update、content-edit、image-generate、redirect-batch（本身 agent_apply 不出卡）
 paid：negative-keyword-add、ad-pause、adgroup-pause、keyword-bid-adjust、schedule-adjust、final-url-change
 
+## SEO 客户卡放行（2026-09-17 Alvin 定，version 8，midea S1 试点起）
+
+Alvin 从 SEO 内容线的常规放行链上退出。原则：方向和口径的确认权归客户，执行判断归 fable 加机器闸加人工后检，Alvin 只处理系统异常。
+
+- **客户卡 = 批文 fact 的采集途径。** external 类 SEO op（article-publish、blog-publish、ad-copy 之外的内容对外发布）与「改页面说什么」的批次（money page title 改法、正文重写、品牌口径 / 价格展示 / 政策页文案），放行凭证一律通过客户卡采集：方向卡（mapping、选题、页面合并砍留）或网页调整卡（具体改动 before/after，敏感字段高亮）。客户确认后落 confirmed 批文 fact，服务端按既有 external_with_backing_fact=auto 放行。卡片纪律见 `sops/client_cards.md`。客户超时未回按未确认搁置，不默认放行。
+- **免卡 op 照旧 L0**：机械类（空缺 meta 补齐、内链、alt、坏链修复、redirect）机器闸（dry-run diff、lint、客户铁律比对、快照/存档）过了直接执行。注意区分：article-meta-update 的「空补齐」免卡，「改已有 title/meta」的批次归网页调整卡，这条分界写在能力清单里，由 plan/execute 阶段执行，后检核对。
+- **Alvin 收件箱只剩异常件**：bug、报错、权限不足、平台不支持的操作、客户站预期外状态。异常件不是放行卡，是带错误上下文与已尝试动作的工单。能归 Aiden 的直接 COLLAB 登记，到 Alvin 的只剩要老板出面的（向客户要权限、动钱、改约定）。
+- **ramp 期后检（前几个月）**：所有 auto 放行的完成件全量进「已完成待检」队列人工核对（锚点三样：客户铁律、facts/PJ 记录一致性、diff 与方案一致性），踩雷记 DEFECTS.md。数据收敛后降为抽查。质量熔断暂不建（Alvin 定），现有「同任务 auto-apply 至多一次」的技术熔断保留。
+- 本节先在 midea S1 单客户试点，与双线观察期数据分开统计；全船队铺开由 S1 跑完一个后检周期后另行提案。
+
 ## Chat 分级派单（2026-09-08 Alvin 定：决策权还给 fable，version 3）
 
 fable 在频道判定后可派改动类任务（dispatch kind=change，ops 必填），服务端按本政策定档，
