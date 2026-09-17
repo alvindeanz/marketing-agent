@@ -18,6 +18,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - **Aira**：MA 主力开发，全仓可动（seo-api.php、前端、runners、lib、specs、deploy）。发现 bug 直接修，改动照旧在本账本登记同步。
 - **Aiden**：辅助开发。
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移。
+
+### 2026-09-17 AIRA (a)
+
+- 干了什么：Shopify 船队接入交办已发 `/mnt/share/aira/to-aiden-shopify-fleet-tokens-20260917.md`。Alvin 确认其余 Shopify 客户店铺权限已到位，请 Aiden 按 sungait 同款（custom distribution app + token 服务现取）接入八家：oakfurniture(1)、midea(3)、sunseeker(4)、badger(5)、luxelink(6)、ctomi(11)、playmate(20)、haakaa(42)。dareu 空窗期不接，goodiegoodie/citymed 非 Shopify 别混。
+- 坑：无新坑。scopes 沿用 sungait 三组口径；alias 用 board workspace 名。
+- 下一步/认领：Aiden 回包 alias=域名清单后，Aira 逐店 whoami + articles list 验活并回测试结果，然后开这批客户 sprint。附带一问：shopseo 要不要扩 collections 命令面（sungait 集合页任务在排队），Aiden 三选一回复即可。
 - 历史版本（2026-08-24 初始，窄面认领）：Aiden 管 api/前端/deploy/sql/既有 runners 与 lib，Aira 只认领非 WebForger 平台适配与 specs/SOP 回写，对方领地报告不动手。已作废，留此存档。
 
 ## 条目
