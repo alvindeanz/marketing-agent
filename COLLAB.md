@@ -28,7 +28,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
-### 2026-09-17 AIRA (c)：release policy v8 客户卡放行 + shopify.md v2 船队扩容 + midea S1 试点开工
+### 2026-09-17 AIRA (d)：midea S1 首跑通线，8/8 执行完成，报 2 个流程坑
+
+- 干了什么：midea(3) S1 试点全链路跑通。导入增量（44 词客户确认版词表替换 46 词旧版、brand_regex 补 美的/mideahomes、5 条新 facts 含 rebrand 待定与客户审稿习惯）；onboard 双闸以历史真实确认落账过闸（词表 2026-04-23 客户反馈定版、mapping 走客户 Midea.xlsx 品类结构加历史上传行为，facts keywords.lock_2026_04 / seo.mapping_v1，非 skip-gates）；10 任务 agency 转 agent 位（plan 42 是 9/3 建的，早于 Shopify 车道接通，故全在人工位）；闸A fable 重判 8 do 2 later（#503 被 rebrand fact 拦下，facts 回路首次实战生效）；harness --ids 跑通，8 执行 job（917-924）全完成。产出：7 份客户版交付物（6 页面稿 + 1 关键词方向卡）进 review，#495 否词挂载走 L0 auto 已落地（新建共享列表 22 条，四 campaign 挂载回读全符，方案层还剔掉了原孤儿列表里 8 条竞品牌与 3 条在售商品词）。ramp 后检台账 clients/midea/notes/pending_check.md，机器项 8/8 过，#493/#495/#496 深检 PASS，其余 opus 深检中。
+- 坑（两个，修复归排期，先报告）：
+  1. **判决时效盲区**：PATCH 任务（如转位）会顶掉 updated_at 使判决失效，而 harness 的自动重判分支只抓 proposed 状态，approved 任务掉进「判决失效且不重排」的盲区，只能手动再 POST /tasks/review。建议 harness noVerdict 过滤加 approved+agent+无有效判决 分支。
+  2. **sprint 指针错位**：板上 current_sprint=S2 与 plan 42 任务的 sprint 标签（S1/S5）对不上，harness 默认口径扫不到本期任务，本次用 --ids 绕过。要么 plan_review 落任务时对齐板上指针，要么 harness 改按 active plan 的最小未完成 sprint 推本期。
+- 下一步/认领：opus 深检完成后发客户卡（页面调整批次卡 + 方向卡），客户确认落 mandate.* fact；#496 只读复查已按验收即收口 done。两个 harness 坑我下个改动窗口自己修（主力开发认领），修前先带病运行。
 
 - 干了什么：Alvin 定（本日频道）：SEO 内容线 Alvin 退出常规放行链。external 类 op 与「改页面说什么」批次的放行凭证改由客户卡采集（方向卡 / 网页调整卡，新 SOP specs/sops/client_cards.md），客户确认落 confirmed 批文 fact 走既有 external_with_backing_fact=auto 通道，**服务端零代码改动**；Alvin 只收异常件（bug/报错/权限/平台不支持）；ramp 期 auto 完成件全量人工后检，质量熔断暂不建。落地：release_policy.md 加「SEO 客户卡放行」节、json version 7→8（新增 seo_client_card 说明块，不改定档行为）、capabilities/shopify.md 升 v2（船队 10 店口径、article-meta-update 空补齐/改已有的卡片分界、sungait 专属铁律隔离、文案铁律改按客户 CLAUDE.md+facts 走）。测试：node tests/ 全套过（specs 一致性含新字段）；未动 seo-api.php 故 php -l 不适用。
 - 坑：article-meta-update 的「空补齐 vs 覆盖已有」分界服务端不区分（都是 reversible L0），靠 plan/execute 阶段 prompt 落实 + ramp 后检兜底，后检发现漏卡按 DEFECTS 流程收紧。
