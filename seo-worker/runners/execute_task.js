@@ -292,6 +292,33 @@ function planReleaseCard(text) {
   const next = rest.search(/\n##\s/);
   return (next === -1 ? rest : rest.slice(0, next)).trim();
 }
+/* 全量交付 lint（Python deliverable_lint.py）的一行结论，盖到客户版卡上。
+   与 PJ 手工产线、ramp 后检共用同一份脚本，规则表是 cfg.lintRulesFile 那份。
+   永不抛错：脚本缺失、超时、异常都回空串，绝不因为 lint 挂掉 execute。
+   退出码约定：0=PASS，2=有命中（stdout 逐行 FAIL/WARN）。 */
+const DELIVERABLE_LINT_PY = '/data/aira/scripts/deliverable_lint.py';
+function runDeliverableLint(filePath, log) {
+  try {
+    const fsx = require('node:fs');
+    if (!fsx.existsSync(DELIVERABLE_LINT_PY)) return '';
+    const cp = require('node:child_process');
+    let out = '';
+    try {
+      out = cp.execFileSync('python3', [DELIVERABLE_LINT_PY, filePath], { timeout: 90000, encoding: 'utf8' });
+    } catch (e) {
+      // 退出码 2 是「有命中」，execFileSync 会抛，命中内容在 stdout
+      out = String((e.stdout || '') + (e.stderr || ''));
+    }
+    const fails = out.split('\n').filter((l) => /^(FAIL|WARN)\s/.test(l));
+    const base = require('node:path').basename(filePath);
+    if (!fails.length) return '[交付 lint] ' + base + '：PASS';
+    return '[交付 lint] ' + base + '：\n' + fails.map((l) => '  ' + l.trim()).join('\n');
+  } catch (e) {
+    if (log) log('交付 lint 跳过（' + require('node:path').basename(filePath) + '）:: ' + e.message);
+    return '';
+  }
+}
+
 function lintReleaseCard(text) {
   const card = planReleaseCard(text);
   const problems = [];
@@ -2047,6 +2074,7 @@ async function runOne(ctx, context, workspace, taskId) {
   // 必须发布成公网 URL 并写进 note「客户版:」行。内部预览是给放行人看的壳，
   // 两个链接绝不能混（2026-08-31 #145 内部壳被当客户版发给人，DEFECTS 有案）。
   let clientLinks = '';
+  let lintLines = '';
   if (!prepare) {
     try {
       const rdir = path.join(workspace, 'reports');
@@ -2054,6 +2082,13 @@ async function runOne(ctx, context, workspace, taskId) {
         && output.indexOf(f) !== -1
         && Date.now() - fs.statSync(path.join(rdir, f)).mtimeMs < 6 * 3600 * 1000) : [];
       for (const f of fresh) {
+        // 发布前跑一遍完整 Python 交付 lint，结果盖到卡上（2026-09-17 P1 核实：worker 无头
+        // claude -p 不加载 /data/aira/.claude 的 PostToolUse lint 钩子，blogcheck.js 又只
+        // 实现三类规则，badge_count 等一律漏到执行侧。这里补一道 execute 侧的全量 lint，
+        // FAIL 不拦发布（external 稿要走客户卡，人来定），但把 FAIL 明写进卡，ramp 后检
+        // 不必再逐份重跑。永不抛错，lint 缺失就跳过。）
+        const lintRes = runDeliverableLint(path.join(rdir, f), log);
+        if (lintRes) lintLines += lintRes + '\n';
         const res = await publishFile(ctx.cfg, path.basename(workspace), '', f, path.join(rdir, f), log);
         if (res && res.url) {
           const fbTok = require('node:crypto').createHash('md5').update('cardfb' + taskId + ctx.cfg.serviceToken).digest('hex');
@@ -2068,7 +2103,7 @@ async function runOne(ctx, context, workspace, taskId) {
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
   // W15/F1：条目先上账再传 result。服务端拆条发现零机器条目会直接把母任务收敛成 merged
   // （不出放行卡），随后的 postTaskResult 撞终态闸只留痕，误导性的「请放行」不再出现。
-  let noteFinal = clientLinks + note;
+  let noteFinal = clientLinks + (lintLines ? lintLines + '\n' : '') + note;
   if (prepare) {
     try {
       const r = await api.postTaskItems(taskId, { mode: 'plan', items: planItems(output, task) });
