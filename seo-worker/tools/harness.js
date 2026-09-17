@@ -174,15 +174,17 @@ async function main() {
     // fact_key 含 lock 就算过，被 keywords.lock_state 这类「状态记录」骗过——它们的 key 有 lock，
     // 值却明说「未锁定 / board profile 未锁定 / onboard gap / 词表未锁」。闸门要的是肯定的锁定，
     // 不是名字里带 lock。修法：先排除否定语的状态记录，再要求值里有肯定的锁定/确认信号。
-    const NEG = /(未锁|未确认|没有确认|尚未|留空|待定稿|onboard gap|\bgap\b|not locked|unlocked|未定稿)/i;
+    // 2026-09-17 二次修：光排否定语不够，措辞是「无定稿/未经客户锁定/锁词未定」时 NEG 抓不全
+    // 又含「锁定/确认」肯定词，goodie 实测仍误过。根治：*.state / *_state 是「状态记录」不是
+    // 「锁定决定」，一律排除出闸门（keywords.state/keywords.lock_state/seo.mapping_state 都是状态）；
+    // 闸门只认肯定的锁定 fact（midea keywords.lock_2026_04 / seo.mapping_v1 / badger 客户确认簇）。
+    const STATE_KEY = /(^|[._])state($|[._])/i; // 名字里带 state 段的都是状态记录，非锁定
+    const NEG = /(未锁|无定稿|未定稿|未确认|无客户确认|没有确认|尚未|未经|留空|待定稿|锁词未定|onboard gap|\bgap\b|not locked|unlocked|内部方向表)/i;
     const POS = /(锁定|已确认|客户确认|定稿|locked|confirmed by|client.confirm)/i;
-    const kwOk = facts.some((f) => /^keywords\./.test(f.fact_key)
+    const kwOk = facts.some((f) => /^keywords\./.test(f.fact_key) && !STATE_KEY.test(f.fact_key)
       && !NEG.test(String(f.value)) && POS.test(String(f.fact_key) + ' ' + String(f.value)));
-    // mapping 定稿的 confirmed fact 命名历史上不统一（seo.mapping_state / seo.page_mapping /
-    // seo.money_pages_and_mapping 都是页面词映射定稿），正则认这几种前缀；同样排除否定语的
-    // 状态记录（seo.mapping_state 值可能是「未定稿」），confirmed 状态不足以证明定稿。
     const mapOk = facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key)
-      && !NEG.test(String(f.value)));
+      && !STATE_KEY.test(f.fact_key) && !NEG.test(String(f.value)));
     if (!kwOk || !mapOk) {
       throw new Error('两道确认闸未过：' + (kwOk ? '' : '关键词未经客户确认（缺 keywords.* 的 confirmed 锁定记录）；')
         + (mapOk ? '' : 'mapping 未定稿（缺 seo.mapping* 的 confirmed 记录）；')
