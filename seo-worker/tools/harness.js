@@ -170,12 +170,19 @@ async function main() {
   if (!argv.includes('--skip-gates')) {
     const fr = await call('GET', '/facts?client_id=' + cid);
     const facts = (fr.facts || []).filter((f) => String(f.status || '') === 'confirmed');
-    const kwOk = facts.some((f) => /^keywords\./.test(f.fact_key) && /(锁定|确认|lock|confirm)/i.test(String(f.fact_key) + String(f.value)));
+    // 闸门 false-positive 修复（2026-09-17，playmate/luxelink/sunseeker 实证）：旧正则只要
+    // fact_key 含 lock 就算过，被 keywords.lock_state 这类「状态记录」骗过——它们的 key 有 lock，
+    // 值却明说「未锁定 / board profile 未锁定 / onboard gap / 词表未锁」。闸门要的是肯定的锁定，
+    // 不是名字里带 lock。修法：先排除否定语的状态记录，再要求值里有肯定的锁定/确认信号。
+    const NEG = /(未锁|未确认|没有确认|尚未|留空|待定稿|onboard gap|\bgap\b|not locked|unlocked|未定稿)/i;
+    const POS = /(锁定|已确认|客户确认|定稿|locked|confirmed by|client.confirm)/i;
+    const kwOk = facts.some((f) => /^keywords\./.test(f.fact_key)
+      && !NEG.test(String(f.value)) && POS.test(String(f.fact_key) + ' ' + String(f.value)));
     // mapping 定稿的 confirmed fact 命名历史上不统一（seo.mapping_state / seo.page_mapping /
-    // seo.money_pages_and_mapping 都是页面词映射定稿），旧正则只认 ^seo\.mapping，把用
-    // seo.page_mapping 记录的老客户（Apollo/Ben's NZ/Kuddles 等）误判成 mapping 未定稿。
-    // facts 已过滤 status=confirmed，confirmed 本身即表定稿，不再叠加 value 文本匹配。
-    const mapOk = facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key));
+    // seo.money_pages_and_mapping 都是页面词映射定稿），正则认这几种前缀；同样排除否定语的
+    // 状态记录（seo.mapping_state 值可能是「未定稿」），confirmed 状态不足以证明定稿。
+    const mapOk = facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key)
+      && !NEG.test(String(f.value)));
     if (!kwOk || !mapOk) {
       throw new Error('两道确认闸未过：' + (kwOk ? '' : '关键词未经客户确认（缺 keywords.* 的 confirmed 锁定记录）；')
         + (mapOk ? '' : 'mapping 未定稿（缺 seo.mapping* 的 confirmed 记录）；')
