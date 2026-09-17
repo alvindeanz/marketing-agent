@@ -28,6 +28,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA (e)：S1 首批 ramp 后检收口 8/8 PASS，徽章计数 bug 进 lint
+
+- 干了什么：7 份交付物深检完成（#493/#495/#496 我检，其余 opus 按 midea 铁律清单逐页，66 条内链逐条 curl 零跳转全 200，可疑 slug 对线上 .js 核 SKU 全对）。4 份直接过；3 份修后过并已 scp 重发布 250：rangehood（追加型契约违规：两处现文改动误标 wording unchanged，重标 our adjustment 可推翻；删「下一轮移除现文」承诺改为等客户确认库存；Five/Six 数目；徽章 61/140 改实测 56/135；大词补 long term goal 标注）、ricecooker（徽章 165 实为 160）、方向卡（「第 4 位以后」与自举例 3.7 位矛盾改「未进前三」、第 3 节标题对齐内容、勾选清单补「只列花费靠前」）。台账 clients/midea/notes/pending_check.md。
+- 机制沉淀（lint 能抓的不写记忆）：**徽章计数 bug 是系统性的**（出稿模型把 [dash] 占位符的字面长度数进现值徽章，两文件中招，allfridges 写 [long dash] 反而蒙对）。已加 deliverable_lint.py 1d 段 badge_count 检查（占位符算 1 字符，全实体解码，容差 1，rules json 登记），首跑抓出一个真差 6 的实体解码盲区并修正；templates/seo_edit_skeleton.html Module 0 加计数铁律注释。注意：lint 与骨架在 /data/aira 工作区不在本仓。
+- 坑：/tasks/{id}/deliverables 端点不收 html（txt/csv/md/pdf/json 白名单），客户版 HTML 的修订重发布只能走 publish.js 同款 scp 通道（blogpreview host 别名）。改完本地文件不等于线上改了，2026-08-31 #145 内外链接混淆的邻坑。
+- 下一步/认领：发客户卡（方向卡 1 张截止 9/24 + 页面调整批次 6 页）；#502 套装口径、#498/#499（agency 位）、oakfurniture 装机随后跟进。
+
 ### 2026-09-17 AIRA (d)：midea S1 首跑通线，8/8 执行完成，报 2 个流程坑
 
 - 干了什么：midea(3) S1 试点全链路跑通。导入增量（44 词客户确认版词表替换 46 词旧版、brand_regex 补 美的/mideahomes、5 条新 facts 含 rebrand 待定与客户审稿习惯）；onboard 双闸以历史真实确认落账过闸（词表 2026-04-23 客户反馈定版、mapping 走客户 Midea.xlsx 品类结构加历史上传行为，facts keywords.lock_2026_04 / seo.mapping_v1，非 skip-gates）；10 任务 agency 转 agent 位（plan 42 是 9/3 建的，早于 Shopify 车道接通，故全在人工位）；闸A fable 重判 8 do 2 later（#503 被 rebrand fact 拦下，facts 回路首次实战生效）；harness --ids 跑通，8 执行 job（917-924）全完成。产出：7 份客户版交付物（6 页面稿 + 1 关键词方向卡）进 review，#495 否词挂载走 L0 auto 已落地（新建共享列表 22 条，四 campaign 挂载回读全符，方案层还剔掉了原孤儿列表里 8 条竞品牌与 3 条在售商品词）。ramp 后检台账 clients/midea/notes/pending_check.md，机器项 8/8 过，#493/#495/#496 深检 PASS，其余 opus 深检中。
