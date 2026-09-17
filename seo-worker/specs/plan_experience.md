@@ -41,3 +41,9 @@ review_principles.md 管「单个任务该不该做」，这份管「整份方�
 - 素材与 copy 类任务一任务一个 ad group 批次，和博客一任务一篇同理，合并任务产线只交付一半。
 - GBP 类任务只有一个合法形态：gbp-align 两件套（档案落 fact gbp.profile + 站内 LocalBusiness schema 对齐）。补照片、发帖、补产品、重写简介、问答维护这类清单项收益不可度量，一律不排任务（Alvin 2026-09-17，#42 六项清单教训：为列而列没有意义）。citation 修正等 map citation 批次统一做。
 - 每个 paid 客户每月排一张方向卡，keyword-direction 与 creative-direction 逐月交替（2026-09 词卡、2026-10 素材卡，依此类推），数据窗口一律取发卡月前两个完整自然月（规则细节在 report/keyword_direction_spec.md 数据窗口节，渲染器强制）。analysis 型，产出 HTML 方向卡供 sales 与客户确认方向，反馈经任务线程回 facts，下一期词表与否词包必须引用上期确认结论。（2026-09-15 Alvin 定月度交替与窗口，取代 2026-08-31 的每 sprint 词卡）
+
+## 博客发布的凭证链（2026-09-17 定版）
+
+- 博客发布的唯一凭证是确认卡的 publish_blog=agree（客户点的，落 seo_card_feedback 表）。凭证在，harness 折叠时直接排 apply 发布，不再等人工前端；凭证不在，谁也不发（runBlogPublish 硬闸）。2026-09-15 那条「博客确认与发布改由人工前端负责」的人工否决（曾挂在 #138/#139 上）自本日撤销，撤销原因：客户已在卡上给出明确凭证时再压人工确认，属重复采集，违反 mandate_carries_release。
+
+## 待整理（experience_sync 自动追加，整理后删）

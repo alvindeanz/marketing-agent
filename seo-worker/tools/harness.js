@@ -67,8 +67,10 @@ async function foldCards(sprint) {
     log('#' + card.id + ' 卡反馈折叠：' + summary);
     if (DRY) continue;
     // 博客确认卡（publish_blog）不走泛方向卡折叠：agree 的凭证要留在 seo_card_feedback 表里，
-    // 供博客任务 apply 时查（runBlogPublish 硬闸），发布靠该任务自身放行，这里不开泛落地任务；
-    // 只有客户写了修改意见才开修订任务。card_feedback_done 只清 card_feedback_at 标记不删表行。
+    // 供博客任务 apply 时查（runBlogPublish 硬闸）。agree = 发布凭证 = 放行凭证（2026-09-17
+    // Alvin 定，撤销 09-15「发布留人工前端」的旧否决）：这里直接 POST /tasks/release 排 apply，
+    // runBlogPublish 仍会二次核对 agree，双保险。只有客户写了修改意见才开修订任务。
+    // card_feedback_done 只清 card_feedback_at 标记不删表行。
     if (rows.some((r) => String(r.item) === 'publish_blog')) {
       const pub = rows.filter((r) => String(r.item) === 'publish_blog');
       const lastPub = pub[pub.length - 1];
@@ -86,9 +88,21 @@ async function foldCards(sprint) {
         revId = r.id;
         log('#' + card.id + ' -> 博客修订任务 #' + revId);
       }
-      const state = lastPub.choice === 'agree' ? '客户同意发布，等本任务放行时 apply 发布'
-        : lastPub.choice === 'hold' ? '客户暂不发布，保持草稿'
-          : '客户有修改意见' + (revId ? '，已开修订 #' + revId : '');
+      let state;
+      if (lastPub.choice === 'agree') {
+        state = '客户同意发布，已排 apply 发布';
+        try {
+          if (String(card.status) === 'review') await call('POST', '/tasks/release', { client_id: cid, task_ids: [card.id] });
+          else state = '客户同意发布，但任务不在 review 态（' + card.status + '），未排 apply，需人工看一眼';
+        } catch (e) {
+          state = '客户同意发布，排 apply 失败：' + (e && e.message ? e.message : e);
+        }
+        log('#' + card.id + ' ' + state);
+      } else if (lastPub.choice === 'hold') {
+        state = '客户暂不发布，保持草稿';
+      } else {
+        state = '客户有修改意见' + (revId ? '，已开修订 #' + revId : '');
+      }
       await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '博客确认卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）：' + summary + (revId ? '。修订 #' + revId : ''), source: 'client', status: 'confirmed' });
       await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + state, card_feedback_done: 1 });
       continue;

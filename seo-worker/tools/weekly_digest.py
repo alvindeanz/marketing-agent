@@ -50,6 +50,11 @@ def classify(t):
     if '失败' in wr:
         return ('执行失败', '看失败原因，修材料或环境后重放（多为凭据/基线/lint，修法通常在任务 note 里）')
     if is_card(t) and t.get('status') == 'review':
+        # 反馈证据优先于 sent_at：早期卡的反馈先于 sent_at 自动打点上线，字段可能永远是空
+        # （#138/#139 2026-09-17 教训），有反馈行/折叠记录就绝不能标「卡待发」。
+        note = str(t.get('result_note') or '')
+        if t.get('card_feedback_at') or '[卡反馈折叠' in note or '[客户反馈]' in note:
+            return ('卡已回等落地', '下一轮 harness 排产即消化；反复出现属机制失效，报 Aira')
         if not t.get('sent_at'):
             return ('卡待发', '把卡发给客户并在看板打「已发」')
         return ('卡等客户', '催客户，或等 30 天到期视同同意')
