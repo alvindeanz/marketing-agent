@@ -44,6 +44,6 @@ review_principles.md 管「单个任务该不该做」，这份管「整份方�
 
 ## 博客发布的凭证链（2026-09-17 定版）
 
-- 博客发布的唯一凭证是确认卡的 publish_blog=agree（客户点的，落 seo_card_feedback 表）。凭证在，harness 折叠时直接排 apply 发布，不再等人工前端；凭证不在，谁也不发（runBlogPublish 硬闸）。2026-09-15 那条「博客确认与发布改由人工前端负责」的人工否决（曾挂在 #138/#139 上）自本日撤销，撤销原因：客户已在卡上给出明确凭证时再压人工确认，属重复采集，违反 mandate_carries_release。
+- 博客发布的唯一凭证是确认卡的 publish_blog=agree（客户点的，落 seo_card_feedback 表）。凭证在，harness 折叠时直接排 apply 发布，不再等人工前端；凭证不在，谁也不发（runBlogPublish 硬闸）。2026-09-15 那条「博客确认与发布改由人工前端负责」的人工否决（曾挂在 task#138、task#139 上，两篇已于 2026-09-17 按凭证发布收口）自本日撤销，撤销原因：客户已在卡上给出明确凭证时再压人工确认，属重复采集，违反 mandate_carries_release。此两个 task# 键保留在本行是给 experience_sync 去重用的，别删（sync 按 task#id 字符串判重，删了会把旧否决原文再追加回来）。
 
 ## 待整理（experience_sync 自动追加，整理后删）

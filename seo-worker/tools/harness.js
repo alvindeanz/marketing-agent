@@ -189,6 +189,24 @@ async function main() {
   /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id */
   const inScope = (t) => (IDS ? IDS.includes(t.id) : t.sprint === sprint);
 
+  // 0.4 later 存量挪期（2026-09-17）：apply_verdicts 的挪期分支只管新落的判决，规则上线前
+  // 已判 later 的 review 态任务会一直留在本期占泳道（run_20260917-0324 七条实证）。这里补扫：
+  // 本期 review+later 一律挪下一期，产出与判决保留，到期随下期自然进放行流程。只在整期
+  // 口径下扫（--ids 指定任务时不动别的任务）。
+  if (!IDS) {
+    const allNow = await tasks();
+    const laterStuck = allNow.filter((t) => t.status === 'review' && t.sprint === sprint
+      && String(t.review_effective || t.review_verdict || '') === 'later');
+    for (const t of laterStuck) {
+      const m = /^S(\d)$/i.exec(String(t.sprint || ''));
+      if (!m) continue;
+      const next = 'S' + Math.min(parseInt(m[1], 10) + 1, 9);
+      if (DRY) { log('#' + t.id + ' later 存量，would 挪 ' + next); continue; }
+      await call('PATCH', '/tasks/' + t.id, { sprint: next, result_note: String(t.result_note || '') + '\n[later] 存量挪期到 ' + next + '（判决与产出保留，到期随下期进放行流程）' });
+      log('#' + t.id + ' later 存量，挪 ' + next);
+    }
+  }
+
   // 0.5 本期还没有判决的任务（含 later 自动挪期后清了判决的）先排一轮闸A，判完再拍板。
   // 2026-09-16 Alvin 定：stale 判决（老 plan 时代判的、detail 或事实已变）一并自动重判，
   // 别让换挡后的新当期卡在「待拍板」（Apollo S3 与 Louvresky S4 两例实证；fable 批量判决
