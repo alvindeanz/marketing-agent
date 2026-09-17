@@ -37,26 +37,27 @@ const DEFAULTS = {
   replicateInput: {},
   bflModel: 'flux-2-pro',
   bflApiKey: '',
-  // Triage reads the whole pipeline and judges it, so it gets the big model.
-  triageModel: 'fable',
-  // Reading a human ruling and turning it into board actions. Small job by
-  // token count, but a misread here moves the board the wrong way, so it gets
-  // the same model that wrote the digest it is answering.
-  rulingModel: 'fable',
+  // 2026-09-17 Alvin 定：premium 档只留「定战略框架」与「不可回收现场」；巡检只做总结不决策，降 opus。
+  triageModel: 'opus',
+  // 2026-09-17 降 opus：把人话解析成看板动作，安全靠服务端双锚校验（引语逐字命中+task_id+标题片段）
+  // 不靠模型，opus 解析足够；模型只提议，服务端验真。
+  rulingModel: 'opus',
   // 收件箱对话。人在工作台按客户跟它聊数据、聊博客规划，只读加提议，
   // 唯一的产物是任务草案，人点开工才落账。谈的是策略，所以给大模型。
   /* 2026-09-11 Alvin 定：频道对话与 PJ 对齐走 fable（周配额观察 5 天，快超再降 opus）。 */
   chatModel: 'fable',
-  // 任务判定：一批任务该不该做，按 specs/review_principles.md 判。一次判错就是
-  // 一个不该做的任务进队列烧 10 分钟，或一个该做的被砍，所以给大模型。
-  reviewModel: 'fable',
+  // 任务判定（闸A）：一批任务该不该做，按 specs/review_principles.md 判。
+  // 2026-09-17 Alvin 定降 opus：这是 fable 定好 plan 框架之内的单任务 go/no-go，边界清楚；
+  // 判断漂了由季度 planReview（仍 fable）重规划纠回。全流水线最高频调用，premium 从高频挪走。
+  reviewModel: 'opus',
   // 方案层过闸：整份方案按跨客户经验改成 v2 并出方向确认卡，一个客户一季度一次，给大模型。
   planReviewModel: 'fable',
-  // 任务线程（chat runner 的任务模式）。人在卡上跟它聊这个任务，它能直接改任务、重派、
-  // 改判，落的是看板层动作，判断要稳，给大模型。普通收件箱会话仍走 chatModel。
-  threadModel: 'fable',
-  // 博客正文审稿：机器校验过了之后由大模型按客户规则审一遍，只出意见，opus 定点修一次，不循环。
-  blogReviewModel: 'fable',
+  // 任务线程（chat runner 的任务模式）。落看板层动作（改任务、重派、改判）。
+  // 2026-09-17 降 opus：同 ruling，动作靠服务端双锚校验兜底，opus 判断够稳。普通收件箱会话仍走 chatModel。
+  threadModel: 'opus',
+  // 博客正文审稿：机器校验过后按客户规则审一遍，只出意见，定点修一次不循环。
+  // 2026-09-17 降 opus：内容 QA 是 opus 强项，且博客还要过客户确认卡。
+  blogReviewModel: 'opus',
   // 与 PJ 手工产线共用的交付 lint 规则表，和记忆目录（客户 feedback_* 规则注入博客 prompt）。
   lintRulesFile: '/data/aira/scripts/deliverable_lint_rules.json',
   memoryDir: '/root/.claude/projects/-data-aira/memory',

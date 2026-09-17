@@ -29,6 +29,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA (j)：fable 模型路由第一性原理收窄，5 岗降 opus
+
+- **Alvin 定（第一性原理）：premium 档（fable/Mythos）只留「定战略框架」与「不可回收的现场判断」，框内的/服务端有硬校验的/总结类/内容 QA 类全降 opus。** 理由：opus 人工跑一年多稳，opus 5.2 将至，不做 A/B backtest（Alvin 明确不用 review）。
+- config.js 改：**留 fable**=planModel（出方案）、planReviewModel（季度对齐，跨客户经验注入）、chatModel（现场对话，有 nuance 不可回收，Alvin 点名留）；**降 opus**=reviewModel（闸A 发卡判断，最高频，框内 go/no-go，漂了季度 planReview 纠）、triageModel（巡检只总结）、rulingModel + threadModel（人话解析成看板动作，安全靠服务端双锚校验不靠模型）、blogReviewModel（内容 QA，且过客户确认卡）。
+- 安全性未降：ruling/thread 的看板动作双锚校验（引语逐字命中+task_id+标题片段）在服务端，模型只提议服务端验真。闸A 判准兜底上移到季度 planReview（仍 fable）。
+- 成本结构：砍在最高频的 review+triage，最低频的 plan/planReview 保 premium，等于把 premium 从高频挪低频。chatModel 是留下的 fable 里最高频的，标为下一个候选（opus 5.2 或成本吃紧时再评）。
+- 测试全绿。config 在 lib 白名单，**待部署 deploy.sh worker**（running job 已归零）。
+
 ### 2026-09-17 AIRA (i)：方向卡模板窄屏修复 + playmate 标记只做 SEO
 
 - **方向卡模板窄屏修复**（direction_card_template.html，全客户通用，词卡+素材卡共用）：席位表 summary 是桌面三列 name/chip/brief，640px 媒体查询漏了这行，手机上长族名 flex:0 0 auto 吃满宽、brief 只剩一条缝一字一行竖排（Alvin 手机截图实证）。补窄屏规则：族名整行、胶囊次行、brief 整行堆叠。桌面不动。render 测试过，goodie 卡已重渲染重发布回验 200。改模板 = 全客户下一张卡生效 + 现有卡重渲染即生效。
