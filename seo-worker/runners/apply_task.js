@@ -1010,6 +1010,23 @@ async function runOne(ctx, context, workspace, taskId) {
     return runBlogPublish(ctx, task, workspace, profile, outputUrl);
   }
 
+  /* 落地页确认卡硬闸（2026-09-17 Alvin 定）：结构类改动（新建/删/并页、URL 与 301、
+     导航、整页换版式）agency 也不拍板，终局裁决权在客户。命中结构类 op 的任务必须有
+     onsite_confirm=agree 凭证（以最后一次表态为准）才落地，否则中止提示出落地页确认卡。
+     title/meta/内链/结构化数据/正文改写等免卡直落，度写在 review_principles.md。 */
+  const STRUCTURAL_CONFIRM_OPS = ['redirect-batch', 'page-rebuild', 'page-create', 'nav-edit', 'page-delete'];
+  if (ops.some((op) => STRUCTURAL_CONFIRM_OPS.indexOf(op) !== -1)) {
+    const fbS = await api.cardFeedback(taskId).catch(() => ({ rows: [] }));
+    const oc = (fbS.rows || []).filter((r) => String(r.item) === 'onsite_confirm');
+    const lastOc = oc.length ? oc[oc.length - 1] : null;
+    if (!lastOc || String(lastOc.choice) !== 'agree') {
+      throw new Error('task ' + taskId + '：结构类改动（' + ops.filter((op) => STRUCTURAL_CONFIRM_OPS.indexOf(op) !== -1).join(',') + '）缺客户确认凭证（onsite_confirm=agree'
+        + (lastOc ? '，当前最后表态是 ' + lastOc.choice : '，卡上没有任何表态') + '）。'
+        + '不落地。请出落地页确认卡发客户，客户同意后下一轮自动落地。');
+    }
+    log('task ' + taskId + '：结构类改动已有客户确认凭证（onsite_confirm=agree），放行落地');
+  }
+
   const planFile = changePlanPath(workspace, taskId);
   let plan;
   try {

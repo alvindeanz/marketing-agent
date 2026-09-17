@@ -5377,7 +5377,19 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
                 if(blog_outline_stage($t)){list($wj,$ws)=blog_release_as_write($cid,$t,$u['username']);$jids=array_merge($jids??[],$wj);$done['do']++;continue;}
                 $releaseIds[]=$tid;$done['do']++;continue;
             }
-            if($eff==='later'){task_append_note($tid,'[later] 判定暂不放行：'.$why);$done['later']++;continue;}
+            if($eff==='later'){
+                /* 2026-09-17 Alvin 定：待放行的 later 也挪到下一个 sprint，不挂本期占泳道；
+                   产出与判决保留（东西是好的只是时机未到），到期随下期自然进放行流程。 */
+                $smL=[];
+                if(preg_match('/^S(\d)$/i',trim((string)$t['sprint']),$smL)){
+                    $nextL='S'.min((int)$smL[1]+1,9);
+                    db()->prepare("UPDATE seo_tasks SET sprint=? WHERE id=?")->execute([$nextL,$tid]);
+                    task_append_note($tid,'[later] 判定暂不放行，挪到 '.$nextL.'，产出保留到期再放：'.$why);
+                }else{
+                    task_append_note($tid,'[later] 判定暂不放行：'.$why);
+                }
+                $done['later']++;continue;
+            }
             if($eff==='drop'){
                 $err=task_close($tid,'dropped','判定不落地：'.$why);
                 if($err){$skipped[]=['task_id'=>$tid,'why'=>$err];continue;}
