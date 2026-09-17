@@ -13,11 +13,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 6. 并行改动禁 git stash（webforge 事故教训）。
 7. 全部产物中文，禁 emoji 和破折号。
 
-## 认领登记（2026-09-13 改版，Alvin 定）
+## 认领登记（2026-09-17 校准，Alvin 定：Aira=MA 主力，Aiden=WebForger 开发）
 
-- **Aira**：MA 主力开发，全仓可动（seo-api.php、前端、runners、lib、specs、deploy）。发现 bug 直接修，改动照旧在本账本登记同步。
-- **Aiden**：辅助开发。
-- 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移。
+- **Aira**：MA 全仓主力开发，一切都能动（seo-api.php、前端、runners、lib、specs、deploy、以及 /data/aira/tools 下的 shopseo 等配套工具）。发现 bug 直接修，改动在本账本登记同步。执行侧提速、车道扩容、CLI 优化都是 MA 内的活，不外包。
+- **Aiden**：WebForger 平台开发（api.webforger.ai 的行为、shadow bot、平台端点、迁移工具）。MA 只在「碰 WebForger 平台本身」时与他交接：平台接口缺口、shadow bot 权限、平台侧 bug。凡是 MA 仓内或 shopseo/Shopify 工具链的事，都归 Aira，不再写「归 Aiden 排期」。
+- 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
+- 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
 ### 2026-09-17 AIRA (a)
 
@@ -43,7 +44,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
   2. **空拍板逐条打原因**（不在本期/判定中/无判决/判决过期/有 job 在册/人工位），最多列 25 条。无声失败是 (d) 误诊的根因，禁止再犯。
   3. noVerdict 重排分支补「approved+agent+从未判决」组合。
 - 新增 tools/republish.js：后检返修的发布回程，lint FAIL 拒发（WARN 放行）-> publishFile 同款 scp 通道 -> curl 回验 200 加字节量核对。修复 (e) 条报的单向通道坑。仓库工作区无 config.json 时回退 DEFAULTS。实测 midea ricecooker 幂等重发全通。
-- 测试：node tests/ 全套绿。P1 两条（能力重绑定回路、worker lint 路径核实）与 P2 两条提案（execute 并发、shopseo GraphQL 提速）在 (d)(e) 复盘框架下待排。
+- 测试：node tests/ 全套绿。P1 两条（能力重绑定回路、worker lint 路径核实）与 P2 两条（execute 并发、shopseo GraphQL 提速，均 MA 仓内 / shopseo 工具链，Aira 自己做，非外包）在 (d)(e) 复盘框架下待排。
 - DEFECTS 补一行：误诊白烧 fable 重判一次，本可被「harness 逐条原因输出」拦住（已修）。
 
 ### 2026-09-17 AIRA (e)：S1 首批 ramp 后检收口 8/8 PASS，徽章计数 bug 进 lint
