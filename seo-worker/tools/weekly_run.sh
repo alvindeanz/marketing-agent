@@ -4,7 +4,7 @@
 # 人触发，不挂 cron，不违反硬规矩 1。
 # 用法：SEO_AGENT_TOKEN=<jwt> bash tools/weekly_run.sh [client_id ...]
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 API="${MA_API:-https://always.horntech-dev.com/seo-api.php}"
 TOKEN="${SEO_AGENT_TOKEN:-}"
 [ -z "$TOKEN" ] && { echo "缺 SEO_AGENT_TOKEN"; exit 2; }
