@@ -131,6 +131,11 @@ footer b{color:#334155}
   .dec .row .rl,.fam .l .ll{flex:none;padding-top:0}
   .fbrow{flex-direction:column}
   .fbb{width:100%}
+  /* 席位表窄屏堆叠（2026-09-17）：桌面三列 name/chip/brief，手机上长族名 flex:0 0 auto
+     吃满宽度、brief 只剩一条缝导致一字一行竖排。窄屏改成族名整行、状态胶囊次行、brief 整行。 */
+  details.seat summary{flex-wrap:wrap;row-gap:6px}
+  details.seat summary .fn{flex:1 1 100%}
+  details.seat summary .brief{flex:1 1 100%;margin-top:0}
 }
 
 /* v2 减法版补充 */

@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA (i)：方向卡模板窄屏修复 + playmate 标记只做 SEO
+
+- **方向卡模板窄屏修复**（direction_card_template.html，全客户通用，词卡+素材卡共用）：席位表 summary 是桌面三列 name/chip/brief，640px 媒体查询漏了这行，手机上长族名 flex:0 0 auto 吃满宽、brief 只剩一条缝一字一行竖排（Alvin 手机截图实证）。补窄屏规则：族名整行、胶囊次行、brief 整行堆叠。桌面不动。render 测试过，goodie 卡已重渲染重发布回验 200。改模板 = 全客户下一张卡生效 + 现有卡重渲染即生效。
+- **playmate 标记只做 SEO**（Alvin 定，成人行业限制，账户花费主力壮阳补充剂类 Ads 反复受限）：profile services 改 seo；fact ops.scope_seo_only 记全；4 个开着的 paid 任务 #556/557/558/564 按 [dropped] 关闭；不进自动 sprint，SEO 侧手动运营。memory project_playmate_seo_only_scope + reference_direction_card_production 记档。playmate 的 SEM 方向卡不再出。
+- 下一步/认领：模板修复与 goodie 卡待部署（deploy.sh worker，template 在 specs 白名单；running job 已归零）。goodie 卡等 Alvin 反馈。
+
 ### 2026-09-17 AIRA (h)：闸门 false-positive 修复 + goodie 词卡发布 + 方向卡产出机制查清
 
 - **闸门修复**（harness.js，已 push，本机工具无需部署）：关键词/mapping 确认闸旧正则只要 fact_key 含 lock 就放行，被 keywords.lock_state（值写「未锁定/onboard gap」）骗过，luxelink/sunseeker/playmate 会被错误放行跑出没校准的 sprint。修法：排除值里否定语 + 要求肯定的锁定信号。实证 midea 过、luxelink 拦、badger 关键词过（leafblower 真客户确认）mapping 拦。
