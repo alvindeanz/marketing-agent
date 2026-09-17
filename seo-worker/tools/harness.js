@@ -167,6 +167,11 @@ async function main() {
   // 入 sprint 前的两道客户确认闸（2026-09-09 Alvin 定的全局流程：轻链方向卡 → 客户确认关键词 →
   // 客户确认 mapping → 才进 sprint）。证据看 facts：词表确认与 mapping 确认各要一条 confirmed 记录。
   // --skip-gates 显式跳过（如老客户补跑、或本次 --ids 只跑与词表无关的技术项），跳过原因进日志。
+  // SEO 两闸只管 SEO 任务（词表/mapping 是 SEO 口径）。paid 卡是基于账户前两月数据无脑出的，
+  // 不需要 SEO 词表/mapping 确认（2026-09-17 Apex 实证：mapping 未定稿把整个 both 客户的 run 挡死、
+  // 连 paid 卡一起挡，是 bug）。改法：闸不再硬 throw，只置 seoGateOk；inScope 里 paid 任务照过，
+  // SEO 任务在闸未过时被 held。--skip-gates 仍强制全过。
+  let seoGateOk = true;
   if (!argv.includes('--skip-gates')) {
     const fr = await call('GET', '/facts?client_id=' + cid);
     const facts = (fr.facts || []).filter((f) => String(f.status || '') === 'confirmed');
@@ -185,12 +190,14 @@ async function main() {
       && !NEG.test(String(f.value)) && POS.test(String(f.fact_key) + ' ' + String(f.value)));
     const mapOk = facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key)
       && !STATE_KEY.test(f.fact_key) && !NEG.test(String(f.value)));
-    if (!kwOk || !mapOk) {
-      throw new Error('两道确认闸未过：' + (kwOk ? '' : '关键词未经客户确认（缺 keywords.* 的 confirmed 锁定记录）；')
-        + (mapOk ? '' : 'mapping 未定稿（缺 seo.mapping* 的 confirmed 记录）；')
-        + '流程是 方向卡 → 词表客户确认 → mapping 确认 → sprint。确有理由跳过用 --skip-gates。');
+    seoGateOk = kwOk && mapOk;
+    if (!seoGateOk) {
+      log('SEO 两闸未过：' + (kwOk ? '' : '关键词未经客户确认（缺 keywords.* confirmed 锁定）；')
+        + (mapOk ? '' : 'mapping 未定稿（缺 seo.mapping* confirmed）；')
+        + 'SEO 任务本轮 held（流程：方向卡→客户确认词表→确认 mapping→SEO sprint）。paid 卡不受此闸，照常出。');
+    } else {
+      log('SEO 两闸通过：词表已确认、mapping 已定稿');
     }
-    log('两道确认闸通过：词表已确认、mapping 已定稿');
   } else {
     log('注意：--skip-gates 跳过词表与 mapping 确认闸，理由自负');
   }
@@ -214,8 +221,19 @@ async function main() {
     }
   }
   log(`${bc.name}（${cid}）本期 ${sprint}` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
-  /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id */
-  const inScope = (t) => (IDS ? IDS.includes(t.id) : t.sprint === sprint);
+  /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id。
+     SEO 闸未过时 SEO 任务 held（module 非 paid 视为 SEO 口径），paid 任务照过。--ids 点名的仍以 id 为准。 */
+  const inScope = (t) => {
+    if (IDS) return IDS.includes(t.id);
+    if (t.sprint !== sprint) return false;
+    if (!seoGateOk && String(t.module || '') !== 'paid') return false; // SEO 任务被 SEO 闸 held
+    return true;
+  };
+  if (!seoGateOk && !IDS) {
+    const held = (await tasks()).filter((t) => t.sprint === sprint && String(t.module || '') !== 'paid'
+      && ['proposed', 'approved', 'blocked'].includes(t.status)).length;
+    if (held) log('SEO 闸未过，本期 ' + held + ' 个 SEO 任务 held，仅推进 paid 卡');
+  }
 
   // 0.4 later 存量挪期（2026-09-17）：apply_verdicts 的挪期分支只管新落的判决，规则上线前
   // 已判 later 的 review 态任务会一直留在本期占泳道（run_20260917-0324 七条实证）。这里补扫：
