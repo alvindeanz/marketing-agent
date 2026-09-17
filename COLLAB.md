@@ -28,6 +28,17 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-17 AIRA (f)：P0 三修（harness 本期推导 + 空拍板逐条原因 + republish 回程通道），另纠正 (d) 条一处误诊
+
+- 先纠错：(d) 条报的「判决时效盲区」是误诊。attach_review_state 的 stale 判定早就是内容哈希锚（review_text_hash=MD5(title|detail)），转位 PATCH 不会作废判决；当日两次空拍板的真凶只有 sprint 口径一个，重排 job 916 是白烧的（且两次 fable 判决结论不同：915 判 496 并入 495，916 判 496 独立 do，本批按 916 执行）。误诊根因是 harness 无声失败逼人瞎猜，修复见下。
+- harness.js 三改（node --check 过，midea 实盘 dry 验证）：
+  1. **「本期」改推导**：未结任务（proposed/approved/blocked）最小 S 号即本期，板上 current_sprint 降级为兜底展示，新增 --sprint SN 人工强指。dry 实证：midea 推导 S2 正确（plan v2 任务本就铺 S1 到 S5，是 90 天节奏不是错位；当日 --ids 批把 S3/S5 任务提前执行了，判决都盖过章但节奏被压缩，后续按推导口径自然恢复波次）。
+  2. **空拍板逐条打原因**（不在本期/判定中/无判决/判决过期/有 job 在册/人工位），最多列 25 条。无声失败是 (d) 误诊的根因，禁止再犯。
+  3. noVerdict 重排分支补「approved+agent+从未判决」组合。
+- 新增 tools/republish.js：后检返修的发布回程，lint FAIL 拒发（WARN 放行）-> publishFile 同款 scp 通道 -> curl 回验 200 加字节量核对。修复 (e) 条报的单向通道坑。仓库工作区无 config.json 时回退 DEFAULTS。实测 midea ricecooker 幂等重发全通。
+- 测试：node tests/ 全套绿。P1 两条（能力重绑定回路、worker lint 路径核实）与 P2 两条提案（execute 并发、shopseo GraphQL 提速）在 (d)(e) 复盘框架下待排。
+- DEFECTS 补一行：误诊白烧 fable 重判一次，本可被「harness 逐条原因输出」拦住（已修）。
+
 ### 2026-09-17 AIRA (e)：S1 首批 ramp 后检收口 8/8 PASS，徽章计数 bug 进 lint
 
 - 干了什么：7 份交付物深检完成（#493/#495/#496 我检，其余 opus 按 midea 铁律清单逐页，66 条内链逐条 curl 零跳转全 200，可疑 slug 对线上 .js 核 SKU 全对）。4 份直接过；3 份修后过并已 scp 重发布 250：rangehood（追加型契约违规：两处现文改动误标 wording unchanged，重标 our adjustment 可推翻；删「下一轮移除现文」承诺改为等客户确认库存；Five/Six 数目；徽章 61/140 改实测 56/135；大词补 long term goal 标注）、ricecooker（徽章 165 实为 160）、方向卡（「第 4 位以后」与自举例 3.7 位矛盾改「未进前三」、第 3 节标题对齐内容、勾选清单补「只列花费靠前」）。台账 clients/midea/notes/pending_check.md。

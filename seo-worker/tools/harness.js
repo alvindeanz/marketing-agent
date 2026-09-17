@@ -21,6 +21,7 @@ const cid = parseInt(argv[0], 10);
 const DRY = argv.includes('--dry');
 const NO_TODO = argv.includes('--no-todo');
 const IDS = (() => { const i = argv.indexOf('--ids'); return i === -1 ? null : String(argv[i + 1] || '').split(',').map((x) => parseInt(x, 10)).filter(Boolean); })();
+const SPRINT_ARG = (() => { const i = argv.indexOf('--sprint'); return i === -1 ? '' : String(argv[i + 1] || '').toUpperCase(); })();
 const GRACE_DAYS = (() => { const i = argv.indexOf('--card-grace-days'); return i === -1 ? 14 : (parseInt(argv[i + 1], 10) || 14); })();
 const POLL_MS = 45000;
 const BUDGET_MS = 3 * 60 * 60 * 1000;
@@ -184,7 +185,25 @@ async function main() {
   } else {
     log('注意：--skip-gates 跳过词表与 mapping 确认闸，理由自负');
   }
-  const sprint = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
+  /* 「本期」是推导值不是存量值（2026-09-17，midea S1 实证：板上指针 S2、plan v2 任务标 S1，
+     默认口径一条都扫不到，只能 --ids 硬点）。推导规则：未结任务（proposed/approved/blocked）
+     里最小的 S 号就是本期；两处真相只留一处，板上 current_sprint 降级为无未结任务时的兜底。
+     人要强指用 --sprint SN。 */
+  const boardSprint = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
+  let sprint = boardSprint;
+  if (SPRINT_ARG) {
+    sprint = SPRINT_ARG;
+    log('本期由 --sprint 指定为 ' + sprint);
+  } else {
+    const openNums = (await tasks())
+      .filter((t) => ['proposed', 'approved', 'blocked'].includes(t.status))
+      .map((t) => { const m = /^S(\d+)$/i.exec(String(t.sprint || '')); return m ? parseInt(m[1], 10) : null; })
+      .filter((n) => n !== null);
+    if (openNums.length) {
+      sprint = 'S' + Math.min.apply(null, openNums);
+      if (sprint !== boardSprint) log('本期推导为 ' + sprint + '（未结任务最小期），板上指针 ' + boardSprint + ' 仅作展示，建议对齐');
+    }
+  }
   log(`${bc.name}（${cid}）本期 ${sprint}` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
   /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id */
   const inScope = (t) => (IDS ? IDS.includes(t.id) : t.sprint === sprint);
@@ -215,6 +234,9 @@ async function main() {
   const noVerdict = all.filter((t) => inScope(t)
     && !t.review_pending && !(t.job_state && t.job_state.status)
     && ((t.status === 'proposed' && !t.review_effective)
+      // approved+agent 从未判决的也要排闸A（2026-09-17：转位 PATCH 后这类任务落在
+      // 「approved 且无判决」的组合上，旧过滤两个分支都接不住，只能人工重排）
+      || (t.status === 'approved' && t.owner_type === 'agent' && !t.review_effective)
       || (['proposed', 'approved'].includes(t.status) && t.owner_type === 'agent'
         && t.review_effective && t.review_stale))).map((t) => t.id);
   const pendingNow = all.filter((t) => inScope(t) && t.review_pending).map((t) => t.id);
@@ -245,7 +267,28 @@ async function main() {
       const r = await call('POST', '/tasks/apply_verdicts', { client_id: cid, task_ids: verdictIds });
       log('apply_verdicts -> ' + JSON.stringify(r.done) + ' jobs ' + JSON.stringify(r.job_ids) + (r.skipped.length ? ' skipped ' + JSON.stringify(r.skipped) : ''));
     }
-  } else log('没有可拍板的任务');
+  } else {
+    // 空拍板必须给逐条原因（2026-09-17 midea S1：连续三跑只说「没有可拍板」，真凶是
+    // sprint 错位，却被误诊成判决时效，白烧了一次 fable 重判。无声失败禁止再犯。）
+    log('没有可拍板的任务，未结任务逐条原因：');
+    const open = all.filter((t) => ['proposed', 'approved', 'blocked', 'review'].includes(t.status));
+    if (!open.length) log('  （没有未结任务）');
+    for (const t of open.slice(0, 25)) {
+      const why = [];
+      if (!inScope(t)) why.push('不在本期（任务 ' + (t.sprint || '无标签') + '，本期口径 ' + (IDS ? '--ids' : sprint) + '）');
+      else {
+        if (t.status === 'review') why.push('已出方案，在放行/发卡阶段');
+        if (t.review_pending) why.push('判定中');
+        else if (!t.review_effective) why.push('无判决（应已被 0.5 段排闸A，若反复出现是 bug）');
+        else if (t.review_stale) why.push('判决过期');
+        if (t.job_state && t.job_state.status) why.push('有 job 在册（' + t.job_state.status + '）');
+        if (t.status === 'approved' && t.owner_type !== 'agent') why.push('人工位（owner=' + t.owner_type + '）');
+        if (!why.length) why.push('条件全过但未入选，检查过滤器逻辑');
+      }
+      log('  #' + t.id + ' ' + why.join('；'));
+    }
+    if (open.length > 25) log('  …另有 ' + (open.length - 25) + ' 条未列');
+  }
   if (DRY) { await report(await tasks(), sprint, {}); return; }
 
   // 2. 等 execute 跑完；lint 打回重排一次
