@@ -21,6 +21,7 @@ pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert �
 5. 模型选择走 config（lib/config.js 的 *Model 键，权威在那），禁散落硬编码。路由原则（2026-09-17 Alvin 定）：fable/premium 只留定战略框架与不可回收现场判断（现为 planModel/planReviewModel/chatModel）；框内 go/no-go、服务端有硬校验的动作、总结、内容 QA 一律 opus（review/triage/ruling/thread/blogReview）。具体值以 config.js 为准，别在文档里复刻会腐烂的枚举。
 6. 客户内容与话术不编造事实，缺的信息占位标注待提供。
 7. 测试先行于推送：node tests/ 全套加 php -l 全绿才 push，见 COLLAB.md。
+8. **可扩充 workers 是设计地基（2026-09-18 Alvin 定）**：一切新机制默认要经得起「N 个 worker 任意来去（重启/断网/被杀）系统照常」。三条硬约束：①无单实例假设（如 reap 早期「库里 running 必是上一世孤儿」那种，一律按 worker 身份收窄或超时清扫）；②共享状态要么 DB 原子（claim 走 CAS `UPDATE WHERE status=queued`+rowCount，同客户互斥走服务端 running 排除）、要么按 worker 隔离（fuse/logs/pending_terminal 各 worker 本地，注意 FUSE_FILE 默认是绝对 NFS 路径不自动隔离）；③绝对路径依赖走 NFS 单一事实源不做双份。写任何新代码前先问「两个 worker 同时跑这段会怎样」。
 
 ## 部署
 
