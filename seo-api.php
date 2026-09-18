@@ -310,6 +310,20 @@ function ensure_job_types(){
     db()->exec("ALTER TABLE agent_jobs MODIFY type ENUM($list) NOT NULL");
 }
 
+/* 多 worker 收尸隔离（2026-09-18，第二 worker 接入前置）：agent_jobs 惰性补 claimed_by。
+   claim 时写认领它的 worker id，reap 只收本 worker 名下的 running 孤儿，别再全表判 failed
+   把别的 worker 正在跑的活杀掉。MariaDB 10.3 无 ADD COLUMN IF NOT EXISTS，information_schema 幂等。 */
+function ensure_jobs_worker_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='claimed_by'");
+    $q->execute();
+    $has=$q->fetch();
+    $q->closeCursor();
+    if(!$has)db()->exec("ALTER TABLE agent_jobs ADD COLUMN claimed_by VARCHAR(32) NOT NULL DEFAULT ''");
+}
+
 /* 日粒度时序表，首次访问 /metrics 系端点时惰性建表，同 seo_feedback 的套路。
    seo_snapshots 存的是 28 天窗口的一大坨 JSON，能看当期总量看不了连续趋势；
    这张表把同样的数据摊成 (client, 日期, 指标名) 三元组，一行一个点，
@@ -1820,19 +1834,30 @@ $PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_proj
 // older worker that sends nothing gets any type, as before.
 if($m==='POST'&&$ROUTE==='/jobs/claim'){
     auth_worker();
+    ensure_jobs_worker_schema();
     $i=input();
     $lane=(string)($i['lane']??'');
     if($lane!==''&&!isset(JOB_LANES[$lane]))res(400,['error'=>'bad lane']);
+    /* worker 身份（2026-09-18 多 worker）：新 worker 传 worker id，写进 claimed_by 供 reap 隔离；
+       老 worker 不传 = ''，reap 兼容口径认 ''。 */
+    $wid=mb_substr(preg_replace('/[^A-Za-z0-9_-]/','',(string)($i['worker']??'')),0,32,'UTF-8');
+    /* 超时清扫（2026-09-18）：running 且认领超过 JOB_STUCK_MIN 分钟的，判 failed。
+       挂在 claim 路径上、服务端 DB 时钟，零 LLM。防某 worker 死后 running 永占同客户互斥锁
+       （excludeRunningClients 会一直躲开那个客户）。余量给足：runClaude 30 分钟超时 + backfill/大店
+       shopseo 偶尔更久，取 60 分钟不误杀活人。失败 job 不自动重试铁律不变，重排归人。 */
+    $stuckMin=60;
+    $swept=db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE status='running' AND claimed_at IS NOT NULL AND claimed_at < (NOW() - INTERVAL ? MINUTE)");
+    $swept->execute(["\n[".gmdate('Y-m-d H:i:s')."Z] [reaped-timeout] 认领超过 ".$stuckMin." 分钟未完成，疑似 worker 离线，超时清扫判 failed（非执行错误，重排即可）。失败 job 不自动重试。",$stuckMin]);
     $jid=0;
     $pick=db()->prepare(jobs_queue_order_sql($lane?:null,$lane==='heavy')." LIMIT 1");
-    $take=db()->prepare("UPDATE agent_jobs SET status='running',claimed_at=NOW() WHERE id=? AND status='queued'");
-    for($try=0;$try<3;$try++){
+    $take=db()->prepare("UPDATE agent_jobs SET status='running',claimed_at=NOW(),claimed_by=? WHERE id=? AND status='queued'");
+    for($try=0;$try<5;$try++){
         $pick->execute();
         $row=$pick->fetch();
         $pick->closeCursor();
         if(!$row)res(200,['job'=>null]);
         $cand=(int)$row['id'];
-        $take->execute([$cand]);
+        $take->execute([$wid,$cand]);
         $won=$take->rowCount();
         $take->closeCursor();
         if($won===1){$jid=$cand;break;}
@@ -5901,16 +5926,26 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
    UPDATE 原子回收成 failed。失败 job 不自动重试的铁律不变，重排归人。 */
 if($m==='POST'&&$ROUTE==='/jobs/reap'){
     auth_worker();
+    ensure_jobs_worker_schema();
+    $i=input();
+    /* 多 worker 收尸隔离（2026-09-18）：只收本 worker 名下的 running 孤儿，别再全表判 failed。
+       新 worker 传 worker id → 收 claimed_by=该 id；老 worker 不传（''）→ 收 claimed_by=''（升级窗口
+       内老 worker 的旧认领 claimed_by 就是默认 ''，只有它一台在跑，收 '' 即收自己，语义不劣于现状）。
+       reap 只在 worker 启动时调一次，此刻它自己名下的 running 必是上一世孤儿；别人的 running 不碰。 */
+    $wid=mb_substr(preg_replace('/[^A-Za-z0-9_-]/','',(string)($i['worker']??'')),0,32,'UTF-8');
     $ids=[];
-    foreach(db()->query("SELECT id FROM agent_jobs WHERE status='running'")->fetchAll() as $r)$ids[]=(int)$r['id'];
+    $sel=db()->prepare("SELECT id FROM agent_jobs WHERE status='running' AND claimed_by=?");
+    $sel->execute([$wid]);
+    foreach($sel->fetchAll() as $r)$ids[]=(int)$r['id'];
+    $sel->closeCursor();
     if($ids){
         $in=implode(',',array_fill(0,count($ids),'?'));
-        $note="\n[".gmdate('Y-m-d H:i:s')."Z] [reaped] worker 重启收尸：认领进程已死，判 failed。失败 job 不自动重试，需要的话人工重排";
-        db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE id IN ($in) AND status='running'")
-            ->execute(array_merge([$note],$ids));
-        audit('seo-worker','seo_jobs_reaped','',['ids'=>$ids]);
+        $note="\n[".gmdate('Y-m-d H:i:s')."Z] [reaped] worker(".($wid!==''?$wid:'default').") 重启收尸：认领进程已死，判 failed。失败 job 不自动重试，需要的话人工重排";
+        db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE id IN ($in) AND status='running' AND claimed_by=?")
+            ->execute(array_merge([$note],$ids,[$wid]));
+        audit('seo-worker','seo_jobs_reaped',$wid,['ids'=>$ids,'worker'=>$wid]);
     }
-    res(200,['ok'=>true,'reaped'=>$ids]);
+    res(200,['ok'=>true,'reaped'=>$ids,'worker'=>$wid]);
 }
 
 // POST /jobs -> queue one job, 409 if the same client+type is already in flight

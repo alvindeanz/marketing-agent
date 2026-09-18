@@ -14,6 +14,9 @@ const DEFAULTS = {
   wakeSecret: '',
   pollIntervalSec: 300,
   maxConcurrent: 1,
+  // worker 身份（2026-09-18 多 worker）：claim/reap 带上，供服务端收尸隔离。ros 基座默认 ros，
+  // Mac 第二 worker 在 config/env 设 workerId=mac。空串 = 老口径（reap 收 claimed_by='' ）。
+  workerId: 'ros',
   ga4KeyFile: 'secrets/ga4_sa.json',
   claudeBin: 'claude',
   claudeModel: 'opus',
@@ -132,6 +135,7 @@ function load() {
   cfg.apiBase = String(cfg.apiBase).replace(/\/+$/, '');
   cfg.wakePort = Number(cfg.wakePort) || DEFAULTS.wakePort;
   cfg.pollIntervalSec = Number(cfg.pollIntervalSec) || DEFAULTS.pollIntervalSec;
+  cfg.workerId = String(cfg.workerId || process.env.WORKER_ID || DEFAULTS.workerId).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
   cfg.maxConcurrent = Number(cfg.maxConcurrent) || 1;
   cfg.jobTimeoutMin = Number(cfg.jobTimeoutMin) || DEFAULTS.jobTimeoutMin;
   cfg.httpTimeoutMs = Number(cfg.httpTimeoutMs) || DEFAULTS.httpTimeoutMs;

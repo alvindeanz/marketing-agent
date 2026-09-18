@@ -8,6 +8,7 @@ class Api {
     this.base = cfg.apiBase;
     this.token = cfg.serviceToken;
     this.timeoutMs = cfg.httpTimeoutMs || 60000;
+    this.workerId = cfg.workerId || ''; // 多 worker 收尸隔离，claim/reap 带上
   }
 
   async req(method, path, body) {
@@ -29,13 +30,15 @@ class Api {
    * before the lanes existed; the server treats it the same way.
    */
   async claimJob(lane) {
-    const res = await this.req('POST', '/jobs/claim', lane ? { lane } : {});
+    const body = { worker: this.workerId };
+    if (lane) body.lane = lane;
+    const res = await this.req('POST', '/jobs/claim', body);
     return res && res.job ? res.job : null;
   }
 
-  /** POST /jobs/reap -> 启动收尸：把上一世遗留的 running 孤儿行判 failed，返回 {reaped:[ids]} */
+  /** POST /jobs/reap -> 启动收尸：只收本 worker 名下遗留的 running 孤儿判 failed，返回 {reaped:[ids]} */
   async reapJobs() {
-    return this.req('POST', '/jobs/reap', {});
+    return this.req('POST', '/jobs/reap', { worker: this.workerId });
   }
 
   /** PATCH /jobs/{id} body { status?, log_append?, token_usage? } */
