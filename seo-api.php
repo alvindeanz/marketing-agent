@@ -829,16 +829,23 @@ function attach_human_state($tasks,$cid){
             else $why='延后';
         }elseif($st==='in_progress'){
             $hs='running';$run='执行中';
-        }else{
+        }elseif(!empty($t['review_pending'])){
+            /* 判定中：fable/opus 正在判，机器在推进，不是等人（2026-09-18 收口：机器待处理态不冒充等我）。 */
+            $hs='running';$run='判定中';
+        }elseif($js['status']==='failed'){
+            /* 执行/落地失败 = bug/流程卡壳，这才该等人。 */
             $hs='wait_me';
-            if(!empty($t['review_pending']))$why='判定中';
-            elseif($js['status']==='failed'){
-                $n=(int)($js['fail_count']??1);
-                $why=(($js['job_type']??'')==='apply_task'?'落地失败':'执行失败').($n>1?(' '.$n.' 次'):'').'（job #'.$js['job_id'].'）';
-                $failReason=task_fail_reason($t,$js['job_id'],(string)($js['job_type']??''));
-            }
-            elseif($st==='review')$why='待放行';
-            else $why=empty($t['review_effective'])?'待判':'待拍板';
+            $n=(int)($js['fail_count']??1);
+            $why=(($js['job_type']??'')==='apply_task'?'落地失败':'执行失败').($n>1?(' '.$n.' 次'):'').'（job #'.$js['job_id'].'）';
+            $failReason=task_fail_reason($t,$js['job_id'],(string)($js['job_type']??''));
+        }elseif($st==='review'){
+            /* 待放行：只读卡已在交付处自动收货，走到这里的是花钱/不可逆/越权类硬闸（授权=权限类，该等人），
+               或 reversible 待 L0 自动放行的短暂过渡（harness/L0 会推进，非等人）。用 review_effective+risk 粗分：
+               有 do 判决且非硬闸的算机器待推进，其余才等人。简化口径：analysis 已不到这（源头收货）。 */
+            $hs='wait_me';$why='待放行';
+        }else{
+            /* 待判（无判决，等闸A）/ 待拍板（有判决，等 harness apply_verdicts）都是机器该推进的，不等人。 */
+            $hs='running';$run=empty($t['review_effective'])?'待判定':'待拍板';
         }
         $mc=manual_checks_of($t);
         $t['manual_checks']=$mc['items'];
@@ -1954,6 +1961,18 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         db()->prepare("UPDATE seo_tasks SET attention=? WHERE id=?")->execute([$i['attention']?1:0,$tid]);
     }
     audit('seo-worker','seo_task_result',(string)$tid,['output_url'=>$i['output_url']??'','attention'=>isset($i['attention'])?($i['attention']?1:0):null]);
+    /* 只读交付默认放行（2026-09-18 Alvin 第一性原理：可逆的直接放行不卡流程，错靠事后抽查+原地还原）。
+       分析型任务（只读卡/报告，放行本就不 apply）交付即自动收货，不进「待放行 等我」。止损闩生效时仍留人。 */
+    $arow=db()->prepare("SELECT owner_type,ops,client_id FROM seo_tasks WHERE id=?");
+    $arow->execute([$tid]);
+    $at=$arow->fetch();
+    if($at&&analysis_task($at)&&!ops_halted((int)$at['client_id'])){
+        $errAA=task_close($tid,'accepted','[auto-accept] 只读交付默认放行（可逆，事后抽查+原地还原），无需人工放行');
+        if($errAA===null){
+            audit('seo-worker','seo_task_auto_accept',(string)$tid,['reason'=>'analysis delivered']);
+            res(200,['ok'=>true,'auto_accepted'=>true]);
+        }
+    }
     ensure_task_origin();
     $cq=db()->prepare("SELECT client_id,origin,title,detail,ops,result_note,output_url FROM seo_tasks WHERE id=?");
     $cq->execute([$tid]);

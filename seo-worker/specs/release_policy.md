@@ -29,15 +29,16 @@ page-rewrite / page-rebuild（整页覆盖，影响面大）、styles-fragment�
 SEO：page-meta-update、content-edit、image-generate、redirect-batch（本身 agent_apply 不出卡）
 paid：negative-keyword-add、ad-pause、adgroup-pause、keyword-bid-adjust、schedule-adjust、final-url-change
 
-## SEO 客户卡放行（2026-09-17 Alvin 定，version 8，midea S1 试点起）
+## 默认放行（2026-09-18 Alvin 第一性原理定版，version 9，取代 v8 客户卡+人工后检口径）
 
-Alvin 从 SEO 内容线的常规放行链上退出。原则：方向和口径的确认权归客户，执行判断归 fable 加机器闸加人工后检，Alvin 只处理系统异常。
+第一性原理：预先卡闸是拿确定成本（每件都等、占注意力）防不确定的稀有损失。当动作**可逆**（快照+原地还原，撤销近免费）、错误**稀有且系统性**（模型上下文缺漏，非随机）、**可被抽样发现**时，卡闸是烂账。故默认放行，质检从"事前卡"搬到"事后抽"。
 
-- **客户卡 = 批文 fact 的采集途径。** external 类 SEO op（article-publish、blog-publish、ad-copy 之外的内容对外发布）与「改页面说什么」的批次（money page title 改法、正文重写、品牌口径 / 价格展示 / 政策页文案），放行凭证一律通过客户卡采集：方向卡（mapping、选题、页面合并砍留）或网页调整卡（具体改动 before/after，敏感字段高亮）。客户确认后落 confirmed 批文 fact，服务端按既有 external_with_backing_fact=auto 放行。卡片纪律见 `sops/client_cards.md`。客户超时未回按未确认搁置，不默认放行。
-- **免卡 op 照旧 L0**：机械类（空缺 meta 补齐、内链、alt、坏链修复、redirect）机器闸（dry-run diff、lint、客户铁律比对、快照/存档）过了直接执行。注意区分：article-meta-update 的「空补齐」免卡，「改已有 title/meta」的批次归网页调整卡，这条分界写在能力清单里，由 plan/execute 阶段执行，后检核对。
-- **Alvin 收件箱只剩异常件**：bug、报错、权限不足、平台不支持的操作、客户站预期外状态。异常件不是放行卡，是带错误上下文与已尝试动作的工单。能归 Aiden 的直接 COLLAB 登记，到 Alvin 的只剩要老板出面的（向客户要权限、动钱、改约定）。
-- **ramp 期后检（前几个月）**：所有 auto 放行的完成件全量进「已完成待检」队列人工核对（锚点三样：客户铁律、facts/PJ 记录一致性、diff 与方案一致性），踩雷记 DEFECTS.md。数据收敛后降为抽查。质量熔断暂不建（Alvin 定），现有「同任务 auto-apply 至多一次」的技术熔断保留。
-- 本节先在 midea S1 单客户试点，与双线观察期数据分开统计；全船队铺开由 S1 跑完一个后检周期后另行提案。
+- **默认放行：可逆的一律自动放行，零闸。** execute 的产出就是决定，后面不加第二道 review（不人审、也不让 opus 再判一遍——execute 那个 agent 已判过）。只读卡/报告交付即自动收货（seo_task_result 里 analysis_task 自动 accepted，不进「待放行」）；reversible 写类走 L0 自动排 apply。
+- **快照即安全网，不是闸。** 每次写都有快照（WF changeset / Shopify shopseo 快照 / apply 存档），随时原地还原。可逆性是自动放行的唯一门槛：能还原就放，不能还原才谈闸。
+- **质检=事后抽查，不阻塞：** 人工抽查（Alvin 结束后手动触发，非定时）+ harness 按需抽查工具（抽样复核 auto 放行件，异常自动原地还原+写 DEFECT）。抽查产物是"堵死一类"不是"还原一张"：错既是上下文缺漏，逮到一次就修上游 fact/spec/lint，整类失效模式消失（北极星纠偏回流）。
+- **硬闸只剩「还原救不回 + 没授权」（=权限/授权类，才该等 Alvin）：** 花钱越出频道委托范围、真不可逆且有下游实害（如 conversion 配置，能加快照就也放）、合同级客户承诺。external 类客户方向确认走客户卡（方向卡/网页调整卡，落 confirmed 批文 fact，external_with_backing_fact=auto），那是等客户不是等 Alvin。
+- **等 Alvin 只剩三类：bug/执行失败、流程卡壳/熔断、权限不够/越权授权。** 判断/验收/放行类一律不等他（他的判断力≈GPT-4.2，二次判断是重复浪费）。human_state 里判定中/待判/待拍板已归机器待推进态，不冒充等我。
+- v8 的「ramp 期人工全量后检」作废（人工审核环节取消，被事后抽样+原地还原取代）；「同任务 auto-apply 至多一次」的技术熔断保留（防 review→apply→review 死循环）。
 
 ## Chat 分级派单（2026-09-08 Alvin 定：决策权还给 fable，version 3）
 
