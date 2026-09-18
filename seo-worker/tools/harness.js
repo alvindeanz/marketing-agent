@@ -302,7 +302,14 @@ async function main() {
     if (!open.length) log('  （没有未结任务）');
     for (const t of open.slice(0, 25)) {
       const why = [];
-      if (!inScope(t)) why.push('不在本期（任务 ' + (t.sprint || '无标签') + '，本期口径 ' + (IDS ? '--ids' : sprint) + '）');
+      if (!inScope(t)) {
+        // 区分「不在本期」与「本期但被 SEO 闸 held」，别让 held 的 S1 任务错报成不在本期（2026-09-18）
+        if (!IDS && t.sprint === sprint && !seoGateOk && String(t.module || '') !== 'paid') {
+          why.push('本期，但 SEO 闸 held（词表/mapping 未客户确认，paid 卡不受此闸）');
+        } else {
+          why.push('不在本期（任务 ' + (t.sprint || '无标签') + '，本期口径 ' + (IDS ? '--ids' : sprint) + '）');
+        }
+      }
       else {
         if (t.status === 'review') why.push('已出方案，在放行/发卡阶段');
         if (t.review_pending) why.push('判定中');
