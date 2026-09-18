@@ -101,6 +101,34 @@ const DEFAULTS = {
 
 let cached = null;
 
+/* claudeBin 启动自愈（2026-09-18，Apex job 981 事故）：Mac 的 config.json 抄了 ros 的
+   /root/.local/bin/claude，worker 带病抢单把真活烧成 failed。机器色彩的配置一律在启动时
+   解析成本机真实可执行文件：配置的路径存在就用；不存在（或裸名）按 PATH 与常见安装目录
+   找同名兜底，用了哪个在 note 里说清。全都找不到返回 null，listener 启动断言据此拒绝起，
+   不带执行不了的配置进抢单循环（地基约束①：无单实例假设）。 */
+function isExecFile(p) {
+  try {
+    fs.accessSync(p, fs.constants.X_OK);
+    return fs.statSync(p).isFile();
+  } catch (e) {
+    return false;
+  }
+}
+function resolveClaudeBin(configured) {
+  const want = String(configured || 'claude');
+  if (want.includes(path.sep) && isExecFile(want)) return { bin: want, note: '' };
+  const name = path.basename(want);
+  const dirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const home = process.env.HOME || '';
+  if (home) dirs.push(path.join(home, '.local', 'bin'));
+  dirs.push('/usr/local/bin', '/opt/homebrew/bin', '/usr/bin');
+  for (const d of dirs) {
+    const c = path.join(d, name);
+    if (isExecFile(c)) return { bin: c, note: 'claudeBin "' + want + '" 本机不可用，兜底解析为 ' + c };
+  }
+  return null;
+}
+
 function configPath() {
   return process.env.SEO_WORKER_CONFIG || path.join(ROOT, 'config.json');
 }
@@ -184,8 +212,17 @@ function load() {
   if (cfg.ga4KeyFile && !path.isAbsolute(cfg.ga4KeyFile)) {
     cfg.ga4KeyFile = path.join(ROOT, cfg.ga4KeyFile);
   }
+  // claudeBin 解析：成功写回真实路径，失败置空并留言，由 listener 启动断言拦截。
+  const rb = resolveClaudeBin(cfg.claudeBin);
+  if (rb) {
+    cfg.claudeBinNote = rb.note;
+    cfg.claudeBin = rb.bin;
+  } else {
+    cfg.claudeBinNote = 'claudeBin "' + String(cfg.claudeBin) + '" 不存在，PATH 与常见安装目录也没有同名可执行文件';
+    cfg.claudeBin = '';
+  }
   cached = cfg;
   return cfg;
 }
 
-module.exports = { load, ROOT, DEFAULTS, configPath };
+module.exports = { load, ROOT, DEFAULTS, configPath, resolveClaudeBin };

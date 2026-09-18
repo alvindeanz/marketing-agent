@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-18 AIRA：claudeBin 启动自愈 + 启动断言(job 981 事故的机制修复)
+
+- 干了什么：lib/config.js 新增 resolveClaudeBin,启动时把 claudeBin 解析成本机真实可执行文件(配置路径存在直用;失效或裸名按 PATH+~/.local/bin+/usr/local/bin+/opt/homebrew/bin+/usr/bin 兜底,用了哪个日志说清);全都没有 cfg.claudeBin 置空,listener 启动断言拒绝起,worker 不再带病抢单烧真活。回归测试 tests/config_claudebin.js,全套绿。
+- 坑：测试样本不能用 /root/.local/bin/claude 当「失效路径」,ros 上它真实存在;二进制名也要唯一防常见目录撞车。
+- 下一步/认领：ros 侧等金丝雀窗口收口时随重启一起 deploy;Mac 侧 Connie 修 config 时顺手 git pull 同享。
+
 ### 2026-09-18 AIRA：harness 卡反馈折叠防叠词 + Apex(44) 实战金丝雀首雷记录
 
 - 干了什么：tools/harness.js foldCards 跟进任务标题先剥旧「卡反馈落地：」前缀再加,防链式折叠叠词(753 -> 759 实证翻车,看板 759 标题已 PATCH 修正)。tests 全绿。tools 不在 deploy 白名单,repo 生效即生效。

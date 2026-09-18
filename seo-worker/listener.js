@@ -36,6 +36,13 @@ try {
   process.stderr.write('[' + ts() + '] [listener] config error: ' + e.message + '\n');
   process.exit(1);
 }
+/* 启动断言（2026-09-18，Apex job 981）：claudeBin 解析不出本机可执行文件就拒绝起，
+   worker 不许带着执行不了的配置进抢单循环，烧的都是真单。 */
+if (!cfg.claudeBin) {
+  process.stderr.write('[' + ts() + '] [listener] 启动断言失败: ' + cfg.claudeBinNote + '；修好 config.json 的 claudeBin 再起。\n');
+  process.exit(1);
+}
+if (cfg.claudeBinNote) log('claudeBin 自愈: ' + cfg.claudeBinNote);
 const api = new Api(cfg);
 
 function laneState() {
