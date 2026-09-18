@@ -69,6 +69,22 @@ try {
   }
   assert.ok(!problems.length, problems.join('; '));
   console.log('  ok   全部能力清单可解析且 op 齐 risk 表');
+  // agent_readonly 的 op 必须全在 seo-api 的 READONLY_OPS 里（2026-09-18 Apex #745 教训：
+  // creative-direction 漏在外面，只读出卡任务被误排 apply_task 报「no change plan」失败推到人工队列）。
+  // 这两处是手抄的两份真相，加断言锁死，防新加只读 op 时忘同步复发。
+  const apiSrc = fs.readFileSync(path.join(__dirname, '..', 'seo-api.php'), 'utf8');
+  const roMatch = apiSrc.match(/\$READONLY_OPS\s*=\s*\[([^\]]*)\]/);
+  const roList = roMatch ? [...roMatch[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
+  const roMissing = [];
+  for (const f of fs.readdirSync(capDir).filter((x) => x.endsWith('.md'))) {
+    for (const o of cap.operations(f.replace(/\.md$/, ''))) {
+      if (String(o.autonomy || '').startsWith('agent_readonly') && !roList.includes(o.name)) {
+        roMissing.push(o.name);
+      }
+    }
+  }
+  assert.ok(!roMissing.length, 'agent_readonly op 未进 seo-api READONLY_OPS（会被误排 apply）: ' + roMissing.join(', '));
+  console.log('  ok   agent_readonly op 全在 READONLY_OPS');
 } catch (e) { fail += 1; console.log('  FAIL 能力清单解析 :: ' + e.message); }
 
 // review_principles 的 SEO 部分还在（append 不许覆盖）
