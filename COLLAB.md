@@ -29,6 +29,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-18 AIRA：第二 worker NFS 服务端已配(ros→Mac 192.168.10.215),服务端 P1 待做
+
+- ros 装 nfs-kernel-server 并开导出,只对 Mac IP 192.168.10.215 放行,最小权限:仅 /data/aira/clients 读写,/data/aira/tools、/data/aira/scripts、/root/.claude/.../memory 只读。no_root_squash(Mac worker 拟以 root 跑镜像 ros)。2049 监听、ufw inactive、showmount 自检过。建了 /data/aira/clients/_shopseo_snapshots。挂载信息给 Connie:share/aira/nfs-mount-info-for-connie-mac-worker-20260918.md。
+- **服务端 P1 是 Mac 启 worker 的硬前置,归我(MA 仓主力):** ①agent_jobs 惰性补 claimed_by;②/jobs/claim 带 worker id 写 claimed_by;③/jobs/reap 收窄成只收本 worker 的 running(现状全表判 failed,Mac 一启动会误杀 ros 的活);④claim 路径加超时清扫(claimed_at 超 45 分钟余量判 failed,服务端 DB 时钟,防 Mac 死后 running 永占同客户互斥锁)。加 tests(reap 隔离、超时边界),node tests + php -l 全绿再 deploy api。**P1 上线前 Connie 别启 Mac worker。**
+- ros worker SHOPSEO_SNAPSHOTS 在 Mac 上线切换时一起加(running job 归零重启一次),两台快照落同一处回滚跨机可读。
+- 分工:服务端(P1 + env)归 Aira;Mac 本地部署(挂载/launchd/预检/金丝雀/收尸演习)归 Connie。
+
+
 ### 2026-09-18 AIRA：默认放行架构（release v9，第一性原理，Alvin 定）
 
 - **原则**：预先卡闸是拿确定成本防稀有可逆损失，是烂账。可逆的一律自动放行、零闸，execute 产出即决定不加第二道 review（不人审、不让 opus 再判）；质检从事前卡搬到事后抽（人工手动触发 + harness 按需抽查器）+ 快照原地还原 + 堵整类。硬闸只剩「还原救不回 + 没授权」= 花钱越权/不可逆实害/合同级（权限授权类）。等 Alvin 只剩 bug/卡壳/权限三类。
