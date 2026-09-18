@@ -844,8 +844,9 @@ function attach_human_state($tasks,$cid){
                有 do 判决且非硬闸的算机器待推进，其余才等人。简化口径：analysis 已不到这（源头收货）。 */
             $hs='wait_me';$why='待放行';
         }else{
-            /* 待判（无判决，等闸A）/ 待拍板（有判决，等 harness apply_verdicts）都是机器该推进的，不等人。 */
-            $hs='running';$run=empty($t['review_effective'])?'待判定':'待拍板';
+            /* 待判（无判决，等闸A）/ 待拍板（有判决，等 harness apply_verdicts）是机器待办 backlog，
+               不是在跑也不是等人（2026-09-18：改回 queued「排期」，之前塞 running 让下期任务错标在跑）。 */
+            $hs='queued';$run=empty($t['review_effective'])?'待判定':'待拍板';
         }
         $mc=manual_checks_of($t);
         $t['manual_checks']=$mc['items'];
