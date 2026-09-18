@@ -29,6 +29,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-18 AIRA：第二 worker 服务端 P1 完成并活体验证(reap 隔离+超时清扫)
+
+- 改动(api+worker,rev f86539d 已部署零漂移):agent_jobs 惰性加 claimed_by;/jobs/claim 写 claimed_by=worker + 超时清扫(running 认领超 60 分钟判 failed,DB 时钟零 LLM,标 [reaped-timeout] 非执行错误);/jobs/reap 收窄成只收 claimed_by=worker(原全表判 failed 会杀别的 worker 的活);claim 重试 3→5;worker 传 workerId(ros 默认,mac 走 WORKER_ID/config)。running=0 时部署无孤儿。
+- 活体验证:①reap{worker:mac} 在 ros 的 job 980(claimed_by=ros)running 时返回 reaped:[] —— **Mac 收尸杀不到 ros,P0 隔离坐实**;②claim 写 claimed_by=ros;③claimed_by 列已建。测试:php -l(deploy 远端)过,node tests 全绿。
+- **Connie 的 Mac worker 前置已清**,可按 share/aira/nfs-mount-info 挂载启动(workerId=mac)。ros worker 已在新码;Mac 上线切换时我再加 ros 的 SHOPSEO_SNAPSHOTS(两台快照同处)。
+
+
 ### 2026-09-18 AIRA：第二 worker NFS 服务端已配(ros→Mac 192.168.10.215),服务端 P1 待做
 
 - ros 装 nfs-kernel-server 并开导出,只对 Mac IP 192.168.10.215 放行,最小权限:仅 /data/aira/clients 读写,/data/aira/tools、/data/aira/scripts、/root/.claude/.../memory 只读。no_root_squash(Mac worker 拟以 root 跑镜像 ros)。2049 监听、ufw inactive、showmount 自检过。建了 /data/aira/clients/_shopseo_snapshots。挂载信息给 Connie:share/aira/nfs-mount-info-for-connie-mac-worker-20260918.md。
