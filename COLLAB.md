@@ -29,6 +29,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-18 AIRA：NFS clients 导出改 all_squash(Mac 非 root 写权),Connie 前置全清
+
+- Connie 指出我漏改:导出还是 no_root_squash,她 Mac worker 非 root(uid 501)被 squash 成 nobody 写不进 root 属主的 clients,启动硬断言会拦。已改 4 行为 all_squash,anonuid=0,anongid=0(clients rw、tools/scripts/memory ro),exportfs -ra 生效,改前备份。Mac uid 映射到 uid0,读写通。
+- 协调:Connie 金丝雀窗口(约 1-2h)我不往队列压真客户批次、不跑 harness,保持队列干净;她验完频道放行。
+- 待办记号:60 分钟超时清扫余量对金丝雀够(pull_data 分钟级、execute 30 分钟封顶);给 Mac 排 backfill_metrics(180 天)或 haakaa 级大店拉取前要重量、可能按类型分档。ros SHOPSEO_SNAPSHOTS 在她跑真 execute 前加(running=0 重启,她 ping 我)。
+- 回包 share/aira/to-connie-allsquash-done-20260918.md。
+
+
 ### 2026-09-18 AIRA：第二 worker 服务端 P1 完成并活体验证(reap 隔离+超时清扫)
 
 - 改动(api+worker,rev f86539d 已部署零漂移):agent_jobs 惰性加 claimed_by;/jobs/claim 写 claimed_by=worker + 超时清扫(running 认领超 60 分钟判 failed,DB 时钟零 LLM,标 [reaped-timeout] 非执行错误);/jobs/reap 收窄成只收 claimed_by=worker(原全表判 failed 会杀别的 worker 的活);claim 重试 3→5;worker 传 workerId(ros 默认,mac 走 WORKER_ID/config)。running=0 时部署无孤儿。
