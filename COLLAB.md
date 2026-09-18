@@ -29,6 +29,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-18 AIRA：方向卡席位表版式事故全局修复(Alvin 报障)
+
+- 干了什么：direction_card_template.html 席位表 summary 重写: 族名 flex:1 1 auto+min-width:0 允许收缩换行, brief flex:1 1 260px+min-width:220px 硬性下限, 整行 flex-wrap, 任何宽度不再出现一字一行竖排。同时把该块挪到 @media 之前: 9/17 的窄屏修复写在基础规则前面, 同权重被覆盖, 一直是死代码。全部 10 张在线方向卡(apex 双卡/bens AU+NZ/goodie/haakaa/louvresky 双卡/midea/sanmichelle)用新模板重渲染重发布, 回验全 200。
+- 坑：CSS 同权重规则靠源序定胜负, media query 覆盖必须写在基础规则之后; 模板改动影响两个渲染器(词卡+素材卡共用)。
+- 下一步/认领：卡类任务 sent_at 前禁收口(今天双卡两次隐身的根因)与 readonly 卡任务多排 apply 的 409, 两条今晚修 seo-api。
 ### 2026-09-18 AIRA：claudeBin 启动自愈 + 启动断言(job 981 事故的机制修复)
 
 - 干了什么：lib/config.js 新增 resolveClaudeBin,启动时把 claudeBin 解析成本机真实可执行文件(配置路径存在直用;失效或裸名按 PATH+~/.local/bin+/usr/local/bin+/opt/homebrew/bin+/usr/bin 兜底,用了哪个日志说清);全都没有 cfg.claudeBin 置空,listener 启动断言拒绝起,worker 不再带病抢单烧真活。回归测试 tests/config_claudebin.js,全套绿。
