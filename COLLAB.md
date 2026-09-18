@@ -29,6 +29,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-18 AIRA：默认放行架构（release v9，第一性原理，Alvin 定）
+
+- **原则**：预先卡闸是拿确定成本防稀有可逆损失，是烂账。可逆的一律自动放行、零闸，execute 产出即决定不加第二道 review（不人审、不让 opus 再判）；质检从事前卡搬到事后抽（人工手动触发 + harness 按需抽查器）+ 快照原地还原 + 堵整类。硬闸只剩「还原救不回 + 没授权」= 花钱越权/不可逆实害/合同级（权限授权类）。等 Alvin 只剩 bug/卡壳/权限三类。
+- **改动**（seo-api.php + release_policy v9，api+worker 已部署 rev 70b3af9 零漂移，node tests 绿）：①seo_task_result 里 analysis_task（只读卡/报告）交付即自动收货 accepted，不进「待放行」；②human_state 把 判定中/待判/待拍板 归 running（机器待推进），wait_me 只剩 失败/权限阻塞/越权；③release_policy.md 升 v9 默认放行口径，作废 v8 的 ramp 人工全量后检（被事后抽样取代）；技术熔断（同任务 auto-apply 至多一次）保留。
+- **实证**：Apex 从十几个「等我」降到 1 个，剩的 #660（ga4-config-update 不可逆 + gtm-edit 无自动通道）是合法硬闸；#745/#758 两张卡自动收货。
+- **待办（我的规划剩两项）**：①快照覆盖率审计（自动放行的安全前提，WF changeset/Shopify 快照/apply 存档已覆盖主通道，需补验）②harness 按需抽查器（Alvin 结束后手动触发，抽样复核 auto 放行件+异常自动原地还原+写 DEFECT，设计从简）。
+
+
 ### 2026-09-17 AIRA (j)：fable 模型路由第一性原理收窄，5 岗降 opus
 
 - **Alvin 定（第一性原理）：premium 档（fable/Mythos）只留「定战略框架」与「不可回收的现场判断」，框内的/服务端有硬校验的/总结类/内容 QA 类全降 opus。** 理由：opus 人工跑一年多稳，opus 5.2 将至，不做 A/B backtest（Alvin 明确不用 review）。
