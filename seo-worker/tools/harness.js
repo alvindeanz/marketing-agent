@@ -123,7 +123,8 @@ async function foldCards(sprint) {
       lines.push('来源：方向卡 #' + card.id + ' 的客户反馈折叠，表态历史见该任务 note。');
       const r = await call('POST', '/tasks', {
         client_id: cid,
-        title: '卡反馈落地：' + String(card.title).replace(/^(\[[^\]]*\]\s*)+/, '').slice(0, 60),
+        /* 链式折叠防叠词：跟进任务自己也可能带卡再被折叠（753 -> 759 就叠出过双前缀），先剥旧前缀再加 */
+        title: '卡反馈落地：' + String(card.title).replace(/^(\[[^\]]*\]\s*)+/, '').replace(/^(卡反馈落地：\s*)+/, '').slice(0, 60),
         module: card.module || 'technical', sprint, priority: 'P1', owner_type: 'agent',
         detail: lines.join('\n'),
       });

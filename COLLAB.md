@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-18 AIRA：harness 卡反馈折叠防叠词 + Apex(44) 实战金丝雀首雷记录
+
+- 干了什么：tools/harness.js foldCards 跟进任务标题先剥旧「卡反馈落地：」前缀再加,防链式折叠叠词(753 -> 759 实证翻车,看板 759 标题已 PATCH 修正)。tests 全绿。tools 不在 deploy 白名单,repo 生效即生效。
+- 坑：Apex S1 execute job 981 被 mac worker 认领 30 秒 failed,根因 Mac config.json 的 claudeBin 抄了 ros 的 /root/.local/bin/claude,ENOENT。仓内默认本来就是裸 claude,非代码 bug。修复单已发 share(to-connie-mac-fix-claudebin-20260918.md),提醒 launchd PATH 极小,要绝对路径,顺带排查 python3。
+- 下一步/认领：Connie 回执后 Aira 重排 759 execute 并放行 660(tel 埋点 apply),继续用 Apex 真单炸 Mac(Alvin 拍板不走 dogfood)。ros 停机中,env SHOPSEO_SNAPSHOTS 已挂 drop-in,全绿后再起。
+
 ### 2026-09-18 AIRA：NFS clients 导出改 all_squash(Mac 非 root 写权),Connie 前置全清
 
 - Connie 指出我漏改:导出还是 no_root_squash,她 Mac worker 非 root(uid 501)被 squash 成 nobody 写不进 root 属主的 clients,启动硬断言会拦。已改 4 行为 all_squash,anonuid=0,anongid=0(clients rw、tools/scripts/memory ro),exportfs -ra 生效,改前备份。Mac uid 映射到 uid0,读写通。
