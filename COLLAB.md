@@ -29,6 +29,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-19 AIRA：SEO 词表闸加状态 fact 一票否决(badger 假阳性)
+
+- 干了什么：harness 两闸的 kwOk/mapOk 前加 veto: *.lock_state 类状态 fact 值带 NEG(未锁/onboard gap)时直接否决,不管局部 fact 多好看。badger 实证: keywords.lock_state 明写未锁定,闸却被 keywords.leafblower_ownership(局部品类客户确认)满足。dry-run 双向验证: badger 关(否决生效), midea 开(不误伤)。tests 全绿。
+- 坑：状态 fact 此前只是「不算数」,局部确认 fact 可绕过全站状态;闸的 some() 语义天然吃这种假阳性。
+- 下一步/认领：badger 三合一确认卡(词表+mapping+edger/301 两决策)在产,客户勾选折叠后落全站锁定 fact,闸从数据侧真开。
 ### 2026-09-18 AIRA：方向卡席位表版式事故全局修复(Alvin 报障)
 
 - 干了什么：direction_card_template.html 席位表 summary 重写: 族名 flex:1 1 auto+min-width:0 允许收缩换行, brief flex:1 1 260px+min-width:220px 硬性下限, 整行 flex-wrap, 任何宽度不再出现一字一行竖排。同时把该块挪到 @media 之前: 9/17 的窄屏修复写在基础规则前面, 同权重被覆盖, 一直是死代码。全部 10 张在线方向卡(apex 双卡/bens AU+NZ/goodie/haakaa/louvresky 双卡/midea/sanmichelle)用新模板重渲染重发布, 回验全 200。

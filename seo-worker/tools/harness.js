@@ -187,9 +187,15 @@ async function main() {
     const STATE_KEY = /(^|[._])state($|[._])/i; // 名字里带 state 段的都是状态记录，非锁定
     const NEG = /(未锁|无定稿|未定稿|未确认|无客户确认|没有确认|尚未|未经|留空|待定稿|锁词未定|onboard gap|\bgap\b|not locked|unlocked|内部方向表)/i;
     const POS = /(锁定|已确认|客户确认|定稿|locked|confirmed by|client.confirm)/i;
-    const kwOk = facts.some((f) => /^keywords\./.test(f.fact_key) && !STATE_KEY.test(f.fact_key)
+    /* 状态 fact 一票否决（2026-09-19，badger 实证）：keywords.lock_state 明写「未锁定/onboard gap」，
+       闸却被 keywords.leafblower_ownership 这类局部品类确认（带「客户确认」POS 词）满足——局部确认
+       骗过全站闸。状态 fact 此前只是「不算数」，改为「带否定语即否决」：全站状态说没锁，任何局部
+       fact 都不能开闸。mapping 侧同规则。 */
+    const kwVeto = facts.some((f) => /^keywords\./.test(f.fact_key) && STATE_KEY.test(f.fact_key) && NEG.test(String(f.value)));
+    const mapVeto = facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key) && STATE_KEY.test(f.fact_key) && NEG.test(String(f.value)));
+    const kwOk = !kwVeto && facts.some((f) => /^keywords\./.test(f.fact_key) && !STATE_KEY.test(f.fact_key)
       && !NEG.test(String(f.value)) && POS.test(String(f.fact_key) + ' ' + String(f.value)));
-    const mapOk = facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key)
+    const mapOk = !mapVeto && facts.some((f) => /^seo\.(mapping|page_mapping|money_pages)/.test(f.fact_key)
       && !STATE_KEY.test(f.fact_key) && !NEG.test(String(f.value)));
     seoGateOk = kwOk && mapOk;
     if (!seoGateOk) {
