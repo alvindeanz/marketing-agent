@@ -3421,10 +3421,13 @@ function scopeHorizon(cur){
 }
 function withinScope(t,cur){
   if(sprintScope==='all')return true;
-  /* 排期只管「还没开工」的任务。已经出了方案等放行、在跑、执行失败等重试的，
-     是当下的活，不管排在哪个 sprint 都必须可见，否则待放行卡会凭空消失
-     （2026-08-31 paid #143 #144 排 S2 被藏，Alvin 找不到）。 */
-  if(t.status==='review'||t.status==='in_progress')return true;
+  /* 排期视野对 review 一视同仁（2026-09-19 Alvin 定，取代 2026-08-31 的
+     「review 无条件可见」）：方案备好但放行排在未来 sprint 的（如 #703 排 S3、
+     放行前置是 301 落地），是未来的活，本期视图不显示，底部提示行计数兜底。
+     只留三类当下例外：等发客户的确认卡（发卡是现在的人事）、在跑的、失败等重试的。
+     旧规则的事故场景（8/31 待放行卡被藏找不到）由「全部」一键放宽与提示行覆盖。 */
+  if(t.status==='in_progress')return true;
+  if(t.status==='review'&&isPendingClientCard(t))return true;
   const hs=hsOf(t);
   if(hs==='running')return true;
   if(hs==='wait_me'&&/失败/.test(String(t.wait_reason||'')))return true;

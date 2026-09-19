@@ -29,6 +29,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-19 AIRA：本期视图收严, review 不再无条件可见(Alvin 定, 取代 8/31 规则)
+
+- 干了什么：seo-agent.html withinScope 改: review 任务跟随 sprint 视野, 仅三例外(等发客户的确认卡 isPendingClientCard/在跑/失败等重试)。起因 #703(S3)方案备好待放行却挂在 hntz 本期视图。旧「review 无条件可见」(2026-08-31 #143 事故的产物)作废, 其事故场景由「全部」按钮与底部计数提示行覆盖。
+- 坑：isPendingClientCard 判卡靠 ops 与 result_note 特征, 新增卡类型要同步该函数, 否则待发卡会被藏。
+- 下一步/认领：随 api 部署上线;观察一周有无「找不到待放行卡」回潮。
 ### 2026-09-19 AIRA：SEO 词表闸加状态 fact 一票否决(badger 假阳性)
 
 - 干了什么：harness 两闸的 kwOk/mapOk 前加 veto: *.lock_state 类状态 fact 值带 NEG(未锁/onboard gap)时直接否决,不管局部 fact 多好看。badger 实证: keywords.lock_state 明写未锁定,闸却被 keywords.leafblower_ownership(局部品类客户确认)满足。dry-run 双向验证: badger 关(否决生效), midea 开(不误伤)。tests 全绿。
