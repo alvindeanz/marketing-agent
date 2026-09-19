@@ -1022,8 +1022,12 @@ function renderSidebar(){
     return true;
   };
   const byStar=c=>!starOnly||c.starred;
-  const act=clientsData.filter(c=>c.status!=='archived'&&bySvc(c)&&byStar(c));
-  const arch=clientsData.filter(c=>c.status==='archived'&&bySvc(c)&&byStar(c));
+  /* 平台分组排序（2026-09-19 Alvin 定）：WF > Shopify > WordPress > 其它，组内按名。 */
+  const PLAT_ORDER={wf:1,sp:2,wp:3,ot:4};
+  const platSort=(a,b)=>(PLAT_ORDER[platKey(a.platform)]-PLAT_ORDER[platKey(b.platform)])
+    ||String(a.name||'').localeCompare(String(b.name||''));
+  const act=clientsData.filter(c=>c.status!=='archived'&&bySvc(c)&&byStar(c)).sort(platSort);
+  const arch=clientsData.filter(c=>c.status==='archived'&&bySvc(c)&&byStar(c)).sort(platSort);
   document.getElementById('sbList').innerHTML=act.length?act.map(sbRow).join(''):'<div class="sb-empty">还没有客户。</div>';
   const grp=document.getElementById('sbArchGroup');
   grp.classList.toggle('hidden',!arch.length);

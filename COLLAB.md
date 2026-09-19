@@ -29,6 +29,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-19 AIRA：侧边栏客户列表按平台分组排序(Alvin 定)
+
+- 干了什么：seo-agent.html renderSidebar 加 platSort: WebForger > Shopify > WordPress > 其它, 组内按名, 复用现有 platKey()。归档区同规则。
+- 坑：无。
+- 下一步/认领：随本次 api 部署上线。
 ### 2026-09-19 AIRA：博客选题规划产线工具化(Alvin 批, 源自 sunseeker/badger 一次性脚本)
 
 - 干了什么：三件套进 tools/: blog_topic_gaps.js(通用 GSC 缺口拉取, 词表输入 clients/<slug>/notes/topic_kw.json), render_blog_topic_plan.py(plan.json 渲染, 文件名强制带 slug), blog_topic_card.js(可选生成选题确认卡任务, 带 we_write/client_writes 模式标注)。sunseeker/badger 的词表已迁移成 topic_kw.json, 渲染器对 sunseeker 真实 gaps 数据冒烟通过。产线文档进 clients/blog/notes/client_blog_specs.md 通用层。
