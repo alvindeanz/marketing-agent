@@ -29,6 +29,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-19 AIRA：博客选题规划产线工具化(Alvin 批, 源自 sunseeker/badger 一次性脚本)
+
+- 干了什么：三件套进 tools/: blog_topic_gaps.js(通用 GSC 缺口拉取, 词表输入 clients/<slug>/notes/topic_kw.json), render_blog_topic_plan.py(plan.json 渲染, 文件名强制带 slug), blog_topic_card.js(可选生成选题确认卡任务, 带 we_write/client_writes 模式标注)。sunseeker/badger 的词表已迁移成 topic_kw.json, 渲染器对 sunseeker 真实 gaps 数据冒烟通过。产线文档进 clients/blog/notes/client_blog_specs.md 通用层。
+- 坑：原一次性脚本的选题 cfg 没落盘(会话临时物), 两份同名产物曾被看串; 新规范文件名带 slug 根治。client_writes 折叠分支未接通, mode 暂写进任务说明供折叠时人裁。
+- 下一步/认领：下一个需要选题规划的客户直接走三段产线首用验证; haakaa 选题卡等 Alvin 解冻。
 ### 2026-09-19 AIRA：本期视图收严, review 不再无条件可见(Alvin 定, 取代 8/31 规则)
 
 - 干了什么：seo-agent.html withinScope 改: review 任务跟随 sprint 视野, 仅三例外(等发客户的确认卡 isPendingClientCard/在跑/失败等重试)。起因 #703(S3)方案备好待放行却挂在 hntz 本期视图。旧「review 无条件可见」(2026-08-31 #143 事故的产物)作废, 其事故场景由「全部」按钮与底部计数提示行覆盖。
