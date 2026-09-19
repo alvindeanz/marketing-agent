@@ -36,4 +36,17 @@ function summariseFold(f) {
   return seg.length ? seg.join('；') : '无有效表态';
 }
 
-module.exports = { foldCardFeedback, summariseFold };
+/* 到期时钟锚点（2026-09-20 Alvin 定：出卡日起算，发卡打点不再是时钟前提，卡出即社媒送达）。
+   取 sent_at 与最早一条交付附件 created_at 里更早的那个；两者都没有回 null（旧卡无附件，
+   不起钟，保守不误触）。输入是 GET /tasks 的任务行（含 deliverables 数组）。 */
+function cardClockAnchor(task) {
+  const times = [];
+  if (task && task.sent_at) times.push(String(task.sent_at));
+  const dels = (task && Array.isArray(task.deliverables)) ? task.deliverables : [];
+  for (const d of dels) { if (d && d.created_at) times.push(String(d.created_at)); }
+  if (!times.length) return null;
+  times.sort();
+  return times[0];
+}
+
+module.exports = { foldCardFeedback, summariseFold, cardClockAnchor };

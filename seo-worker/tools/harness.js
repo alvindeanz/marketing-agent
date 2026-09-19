@@ -12,7 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { foldCardFeedback, summariseFold } = require('../lib/cardfold');
+const { foldCardFeedback, summariseFold, cardClockAnchor } = require('../lib/cardfold');
 const API = process.env.SEO_API_BASE || 'https://always.horntech-dev.com/seo-api.php';
 const TOKEN = process.env.SEO_AGENT_TOKEN || '';
 const TODO = process.env.MA_TODO || '/data/aira/projects/MA/memory/TODO.md';
@@ -137,24 +137,25 @@ async function foldCards(sprint) {
        博客确认卡不走这里（挂在博客任务上，由发布流程收口）。 */
     await call('PATCH', '/tasks/' + card.id, { status: 'done', result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + summary + (followId ? '，跟进 #' + followId : '，无需跟进') + '\n[accepted] 客户表态已折叠，卡使命完成，自动收口。', card_feedback_done: 1 });
   }
-  // 到期视同同意：只认已标记发出（sent_at）的方向卡，折叠过的不重跑。
-  // 锚点是发出时间不是产出时间：卡产出后没发给客户不该开始计时，否则卡还没发就被
-  // 误触到期（#145 事故，见 DEFECTS 2026-09-14）。sent_at 由人工前端发卡后 PATCH card_sent 打点。
-  const auto = all.filter((t) => t.status === 'review' && !t.card_feedback_at && t.sent_at
+  // 到期视同同意：锚点是出卡时间（2026-09-20 Alvin 定：卡出即经社媒送达客户，出卡日起算，
+  // 发卡打点降级为提前手段；后续换 SMTP 直发同口径）。锚点取 sent_at 与最早交付附件时间里
+  // 更早的那个（cardClockAnchor）；两者都没有的旧卡不起钟，保留 #145 事故（DEFECTS 2026-09-14）
+  // 「没送达不该计时」的兜底。sent_at 的客户开卡自动打点（seo-api 2026-09-16）照旧保留。
+  const auto = all.filter((t) => t.status === 'review' && !t.card_feedback_at
     && /方向卡|direction/i.test(String(t.title) + ' ' + String(t.ops || ''))
     && !/\[卡反馈折叠/.test(String(t.result_note || '')));
   for (const card of auto) {
-    const sent = String(card.sent_at || '');
-    if (!sent) continue;
-    const days = (Date.now() - new Date(sent.replace(' ', 'T')).getTime()) / 86400000;
+    const anchor = cardClockAnchor(card);
+    if (!anchor) continue;
+    const days = (Date.now() - new Date(anchor.replace(' ', 'T')).getTime()) / 86400000;
     if (!(days >= GRACE_DAYS)) continue;
-    log('#' + card.id + ' 发出 ' + Math.floor(days) + ' 天零反馈，到期视同同意');
+    log('#' + card.id + ' 出卡 ' + Math.floor(days) + ' 天零反馈，到期视同同意');
     if (DRY) continue;
     const r = await call('POST', '/tasks', {
       client_id: cid,
       title: '卡到期落地（视同同意）：' + String(card.title).replace(/^(\[[^\]]*\]\s*)+/, '').slice(0, 60),
       module: card.module || 'technical', sprint, priority: 'P1', owner_type: 'agent',
-      detail: '方向卡 #' + card.id + ' 发出 ' + Math.floor(days) + ' 天无客户反馈，按卡上「未回复将按建议执行」的承诺落地全部建议项。卡：' + (card.output_url || '（无链接，见任务 note）'),
+      detail: '方向卡 #' + card.id + ' 出卡 ' + Math.floor(days) + ' 天无客户反馈，按卡上「未回复将按建议执行」的承诺落地全部建议项。卡：' + (card.output_url || '（无链接，见任务 note）'),
     });
     await call('PATCH', '/tasks/' + card.id, { status: 'done', result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] 到期（' + Math.floor(days) + ' 天）零反馈视同同意，跟进 #' + r.id + '\n[accepted] 到期视同同意，卡使命完成，自动收口。' });
   }

@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-20 AIRA：方向卡到期时钟改出卡日起算(Alvin 定, 取代 sent_at 前提)
+
+- 干了什么：lib/cardfold 新增 cardClockAnchor(取 sent_at 与最早交付附件 created_at 里更早者, 都无回 null 不起钟), harness foldCards 到期过滤不再要求 sent_at。背景: 发卡改社媒/后续 SMTP 直发, 人工 card_sent 打点废止为提前手段, 客户开卡自动打点(seo-api 2026-09-16)保留。tests/cardfold 补三例, node 全套绿; 本次未动 PHP。
+- 坑：#145 事故的「没送达不计时」兜底只剩「无附件旧卡不起钟」这一层; 出卡即计时的前提是社媒当天真的发出, 漏发的卡到期照样视同同意, Alvin 知情拍板。
+- 下一步/认领：Alvin 做 SMTP 直发时把发送成功回写 sent_at, 时钟口径自然归一; 9/18 遗留的「readonly 卡任务多排 apply 409」仍待修。
+
 ### 2026-09-19 AIRA：侧边栏客户列表按平台分组排序(Alvin 定)
 
 - 干了什么：seo-agent.html renderSidebar 加 platSort: WebForger > Shopify > WordPress > 其它, 组内按名, 复用现有 platKey()。归档区同规则。

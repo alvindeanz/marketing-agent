@@ -67,5 +67,23 @@ t('未知 choice 忽略不炸', () => {
   assert.strictEqual(f.agreed.length + f.holds.length + f.texts.length, 0);
 });
 
+/* 到期时钟锚点（2026-09-20 出卡日起算）。 */
+const { cardClockAnchor } = require('../seo-worker/lib/cardfold');
+
+t('锚点取最早交付附件时间（无 sent_at 也起钟，出卡日口径）', () => {
+  const a = cardClockAnchor({ sent_at: null, deliverables: [{ created_at: '2026-09-20 11:40:37' }, { created_at: '2026-09-21 08:00:00' }] });
+  assert.strictEqual(a, '2026-09-20 11:40:37');
+});
+
+t('sent_at 早于附件时取 sent_at（人工提前标发仍有效）', () => {
+  const a = cardClockAnchor({ sent_at: '2026-09-19 09:00:00', deliverables: [{ created_at: '2026-09-20 11:40:37' }] });
+  assert.strictEqual(a, '2026-09-19 09:00:00');
+});
+
+t('sent_at 与附件都没有的旧卡不起钟（#145 兜底）', () => {
+  assert.strictEqual(cardClockAnchor({ sent_at: null, deliverables: [] }), null);
+  assert.strictEqual(cardClockAnchor({}), null);
+});
+
 console.log(pass + ' pass, ' + fail + ' fail');
 process.exit(fail ? 1 : 0);
