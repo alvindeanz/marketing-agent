@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-20 AIRA：判卡正则第三补(横扫 30 客户后的收口)
+
+- 干了什么：Alvin 要求摸底周末全部在途卡。横扫结果: 21 张待发卡全有发布 URL(无 ideal 式落错目录), 但 goodie #411(negatives_direction 文件名)与 hntz #699 判卡正则认不出, 照样隐身。修: isPendingClientCard 补 negatives_direction 文件名+标题兜底(像卡的标题且带客户版链接), 排除「卡反馈落地/到期落地」前缀防误抓执行任务。rev 79f6d1c 已部署, tests 全绿。
+- 坑：同一函数 48 小时内第三次因「认不出新卡」被改, 文件名正则这条路已经证伪。
+- 下一步/认领：显式字段方案我认领: seo_tasks 加 card_kind 列(惰性 DDL), execute 出卡时写入, 前端只认字段, 正则降级为存量兜底。
+
 ### 2026-09-20 AIRA：待客户反馈的卡钉在人工泳道(Alvin 报障: ideal 词卡出完即隐身)
 
 - 干了什么：isPendingClientCard 接受 done(analysis 卡自动收货成 done, 但客户反馈折叠前发卡跟进仍是人的活), ops 匹配补 keyword-confirmation/mapping-confirmation; taskVisible 与 withinScope 对该类卡无条件放行, 折叠后([卡反馈折叠], 含到期)照旧退场。tests 全绿, rev 1d9e0f3 已部署。
