@@ -3352,6 +3352,8 @@ function taskVisible(t){
   if(showDone)return closed&&withinWindow(t);
   /* Chat 单天生完结，选中 Chat 筛选时在进行中视图仍可见（2026-09-08） */
   if(originScope==='chat'&&taskOrigin(t)==='chat')return true;
+  /* 待客户反馈的卡即使 done 也留在进行中视图（2026-09-20 Alvin 定，发卡是人的活） */
+  if(isPendingClientCard(t))return true;
   return !closed;
 }
 function toggleShowDone(){showDone=!showDone;renderLanes()}
@@ -3431,7 +3433,7 @@ function withinScope(t,cur){
      只留三类当下例外：等发客户的确认卡（发卡是现在的人事）、在跑的、失败等重试的。
      旧规则的事故场景（8/31 待放行卡被藏找不到）由「全部」一键放宽与提示行覆盖。 */
   if(t.status==='in_progress')return true;
-  if(t.status==='review'&&isPendingClientCard(t))return true;
+  if(isPendingClientCard(t))return true;
   const hs=hsOf(t);
   if(hs==='running')return true;
   if(hs==='wait_me'&&/失败/.test(String(t.wait_reason||'')))return true;
@@ -3457,11 +3459,14 @@ function hsOf(t){return t.human_state||(t.status==='done'?'closed':'wait_me')}
    （发卡、跟客户确认），显示进人工泳道；反馈折叠完（result_note 带 [卡反馈折叠]）
    agent 接手，回 Agent 泳道（2026-09-16 Alvin 定）。只改展示层，owner_type 数据不动。 */
 function isPendingClientCard(t){
-  if(t.status!=='review')return false;
+  /* done 也算（2026-09-20 Alvin 定）：analysis 卡交付即自动收货成 done，但客户还没
+     反馈折叠前，发卡与跟进仍是人的活，必须钉在人工泳道，不许随「已结束」折叠藏起。
+     反馈折叠后（note 带 [卡反馈折叠]，含到期视同同意）才退场。 */
+  if(t.status!=='review'&&t.status!=='done')return false;
   const s=String(t.result_note||'');
   if(/\[卡反馈折叠/.test(s))return false;
-  if(/keyword-direction|creative-direction/.test(String(t.ops||'')))return true;
-  return /确认卡|blog_confirmation|keyword_direction_|creative_direction_/.test(s+String(t.output_url||''));
+  if(/keyword-direction|creative-direction|keyword-confirmation|mapping-confirmation/.test(String(t.ops||'')))return true;
+  return /确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_/.test(s+String(t.output_url||''));
 }
 function laneKeyOf(t){return isPendingClientCard(t)?'human':(t.owner_type==='agent'?'agent':'human')}
 function renderLanes(){
