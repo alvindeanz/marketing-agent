@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-20 AIRA：tools/fleet_digest.js 舰队摘要(Alvin 定四桶)
+
+- 干了什么：跨客户零模型只读汇总: ①在途卡按到期倒数(cardClockAnchor 出卡日时钟) ②反馈折叠后开跑中 ③失败未自愈 job/任务(同任务多次失败去重报最新, 已自愈不报) ④近 7 天落地数 vs 抽查数。跑法 SEO_AGENT_TOKEN=... node tools/fleet_digest.js [--days 7]。首跑即抓出: 16 条失败未自愈、落地 34 抽查 0。
+- 坑：库里时间是 NZ 本地无时区, UTC 机器直接解析有半天偏移, 天数钳 0 下限; isPendingCard 正则与前端双份, card_kind 字段落地后两处同删。
+- 下一步/认领：接入节律待 Alvin 定(纯只读零模型, cron 合规); 16 条失败逐条清理排下批。
+
 ### 2026-09-20 AIRA：判卡正则第三补(横扫 30 客户后的收口)
 
 - 干了什么：Alvin 要求摸底周末全部在途卡。横扫结果: 21 张待发卡全有发布 URL(无 ideal 式落错目录), 但 goodie #411(negatives_direction 文件名)与 hntz #699 判卡正则认不出, 照样隐身。修: isPendingClientCard 补 negatives_direction 文件名+标题兜底(像卡的标题且带客户版链接), 排除「卡反馈落地/到期落地」前缀防误抓执行任务。rev 79f6d1c 已部署, tests 全绿。
