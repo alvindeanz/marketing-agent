@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-20 AIRA：待客户反馈的卡钉在人工泳道(Alvin 报障: ideal 词卡出完即隐身)
+
+- 干了什么：isPendingClientCard 接受 done(analysis 卡自动收货成 done, 但客户反馈折叠前发卡跟进仍是人的活), ops 匹配补 keyword-confirmation/mapping-confirmation; taskVisible 与 withinScope 对该类卡无条件放行, 折叠后([卡反馈折叠], 含到期)照旧退场。tests 全绿, rev 1d9e0f3 已部署。
+- 坑：这是 9/18 账本坑预告的第二次应验(「新增卡类型要同步该函数, 否则待发卡会被藏」), 且 9/18 那次修的是 review 态, 这次是 done 态, 同一个函数第三次改。卡的「待客户反馈」该是显式状态而不是三处 note 正则推断, 下次再踩考虑加字段。
+- 下一步/认领：观察三张在途卡(sdalu#591/kiaorakids#799/ideal#798)在人工泳道显示正常; 执行侧另有两坑排队: 卡发布段只扫 reports/ 不扫 seo-agent-output/(ideal 首跑落错目录我手动 republish 兜底), readonly 卡多排 apply 409。
+
 ### 2026-09-20 AIRA：方向卡到期时钟改出卡日起算(Alvin 定, 取代 sent_at 前提)
 
 - 干了什么：lib/cardfold 新增 cardClockAnchor(取 sent_at 与最早交付附件 created_at 里更早者, 都无回 null 不起钟), harness foldCards 到期过滤不再要求 sent_at。背景: 发卡改社媒/后续 SMTP 直发, 人工 card_sent 打点废止为提前手段, 客户开卡自动打点(seo-api 2026-09-16)保留。tests/cardfold 补三例, node 全套绿; 本次未动 PHP。
