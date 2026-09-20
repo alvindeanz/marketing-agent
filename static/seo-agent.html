@@ -3465,8 +3465,14 @@ function isPendingClientCard(t){
   if(t.status!=='review'&&t.status!=='done')return false;
   const s=String(t.result_note||'');
   if(/\[卡反馈折叠/.test(s))return false;
+  /* 折叠/落地类任务标题也带「方向卡」字样，但它们是执行任务不是客户卡，先排除 */
+  const title=String(t.title||'');
+  if(/^(卡反馈落地|卡到期落地)/.test(title))return false;
   if(/keyword-direction|creative-direction|keyword-confirmation|mapping-confirmation/.test(String(t.ops||'')))return true;
-  return /确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_/.test(s+String(t.output_url||''));
+  if(/确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(s+String(t.output_url||'')))return true;
+  /* 文件名正则跟不上新卡命名（goodie negatives_direction 漏网实证），标题兜底：
+     像卡的标题且已有客户版链接的，一律当在途卡。长期解法是显式字段，见 COLLAB 2026-09-20。 */
+  return /确认卡|方向卡|词卡|素材卡|confirmation card/i.test(title)&&/客户版|agencyreport/.test(s);
 }
 function laneKeyOf(t){return isPendingClientCard(t)?'human':(t.owner_type==='agent'?'agent':'human')}
 function renderLanes(){
