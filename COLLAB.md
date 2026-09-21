@@ -29,6 +29,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：#339 全链收口, execute 长任务规矩与 apply 无变更分支上线(Alvin 批)
+
+- 干了什么：execute prepare prompt 加长任务规矩（长验证不留后台尾巴，抽样核对或按真实数据分批，拆不拆由 execute 撞到数据量当场判断，66adc02）；apply 补无变更方案收口分支（判据读磁盘已批方案的「本方案无 API 调用」，affected 空是预期，shopify 与 ads 两路同修，9717aca）。#339 新规矩下重跑：定点 curl 核验替代 1380 URL 全量爬取，前提被推翻（三组 301 客户 9 月中已自行落地，两站一跳 301 落地 200），无变更方案过结构闸、放行、apply 验证收口 done。拆分共识（Alvin 定）：未知量自适应拆、已知量计划拆、不为未知量提前买单，已写进 prompt 本体。
+- 坑：harness 收口报告把历史执行失败备注当现行阻塞展示（#339 成功后仍报旧失败行），展示层小噪音待清；digest 的「连续两轮零进展」会把未来期排队任务标成机制失效，口径偏严。
+- 下一步/认领：批2 待 Alvin approve；两处展示层噪音低优先级排队。
+
+
 ### 2026-09-21 AIRA：空 ops 收口洞修复上线 + 五条误收任务显式重开(Alvin 批)
 
 - 干了什么：analysis_task 空 ops 默认从严（只有 card_kind 卡类仍自动收货）；三处放行路补空 ops 护栏（POST /tasks/release、decide 批量按推荐、频道路原有）；decide 人工同意对空 ops 任务保留为显式验收。job 超时按类型分档：execute/apply/backfill 60 分，report 45 分不变，其余 30 分。rev f7865bb，api 与 worker 双端已部署，node tests 112 报告套件全绿。五条误收任务显式重开：haakaa #339 补 ops=redirect-add 转机器道重跑；#341/#614/#616 成稿完整但 shopseo 无 collections 写通道，转回人工位 in_progress；goodie #410 转人工位随批2。
