@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：板上聊天 [ATTACH] 变下载链接(Alvin 定, monica 拿不到 excel 实证)
+
+- 干了什么：chat runner 回复后处理 publishAttachments: [ATTACH:绝对路径] 校验(限本客户工作区/扩展名白名单/敏感词拒/20MB 上限)后经 lib/publish 上 250 reports/{slug}/files/, 文件名前缀日期加 6 位随机, 标记原位替换成 agencyreport 链接; 失败原位写失败说明不吞。prompt 补「给人发文件」用法。端到端冒烟: ideal 搜索词 xlsx 已真发布回验 200(monica 那份)。
+- 坑：lib/config 的 load() 按 __dirname 找 config.json, 只能在部署目录跑; ATTACH 是 Discord bot 的惯用法, 板上此前无人解析, agent 写了等于没给。
+- 下一步/认领：观察下一次 agent 发文件是否自动成链; Discord 侧 bot 的 ATTACH 通道不受影响。
+
 ### 2026-09-21 AIRA：前提核验进 chat 与 execute prompt(favicon 单第四刀)
 
 - 干了什么：chat prompt 加两条: WebFetch 只见正文提取看不到 head(工具盲区不许当站点缺陷下结论, head 层标「待核」交 execute), 改动类委托先核前提, 推翻即回话落 fact 不出委托单。execute 方案骨架加前提闸: 前提被实测推翻走无变更方案(第 1 节写证据, items 空), 禁止硬凑低价值或平台做不成的变更项。

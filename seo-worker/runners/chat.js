@@ -58,6 +58,46 @@ function chatTools(clientDomain) {
 }
 const ALLOWED_TOOLS = 'Read';
 
+/* [ATTACH:绝对路径] 变下载链接（2026-09-21 Alvin 定：板上聊天没有 Discord 那套附件搬运，
+   裸服务器路径对运营等于没给）。回复文本里的每个 ATTACH 标记：路径必须落在本会话客户
+   工作区内、扩展名在白名单、文件名不含敏感词，过检的经 lib/publish 上 250 的
+   reports/{slug}/files/ 并替换成 agencyreport 链接；不过检或上传失败的，标记原位换成
+   失败说明，宁可让人看到失败也不吞。文件名前缀日期加 6 位随机，防撞防猜。 */
+const ATTACH_EXT = /\.(xlsx|xls|csv|pdf|docx|pptx|html|txt|md|png|jpg|jpeg|webp)$/i;
+async function publishAttachments(cfg, opts, text, log) {
+  const tags = [...String(text).matchAll(/\[ATTACH:([^\]\n]+)\]/g)];
+  if (!tags.length) return text;
+  const { publishFile } = require('../lib/publish');
+  const fs = require('node:fs');
+  const crypto = require('node:crypto');
+  const ws = path.resolve(String(opts.workspace || ''));
+  const slug = path.basename(ws);
+  let out = text;
+  for (const m of tags) {
+    const raw = m[1].trim();
+    let repl;
+    try {
+      const p = path.resolve(raw);
+      if (!ws || !(p + path.sep).startsWith(ws + path.sep) && p !== ws) throw new Error('路径不在本客户工作区内');
+      if (!ATTACH_EXT.test(p)) throw new Error('扩展名不在附件白名单');
+      if (/secret|credential|\.env|password/i.test(p)) throw new Error('疑似敏感文件，拒绝发布');
+      const st = fs.statSync(p);
+      if (!st.isFile()) throw new Error('不是文件');
+      if (st.size > 20 * 1024 * 1024) throw new Error('超过 20MB');
+      const base = path.basename(p).replace(/[^A-Za-z0-9._-]+/g, '-');
+      const name = new Date().toISOString().slice(0, 10) + '-' + crypto.randomBytes(3).toString('hex') + '-' + base;
+      const r = await publishFile(cfg, slug, 'files', name, p, log);
+      repl = r.url;
+      log('对话附件已发布：' + base + ' -> ' + r.url);
+    } catch (e) {
+      repl = '（附件发布失败：' + path.basename(raw) + '，' + (e && e.message ? e.message : e) + '，文件仍在 ' + raw + '，运营手动处理）';
+      log('对话附件发布失败：' + raw + ' :: ' + (e && e.message ? e.message : e));
+    }
+    out = out.replace(m[0], repl);
+  }
+  return out;
+}
+
 const MODULES = ['technical', 'onpage', 'content', 'local', 'offpage', 'paid'];
 
 /* 操作白名单注入（2026-09-11，ctomi 13:59 事故）：以前 prompt 里硬编码常用 op 列表，
@@ -332,6 +372,9 @@ function buildPrompt(opts) {
     '- **改动类委托先核前提**：人说「站上缺 X / Y 坏了」，先用工具带核实（能核的当场核，核不了照上条标注）。',
     '  前提被推翻就直接回话讲实情加落 fact，不出委托单；核验不了的，委托单 detail 第一步必须写',
     '  「核实前提，若不成立即终止并回报，不硬凑改动项」。',
+    '- **给人发文件**：文件放在本客户工作区内（temp/ 或 reports/），正文里写 [ATTACH:绝对路径]，',
+    '  系统自动换成 agencyreport 的下载链接（点击即下）。别贴裸服务器路径，运营点不开；',
+    '  xlsx、csv、pdf、docx 这类都支持，含凭据或敏感词的文件会被拒绝发布。',
     '- 要广告后台数字时，先查本地已有再去拉：简报快照、工作区 temp/ 与 reports/ 里此前拉过的',
     '  jsonl 和底稿（用 Glob/Grep 找），本地能答就不拉。确实要现拉才用只读查询：',
     '  python3 /data/aira/seo-worker/lib/gaql_query.py <customer_id> "<GAQL SELECT>"，',
@@ -649,8 +692,9 @@ async function parseWithModel(ctx, opts) {
     label: opts.label,
   });
 
-  const output = String(res.stdout || '').trim();
+  let output = String(res.stdout || '').trim();
   if (!output) return { ok: false, error: 'claude 没有任何输出' };
+  output = await publishAttachments(cfg, opts, output, log);
 
   const fence = extractLastFence(output, 'json');
   // 没有 json 块是常态：还在聊，没到派活的时候。
