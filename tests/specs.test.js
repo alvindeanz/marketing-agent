@@ -45,8 +45,15 @@ try {
     if (pol.risk_class_by_op[m[1]] !== m[2]) mismatch.push(m[1] + ': wf.md=' + m[2] + ' json=' + (pol.risk_class_by_op[m[1]] || 'missing'));
   }
   assert.ok(wfBlock.length > 100, 'webforger.md 缺 RISK_CLASS 块');
+  const wp = fs.readFileSync(path.join(S, 'capabilities', 'wordpress.md'), 'utf8');
+  const wpBlock = (wp.match(/RISK_CLASS_START[\s\S]*?RISK_CLASS_END/) || [''])[0];
+  for (const m of wpBlock.matchAll(/^- ([a-z0-9-]+): (\w+)/gm)) {
+    if (pol.risk_class_by_op[m[1]] !== m[2]) mismatch.push(m[1] + ': wp.md=' + m[2] + ' json=' + (pol.risk_class_by_op[m[1]] || 'missing'));
+  }
+  assert.ok(wpBlock.length > 100, 'wordpress.md 缺 RISK_CLASS 块');
+  assert.ok(pol.connected_lanes.lanes.indexOf('wordpress') !== -1, 'connected_lanes 缺 wordpress');
   assert.ok(!mismatch.length, 'risk_class 两处不一致: ' + mismatch.join('; '));
-  console.log('  ok   release_policy json/md/googleads/webforger 一致');
+  console.log('  ok   release_policy json/md/googleads/webforger/wordpress 一致');
 } catch (e) { fail += 1; console.log('  FAIL release_policy :: ' + e.message); }
 
 // 能力清单必须能被 runner 解析（2026-09-08 job545 教训：googleads.md 只有文档没有规划视图表，

@@ -993,6 +993,124 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
   return { taskId, status: status === 'success' ? 'failed' : status, logFile };
 }
 
+// ==== WordPress 落地（wf-agent 插件 REST，2026-09-21）====
+// 安全模型：唯一写通道 wf-agent/v1（token 鉴权，插件写前自动快照，POST /snapshots/<id>/rollback 回滚），
+// 不直改主题后台不直连数据库（Alvin 2026-09-01 定）。token 只活在客户工作区 .secrets.env
+// （键 WF_AGENT_TOKEN，chmod 600），curl 内联取值，禁止出现在方案、执行记录与任何输出里。
+// 能力边界见 specs/capabilities/wordpress.md；缺口（正文/Elementor/Woo 写）登记回 Aiden，不绕插件。
+const WFAGENT_TOOLS = 'Read,Bash(curl:*),Bash(sleep:*)';
+
+function buildWordpressPrompt(opts) {
+  const { task, plan, planFile, restBase, manifest } = opts;
+  return [
+    '你是一家新西兰数字营销公司的 SEO 执行 agent，现在处于 apply 阶段。',
+    '下面这份变更方案**已获授权**。你的工作只有一件：严格照着它执行，然后自验。',
+    '',
+    '站点 REST 基址：' + restBase + '（写死，不许对其他站操作）。',
+    '',
+    '工具与铁律：',
+    '- 唯一写通道是 wf-agent 插件 REST（上面的基址），不发任何 /wp-json/wp/v2/ 写请求，不碰后台。',
+    '- 鉴权 header 用 `-H "X-WF-Agent-Token: $(sed -n \'s/^WF_AGENT_TOKEN=//p\' .secrets.env)"` 内联取值。',
+    '  **禁止 cat、echo、打印 .secrets.env 或该变量**，token 不得出现在你的任何输出里，违者整个执行作废。',
+    '- 写前必须 GET 现读当前值：客户会自行改站，现值与方案「改前值」不符时**停手（aborted）**，',
+    '  把差异写进执行记录，不要动那一处，也不要「纠正」客户的改动。',
+    '- 每两条写请求之间 sleep 2（Wordfence 在线，批量写限速）；每条 curl 带 --max-time 120。',
+    '- REST 响应可能带 PHP warning 的 HTML 前缀，解析 JSON 前先把响应截到第一个 { 或 [。',
+    '- 写完 GET 同端点回读核对新值，并 curl 线上页面验证 200 且关键改动点出现在页面源码里。',
+    '- 回滚靠插件自动快照（每次写前自动留），执行记录里记下本次写产生的快照 id。',
+    '- 方案没写的资产一根手指都不许碰。',
+    '',
+    '能力清单（风险注记必须遵守）：',
+    manifest || '（清单缺失，只许执行方案里明确写出的白名单操作）',
+    '',
+    '===== 变更方案开始（' + planFile + '）=====',
+    plan,
+    '===== 变更方案结束 =====',
+    String(task.review_adjust || '').trim()
+      ? '\n===== 判定前提修正（复审后的硬约束，与方案冲突时以本段为准）=====\n' + String(task.review_adjust).trim() + '\n===== 前提修正结束 ====='
+      : '',
+    '',
+    '任务 #' + task.id + '：' + (task.title || ''),
+    '',
+    '执行完输出执行记录（中文），最后附一个 json 代码块，块后不许再有文字：',
+    '```json',
+    '{"status":"success","checks_passed":4,"affected":["改动对象清单"],"old_values":["每处改动的旧值或快照 id"],"note":"一句话结论"}',
+    '```',
+    'status 只能是 success / failed / aborted。任何一步没过或现值不符，status 不许写 success。',
+    '自验断言只针对方案明确写入的内容，平台默认值与客户自改的其他部分不构成失败。',
+  ].join('\n');
+}
+
+async function runWordpressApply(ctx, workspace, profile, task, taskId) {
+  const { cfg, api, log } = ctx;
+  const fail = async (note) => {
+    try { await api.postTaskResult(taskId, { output_url: '', note, attention: true }); } catch (e) { log('task ' + taskId + ': could not write note :: ' + e.message); }
+  };
+  const domain = String(profile.domain || '').replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(domain)) {
+    await fail('执行中止：profile.domain 不是完整 URL（' + domain + '），WordPress 落地无法定位站点。站点零改动，任务保持 review。');
+    throw new Error('task ' + taskId + ': bad domain for wordpress apply');
+  }
+  const restBase = domain + '/wp-json/wf-agent/v1';
+  if (!fs.existsSync(path.join(workspace, '.secrets.env'))) {
+    await fail('执行中止：客户工作区缺 .secrets.env（WF_AGENT_TOKEN），wf-agent 无凭据。站点零改动，任务保持 review。');
+    throw new Error('task ' + taskId + ': missing .secrets.env for wf-agent token');
+  }
+  const planFile = changePlanPath(workspace, taskId);
+  let plan;
+  try { plan = fs.readFileSync(planFile, 'utf8'); } catch (e) {
+    throw new Error('task ' + taskId + ': no approved change plan at ' + planFile + '. Run execute_task first');
+  }
+  if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+  const manifest = capabilities.fullText('wordpress');
+  const prompt = buildWordpressPrompt({ task, plan, planFile, restBase, manifest });
+  log('task ' + taskId + ': wordpress apply, ' + restBase + ', model ' + cfg.applyModel);
+  const res = await runClaude(cfg, {
+    prompt,
+    cwd: workspace,
+    log,
+    model: cfg.applyModel,
+    allowedTools: WFAGENT_TOOLS,
+    label: 'wordpress apply task ' + taskId,
+  });
+  const output = String(res.stdout || '').trim();
+  if (!output) throw new Error('task ' + taskId + ': the wordpress apply pass produced no output');
+  const outDir = path.join(workspace, OUTPUT_DIRNAME);
+  fs.mkdirSync(outDir, { recursive: true });
+  const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
+  fs.writeFileSync(logFile, output, 'utf8');
+  const parsed = extractTrailingJson(output);
+  const j = (parsed && parsed.json) || {};
+  const status = STATUSES.indexOf(String(j.status || '')) !== -1 ? String(j.status) : 'failed';
+  const affected = Array.isArray(j.affected) ? j.affected.map(String).slice(0, 20) : [];
+  const oldVals = Array.isArray(j.old_values) ? j.old_values.map(String).slice(0, 20) : [];
+  const checks = Number(j.checks_passed) || 0;
+  const head = [
+    '受影响: ' + (affected.join('；') || '（未声明）'),
+    '改前旧值: ' + (oldVals.join('；') || '（见快照与执行记录）'),
+    '检查: 通过 ' + checks + ' 项，待人工 0 项',
+    '预算影响: 0（站内内容操作）',
+  ].join('\n');
+  if (status === 'success' && affected.length) {
+    await api.completeTask(taskId, {
+      note: head + '\n已按授权方案执行并线上自验通过。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
+    });
+    log('task ' + taskId + ': wordpress applied and verified, marked done');
+    return { taskId, status: 'success', logFile };
+  }
+  if (status === 'success' && !affected.length && planDeclaresNoChange(plan)) {
+    await api.completeTask(taskId, {
+      note: head + '\n无变更方案验收：前提核验见方案第 1 节，affected 为空是预期。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
+    });
+    log('task ' + taskId + ': no-change plan verified and accepted');
+    return { taskId, status: 'success', logFile };
+  }
+  const why = status === 'success' ? 'affected 为空，无法证明改了什么，按失败处理' : summarize(String(j.note || '') || output, 300);
+  await fail(head + '\n' + (status === 'aborted' ? '执行中止' : '执行失败') + '：' + why + ' 任务保持 review，未标记完成，不自动重试。执行记录 ' + path.basename(logFile));
+  log('task ' + taskId + ': wordpress apply ' + status + ' :: ' + truncate(why, 200));
+  return { taskId, status: status === 'success' ? 'failed' : status, logFile };
+}
+
 async function runOne(ctx, context, workspace, taskId) {
   const { cfg, api, log, job } = ctx;
   const profile = (context && context.profile) || {};
@@ -1014,10 +1132,16 @@ async function runOne(ctx, context, workspace, taskId) {
     return runShopifyApply(ctx, workspace, profile, task, taskId);
   }
 
+  // WordPress 通道（2026-09-21，wf-agent 插件 REST v1）：SEO meta、term meta、Rank Math
+  // 重定向与 sitemap flush。能力边界见 specs/capabilities/wordpress.md。
+  if (capabilities.slugPlatform(platform) === 'wordpress') {
+    return runWordpressApply(ctx, workspace, profile, task, taskId);
+  }
+
   // 平台分流强制（2026-09-10 Alvin 定：platform 是唯一路由真值，未知平台明确拒，
   // 不许掉进下面的 WebForger changeset 默认车道）。
   if (capabilities.slugPlatform(platform) !== 'webforger') {
-    const msg = '平台「' + (platform || '(空)') + '」没有已接通的落地车道（现有：webforger/shopify/googleads），任务保持 review 转人工或等车道接入。站点零改动。';
+    const msg = '平台「' + (platform || '(空)') + '」没有已接通的落地车道（现有：webforger/shopify/wordpress/googleads），任务保持 review 转人工或等车道接入。站点零改动。';
     try { await api.postTaskResult(taskId, { output_url: '', note: '执行中止：' + msg, attention: true }); } catch (e) { log('task ' + taskId + ': note write failed :: ' + e.message); }
     throw new Error('task ' + taskId + ': no apply lane for platform ' + platform);
   }

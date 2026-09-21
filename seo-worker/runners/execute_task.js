@@ -211,8 +211,11 @@ function buildPreparePrompt(opts) {
     '- 预期响应：**只写 HTTP 状态码**。不许写"响应里某字段等于什么"，平台响应结构不是契约，会变。',
     '- 回读核对：这一步成功与否靠回读，写清回读哪个只读端点、比对什么内容（元素值、页面字段、文章正文、线上 URL 状态码）。',
     '- 这一步如果失败，是停下还是可以跳过',
-    '每一条写请求都要带 header `X-WF-Changeset: $WF_CHANGESET`（apply 阶段 worker 会给出真实 id），每条 curl 带 `--max-time 120`。',
-    '**不许把 POST /snapshots 写成前置步骤**，安全网是 changeset。整页覆盖类操作，前面必须有一步 GET 留档。',
+    capabilities.slugPlatform(platform) === 'webforger'
+      ? '每一条写请求都要带 header `X-WF-Changeset: $WF_CHANGESET`（apply 阶段 worker 会给出真实 id），每条 curl 带 `--max-time 120`。\n' +
+        '**不许把 POST /snapshots 写成前置步骤**，安全网是 changeset。整页覆盖类操作，前面必须有一步 GET 留档。'
+      : '每条 curl 带 `--max-time 120`。写通道、鉴权与安全网（快照/dry-run）按上方能力清单的风险注记执行，' +
+        '不许把手动建快照写成前置步骤；整页覆盖类操作，前面必须有一步 GET 留档。',
     '第 2 节末尾加一行「涉及文件：」列出本方案会写到的平台文件（pages/x.html、posts/slug.md、config.json 这类），',
     'apply 结束会拿 changeset 实际碰过的文件和它比对。',
     '',
