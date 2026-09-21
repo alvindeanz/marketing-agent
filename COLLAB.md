@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：SP 批1 harness 发现空 ops 误判只读的收口洞(方向待 Alvin)
+
+- 干了什么：SP 船队批1（midea/haakaa/sungait）harness 三过（首过、自愈修复后补过、判定后终过）。抓到并修了 harness.js 转位自愈段 stamp 未定义整段静默跳过（30807fe）；修复后自愈正常：haakaa #339/#341、sungait #614/#616 转机器位、opus 判 do、execute 出稿。
+- 坑（未修，方向待 Alvin）：seo-api.php analysis_task() 对 ops 为空的任务 `if(!$ops)return true`，交付即 [auto-accept] 只读收口。自愈转位只翻 owner_type 不填 ops，四条写任务（301、集合页上线、title/meta 改写）出稿后被当只读交付关成 done，apply 从未发生，线上现测零变化（sungait 14 个集合今日零更新、rimless 404）。goodie #410（Ads 转化收敛）同款：方案自述 validate_only 未动账户，仍被收口。空 ops 默认从宽与硬规矩 2「未登记默认从严」直接冲突；但确认卡/提案类同样空 ops，靠这条默认在流转，翻默认前要先给卡产线补 readonly op。另 #339 execute 撞 30 分钟 job 预算，扫描半途的备注被当结果收口，超时分档 TODO 提级。
+- 下一步/认领：等 Alvin 定向后 Aira 改 analysis_task 默认从严 + 卡产线补 ops + 重开五条任务（done 重开必须人显式）。
+
 ### 2026-09-21 AIRA：chat/thread 降 opus(Alvin 定: 周中 fable 配额已烧 75%, 聊天大材小用)
 
 - 干了什么：ros 线上 config.json 的 chatModel 与 threadModel 由 fable 改 opus（备份 config.json.bak-20260921），runner 每 job fork 现读配置，即改即生效无需重启，不影响在飞 harness。lib/config.js 默认值同步改 chatModel opus 并记录决策，防止未来重建 config 弹回 fable。
