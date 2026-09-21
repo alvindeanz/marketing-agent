@@ -69,12 +69,11 @@ try {
   }
   assert.ok(!problems.length, problems.join('; '));
   console.log('  ok   全部能力清单可解析且 op 齐 risk 表');
-  // agent_readonly 的 op 必须全在 seo-api 的 READONLY_OPS 里（2026-09-18 Apex #745 教训：
-  // creative-direction 漏在外面，只读出卡任务被误排 apply_task 报「no change plan」失败推到人工队列）。
-  // 这两处是手抄的两份真相，加断言锁死，防新加只读 op 时忘同步复发。
-  const apiSrc = fs.readFileSync(path.join(__dirname, '..', 'seo-api.php'), 'utf8');
-  const roMatch = apiSrc.match(/\$READONLY_OPS\s*=\s*\[([^\]]*)\]/);
-  const roList = roMatch ? [...roMatch[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
+  // agent_readonly 的 op 必须全在只读白名单里（2026-09-18 Apex #745 教训：creative-direction
+  // 漏在外面，只读出卡任务被误排 apply_task 报「no change plan」失败推到人工队列）。
+  // v10 起唯一事实源是 release_policy.json 的 readonly_ops（seo-api 运行时从政策文件读，
+  // PHP 内联表只是政策缺失兜底），断言改对政策文件收口。
+  const roList = (pol.readonly_ops && pol.readonly_ops.ops) || [];
   const roMissing = [];
   for (const f of fs.readdirSync(capDir).filter((x) => x.endsWith('.md'))) {
     for (const o of cap.operations(f.replace(/\.md$/, ''))) {
@@ -90,6 +89,22 @@ try {
 // review_principles 的 SEO 部分还在（append 不许覆盖）
 const rp = fs.readFileSync(path.join(S, 'review_principles.md'), 'utf8');
 if (!rp.includes('五问')) { fail += 1; console.log('  FAIL review_principles 丢了原有五问段'); } else console.log('  ok   review_principles 原段完整');
+
+// readonly_ops（v10 2026-09-21）：analysis 收货白名单的唯一事实源。卡 op 必须在场，
+// 且每个 readonly op 都要有 risk_class 档（dispatch_grade 见不认识的 op 会整单拒）。
+try {
+  const pol = JSON.parse(fs.readFileSync(path.join(S, 'release_policy.json'), 'utf8'));
+  const ro = pol.readonly_ops && pol.readonly_ops.ops;
+  assert.ok(Array.isArray(ro) && ro.length, 'readonly_ops.ops 缺失');
+  for (const op of ['keyword-direction', 'creative-direction', 'keyword-confirmation', 'mapping-confirmation']) {
+    assert.ok(ro.includes(op), 'readonly_ops 缺 ' + op + '（确认卡会重新卡在待放行）');
+  }
+  /* 卡 op 会出现在 dispatch/定档语境，必须有风险档；audit 类只读 op 不走 dispatch，不强求 */
+  for (const op of ro.filter((x) => /direction|confirmation/.test(x))) {
+    assert.ok(typeof pol.risk_class_by_op[op] === 'string', 'readonly 卡 op ' + op + ' 没有 risk_class 档');
+  }
+  console.log('  ok   readonly_ops 白名单完整且卡 op 全有风险档');
+} catch (e) { fail += 1; console.log('  FAIL readonly_ops :: ' + e.message); }
 
 console.log(fail ? '\n' + fail + ' failed' : '\nall ok');
 process.exit(fail ? 1 : 0);

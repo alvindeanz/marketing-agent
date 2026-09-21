@@ -537,6 +537,10 @@ function ensure_review_schema(){
            「到期视同同意」的时钟从这里算，不再锚在 deliverable 产出时间。NULL = 未发出不计时，
            修复卡产出当天即被误触到期的缺陷（#145 事故，见 DEFECTS 2026-09-14）。 */
         'sent_at'=>"DATETIME DEFAULT NULL",
+        /* 2026-09-21 卡类型显式字段（Alvin 批）：判卡三处正则清单反复漏新卡（goodie #411 等），
+           改为建任务/改 ops 时由 card_kind_of() 从 ops 落字段，前端与 digest 只认字段，
+           正则降级为存量兜底。值如 keyword_direction / keyword_confirmation。 */
+        'card_kind'=>"VARCHAR(32) DEFAULT NULL",
     ];
     $in=implode(',',array_fill(0,count($cols),'?'));
     $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_tasks' AND COLUMN_NAME IN ($in)");
@@ -659,7 +663,14 @@ function tasks_bulk_insert($p,$clean){
 /* 分析型任务（没有 ops 的 agent 任务）产出是报告，进 review 后「同意」= 验收完成，不排 apply。 */
 /* 分析型任务：agent 任务且没有写操作。ops 为空，或 ops 全是只读审计类（能力表 agent_readonly：
    worker 走分析模式直接出报告，不产方案），放行等于验收。2026-08-29 #95 教训：ga4-audit 被排进 apply。 */
-$READONLY_OPS=['ga4-audit','gsc-audit','gbp-audit','gbp-align','keyword-direction','creative-direction'];
+/* 只读 op 白名单唯一事实源是 release_policy.json 的 readonly_ops（v10 2026-09-21）：
+   PHP 内联表只是政策文件缺失时的兜底，别再往这里加 op（Badger #790 等 12 张确认卡
+   卡「待放行」的根因就是这份拷贝和执行侧清单分叉）。 */
+$READONLY_OPS=(function(){
+    $pol=release_policy_load();
+    $o=isset($pol['readonly_ops']['ops'])&&is_array($pol['readonly_ops']['ops'])?$pol['readonly_ops']['ops']:null;
+    return ($o&&count($o))?$o:['ga4-audit','gsc-audit','gbp-audit','gbp-align','keyword-direction','creative-direction'];
+})();
 function analysis_task($t){
     global $READONLY_OPS;
     if(($t['owner_type']??'')!=='agent')return false;
@@ -850,7 +861,8 @@ function attach_human_state($tasks,$cid){
             /* 执行/落地失败 = bug/流程卡壳，这才该等人。 */
             $hs='wait_me';
             $n=(int)($js['fail_count']??1);
-            $why=(($js['job_type']??'')==='apply_task'?'落地失败':'执行失败').($n>1?(' '.$n.' 次'):'').'（job #'.$js['job_id'].'）';
+            /* 失败是运营侧要清的债，不是老板决策（2026-09-21 Alvin 定），措辞标清归属 */
+            $why='等运营：'.(($js['job_type']??'')==='apply_task'?'落地失败':'执行失败').($n>1?(' '.$n.' 次'):'').'（job #'.$js['job_id'].'）';
             $failReason=task_fail_reason($t,$js['job_id'],(string)($js['job_type']??''));
         }elseif($st==='review'){
             /* 待放行：只读卡已在交付处自动收货，走到这里的是花钱/不可逆/越权类硬闸（授权=权限类，该等人），
@@ -860,7 +872,7 @@ function attach_human_state($tasks,$cid){
         }else{
             /* 待判（无判决，等闸A）/ 待拍板（有判决，等 harness apply_verdicts）是机器待办 backlog，
                不是在跑也不是等人（2026-09-18：改回 queued「排期」，之前塞 running 让下期任务错标在跑）。 */
-            $hs='queued';$run=empty($t['review_effective'])?'待判定':'待拍板';
+            $hs='queued';$run=empty($t['review_effective'])?'排期（待判定）':'排期（下轮自动拍板）';
         }
         $mc=manual_checks_of($t);
         $t['manual_checks']=$mc['items'];
@@ -1060,13 +1072,23 @@ function ensure_task_origin(){
 /* 一行任务落库，入参是 task_fields_clean() 出来的干净数组。
    POST /tasks 和 POST /inbox/{root}/spawn_task 共用，写的列必须一致：
    立项出来的任务和人工建的任务在看板上不该有任何区别。 */
+/* ops 到卡类型：出客户卡的 op 才有值，其余 null。唯一推导点，前端/digest 只认落好的字段。 */
+function card_kind_of($ops){
+    $map=['keyword-direction'=>'keyword_direction','creative-direction'=>'creative_direction',
+          'keyword-confirmation'=>'keyword_confirmation','mapping-confirmation'=>'mapping_confirmation'];
+    foreach(array_filter(array_map('trim',explode(',',(string)$ops))) as $op){
+        if(isset($map[$op]))return $map[$op];
+    }
+    return null;
+}
 function task_insert($cid,$t,$by,$origin='sprint'){
     ensure_task_origin();
-    db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    ensure_review_schema();
+    db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin,card_kind)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             (int)$cid,$t['plan_id'],$t['sprint'],$t['module'],$t['title'],$t['detail'],
             $t['owner_type'],$t['priority'],$t['attention'],$t['ops'],$t['status'],$t['output_url'],$by
-        ,$origin]);
+        ,$origin,card_kind_of($t['ops'])]);
     return (int)db()->lastInsertId();
 }
 
@@ -5876,6 +5898,7 @@ if($m==='POST'&&$ROUTE==='/tasks'){
 if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     $u=auth_admin();
     ensure_task_module();
+    ensure_review_schema(); /* card_kind 随 ops 重算要列在（2026-09-21） */
     $tid=(int)$mm[1];
     $i=input();
     $chk=db()->prepare("SELECT id FROM seo_tasks WHERE id=?");
@@ -5902,7 +5925,7 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     if(isset($i['detail'])){$sets[]='detail=?';$args[]=(string)$i['detail'];}
     if(isset($i['sprint'])){$sets[]='sprint=?';$args[]=(string)$i['sprint'];}
     if(isset($i['output_url'])){$sets[]='output_url=?';$args[]=(string)$i['output_url'];}
-    if(isset($i['ops'])){$sets[]='ops=?';$args[]=(string)$i['ops'];}
+    if(isset($i['ops'])){$sets[]='ops=?';$args[]=(string)$i['ops'];$sets[]='card_kind=?';$args[]=card_kind_of((string)$i['ops']);}
     if(isset($i['result_note'])){$sets[]='result_note=?';$args[]=(string)$i['result_note'];}
     if(array_key_exists('attention',$i)){$sets[]='attention=?';$args[]=empty($i['attention'])?0:1;}
     if(array_key_exists('plan_id',$i)){$sets[]='plan_id=?';$args[]=$i['plan_id']?(int)$i['plan_id']:null;}

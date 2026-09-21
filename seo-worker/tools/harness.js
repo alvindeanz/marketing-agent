@@ -121,6 +121,9 @@ async function foldCards(sprint) {
         for (const x of f.texts) lines.push('- [' + x.item + '] ' + x.text.slice(0, 500));
       }
       lines.push('来源：方向卡 #' + card.id + ' 的客户反馈折叠，表态历史见该任务 note。');
+      /* 客户表态即批文（2026-09-21 Alvin 批）：跟进任务带 [backing] 指向折叠 fact，
+         L0 定档时 external/structural 凭它直落，花钱/不可逆照停。 */
+      if (f.agreed.length) lines.push('[backing] cards.t' + card.id + '.outcome');
       const r = await call('POST', '/tasks', {
         client_id: cid,
         /* 链式折叠防叠词：跟进任务自己也可能带卡再被折叠（753 -> 759 就叠出过双前缀），先剥旧前缀再加 */
@@ -132,6 +135,21 @@ async function foldCards(sprint) {
       log('#' + card.id + ' -> 跟进任务 #' + followId + '，闸A 已排（job ' + (r.review_job_id || '?') + '）');
     }
     await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '方向卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）客户表态：' + summary + (followId ? '。跟进任务 #' + followId : '。全部保持观察，无跟进'), source: 'client', status: 'confirmed' });
+    /* 词表/mapping 确认卡的同意 = 对应 onpage 批次的客户批文（2026-09-21 Alvin 批）：
+       给本客户 onpage/content 的未落地任务补 [backing] 指向折叠 fact，L0 定档时
+       external/structural 凭它直落，B 桶「待放行」不再排队等老板；花钱/不可逆照旧硬闸。 */
+    if (f.agreed.length && /keyword[-_]confirmation|mapping[-_]confirmation/.test(String(card.ops || '') + String(card.card_kind || ''))) {
+      const bk = '[backing] cards.t' + card.id + '.outcome';
+      const scope = all.filter((t) => t.id !== card.id
+        && ['onpage', 'content'].indexOf(String(t.module || '')) !== -1
+        && ['proposed', 'approved', 'review'].indexOf(String(t.status || '')) !== -1
+        && String(t.detail || '').indexOf('[backing]') === -1
+        && !/blog-draft/.test(String(t.ops || '')));
+      for (const t of scope) {
+        await call('PATCH', '/tasks/' + t.id, { detail: String(t.detail || '') + '\n' + bk });
+      }
+      if (scope.length) log('#' + card.id + ' 批文回流：' + scope.length + ' 个 onpage/content 任务已挂 backing（' + scope.map((t) => '#' + t.id).join(' ') + '）');
+    }
     /* 折叠即收口（2026-09-16 Alvin 定）：卡的使命是收客户表态，表态已折叠、跟进任务
        已接棒（或明确无跟进），卡任务当场置 done(accepted)，不再杵在泳道里等人批。
        博客确认卡不走这里（挂在博客任务上，由发布流程收口）。 */
@@ -151,11 +169,14 @@ async function foldCards(sprint) {
     if (!(days >= GRACE_DAYS)) continue;
     log('#' + card.id + ' 出卡 ' + Math.floor(days) + ' 天零反馈，到期视同同意');
     if (DRY) continue;
+    /* 到期也落 outcome fact 当批文（2026-09-21）：「未回复将按建议执行」是卡面承诺，
+       到期即凭证，跟进任务凭 [backing] 走 L0；花钱/不可逆照旧硬闸。 */
+    await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '方向卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）出卡 ' + Math.floor(days) + ' 天零反馈，按卡面「未回复将按建议执行」承诺到期视同同意。', source: 'client', status: 'confirmed' });
     const r = await call('POST', '/tasks', {
       client_id: cid,
       title: '卡到期落地（视同同意）：' + String(card.title).replace(/^(\[[^\]]*\]\s*)+/, '').slice(0, 60),
       module: card.module || 'technical', sprint, priority: 'P1', owner_type: 'agent',
-      detail: '方向卡 #' + card.id + ' 出卡 ' + Math.floor(days) + ' 天无客户反馈，按卡上「未回复将按建议执行」的承诺落地全部建议项。卡：' + (card.output_url || '（无链接，见任务 note）'),
+      detail: '方向卡 #' + card.id + ' 出卡 ' + Math.floor(days) + ' 天无客户反馈，按卡上「未回复将按建议执行」的承诺落地全部建议项。卡：' + (card.output_url || '（无链接，见任务 note）') + '\n[backing] cards.t' + card.id + '.outcome',
     });
     await call('PATCH', '/tasks/' + card.id, { status: 'done', result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] 到期（' + Math.floor(days) + ' 天）零反馈视同同意，跟进 #' + r.id + '\n[accepted] 到期视同同意，卡使命完成，自动收口。' });
   }

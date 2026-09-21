@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：等我队列 49 收敛到真决策(Alvin 批五件套)
+
+- 干了什么：①readonly_ops 唯一事实源迁 release_policy.json v10(补 keyword/mapping-confirmation 两个卡 op 与风险档), seo-api $READONLY_OPS 运行时从政策读, specs.test 断言改对政策文件收口 ②seo_tasks 加 card_kind 列(惰性 DDL), task_insert/PATCH ops 时由 card_kind_of() 落字段, 前端判卡字段优先正则兜底 ③harness 折叠词表/mapping 确认卡时给同客户 onpage/content 未落地任务挂 [backing] cards.tN.outcome, 到期分支同样落 outcome fact+backing, L0 凭批文直落 external/structural, 花钱/不可逆照停 ④失败任务 wait_reason 前缀「等运营」 ⑤queued 措辞改「排期（待判定/下轮自动拍板）」。tests 全绿。
+- 坑：specs.test 原从 PHP 源码正则抠 READONLY_OPS, 迁政策文件后断言对象同步改; audit 类只读 op 不走 dispatch 不强求风险档。
+- 下一步/认领：存量 17 张卡一次性收货清零(blog 两张走 sent_at 机制不动); 观察首个折叠卡的批文回流是否按预期放行 B 桶。
+
 ### 2026-09-20 AIRA：tools/fleet_digest.js 舰队摘要(Alvin 定四桶)
 
 - 干了什么：跨客户零模型只读汇总: ①在途卡按到期倒数(cardClockAnchor 出卡日时钟) ②反馈折叠后开跑中 ③失败未自愈 job/任务(同任务多次失败去重报最新, 已自愈不报) ④近 7 天落地数 vs 抽查数。跑法 SEO_AGENT_TOKEN=... node tools/fleet_digest.js [--days 7]。首跑即抓出: 16 条失败未自愈、落地 34 抽查 0。

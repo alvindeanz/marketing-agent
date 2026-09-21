@@ -3468,6 +3468,8 @@ function isPendingClientCard(t){
   /* 折叠/落地类任务标题也带「方向卡」字样，但它们是执行任务不是客户卡，先排除 */
   const title=String(t.title||'');
   if(/^(卡反馈落地|卡到期落地)/.test(title))return false;
+  /* card_kind 显式字段优先（2026-09-21 上线，建卡时服务端落好），下面的正则全是存量兜底 */
+  if(t.card_kind)return true;
   if(/keyword-direction|creative-direction|keyword-confirmation|mapping-confirmation/.test(String(t.ops||'')))return true;
   if(/确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(s+String(t.output_url||'')))return true;
   /* 文件名正则跟不上新卡命名（goodie negatives_direction 漏网实证），标题兜底：
