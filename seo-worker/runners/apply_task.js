@@ -1111,6 +1111,60 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
   return { taskId, status: status === 'success' ? 'failed' : status, logFile };
 }
 
+// ==== 同页冷却与全站独占窗（2026-09-21 Alvin 批，第一性审阅 P3）====
+// 要防的不是「变更多」，是「归因糊」：同一 URL 集在测量窗内吃两个假设，或全站级变更与
+// 页面级混窗。不相交的批次照常并行。台账 notes/applied_ledger.jsonl 在 NFS 共享工作区，
+// 双 worker 同源。放行层与方案生产完全不受限，只有落地这一步看窗口。
+const COOLDOWN_DAYS = 28;
+const SITEWIDE_WINDOW_DAYS = 7;
+const SITE_WIDE_OPS = ['styles-fragment', 'page-rebuild', 'theme-global'];
+
+function ledgerFile(workspace) { return path.join(workspace, 'notes', 'applied_ledger.jsonl'); }
+function readLedger(workspace) {
+  try { return fs.readFileSync(ledgerFile(workspace), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean); }
+  catch (e) { return []; }
+}
+function appendLedger(workspace, row) {
+  try { fs.mkdirSync(path.dirname(ledgerFile(workspace)), { recursive: true }); fs.appendFileSync(ledgerFile(workspace), JSON.stringify(row) + '\n'); } catch (e) { /* 台账写失败不拦执行 */ }
+}
+function normPageUrl(u) {
+  try { const x = new URL(String(u).trim()); let p = x.pathname; if (!p.endsWith('/')) p += '/'; return x.origin.toLowerCase() + p; } catch (e) { return null; }
+}
+function planTargetUrls(workspace, taskId) {
+  try {
+    const plan = fs.readFileSync(changePlanPath(workspace, taskId), 'utf8');
+    const parsed = extractTrailingJson(plan);
+    const urls = (parsed && parsed.json && Array.isArray(parsed.json.target_urls)) ? parsed.json.target_urls : [];
+    return { urls: urls.map(normPageUrl).filter(Boolean), noChange: planDeclaresNoChange(plan) };
+  } catch (e) { return { urls: [], noChange: false }; }
+}
+function daysAgo(dateStr) { return Math.floor((Date.now() - new Date(dateStr + 'T00:00:00Z').getTime()) / 86400000); }
+/** 返回 { blocked, until, why }。 */
+function cooldownGate(workspace, taskOps_, taskId) {
+  const { urls, noChange } = planTargetUrls(workspace, taskId);
+  if (noChange) return { blocked: false };
+  const ledger = readLedger(workspace);
+  const isSitewide = taskOps_.some((op) => SITE_WIDE_OPS.indexOf(op) !== -1);
+  for (const e of ledger) {
+    const age = daysAgo(e.date);
+    const eSitewide = (e.ops || []).some((op) => SITE_WIDE_OPS.indexOf(op) !== -1);
+    if (eSitewide && age < SITEWIDE_WINDOW_DAYS) {
+      const until = new Date(new Date(e.date + 'T00:00:00Z').getTime() + SITEWIDE_WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
+      return { blocked: true, until, why: '全站级变更独占窗：#' + e.task + '（' + (e.ops || []).join(',') + '）落地于 ' + e.date };
+    }
+    if (isSitewide && age < SITEWIDE_WINDOW_DAYS) {
+      const until = new Date(new Date(e.date + 'T00:00:00Z').getTime() + SITEWIDE_WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
+      return { blocked: true, until, why: '本单是全站级变更，独占窗内已有 #' + e.task + ' 落地于 ' + e.date };
+    }
+    if (age < COOLDOWN_DAYS && urls.length && (e.urls || []).some((u) => urls.indexOf(u) !== -1)) {
+      const until = new Date(new Date(e.date + 'T00:00:00Z').getTime() + COOLDOWN_DAYS * 86400000).toISOString().slice(0, 10);
+      const hit = (e.urls || []).filter((u) => urls.indexOf(u) !== -1);
+      return { blocked: true, until, why: '同页冷却：' + hit[0] + (hit.length > 1 ? ' 等 ' + hit.length + ' 页' : '') + ' 已被 #' + e.task + '（' + e.date + '）触碰，测量窗未走完' };
+    }
+  }
+  return { blocked: false };
+}
+
 async function runOne(ctx, context, workspace, taskId) {
   const { cfg, api, log, job } = ctx;
   const profile = (context && context.profile) || {};
@@ -1124,6 +1178,18 @@ async function runOne(ctx, context, workspace, taskId) {
   // 白名单 mutate 脚本执行，没有 changeset（安全网换成改前记旧值 + 回读验证）。
   if (String(task.module || '') === 'paid') {
     return runAdsApply(ctx, workspace, profile, task, taskId);
+  }
+
+  // 冷却闸：站内写批次落地前查同页冷却与全站独占窗。博客发布豁免（新 URL 无前窗数据，
+  // 且有客户确认闸把节奏）。挡下的任务保持 review，note 带 [cooldown-until]，到期重放行即可。
+  const gateOps = taskOps(task);
+  if (!gateOps.some((op) => BLOG_OPS.indexOf(op) !== -1)) {
+    const gate = cooldownGate(workspace, gateOps, taskId);
+    if (gate.blocked) {
+      const msg = '[cooldown-until ' + gate.until + '] 落地暂缓：' + gate.why + '。' + gate.until + ' 后重放行即可，方案与判决保留。';
+      try { await api.postTaskResult(taskId, { output_url: String(task.output_url || ''), note: msg, attention: false }); } catch (e) { log('task ' + taskId + ': cooldown note write failed :: ' + e.message); }
+      throw new Error('task ' + taskId + ': ' + gate.why + '（cooldown until ' + gate.until + '）');
+    }
   }
 
   // Shopify 通道（2026-09-10，博客与 redirect v1）：唯一写通道 shopseo CLI（dry-run 默认，
@@ -1338,6 +1404,16 @@ async function run(ctx) {
     try {
       const res = await runOne(ctx, context, workspace, taskId);
       if (res.status !== 'success') problems.push(taskId + ': ' + res.status);
+      else {
+        /* 冷却台账：成功落地的批次记 URL 集与 op（NFS 共享，双 worker 同源）。
+           无变更方案与空 URL 的博客发布不进账（没有触碰既有页面）。 */
+        const t0 = findTask(context, taskId) || {};
+        const { urls, noChange } = planTargetUrls(workspace, taskId);
+        const opsL = taskOps(t0);
+        if (!noChange && (urls.length || opsL.some((op) => SITE_WIDE_OPS.indexOf(op) !== -1))) {
+          appendLedger(workspace, { task: taskId, date: new Date().toISOString().slice(0, 10), ops: opsL, urls });
+        }
+      }
     } catch (e) {
       log('task ' + taskId + ': FAILED :: ' + (e.stack || e.message));
       problems.push(taskId + ': ' + e.message);
@@ -1355,6 +1431,9 @@ async function run(ctx) {
 }
 
 module.exports = {
+  cooldownGate,
+  planTargetUrls,
+  appendLedger,
   run,
   buildPrompt,
   readOutcome,

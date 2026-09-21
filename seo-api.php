@@ -2190,6 +2190,38 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/complete$#',$ROUTE,$mm)){
             if($rootK)chat_msg_insert($rootK,'chat_agent','派单 #'.$tid.'「'.$trow['title'].'」已落地并自验通过（检查行在任务卡结果备注），月度抽查照旧。','seo-worker');
         }
     }
+    /* 待复验路由（2026-09-21 Alvin 批，第一性审阅 P4）：收口 note 里的「待复验 N 项（...）」
+       是不可见例外件，文本不是队列。拆两支：数据回测类（GSC/位次/观察/复测/数据/CTR/排名）
+       归 cohort_backtest 管道自动测，打标即可；真人工类聚合建一个跟进工单（verify: 前缀，
+       继承母判决 do，同 split: 先例），进人工泳道红点可见。 */
+    if(preg_match('/待复验\s*(\d+)\s*项（([^）]+)）/u',$note,$vm)&&(int)$vm[1]>0){
+        $items=array_values(array_filter(array_map('trim',preg_split('/[、;；]/u',$vm[2]))));
+        $dataRe='/GSC|位次|观察|复测|数据|CTR|排名|流量/iu';
+        $manualV=[];$dataV=[];
+        foreach($items as $it){if(preg_match($dataRe,$it))$dataV[]=$it;else $manualV[]=$it;}
+        if($dataV)task_append_note($tid,'[backtest] '.count($dataV).' 项数据类复验归回测管道（cohort_backtest 满窗自动测）：'.mb_substr(implode('、',$dataV),0,300,'UTF-8'));
+        if($manualV){
+            $fq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
+            $fq->execute(['verify:'.$tid]);
+            if(!$fq->fetch()){
+                $tq2=db()->prepare("SELECT client_id,module,priority,sprint FROM seo_tasks WHERE id=?");
+                $tq2->execute([$tid]);$mt=$tq2->fetch();
+                $lines=[];foreach($manualV as $b)$lines[]='- '.$b;
+                list($ts,$te)=task_fields_clean([
+                    'title'=>mb_substr('人工复验：#'.$tid.' '.$trow['title'],0,255,'UTF-8'),
+                    'detail'=>"母任务 #".$tid." 落地自验通过，但方案第 5 节有 ".count($manualV)." 项复验只能人做。逐项做完在本任务备注写结果后关单，验收标准以母方案为准。\n\n".implode("\n",$lines),
+                    'module'=>(string)$mt['module'],'owner_type'=>'agency','priority'=>(string)$mt['priority'],'ops'=>'','sprint'=>(string)$mt['sprint'],
+                ],['status_force'=>'approved']);
+                if(!$te){
+                    $vTid=task_insert((int)$mt['client_id'],$ts,'seo-worker','verify:'.$tid);
+                    ensure_review_schema();
+                    db()->prepare("UPDATE seo_tasks SET review_verdict='do',review_reason=?,reviewed_at=NOW() WHERE id=?")
+                        ->execute(['继承母任务 #'.$tid.' 判决（落地后人工复验项，验收标准以母方案为准）',$vTid]);
+                    task_append_note($tid,'[verify-split] '.count($manualV).' 项人工复验已生成跟进工单 #'.$vTid);
+                }
+            }
+        }
+    }
     audit('seo-worker','seo_task_complete',(string)$tid,['note'=>$note]);
     res(200,['ok'=>true]);
 }
