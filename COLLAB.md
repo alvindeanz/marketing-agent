@@ -29,6 +29,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：deploy.sh mac 腿上线并首次联调通过(Alvin 定, Connie 投递促升契约)
+
+- 干了什么：deploy.sh worker 加 mac 腿（rsync 白名单到 staging、写 REV、touch .deploy-request、轮询 DEPLOYED/DEPLOY_ERROR，mac 不在线不阻塞 ros）；check 加 mac 漂移比对（逐文件 md5，Connie 定不比 manifest_md5，locale 序不同）。SSH 走专用 ed25519（私钥 ros /root/.ssh/aira_mac_deploy），中途 SACL 组问题由 Connie 修复（com.apple.access_ssh 加 aira）。47abd0b 已推 main。
+- 联调实录：首次双机部署 ros 与 mac 同 rev 47abd0b，mac 侧促升含 listener 重启约 60 秒完成，listener 复活正常（poll 60s，lanes heavy+light+chat，claudeBin 自愈解析）。mac 认领能力此前当日已实证（15 条 job 含 6 条 execute）。
+- 坑：空载时 fire_wake 只指 ros，新 job 必被 ros 秒抢，「排新 job 看 mac 认领」这种测法测不出东西，验 mac 用 DEPLOYED rev + listener 存活 + 历史认领记录。交接全程记录在 /mnt/share/aira/to-connie-mac-worker-ssh-20260921.md（Connie 确认后删）。
+- 下一步/认领：无。此后每次 ./deploy.sh worker 自动双机同步，版本漂移问题结案。
+
+
 ### 2026-09-21 AIRA：wordpress 能力清单 v1 + wf-agent 落地车道上线(Alvin 批, TODO 收口)
 
 - 干了什么：specs/capabilities/wordpress.md v1（wp-seo-meta-update / wp-term-seo-update / wp-redirect-add / wp-sitemap-flush 四 op agent_apply 带卡片分界；正文、Elementor、结构化数据、Woo 写 human_only 等端点；token 纪律与两站坑写进风险注记）。release_policy v12：四 op reversible 入 risk_class_by_op，connected_lanes 加 wordpress。apply_task 加 runWordpressApply（wf-agent REST，token 从客户 .secrets.env 内联取值禁止入日志，Wordfence 写间隔 2 秒，PHP warning 前缀截断，插件自动快照即回滚）。execute prepare prompt 的 X-WF-Changeset 行改按平台分流。specs 测试补 wordpress.md 与 policy 一致断言。两客户工作区补 notes/wordpress_credentials.md。rev df93cbc，worker 与 api 双端部署，全测绿。
