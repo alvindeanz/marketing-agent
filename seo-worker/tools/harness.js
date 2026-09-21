@@ -422,25 +422,48 @@ async function report(all, sprint, retried) {
   console.log('\n## 阻塞与待人定（' + blockers.length + '）');
   for (const b of blockers) console.log('- #' + b.id + ' ' + b.kind + '：' + b.text);
 
-  // 能力重绑定候选（2026-09-17，midea S1 实证：plan 是车道接通前建的，12 条全落人工位，
-  // 车道通了没人发现，只能人肉逐条 PATCH。原则：owner 位是建计划时的快照，能力表是活的，
-  // 每次 harness 跑都要把「人工位存量 × 已接通车道」摆到人眼前。只提示不自动转：
-  // 转位即 mandate（policy mandate_doc），必须人说了算。）
+  // 转位自愈（2026-09-21 Alvin 批，取代 9/17 的「只提示」）：owner 位是建计划时的快照，
+  // 能力表是活的。当期无人工特征的存量自动转机器位（元数据可逆，转回来一条 PATCH），
+  // 转位不带 mandate 标记，落地照走判定与放行分级，花钱/不可逆照停。
+  // 判据收严：只转 proposed/approved（blocked 在等外部不动）、module 限站内三类
+  // （offpage/local/paid 的人工位多为刻意），排除人工特征词、split 工单、[auto-machine-run]
+  // 熔断标记；每轮每客户上限 10 条防烧爆；未来期照旧只提示。
   try {
     const caps = require('../lib/capabilities');
     const bcNow = await boardClient();
     const manifest = caps.loadManifest(String((bcNow && bcNow.platform) || ''));
     if (manifest.found) {
+      const HUMANISH = /客户拍板|客户审阅|客户提供|客户确认|客户回传|素材|拍照|GBP|发帖|电话|会议|人工落地|培训/;
       const cands = all.filter((t) => ['proposed', 'approved', 'blocked'].includes(t.status)
         && String(t.owner_type || '') === 'agency');
-      if (cands.length) {
-        console.log('\n## 转位候选（' + cands.length + '，平台 ' + manifest.platform + ' 车道已接通，人工位存量建议逐条决定转或留）');
-        for (const t of cands.slice(0, 15)) console.log('- #' + t.id + ' [' + (t.sprint || '无期') + '] ' + t.title);
-        if (cands.length > 15) console.log('- …另有 ' + (cands.length - 15) + ' 条');
-        console.log('  转位：node tools/machine_run.js ' + cid + ' <id[:ops[:module]],...> --reason "..."（转完 harness 会自动重判再拍板）');
+      const curN = (() => { const m = /^S(\d+)/.exec(String(sprint || '')); return m ? parseInt(m[1], 10) : 1; })();
+      const sprintN = (t) => { const m = /^S(\d+)/.exec(String(t.sprint || '')); return m ? parseInt(m[1], 10) : null; };
+      const autoable = cands.filter((t) => ['proposed', 'approved'].includes(t.status)
+        && ['technical', 'onpage', 'content'].includes(String(t.module || ''))
+        && sprintN(t) !== null && sprintN(t) <= curN
+        && String(t.origin || '').indexOf('split:') !== 0
+        && !HUMANISH.test(String(t.title || '') + String(t.detail || '').slice(0, 200))
+        && String(t.result_note || '').indexOf('[auto-machine-run]') === -1);
+      const doNow = autoable.slice(0, 10);
+      const rest = cands.filter((t) => !doNow.includes(t));
+      for (const t of doNow) {
+        if (DRY) { console.log('[dry] 转位 #' + t.id + ' ' + t.title.slice(0, 40)); continue; }
+        await call('PATCH', '/tasks/' + t.id, { owner_type: 'agent',
+          result_note: String(t.result_note || '') + '\n[auto-machine-run] ' + stamp() + ' 车道 ' + manifest.platform + ' 已接通，当期人工位自动转机器（自愈，可 PATCH 回 agency 翻案），照走判定与放行分级。' });
+      }
+      if (doNow.length && !DRY) {
+        await call('POST', '/tasks/review', { client_id: cid, task_ids: doNow.map((t) => t.id) });
+        console.log('\n## 转位自愈（' + doNow.length + ' 条已转机器位并重排判定）');
+        for (const t of doNow) console.log('- #' + t.id + ' [' + (t.sprint || '') + '] ' + t.title);
+      }
+      if (rest.length) {
+        console.log('\n## 转位候选（' + rest.length + '，未来期/特征存疑，人工逐条决定）');
+        for (const t of rest.slice(0, 15)) console.log('- #' + t.id + ' [' + (t.sprint || '无期') + '/' + (t.module || '') + '] ' + t.title);
+        if (rest.length > 15) console.log('- …另有 ' + (rest.length - 15) + ' 条');
+        console.log('  转位：node tools/machine_run.js ' + cid + ' <id[:ops[:module]],...> --reason "..."');
       }
     }
-  } catch (e) { log('转位候选段跳过：' + e.message); }
+  } catch (e) { log('转位自愈段跳过：' + e.message); }
 
   // 追加到 TODO.md 批注段
   if (!NO_TODO && !DRY && fs.existsSync(TODO)) {

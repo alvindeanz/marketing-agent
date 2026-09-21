@@ -39,7 +39,7 @@ function isPendingCard(t) {
 
 (async () => {
   const clients = (await call('/clients')).clients.filter((c) => c.status === 'active');
-  const wait = [], running = [], broken = [], applied = [];
+  const wait = [], running = [], broken = [], applied = [], healed = [];
   for (const c of clients) {
     const ts = (await call('/tasks?client_id=' + c.client_id)).tasks || [];
     for (const t of ts) {
@@ -53,6 +53,13 @@ function isPendingCard(t) {
       }
       if (t.status === 'in_progress' || /^(卡反馈落地|卡到期落地)/.test(String(t.title || '')) && t.status !== 'done') {
         running.push({ c: c.name, id: t.id, st: t.status, title: String(t.title).slice(0, 44) });
+      }
+      /* 自愈账（2026-09-21）：reclass 与自动转位的留痕，近 N 天的列给人翻案 */
+      for (const tag of ['[reclass]', '[auto-machine-run]']) {
+        if (note.indexOf(tag) !== -1 && t.updated_at && daysAgo(t.updated_at) <= DAYS) {
+          const line = note.split('\n').find((l) => l.indexOf(tag) !== -1) || tag;
+          healed.push({ c: c.name, id: t.id, what: line.replace(/^\[[^\]]*\]\s*/, '').slice(0, 90), kind: tag === '[reclass]' ? '归类' : '转位' });
+        }
       }
       if (/失败/.test(String(t.wait_reason || ''))) {
         broken.push({ c: c.name, id: t.id, key: c.client_id + ':' + t.id, what: '任务 #' + t.id + ' ' + String(t.wait_reason).slice(0, 60) + '：' + String(t.title).slice(0, 36) });
@@ -98,5 +105,9 @@ function isPendingCard(t) {
   const sampled = applied.filter((a) => a.sampled).length;
   L.push('## 落地抽查（近 ' + DAYS + ' 天）');
   L.push('- 落地 ' + applied.length + ' 条，抽查 ' + sampled + ' 条' + (applied.length && !sampled ? '，抽查率为零，该抽了' : ''));
+  L.push('');
+  L.push('## 自愈账（近 ' + DAYS + ' 天，看不顺眼的 PATCH 回原值即翻案，熔断保证不反复）');
+  for (const h of healed) L.push('- ' + h.c + ' #' + h.id + ' [' + h.kind + '] ' + h.what);
+  if (!healed.length) L.push('- 无');
   console.log(L.join('\n'));
 })().catch((e) => { console.error('fleet_digest 失败：' + e.message); process.exit(1); });

@@ -61,7 +61,32 @@ t('keeps a well formed verdict as is', () => {
     evidence: 'GSC 48% 点击',
     merge_into: 0,
     adjust: '别写 220',
+    reclass: null,
   });
+});
+
+t('reclass 合法字段原样带出（module 加 owner_type）', () => {
+  const out = R.cleanVerdicts(
+    { verdicts: [{ task_id: 1, verdict: 'do', reason: 'x', evidence: 'y', reclass: { module: 'paid', owner_type: 'agent', reason: '广告核查挂错类' } }] },
+    [1], [1], quiet
+  );
+  assert.deepStrictEqual(out.verdicts[0].reclass, { module: 'paid', owner_type: 'agent', reason: '广告核查挂错类' });
+});
+
+t('reclass 非法 module 丢字段，owner 只认 agent', () => {
+  const out = R.cleanVerdicts(
+    { verdicts: [{ task_id: 1, verdict: 'do', reason: 'x', evidence: 'y', reclass: { module: 'sem', owner_type: 'client', reason: 'z' } }] },
+    [1], [1], quiet
+  );
+  assert.strictEqual(out.verdicts[0].reclass, null);
+});
+
+t('reclass 只给 owner 也成立，缺 reason 补占位', () => {
+  const out = R.cleanVerdicts(
+    { verdicts: [{ task_id: 1, verdict: 'do', reason: 'x', evidence: 'y', reclass: { owner_type: 'agent' } }] },
+    [1], [1], quiet
+  );
+  assert.deepStrictEqual(out.verdicts[0].reclass, { owner_type: 'agent', reason: '判定器未说明依据' });
 });
 
 t('drops a verdict for a task outside the batch', () => {

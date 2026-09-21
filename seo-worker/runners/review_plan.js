@@ -161,11 +161,16 @@ function buildPrompt(opts) {
       '"verdicts":[{"task_id":12,"verdict":"do","reason":"...","evidence":"...","adjust":""},' +
       '{"task_id":13,"verdict":"merge","merge_into":12,"reason":"...","evidence":"..."},' +
       '{"task_id":14,"verdict":"later","reason":"等 fact biz.wind_rating 确认","evidence":"..."},' +
-      '{"task_id":15,"verdict":"drop","reason":"...","evidence":"..."}]}',
+      '{"task_id":15,"verdict":"drop","reason":"...","evidence":"..."},' +
+      '{"task_id":16,"verdict":"do","reason":"...","evidence":"...","reclass":{"module":"paid","reason":"纯广告核查活, 挂 technical 会吃 SEO 闸并走错平台"}}]}',
     '```',
     '',
     'json 的规矩',
     '- verdict 只能是 do、later、merge、drop 四个之一，全小写。',
+    '- reclass 可选，只在任务归类明显挂错时给（例：广告账户核查挂在 technical，站内只读核验挂人工位）。',
+    '  module 只能是 technical、onpage、content、local、offpage、paid 之一；owner_type 只允许 "agent"',
+    '  （活是机器可做的只读或站内改动却挂了人工位时给）。给了 reclass 的任务照常给 verdict，',
+    '  服务端改完归类会作废判决按新类重判。拿不准就不给，别为了动而动。',
     '- 每个待判定任务恰好一条，不多不少。',
     '- 字符串值里不许出现英文双引号，要引用时用中文引号；不许出现换行符。',
     '- 全中文。不用 emoji。不用破折号，用逗号、句号或分号。',
@@ -225,6 +230,21 @@ function cleanVerdicts(json, batchIds, knownIds, log) {
       }
     }
     if (!reason) reason = '模型没有给出理由';
+    /* reclass 归类自愈提议（2026-09-21）：这里只做形状清洗，合法性（车道接通、熔断、状态）
+       由服务端校验器把关。非法值静默丢弃并记日志，不影响判决本身。 */
+    let reclass = null;
+    if (v.reclass && typeof v.reclass === 'object') {
+      const MODS = ['technical', 'onpage', 'content', 'local', 'offpage', 'paid'];
+      const rm = String(v.reclass.module || '').trim().toLowerCase();
+      const ro = String(v.reclass.owner_type || '').trim().toLowerCase();
+      const rr = summarize(v.reclass.reason, 120);
+      const out = {};
+      if (MODS.includes(rm)) out.module = rm;
+      else if (rm) say('判定：任务 #' + tid + ' reclass.module "' + truncate(rm, 16) + '" 不合法，丢弃该字段');
+      if (ro === 'agent') out.owner_type = 'agent';
+      else if (ro) say('判定：任务 #' + tid + ' reclass.owner_type 只允许 agent，丢弃该字段');
+      if (Object.keys(out).length) { out.reason = rr || '判定器未说明依据'; reclass = out; }
+    }
     byId.set(tid, {
       task_id: tid,
       verdict,
@@ -232,6 +252,7 @@ function cleanVerdicts(json, batchIds, knownIds, log) {
       evidence,
       merge_into: mergeInto,
       adjust: verdict === 'do' ? adjust : '',
+      reclass,
     });
   }
   const verdicts = [];

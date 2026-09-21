@@ -5211,12 +5211,60 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
     /* 过期判定改按内容哈希：只有标题或说明真改了才算过期。批准、放行、写备注这些状态动作
        会动 updated_at，但判决依据的内容没变，不该让判决失效（2026-08-27 #88 #89 因整 plan 批准被误判过期）。 */
     $up=db()->prepare("UPDATE seo_tasks SET review_verdict=?,review_reason=?,review_evidence=?,review_merge_into=?,review_adjust=?,review_job_id=?,reviewed_at=NOW(),review_override=NULL,review_override_note='',review_text_hash=MD5(CONCAT(IFNULL(title,''),'|',IFNULL(detail,''))),updated_at=updated_at WHERE id=? AND client_id=?");
-    $written=0;$refused=[];
+    $written=0;$refused=[];$reclassed=[];
     foreach($rows as $n=>$v){
         if(!is_array($v)){$refused[]="row $n: not an object";continue;}
         $tid=(int)($v['task_id']??0);
         $verdict=(string)($v['verdict']??'');
         if(!$tid||!in_array($verdict,REVIEW_VERDICTS,true)){$refused[]="row $n: bad task_id or verdict";continue;}
+        /* 归类自愈（2026-09-21 Alvin 批，第一性：路由元数据可逆，判定器提议+服务端确定性校验+熔断+留痕）。
+           校验全过才落：改完作废本条判决并重排闸A按新归类重判；任一不过则忽略 reclass 照写判决。 */
+        $rc0=isset($v['reclass'])&&is_array($v['reclass'])?$v['reclass']:null;
+        if($rc0){
+            $tq0=db()->prepare("SELECT module,owner_type,ops,status,result_note,origin FROM seo_tasks WHERE id=? AND client_id=?");
+            $tq0->execute([$tid,$cid]);
+            $t0=$tq0->fetch();$tq0->closeCursor();
+            $newMod=isset($rc0['module'])?(string)$rc0['module']:'';
+            $newOwn=isset($rc0['owner_type'])?(string)$rc0['owner_type']:'';
+            $rcWhy=mb_substr(trim((string)($rc0['reason']??'')),0,120,'UTF-8');
+            $veto='';
+            if(!$t0)$veto='task missing';
+            elseif(strpos((string)$t0['result_note'],'[reclass]')!==false)$veto='reclass 熔断：同任务只自愈一次';
+            elseif(!in_array((string)$t0['status'],['proposed','approved','blocked'],true))$veto='status '.$t0['status'].' 不改归类（已有产出）';
+            elseif(strpos((string)$t0['origin'],'split:')===0)$veto='split 工单是刻意给人的，不转';
+            if(!$veto&&$newMod!==''&&(!in_array($newMod,['technical','onpage','content','local','offpage','paid'],true)||$newMod===(string)$t0['module']))$veto='module 目标不合法或与现值相同';
+            if(!$veto&&$newOwn!==''){
+                if($newOwn!=='agent'||(string)$t0['owner_type']!=='agency')$veto='owner 只允许 agency 转 agent';
+                else{
+                    $lanePlat=($newMod!==''?$newMod:(string)$t0['module'])==='paid'?'googleads':'';
+                    if($lanePlat===''){
+                        $pq0=db()->prepare("SELECT platform FROM seo_profiles WHERE client_id=?");
+                        $pq0->execute([$cid]);$pr0=$pq0->fetch();$pq0->closeCursor();
+                        $lanePlat=strtolower(preg_replace('/[^a-z0-9]/i','',(string)($pr0['platform']??'')));
+                    }
+                    $polC=release_policy_load();
+                    $lanes=isset($polC['connected_lanes']['lanes'])&&is_array($polC['connected_lanes']['lanes'])?$polC['connected_lanes']['lanes']:['webforger','shopify','googleads'];
+                    if(!in_array($lanePlat,$lanes,true))$veto='平台 '.$lanePlat.' 车道未接通，owner 不转';
+                }
+            }
+            if(!$veto&&$newMod===''&&$newOwn==='')$veto='reclass 无有效字段';
+            if($veto){
+                $refused[]="row $n: reclass 拒绝（$veto）";
+            }else{
+                ensure_task_module();
+                $sets0=['review_verdict=NULL','review_reason=\'\'','review_evidence=\'\'','review_merge_into=NULL','review_adjust=\'\'','review_job_id=NULL','reviewed_at=NULL','review_text_hash=NULL','updated_at=updated_at'];
+                $args0=[];
+                if($newMod!==''){$sets0[]='module=?';$args0[]=$newMod;}
+                if($newOwn!==''){$sets0[]='owner_type=?';$args0[]=$newOwn;}
+                $args0[]=$tid;$args0[]=$cid;
+                db()->prepare("UPDATE seo_tasks SET ".implode(',',$sets0)." WHERE id=? AND client_id=?")->execute($args0);
+                task_append_note($tid,'[reclass] '.($newMod!==''?('module '.$t0['module'].'→'.$newMod.' '):'').($newOwn!==''?('owner '.$t0['owner_type'].'→agent '):'').'判定器依据：'.$rcWhy.'。旧判决作废，已重排闸A按新归类重判。');
+                list($rjid0,)=queue_review_job($cid,[$tid],'seo-worker','seo_tasks_review_auto');
+                audit('seo-worker','seo_task_reclass',(string)$tid,['client_id'=>$cid,'module'=>$newMod?:null,'owner'=>$newOwn?:null,'reason'=>$rcWhy,'rejudge_job'=>$rjid0]);
+                $reclassed[]=['task_id'=>$tid,'module'=>$newMod?:null,'owner'=>$newOwn?:null];
+                continue; /* 判决按新归类重出，本条旧判决不落 */
+            }
+        }
         $merge=($verdict==='merge')?((int)($v['merge_into']??0)?:null):null;
         if($verdict==='merge'&&!$merge){$refused[]="row $n: merge without merge_into";continue;}
         $up->execute([
@@ -5300,8 +5348,8 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $err=task_close($tid,'dropped','[auto-drop] fable 判不做自动归档：'.mb_substr(trim((string)($v['reason']??'')),0,200,'UTF-8'),'seo-worker');
         if(!$err)$autoDrop[]=$tid;
     }
-    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
-    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop]);
+    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'reclassed'=>$reclassed,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
+    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'reclassed'=>$reclassed]);
 }
 
 // POST /tasks/{id}/review_override body { verdict, note } -> 人推翻 fable 的判决，理由必填。

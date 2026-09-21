@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：路由元数据自愈环上线(Alvin 批, 第一性设计见当日频道)
+
+- 干了什么：统一形状=观测者提议+服务端确定性校验+执行留痕+台账回流+熔断。①归类自愈: 闸A 判定 json 加可选 reclass{module,owner_type,reason}(review_plan 清洗只认六枚举与 agent), review_result 校验(熔断[reclass]一次/仅 proposed|approved|blocked/split 工单不转/owner 转 agent 需 connected_lanes 车道在表), 过检即改库+作废旧判决+自动重排闸A, audit 留 seo_task_reclass ②转位自愈: harness 转位候选升级为当期自动转(proposed|approved+站内三 module+无人工特征词+非 split+每轮每客户上限 10), 不带 mandate 标记, 照走判定与放行分级, [auto-machine-run]熔断; 未来期照旧提示 ③policy v11 加 connected_lanes ④fleet_digest 加自愈账桶(近 N 天 reclass/转位逐条, 翻案=PATCH 回原值)。tests 全绿(review 25 过, 新增 reclass 三例, 既有 deepStrictEqual 基线补 reclass:null)。
+- 坑：cleanVerdicts 的兜底 later 行无 reclass 字段, PHP isset 判空兼容; 转位不落 mandate 是刻意的(mandate 是人的意图, 自愈只动路由)。
+- 下一步/认领：观察期一周, 回退阈值=reclass 翻案率>20% 或转位后失败率显著高于存量, 触发即降回提示模式; 周一 harness 全量跑首轮验证。
+
 ### 2026-09-21 AIRA：板上聊天 [ATTACH] 变下载链接(Alvin 定, monica 拿不到 excel 实证)
 
 - 干了什么：chat runner 回复后处理 publishAttachments: [ATTACH:绝对路径] 校验(限本客户工作区/扩展名白名单/敏感词拒/20MB 上限)后经 lib/publish 上 250 reports/{slug}/files/, 文件名前缀日期加 6 位随机, 标记原位替换成 agencyreport 链接; 失败原位写失败说明不吞。prompt 补「给人发文件」用法。端到端冒烟: ideal 搜索词 xlsx 已真发布回验 200(monica 那份)。
