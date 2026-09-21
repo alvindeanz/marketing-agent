@@ -14,7 +14,7 @@ pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert �
 
 ## 硬规矩
 
-1. 禁 cron 自动触发 LLM，一切执行源于人（按钮、收件箱、人放行的批次收尾）。失败 job 不自动重试。
+1. 禁 cron 自动触发 LLM，一切执行源于人（按钮、收件箱、人放行的批次收尾）。失败 job 不自动重试。零 LLM 的纯取数不在此列：周日 cron 调 POST /jobs/pull_sweep 给全部 active 客户排 pull_data（2026-09-21 Alvin 定，脚本 tools/weekly_pull.sh），保证 harness 轮转吃最新数据。
 2. 风险闸门（2026-09-14 Alvin 改版）：放行凭证先于一切写操作，凭证 = 频道委托确认（服务端双验引语）/ 客户批文 fact / 人工放行，凭证即放行，不二次采集（意图携带，policy mandate_doc）。执行分两级：有 L1 确定性实现的 op 走白名单执行器（ads_mutate 等，零模型且幂等）；白名单外的 op 由 apply 的无头 agent 泳道直接执行，收口必须过零模型后置对账（lib/ads_audit 账户硬读全符）。白名单是路由偏好不是能力天花板。生意闸永远停人：超委托范围的花钱/不可逆、合同外、客户关系动作。旧表述「模型只提议，服务端白名单执行」自本日废止。
 3. facts 三分法：平台可读即 confirmed 可刷新；分析推断进报告带置信度；只有人类独有信息进待确认队列。
 4. 结构化输出走三层防线模板（prompt 自检、同 job 报错喂回自修一次、仍败安全落地例外队列）。

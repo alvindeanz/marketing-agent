@@ -6145,6 +6145,31 @@ if($m==='POST'&&$ROUTE==='/jobs'){
     res(200,['ok'=>true,'id'=>$id]);
 }
 
+/* POST /jobs/pull_sweep -> 给全部 active 客户各排一个 pull_data job。
+   Deliberately narrow（同 /tasks/{id}/revise 的规矩）：worker 层只许排零 LLM 的
+   取数 job，POST /jobs 本体保持 admin only 不动。给 ros 的周日 cron 用
+   （tools/weekly_pull.sh），让 harness 的轮转与判定吃到最新数据。不违反硬规矩 1：
+   pull_data 从头到尾无 LLM（见 runners/pull_data.js 头注），规矩禁的是 cron 触发 LLM。
+   同客户已有 queued/running 的 pull_data 就跳过，回 queued 与 skipped 两份名单。 */
+if($m==='POST'&&$ROUTE==='/jobs/pull_sweep'){
+    $u=auth_worker();
+    ensure_jobs_worker_schema();
+    $rows=db()->query("SELECT p.client_id FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id WHERE p.status='active' ORDER BY p.client_id")->fetchAll();
+    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='pull_data' AND status IN('queued','running') LIMIT 1");
+    $ins=db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'pull_data',NULL,'queued',?)");
+    $queued=[];$skipped=[];
+    foreach($rows as $r){
+        $cid=(int)$r['client_id'];
+        $dup->execute([$cid]);
+        if($dup->fetch()){$skipped[]=$cid;continue;}
+        $ins->execute([$cid,$u['username']]);
+        $queued[]=['client_id'=>$cid,'job_id'=>(int)db()->lastInsertId()];
+    }
+    audit($u['username'],'seo_pull_sweep','',['queued'=>$queued,'skipped'=>$skipped]);
+    if($queued)fire_wake($queued[0]['job_id']);
+    res(200,['ok'=>true,'queued'=>$queued,'skipped'=>$skipped]);
+}
+
 // GET /jobs?client_id=&limit=
 // Either layer: the console lists jobs, the triage runner reads the same history
 // to work out what has been failing. The worker gets a narrower row on purpose:

@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：周日 cron 全客户 pull_data(Alvin 定: harness 轮转要吃最新数据)
+
+- 干了什么：weekly_run 批跑 harness 前没有取数步骤，各家决策一直用上次谁手动点「拉数据」时的库存。加 POST /jobs/pull_sweep（auth_worker，deliberately narrow 同 /tasks/{id}/revise 先例：worker 层只许排零 LLM 的 pull_data，POST /jobs 保持 admin only 不动），逐 active 客户排队、同客户在飞去重、audit 落账、fire_wake 唤醒。配 tools/weekly_pull.sh 从 ros config.json 读 serviceToken 调端点，root crontab 挂 0 14 * * 6（周日 02:00 NZST，夏令时 03:00）。CLAUDE.md 硬规矩 1 补了例外说明：规矩禁的是 cron 触发 LLM，零 LLM 纯取数不在此列。
+- 坑：worker maxConcurrent=1 且 pull_data 与 harness 同走 heavy lane，全量 sweep 约 20 家要排一阵，所以时间选在周日凌晨，跟人触发的批跑错开；撞上了也只是排队不冲突。
+- 下一步/认领：无。测试 node tests 全绿，php -l 在 250 远端过（本机无 php），部署 deploy.sh api 后 check 无漂移，live 跑过一轮 sweep 验证。
+
 ### 2026-09-21 AIRA：卡反馈 actor 来源分账(Alvin 定: 代确认与客户亲点同通道)
 
 - 干了什么：seo_card_feedback 惰性补 actor 列('client'/'agency:<user>'), 表结构收进 ensure_card_feedback_schema()三处共用; 新端点 POST /tasks/{id}/card_feedback_proxy(admin, text 必填留档客户同意渠道, note 写[代确认 user], audit 留痕); GET /card_feedback 带回 actor(先 ensure 防 SELECT 抛错吞行); harness 折叠署名进批文 fact(「含 agency 代确认(名字)」); 看板卡行加「代确认」按钮(整卡同意口径, prompt 强制留档)。
