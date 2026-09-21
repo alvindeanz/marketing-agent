@@ -1000,7 +1000,7 @@ function sbRow(c){
   const arch=c.status==='archived';
   // 三色徽标，排序红橙蓝：红=人工任务待处理，橙=fact 待确认，蓝=agent 任务待做
   let pills='';
-  if(c.manual_tasks_open)pills+='<span class="sb-pill manual" title="人工任务待处理">'+c.manual_tasks_open+'</span>';
+  if(c.manual_tasks_open)pills+='<span class="sb-pill manual" title="当下要人动：待发卡与在办人工任务">'+c.manual_tasks_open+'</span>';
   if(c.facts_pending)pills+='<span class="sb-pill facts" title="fact 待确认">'+c.facts_pending+'</span>';
   if(c.agent_tasks_open)pills+='<span class="sb-pill agent" title="agent 任务待做">'+c.agent_tasks_open+'</span>';
   const star='<span class="sb-star'+(c.starred?' on':'')+'" title="'+(c.starred?'取消星标':'星标（标为我负责）')+'" onclick="event.stopPropagation();toggleStar('+c.client_id+','+(c.starred?0:1)+')">✡</span>';

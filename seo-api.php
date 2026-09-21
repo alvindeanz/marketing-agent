@@ -4604,13 +4604,24 @@ if($m==='GET'&&$ROUTE==='/clients'){
     ensure_metrics_schema();
     $s=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status,p.services FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id ORDER BY FIELD(p.status,'active','archived'),c.name");
     $rows=$s->fetchAll();
-    /* 侧边栏三色徽标（红橙蓝）：人工任务(红)、待确认 facts(橙)、agent 任务(蓝)分别计数，
-       所以任务数按 owner_type 拆。agent 归 agent 泳道(蓝)，agency/client 归人工(红)。 */
+    /* 侧边栏三色徽标（红橙蓝）。红的语义 2026-09-21 Alvin 改版：不再是「人工位任务数」
+       （旧口径把 S4-S6 排期占位全点红，真要发的卡反而因 done 不亮，oak 实证），改为
+       「当下要人动的数」= 待发的客户卡 + 真在等人办的人工任务（in_progress/review/split 工单）。
+       proposed 排期占位不进红。蓝(agent 任务)口径不变。 */
+    ensure_review_schema();
+    ensure_task_origin();
     $agentTasks=[];$manualTasks=[];
     foreach(db()->query("SELECT client_id,owner_type,COUNT(*) AS n FROM seo_tasks WHERE status IN('proposed','in_progress','review') GROUP BY client_id,owner_type")->fetchAll() as $r){
         $id=$r['client_id'];
         if((string)$r['owner_type']==='agent')$agentTasks[$id]=($agentTasks[$id]??0)+(int)$r['n'];
-        else $manualTasks[$id]=($manualTasks[$id]??0)+(int)$r['n'];
+    }
+    foreach(db()->query("SELECT client_id,COUNT(*) AS n FROM seo_tasks WHERE owner_type<>'agent' AND (status IN('in_progress','review') OR (status='approved' AND origin LIKE 'split:%')) GROUP BY client_id")->fetchAll() as $r){
+        $manualTasks[$r['client_id']]=($manualTasks[$r['client_id']]??0)+(int)$r['n'];
+    }
+    /* 待发卡：出了没发（sent_at 空）也没折叠的客户卡，owner agent 与上面的人工计数天然不重。
+       判卡认 card_kind 字段或 t/k 反馈令牌（存量卡无字段靠令牌兜底）。 */
+    foreach(db()->query("SELECT client_id,COUNT(*) AS n FROM seo_tasks WHERE owner_type='agent' AND status IN('review','done') AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE '%?t=%&k=%') AND result_note NOT LIKE '%[卡反馈折叠%' GROUP BY client_id")->fetchAll() as $r){
+        $manualTasks[$r['client_id']]=($manualTasks[$r['client_id']]??0)+(int)$r['n'];
     }
     /* per-user 星标（2026-09-15）：跟登录用户绑定，同事各标各的负责客户，不共享不乱窜。 */
     ensure_stars_schema();
