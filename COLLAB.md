@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：前提核验进 chat 与 execute prompt(favicon 单第四刀)
+
+- 干了什么：chat prompt 加两条: WebFetch 只见正文提取看不到 head(工具盲区不许当站点缺陷下结论, head 层标「待核」交 execute), 改动类委托先核前提, 推翻即回话落 fact 不出委托单。execute 方案骨架加前提闸: 前提被实测推翻走无变更方案(第 1 节写证据, items 空), 禁止硬凑低价值或平台做不成的变更项。
+- 坑：favicon 单的根因链是 工具盲区(WebFetch 无 head)→错误前提→硬凑方案→拆单转人工, 四层每层都该有闸, 本批把头尾两层闸补上了。
+- 下一步/认领：观察下一个改动类 chat 单是否在核验层被正确拦截或放行。
+
 ### 2026-09-21 AIRA：chat 快路单收口三修(benscurtainsnz favicon 单复盘, Alvin 定)
 
 - 干了什么：①split 人工工单继承母判决(review_verdict=do+理由, 不再排期等下轮判定), human_state 显示「待人工执行(母任务已判 do)」 ②webforger.md 风险注记加第 7 条: 抓客户站必须带浏览器 UA, 工具看不到 head 先怀疑抓取方式再下结论(本单根因: 读取工具看不到 head 就立项, 实际 NZ 站图标完好与 AU 同构) ③第 3 条补跳转表不匹配带扩展名路径, 顺手修了 8/11 两处重号(现 0 到 12)。#803 Alvin 手动点不做。
