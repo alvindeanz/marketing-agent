@@ -217,7 +217,9 @@ function load() {
 
   // Resolve relative paths against the worker root.
   if (cfg.ga4KeyFile && !path.isAbsolute(cfg.ga4KeyFile)) {
-    cfg.ga4KeyFile = path.join(ROOT, cfg.ga4KeyFile);
+    /* 相对路径按 config 文件所在目录解析：SEO_WORKER_CONFIG 指向部署目录时
+       （仓库里跑 tools 的场景），secrets 跟着 config 走，不跟仓库走。 */
+    cfg.ga4KeyFile = path.join(path.dirname(configPath()), cfg.ga4KeyFile);
   }
   // claudeBin 解析：成功写回真实路径，失败置空并留言，由 listener 启动断言拦截。
   const rb = resolveClaudeBin(cfg.claudeBin);
