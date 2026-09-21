@@ -365,7 +365,9 @@ async function main() {
     await sleep(POLL_MS);
     all = await tasks();
     const mine = all.filter(inScope);
-    const running = mine.filter((t) => t.human_state === 'running');
+    /* 只等机器位：人工位 in_progress 的 human_state 也是 running，但它不会自己完成，
+       等它等于烧满 3 小时预算（2026-09-21 批1 二轮 #341 实测卡死半小时）。 */
+    const running = mine.filter((t) => t.human_state === 'running' && String(t.owner_type || '') === 'agent');
     const lintFailed = mine.filter((t) => t.human_state === 'wait_me' && /lint 未过/.test(t.fail_reason || '') && !retried[t.id]);
     for (const t of lintFailed) {
       retried[t.id] = true;
