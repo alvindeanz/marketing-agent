@@ -869,6 +869,9 @@ function attach_human_state($tasks,$cid){
                或 reversible 待 L0 自动放行的短暂过渡（harness/L0 会推进，非等人）。用 review_effective+risk 粗分：
                有 do 判决且非硬闸的算机器待推进，其余才等人。简化口径：analysis 已不到这（源头收货）。 */
             $hs='wait_me';$why='待放行';
+        }elseif(strpos((string)($t['origin']??''),'split:')===0){
+            /* 拆条人工工单（2026-09-21）：母判决已继承，没有排期概念，就是等人上手。 */
+            $hs='wait_me';$why='待人工执行（母任务已判 do）';
         }else{
             /* 待判（无判决，等闸A）/ 待拍板（有判决，等 harness apply_verdicts）是机器待办 backlog，
                不是在跑也不是等人（2026-09-18：改回 queued「排期」，之前塞 running 让下期任务错标在跑）。 */
@@ -2343,6 +2346,11 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
                 ],['status_force'=>'approved']);
                 if(!$te){
                     $splitTid=task_insert($cid,$ts,'seo-worker','split:'.$tid);
+                    /* 继承母判决（2026-09-21 Alvin 定：拆条不产生新的「该不该做」，别再排期等下轮判定）。
+                       该不该做在母任务判定期已答过，工单当场就位等人执行。 */
+                    ensure_review_schema();
+                    db()->prepare("UPDATE seo_tasks SET review_verdict='do',review_reason=?,reviewed_at=NOW() WHERE id=?")
+                        ->execute(['继承母任务 #'.$tid.' 判决（拆条转人工，验收标准以母方案为准）',$splitTid]);
                     task_append_note($tid,'[split] 方案含 '.count($blocked).' 处白名单外写入，已生成人工工单 #'.$splitTid.'（判定期分流，不再等 apply 中止）');
                     /* 回发起频道：让提需求的人知道哪部分是机器落、哪部分给了人 */
                     if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$task['origin'],$om)){

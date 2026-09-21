@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：chat 快路单收口三修(benscurtainsnz favicon 单复盘, Alvin 定)
+
+- 干了什么：①split 人工工单继承母判决(review_verdict=do+理由, 不再排期等下轮判定), human_state 显示「待人工执行(母任务已判 do)」 ②webforger.md 风险注记加第 7 条: 抓客户站必须带浏览器 UA, 工具看不到 head 先怀疑抓取方式再下结论(本单根因: 读取工具看不到 head 就立项, 实际 NZ 站图标完好与 AU 同构) ③第 3 条补跳转表不匹配带扩展名路径, 顺手修了 8/11 两处重号(现 0 到 12)。#803 Alvin 手动点不做。
+- 坑：split 建单只 status_force approved 没继承判决也没排 review job, 是「chat 单拖到 harness」体感的机制来源; 前提核验发生在拆单后, 「该不该做」没人把门。
+- 下一步/认领：chat 委托单启动前的前提核验(读线上推翻前提则直接回话不建单)是下一刀, 我认领; 观察下一个 split 单是否即时就位。
+
 ### 2026-09-21 AIRA：t/k 令牌判卡 + 存量只读任务收货(Alvin 报障 badger #446/#452)
 
 - 干了什么：判卡加 t/k 反馈令牌签名(所有客户卡共同特征, badger #452 博客卡文件名是 topic-slug 全部清单认不出, 连带 midea 七条/oak 一条页面改版卡一起隐身在 Agent 泳道装「等放行」), 前端与 fleet_digest 同步。存量只读分析任务(交付早于 9/18 自动收货)补收 3 条: badger #446 核验/haakaa #342 映射表/oak #475 审计; citymed #380 是待人工发客户的博客 docx 不收, 归运营发送。

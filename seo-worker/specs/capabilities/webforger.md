@@ -73,11 +73,12 @@ bot 账号操作说明（/mnt/share/aiden/to-aira-webforger-bot-ops-20260826.md�
 4. **`isExistingPage: true` 的 404 严禁做 301。** 这类 404 是 bug 信号，代表 slug 写错、文件缺失或语言路由坏了。给它加重定向等于把 bug 盖住。挂进任务备注交给人排查。
 5. **`rewrite-page` 之前必须先 GET 原页留档。** 该操作整页覆盖，方案文档里要附原正文的存档位置。
 6. **只操作自己的 siteId。** 跨站读到 200 说明安全边界破了，立刻停下报人。看到 403 不要换 payload 重试，停下报人。
-7. **超时与重试写死。** 每条 curl 必带 `--max-time 120`。401 停（密码轮换，重试无意义）；403 停；409 停（多半是 changeset 过期或冲突）；接口挂起超过 120 秒停。只有明确的 5xx 与 429 允许重试，带退避（429 按 `retryAfter`，没有就 60 秒），最多 2 次。
-8. **禁区。** 不碰 `/api/domains/*`、`/api/admin/*`、`/api/partner/*`、`/api/migrate/*`、`/api/payments/*`、改密码改邮箱的接口，不碰 KV / R2，不部署 worker，不发邮件，不改 site meta 的 `published` / `delivered`，不动页面注册表增删、导航结构、默认语种、indexing 开关（任务书逐条明确写了的除外）。方案里出现这些路径，prepare 阶段直接打回。
-9. **回滚现状。** changeset 的 revert 端点尚未上线，全站快照 restore 大站必挂。所以失败处置只有一种：**停手，不再尝试写，上报五项**：job id、changeset id、siteId、碰过的文件清单、最后一个成功完成的步骤加失败步骤的 HTTP 状态码与 `error` 文本，并点名哪些文件停在半改状态。人按 changeset `pre/` 里的原件还原。不要因为「反正能回滚」放胆改，现在没有回滚按钮。
-10. **在线文档一个任务只拉一次。** `curl -s https://api.webforger.ai/api/doc -o /tmp/wf-agent-api.md` 落到本地再 grep，别反复 curl 进上下文；`/api/doc.json` 只回目录，随便拉。本清单没写的端点先查它，不许猜。
-11. **页面硬规则（写任何页面 HTML 或博客正文之前）。** body-only fragment：不写 `<html>` `<head>` `<body>` `<style>` `<script>` `<nav>` `<footer>`；每个可编辑文本和图片必须带 `data-content-id="unique-id"`；内链一律带 trailing slash；禁 inline `style="grid-template-columns:..."`，用 `.grid-2col` / `.grid-3col` / `.grid-4col` / `.wf-*` / `.services-grid`；图片只用 `POST /generate-image` 生成的或 `GET /media` 里现成的，路径 `/assets/{filename}`，禁 placeholder 与外链 stock 图；shortcode 永远走 `PATCH /edit` 的 `type:"shortcode"`，禁手写 `<!--WF_*-->`；blog category 只取 `config.blogCategories[].slug` 已有值，要新的先 `POST /api/blog/{siteId}/categories`；category slug 必须英文 ASCII；改完 390px 宽不能横向滚动。
+7. **抓客户站页面必须带浏览器 UA**（`-A "Mozilla/5.0"`，站点 WAF 挡脚本默认 UA）。抓回来「看不到 head」或页面残缺时，先怀疑抓取方式（UA、渲染差异），换 UA 重抓核实，禁止在没确认工具没问题前就下「站上没有 X」的结论（2026-09-21 benscurtainsnz favicon 单：读取工具看不到 head 就立项补图标，实际 head 双引用完好，任务从头就不该存在）。
+8. **超时与重试写死。** 每条 curl 必带 `--max-time 120`。401 停（密码轮换，重试无意义）；403 停；409 停（多半是 changeset 过期或冲突）；接口挂起超过 120 秒停。只有明确的 5xx 与 429 允许重试，带退避（429 按 `retryAfter`，没有就 60 秒），最多 2 次。
+9. **禁区。** 不碰 `/api/domains/*`、`/api/admin/*`、`/api/partner/*`、`/api/migrate/*`、`/api/payments/*`、改密码改邮箱的接口，不碰 KV / R2，不部署 worker，不发邮件，不改 site meta 的 `published` / `delivered`，不动页面注册表增删、导航结构、默认语种、indexing 开关（任务书逐条明确写了的除外）。方案里出现这些路径，prepare 阶段直接打回。
+10. **回滚现状。** changeset 的 revert 端点尚未上线，全站快照 restore 大站必挂。所以失败处置只有一种：**停手，不再尝试写，上报五项**：job id、changeset id、siteId、碰过的文件清单、最后一个成功完成的步骤加失败步骤的 HTTP 状态码与 `error` 文本，并点名哪些文件停在半改状态。人按 changeset `pre/` 里的原件还原。不要因为「反正能回滚」放胆改，现在没有回滚按钮。
+11. **在线文档一个任务只拉一次。** `curl -s https://api.webforger.ai/api/doc -o /tmp/wf-agent-api.md` 落到本地再 grep，别反复 curl 进上下文；`/api/doc.json` 只回目录，随便拉。本清单没写的端点先查它，不许猜。
+12. **页面硬规则（写任何页面 HTML 或博客正文之前）。** body-only fragment：不写 `<html>` `<head>` `<body>` `<style>` `<script>` `<nav>` `<footer>`；每个可编辑文本和图片必须带 `data-content-id="unique-id"`；内链一律带 trailing slash；禁 inline `style="grid-template-columns:..."`，用 `.grid-2col` / `.grid-3col` / `.grid-4col` / `.wf-*` / `.services-grid`；图片只用 `POST /generate-image` 生成的或 `GET /media` 里现成的，路径 `/assets/{filename}`，禁 placeholder 与外链 stock 图；shortcode 永远走 `PATCH /edit` 的 `type:"shortcode"`，禁手写 `<!--WF_*-->`；blog category 只取 `config.blogCategories[].slug` 已有值，要新的先 `POST /api/blog/{siteId}/categories`；category slug 必须英文 ASCII；改完 390px 宽不能横向滚动。
 
 ## 登录
 
