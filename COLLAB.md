@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：取消卡预览模式(Alvin 定: 内部有纪律, 降级画蛇添足)
+
+- 干了什么：lib/publish 新增 injectCardToken(幂等注入一行自动补参脚本, 裸链接打开自动 replace 成 ?t=&k=), execute 两处客户卡发布点接入, 发布扫描目录补 seo-agent-output/(ideal #798 根因), republish 加 --card <taskId> 旗标。效果: 任何存在的卡链接点开即可提交, 以最近一次发布为准, 预览降级分支永不触发(模板保留当死代码兜底), feedback API 令牌校验不变。
+- 坑：republish --card 需要 serviceToken, 只能在部署目录跑; 存量已发布卡页里没有注入脚本, 但它们的流通链接本来就带 t/k, 不用回刷, 只有 ideal #798 是裸链接需单独重发。
+- 下一步/认领：#798 注入令牌重发布(本条目后立即做)。
+
 ### 2026-09-21 AIRA：haakaa chat 复盘三修(Alvin 定, 立即修不等周末)
 
 - 干了什么：①瞬时状态快照不进 facts: chat cleanFacts 与 feedback cleanFacts 同口径拦 missing/not_set/default 类值(haakaa 实证: 三条缺陷快照当天被修掉却永久 confirmed, 下轮 plan 会去补已补的东西), chat prompt 补「facts 只记持久事实与客户决策」 ②chat 正文点名 #N 自动挂根 refs.tasks(服务端 chat_reply 校验本客户真实任务, 上限 10), prompt 补「人说做完了→点明对应任务并提醒置完成」 ③存量清理: haakaa 三条快照 fact 改写为已解决实情(带日期), #340 人工认定完成收口, #341 记四/八进度。

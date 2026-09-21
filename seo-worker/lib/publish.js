@@ -80,4 +80,29 @@ async function publishReport(cfg, slug, filename, localPath, log) {
   return publishFile(cfg, slug, '', filename, localPath, log);
 }
 
-module.exports = { publishReport, publishFile, assertSafeName };
+/**
+ * 卡页令牌自动补参（2026-09-21 Alvin 定「取消预览模式」）：往卡 HTML 里注入一行脚本，
+ * 裸链接打开时自动 replace 成带 ?t=&k= 的链接，反馈按钮永远可用，预览降级分支永不触发。
+ * 幂等：已注入的替换成最新令牌。返回令牌串；不是 HTML 或读写失败返回空串不炸调用方。
+ */
+function injectCardToken(localPath, taskId, serviceToken) {
+  try {
+    if (!/\.html?$/i.test(String(localPath)) || !taskId || !serviceToken) return '';
+    const fs = require('node:fs');
+    const crypto = require('node:crypto');
+    const tok = crypto.createHash('md5').update('cardfb' + taskId + serviceToken).digest('hex');
+    let html = fs.readFileSync(localPath, 'utf8');
+    const tag = '<script data-card-autotoken>if(!new URLSearchParams(location.search).get("k"))location.replace(location.pathname+"?t=' + Number(taskId) + '&k=' + tok + '");</script>';
+    if (html.indexOf('data-card-autotoken') !== -1) {
+      html = html.replace(/<script data-card-autotoken>[\s\S]*?<\/script>/, tag);
+    } else if (/<\/body>/i.test(html)) {
+      html = html.replace(/<\/body>/i, tag + '\n</body>');
+    } else {
+      html += '\n' + tag + '\n';
+    }
+    fs.writeFileSync(localPath, html, 'utf8');
+    return tok;
+  } catch (e) { return ''; }
+}
+
+module.exports = { publishReport, publishFile, assertSafeName, injectCardToken };

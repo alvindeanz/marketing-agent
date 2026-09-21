@@ -1744,10 +1744,11 @@ async function runBlogTask(ctx, context, workspace, task) {
     fs.mkdirSync(rdir, { recursive: true });
     const cardName = 'blog_confirmation_task-' + taskId + '.html';
     fs.writeFileSync(path.join(rdir, cardName), cardHtml, 'utf8');
+    /* 令牌注入（2026-09-21 取消预览模式）：裸链接自动补参 */
+    const fbTok = require('../lib/publish').injectCardToken(path.join(rdir, cardName), taskId, ctx.cfg.serviceToken);
     const res = await publishFile(ctx.cfg, path.basename(workspace), '', cardName, path.join(rdir, cardName), log);
     if (res && res.url) {
-      const fbTok = require('node:crypto').createHash('md5').update('cardfb' + taskId + ctx.cfg.serviceToken).digest('hex');
-      cardUrl = res.url + '?t=' + taskId + '&k=' + fbTok;
+      cardUrl = res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '');
       log('task ' + taskId + '：博客确认卡已发布 ' + res.url);
     }
   } catch (e) {
@@ -2081,11 +2082,20 @@ async function runOne(ctx, context, workspace, taskId) {
   let lintLines = '';
   if (!prepare) {
     try {
-      const rdir = path.join(workspace, 'reports');
-      const fresh = fs.existsSync(rdir) ? fs.readdirSync(rdir).filter((f) => f.endsWith('.html')
-        && output.indexOf(f) !== -1
-        && Date.now() - fs.statSync(path.join(rdir, f)).mtimeMs < 6 * 3600 * 1000) : [];
-      for (const f of fresh) {
+      /* 扫描目录补 seo-agent-output/（2026-09-21，ideal #798 实证：agent 把卡写去那里，
+         发布段只扫 reports/ 导致客户版链接没生成，人工 republish 又补了裸链接）。 */
+      const scanDirs = [path.join(workspace, 'reports'), path.join(workspace, 'seo-agent-output')];
+      const fresh = [];
+      for (const rdir of scanDirs) {
+        if (!fs.existsSync(rdir)) continue;
+        for (const f of fs.readdirSync(rdir)) {
+          if (!f.endsWith('.html') || output.indexOf(f) === -1) continue;
+          if (Date.now() - fs.statSync(path.join(rdir, f)).mtimeMs >= 6 * 3600 * 1000) continue;
+          if (fresh.some((x) => x.f === f)) continue;
+          fresh.push({ rdir, f });
+        }
+      }
+      for (const { rdir, f } of fresh) {
         // 发布前跑一遍完整 Python 交付 lint，结果盖到卡上（2026-09-17 P1 核实：worker 无头
         // claude -p 不加载 /data/aira/.claude 的 PostToolUse lint 钩子，blogcheck.js 又只
         // 实现三类规则，badge_count 等一律漏到执行侧。这里补一道 execute 侧的全量 lint，
@@ -2093,10 +2103,11 @@ async function runOne(ctx, context, workspace, taskId) {
         // 不必再逐份重跑。永不抛错，lint 缺失就跳过。）
         const lintRes = runDeliverableLint(path.join(rdir, f), log);
         if (lintRes) lintLines += lintRes + '\n';
+        /* 令牌注入（2026-09-21 取消预览模式）：裸链接自动补参，卡打开即可提交 */
+        const fbTok = require('../lib/publish').injectCardToken(path.join(rdir, f), taskId, ctx.cfg.serviceToken);
         const res = await publishFile(ctx.cfg, path.basename(workspace), '', f, path.join(rdir, f), log);
         if (res && res.url) {
-          const fbTok = require('node:crypto').createHash('md5').update('cardfb' + taskId + ctx.cfg.serviceToken).digest('hex');
-          clientLinks += '客户版: ' + res.url + '?t=' + taskId + '&k=' + fbTok + '\n';
+          clientLinks += '客户版: ' + res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '') + '\n';
           log('task ' + taskId + '：客户版已发布 ' + res.url);
         }
       }

@@ -16,7 +16,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const cp = require('node:child_process');
-const { publishFile } = require('../lib/publish');
+const { publishFile, injectCardToken } = require('../lib/publish');
 const config = require('../lib/config');
 
 const LINT = '/data/aira/scripts/deliverable_lint.py';
@@ -26,10 +26,11 @@ const argv = process.argv.slice(2);
 const clientDir = String(argv[0] || '');
 const filename = String(argv[1] || '');
 const skipLint = argv.includes('--skip-lint');
+const cardTask = (() => { const i = argv.indexOf('--card'); return i === -1 ? 0 : (parseInt(argv[i + 1], 10) || 0); })();
 
 function die(msg) { console.error('republish: ' + msg); process.exit(2); }
 
-if (!clientDir || !filename) die('用法：node tools/republish.js <clientDir> <filename> [--skip-lint]');
+if (!clientDir || !filename) die('用法：node tools/republish.js <clientDir> <filename> [--skip-lint] [--card <taskId>]');
 
 const localPath = path.join(CLIENTS_ROOT, clientDir, 'reports', filename);
 if (!fs.existsSync(localPath)) die('本地文件不存在：' + localPath);
@@ -54,6 +55,14 @@ if (!skipLint && fs.existsSync(LINT) && /\.html?$/i.test(filename)) {
   // reportSsh / reportRemoteRoot / reportUrlBase 三个键，DEFAULTS 就够。
   let cfg;
   try { cfg = config.load(); } catch (e) { cfg = Object.assign({}, config.DEFAULTS); }
+  /* --card <taskId>：发布客户卡时注入令牌自动补参（2026-09-21 取消预览模式），
+     需要 serviceToken，所以要在部署目录（/data/aira/seo-worker）里跑。 */
+  if (cardTask) {
+    if (!cfg.serviceToken) die('--card 需要 serviceToken，请在 /data/aira/seo-worker 下跑本工具');
+    const tok = injectCardToken(localPath, cardTask, cfg.serviceToken);
+    if (!tok) die('--card 令牌注入失败（不是 HTML？）');
+    console.log('republish: 已注入卡令牌（task ' + cardTask + '），裸链接将自动补参');
+  }
   const res = await publishFile(cfg, clientDir, '', filename, localPath, (m) => console.log('republish: ' + m));
 
   // 3. 回验：线上 200 且字节数和本地同量级（scp 半途断掉会留残文件）。
