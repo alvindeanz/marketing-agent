@@ -46,6 +46,13 @@ function changePlanPath(workspace, taskId) {
   return path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + taskId + '.md');
 }
 
+/** 无变更方案：execute 前提核验推翻原设后合法交付的空方案（第 2 节写「本方案无 API 调用」）。
+ *  apply 对它的职责只剩验收，affected 为空是预期不是失败。判据读磁盘上已批的方案原文，
+ *  apply 阶段的模型改不了它，报 success 也绕不过真方案的形状（2026-09-21 #339 实测补口）。 */
+function planDeclaresNoChange(plan) {
+  return /本方案无\s*API\s*调用/.test(String(plan || ''));
+}
+
 /** 方案末尾 json 的 files 清单，与 execute_task.planFiles 同一口径。 */
 function planFilesOf(plan) {
   const parsed = extractTrailingJson(plan);
@@ -852,6 +859,13 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
     log('task ' + taskId + ': ads applied and verified, marked done');
     return { taskId, status: 'success', logFile };
   }
+  if (status === 'success' && !affected.length && planDeclaresNoChange(plan)) {
+    await api.completeTask(taskId, {
+      note: head + '\n无变更方案验收：前提核验见方案第 1 节，affected 为空是预期。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
+    });
+    log('task ' + taskId + ': no-change plan verified and accepted');
+    return { taskId, status: 'success', logFile };
+  }
   const why = status === 'success' ? 'affected 为空，无法证明改了什么，按失败处理' : summarize(String(j.note || '') || output, 300);
   await fail(head + '\n' + (status === 'aborted' ? '执行中止' : '执行失败') + '：' + why + ' 任务保持 review，未标记完成，不自动重试。执行记录 ' + path.basename(logFile));
   log('task ' + taskId + ': ads apply ' + status + ' :: ' + truncate(why, 200));
@@ -964,6 +978,13 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
       note: head + '\n已按授权方案执行并线上自验通过。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
     });
     log('task ' + taskId + ': shopify applied and verified, marked done');
+    return { taskId, status: 'success', logFile };
+  }
+  if (status === 'success' && !affected.length && planDeclaresNoChange(plan)) {
+    await api.completeTask(taskId, {
+      note: head + '\n无变更方案验收：前提核验见方案第 1 节，affected 为空是预期。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
+    });
+    log('task ' + taskId + ': no-change plan verified and accepted');
     return { taskId, status: 'success', logFile };
   }
   const why = status === 'success' ? 'affected 为空，无法证明改了什么，按失败处理' : summarize(String(j.note || '') || output, 300);
