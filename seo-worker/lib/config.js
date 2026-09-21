@@ -79,6 +79,10 @@ const DEFAULTS = {
   // 叠起来会逼近 jobTimeoutMin 的 30 分，所以单独放宽。
   reportTimeoutMin: 45,
   jobTimeoutMin: 30,
+  // 按 job 类型分档放宽（2026-09-21 Alvin 批）：haakaa 317 篇 articles list 实测 30 分钟+，
+  // 批1 #339 执行撞预算被腰斩、半途备注被当结果收口。execute/apply/backfill 给 60 分，
+  // 其余类型维持 jobTimeoutMin，report 仍走 reportTimeoutMin。
+  jobTimeoutMinByType: { execute_task: 60, apply_task: 60, backfill_metrics: 60 },
   // WebForger API base and the blog language the runners write in. Empty lang
   // means the site's default language.
   webforgerApi: 'https://api.webforger.ai',
@@ -167,6 +171,8 @@ function load() {
   cfg.workerId = String(cfg.workerId || process.env.WORKER_ID || DEFAULTS.workerId).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
   cfg.maxConcurrent = Number(cfg.maxConcurrent) || 1;
   cfg.jobTimeoutMin = Number(cfg.jobTimeoutMin) || DEFAULTS.jobTimeoutMin;
+  cfg.jobTimeoutMinByType = Object.assign({}, DEFAULTS.jobTimeoutMinByType,
+    (cfg.jobTimeoutMinByType && typeof cfg.jobTimeoutMinByType === 'object') ? cfg.jobTimeoutMinByType : {});
   cfg.httpTimeoutMs = Number(cfg.httpTimeoutMs) || DEFAULTS.httpTimeoutMs;
   // Newer fields. Missing in an older config.json is fine, defaults apply.
   // cacheTtlHours 0 is meaningful, it disables the cache, so only fall back on NaN.

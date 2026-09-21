@@ -79,7 +79,8 @@ function runJob(job, lane) {
     const jobTag = 'job#' + job.id + ' ' + job.type;
     // 报告 job 的三层（取数、叙事、渲染发布）叠起来会超过通用 30 分钟预算，
     // 单独给它 cfg.reportTimeoutMin，其余类型口径不变。
-    const timeoutMin = job.type === 'report' ? cfg.reportTimeoutMin : cfg.jobTimeoutMin;
+    const timeoutMin = job.type === 'report' ? cfg.reportTimeoutMin
+      : (Number(cfg.jobTimeoutMinByType && cfg.jobTimeoutMinByType[job.type]) || cfg.jobTimeoutMin);
     const timeoutMs = timeoutMin * 60 * 1000;
     log(jobTag + ': claimed (client_id=' + job.client_id + '), timeout ' + timeoutMin + 'min');
 

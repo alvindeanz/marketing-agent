@@ -675,7 +675,11 @@ function analysis_task($t){
     global $READONLY_OPS;
     if(($t['owner_type']??'')!=='agent')return false;
     $ops=array_values(array_filter(array_map('trim',explode(',',(string)($t['ops']??'')))));
-    if(!$ops)return true;
+    /* ops 为空不再默认只读（2026-09-21 SP 批1 事故：自愈转位的写任务空 ops 走了分析模式，
+       交付即 auto-accept 收口成 done，apply 从未发生，线上现测零变化。按硬规矩 2
+       「操作未登记默认从严」，空 ops 只有确认卡类（card_kind 非空）仍按只读交付流转，
+       其余留 review 走人：人工验收，或补 ops 重跑出方案再放行。 */
+    if(!$ops)return !empty($t['card_kind']);
     foreach($ops as $op){if(!in_array($op,$READONLY_OPS,true))return false;}
     return true;
 }
@@ -2014,7 +2018,8 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     audit('seo-worker','seo_task_result',(string)$tid,['output_url'=>$i['output_url']??'','attention'=>isset($i['attention'])?($i['attention']?1:0):null]);
     /* 只读交付默认放行（2026-09-18 Alvin 第一性原理：可逆的直接放行不卡流程，错靠事后抽查+原地还原）。
        分析型任务（只读卡/报告，放行本就不 apply）交付即自动收货，不进「待放行 等我」。止损闩生效时仍留人。 */
-    $arow=db()->prepare("SELECT owner_type,ops,client_id FROM seo_tasks WHERE id=?");
+    ensure_review_schema(); /* card_kind 列（analysis_task 空 ops 分岔要读） */
+    $arow=db()->prepare("SELECT owner_type,ops,client_id,card_kind FROM seo_tasks WHERE id=?");
     $arow->execute([$tid]);
     $at=$arow->fetch();
     if($at&&analysis_task($at)&&!ops_halted((int)$at['client_id'])){
@@ -5206,7 +5211,13 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
     foreach($found as $t){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([(int)$t['id']]);$row=$full->fetch();
         if(analysis_task($row))$acceptIds[]=(int)$t['id'];
-        elseif(blog_outline_stage($row))$writeIds[]=(int)$t['id'];else $applyIds[]=(int)$t['id'];
+        elseif(blog_outline_stage($row))$writeIds[]=(int)$t['id'];
+        else{
+            /* 空 ops 护栏（与频道放行同口径）：执行走的是分析模式没有 change plan，排 apply 必失败 */
+            $opsR=array_values(array_filter(array_map('trim',explode(',',(string)$row['ops']))));
+            if(!$opsR)res(400,['error'=>'任务 '.$t['id'].' 没有 ops：没有 change plan 排落地必失败。人工验收（decide）或补 ops 重跑出方案再放行']);
+            $applyIds[]=(int)$t['id'];
+        }
     }
     foreach($acceptIds as $aid){
         $full=db()->prepare("SELECT output_url,result_note FROM seo_tasks WHERE id=?");$full->execute([$aid]);$row=$full->fetch();
@@ -5475,7 +5486,9 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/decide$#',$ROUTE,$mm)){
         res(200,['ok'=>true,'did'=>'killed']);
     }
     if($t['status']==='review'){
-        if(analysis_task($t)){
+        /* 空 ops 任务的人工同意 = 显式验收成稿（区别于 auto-accept：这里有人看过点头，
+           不违反「未登记默认从严」；机器落地仍然被挡，见各放行路护栏）。 */
+        if(analysis_task($t)||!array_filter(array_map('trim',explode(',',(string)$t['ops'])))){
             if(trim((string)$t['output_url'])===''&&strpos((string)$t['result_note'],'预览: ')===false)res(400,['error'=>'分析任务没有产出链接也没有预览，无法验收']);
             $err=task_close($tid,'accepted','分析报告已验收',$u['username']);
             if($err)res(400,['error'=>$err]);
@@ -5569,6 +5582,8 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
                     $done['do']++;continue;
                 }
                 if(blog_outline_stage($t)){list($wj,$ws)=blog_release_as_write($cid,$t,$u['username']);$jids=array_merge($jids??[],$wj);$done['do']++;continue;}
+                /* 空 ops 护栏：批量按推荐不代人验收成稿，留人逐条 decide */
+                if(!array_filter(array_map('trim',explode(',',(string)$t['ops'])))){$skipped[]=['task_id'=>$tid,'why'=>'没有 ops，机器落不了地：人工逐条验收，或补 ops 重跑出方案'];continue;}
                 $releaseIds[]=$tid;$done['do']++;continue;
             }
             if($eff==='later'){

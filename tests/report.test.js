@@ -953,9 +953,13 @@ t('报告相关的 config 键都有默认值', () => {
   assert.ok(d.reportRemoteRoot.indexOf('/reports') > -1);
   assert.ok(d.reportUrlBase.indexOf('agencyreport') > -1, '对外链接必须走 agencyreport 域名');
 });
-t('listener 对 type=report 单独取超时', () => {
+t('listener 对 type=report 单独取超时，其余类型走分档表兜底 jobTimeoutMin', () => {
   const src = require('fs').readFileSync(path.join(W, 'listener.js'), 'utf8');
-  assert.ok(/job\.type === 'report' \? cfg\.reportTimeoutMin : cfg\.jobTimeoutMin/.test(src));
+  assert.ok(/job\.type === 'report' \? cfg\.reportTimeoutMin/.test(src));
+  assert.ok(/jobTimeoutMinByType\[job\.type\]\) \|\| cfg\.jobTimeoutMin/.test(src));
+  const cfg = require(path.join(W, 'lib', 'config.js'));
+  const d = cfg.DEFAULTS || {};
+  if (d.jobTimeoutMinByType) assert.strictEqual(d.jobTimeoutMinByType.execute_task, 60);
 });
 t('api 有报告要用的五个方法', () => {
   const { Api } = require(path.join(W, 'lib', 'api'));
