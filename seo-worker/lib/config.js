@@ -47,8 +47,9 @@ const DEFAULTS = {
   rulingModel: 'opus',
   // 收件箱对话。人在工作台按客户跟它聊数据、聊博客规划，只读加提议，
   // 唯一的产物是任务草案，人点开工才落账。谈的是策略，所以给大模型。
-  /* 2026-09-11 Alvin 定：频道对话与 PJ 对齐走 fable（周配额观察 5 天，快超再降 opus）。 */
-  chatModel: 'fable',
+  /* 2026-09-11 Alvin 定走 fable 观察周配额，快超再降 opus；2026-09-21 应验（周中 fable 已烧 75%），
+     Alvin 定降 opus：聊天用 fable 大材小用，premium 只留 plan 与 planReview 两个低频真判断位。 */
+  chatModel: 'opus',
   // 任务判定（闸A）：一批任务该不该做，按 specs/review_principles.md 判。
   // 2026-09-17 Alvin 定降 opus：这是 fable 定好 plan 框架之内的单任务 go/no-go，边界清楚；
   // 判断漂了由季度 planReview（仍 fable）重规划纠回。全流水线最高频调用，premium 从高频挪走。

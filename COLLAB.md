@@ -29,6 +29,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：chat/thread 降 opus(Alvin 定: 周中 fable 配额已烧 75%, 聊天大材小用)
+
+- 干了什么：ros 线上 config.json 的 chatModel 与 threadModel 由 fable 改 opus（备份 config.json.bak-20260921），runner 每 job fork 现读配置，即改即生效无需重启，不影响在飞 harness。lib/config.js 默认值同步改 chatModel opus 并记录决策，防止未来重建 config 弹回 fable。
+- 坑：threadModel 2026-09-17 已在 DEFAULTS 降过 opus，但 ros config.json 的显式覆盖一直是 fable，默认值改了线上没跟着变，任务线程多烧了四天 premium。教训：DEFAULTS 改模型路由时必须同查 ros config.json 有没有同名覆盖。
+- fable 现存位：planModel（plan 生成，每客户每期一次）与 planReviewModel（方案层过闸，一客户一季度一次），均低频真判断，Alvin 定保留。
+- 下一步/认领：lib/config.js 默认值属 worker 白名单，待批跑收尾后随下次 worker 部署带上（线上行为已由 config.json 保证，不急）。
+
 ### 2026-09-21 AIRA：周日 cron 全客户 pull_data(Alvin 定: harness 轮转要吃最新数据)
 
 - 干了什么：weekly_run 批跑 harness 前没有取数步骤，各家决策一直用上次谁手动点「拉数据」时的库存。加 POST /jobs/pull_sweep（auth_worker，deliberately narrow 同 /tasks/{id}/revise 先例：worker 层只许排零 LLM 的 pull_data，POST /jobs 保持 admin only 不动），逐 active 客户排队、同客户在飞去重、audit 落账、fire_wake 唤醒。配 tools/weekly_pull.sh 从 ros config.json 读 serviceToken 调端点，root crontab 挂 0 14 * * 6（周日 02:00 NZST，夏令时 03:00）。CLAUDE.md 硬规矩 1 补了例外说明：规矩禁的是 cron 触发 LLM，零 LLM 纯取数不在此列。
