@@ -29,6 +29,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：第一性审阅四件套上线(Alvin 批: 回测/对账/冷却/复验路由)
+
+- 干了什么：①cohort_backtest.js：已落地写批次满 28 天测量窗自动拉 GSC 页级前后对称窗对比，结果落客户 notes/cohort_results.{json,md}，回流「结果层」闭环（experience_sync 只回判断层），月报证据素材副产品；周一 cron。首跑实测 Kuddles #71（结构化数据批）3 页点击 -4、位次 -4.3，样本小仅观察。②live_audit.js：宣称对账周检（done 写批次的 URL 全部现测 200 零跳转 + 改前存档可回溯），是「L0 零事故」度量缺的仪器；首跑 18 批 17 PASS，1 条 FAIL 为 note 截断的半截 URL 误报，已加截断保护后全绿。③同页冷却 28 天 + 全站独占窗 7 天：apply 前置闸读 notes/applied_ledger.jsonl（NFS 双 worker 同源），只拦同 URL 集与全站级混窗，不相交批次照常并行；博客与无变更方案豁免；四场景单测全过。④complete 端点待复验路由：数据类打 [backtest] 标归回测管道，人工类聚合建 verify: 工单继承母判决（split: 先例），不可见例外件归队。rev 8b9afc3，双机 worker 加 api 三端部署，全测绿。
+- 坑：结果 note 存库会截断长 URL 清单（Apollo #99 实证），受影响清单超长的批次对账覆盖不全；根治要么 note 不截断要么受影响 URL 进结构化存储（条目账本已有 entity 字段，可考虑并轨），暂记待办。config.js 相对 keyFile 曾按仓库 ROOT 解析，SEO_WORKER_CONFIG 场景取错 secrets，已改按 config 所在目录。
+- 下一步/认领：cohort 结果喂 planReview 简报（v2）；受影响 URL 结构化存储评估。
+
+
 ### 2026-09-21 AIRA：deploy.sh mac 腿上线并首次联调通过(Alvin 定, Connie 投递促升契约)
 
 - 干了什么：deploy.sh worker 加 mac 腿（rsync 白名单到 staging、写 REV、touch .deploy-request、轮询 DEPLOYED/DEPLOY_ERROR，mac 不在线不阻塞 ros）；check 加 mac 漂移比对（逐文件 md5，Connie 定不比 manifest_md5，locale 序不同）。SSH 走专用 ed25519（私钥 ros /root/.ssh/aira_mac_deploy），中途 SACL 组问题由 Connie 修复（com.apple.access_ssh 加 aira）。47abd0b 已推 main。
