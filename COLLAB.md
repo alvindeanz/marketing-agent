@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：卡反馈 actor 来源分账(Alvin 定: 代确认与客户亲点同通道)
+
+- 干了什么：seo_card_feedback 惰性补 actor 列('client'/'agency:<user>'), 表结构收进 ensure_card_feedback_schema()三处共用; 新端点 POST /tasks/{id}/card_feedback_proxy(admin, text 必填留档客户同意渠道, note 写[代确认 user], audit 留痕); GET /card_feedback 带回 actor(先 ensure 防 SELECT 抛错吞行); harness 折叠署名进批文 fact(「含 agency 代确认(名字)」); 看板卡行加「代确认」按钮(整卡同意口径, prompt 强制留档)。
+- 坑：GET 端点原来 try 吞表不存在, 新列上线瞬间会把已有行吞成零行, ensure 前置修掉; 代确认效力与客户亲点相同(批文/放行/到期机制不区分), 区别只在留痕, 这是 Alvin 明确的取舍。
+- 下一步/认领：观察首例代确认折叠的批文 fact 文案。
+
 ### 2026-09-21 AIRA：取消卡预览模式(Alvin 定: 内部有纪律, 降级画蛇添足)
 
 - 干了什么：lib/publish 新增 injectCardToken(幂等注入一行自动补参脚本, 裸链接打开自动 replace 成 ?t=&k=), execute 两处客户卡发布点接入, 发布扫描目录补 seo-agent-output/(ideal #798 根因), republish 加 --card <taskId> 旗标。效果: 任何存在的卡链接点开即可提交, 以最近一次发布为准, 预览降级分支永不触发(模板保留当死代码兜底), feedback API 令牌校验不变。

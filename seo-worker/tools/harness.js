@@ -64,7 +64,9 @@ async function foldCards(sprint) {
     const rows = (await call('GET', '/card_feedback?task_id=' + card.id)).rows || [];
     const f = foldCardFeedback(rows);
     if (!f.hasAny) { if (!DRY) await call('PATCH', '/tasks/' + card.id, { card_feedback_done: 1 }); continue; }
-    const summary = summariseFold(f);
+    /* 表态来源署名（2026-09-21 Alvin 定）：代确认与客户亲点同效力不同留痕，批文 fact 里点名 */
+    const proxyBy = [...new Set(rows.filter((r) => String(r.actor || '').indexOf('agency:') === 0).map((r) => String(r.actor).slice(7)))];
+    const summary = summariseFold(f) + (proxyBy.length ? '。含 agency 代确认（' + proxyBy.join('、') + '，渠道见卡反馈记录）' : '');
     log('#' + card.id + ' 卡反馈折叠：' + summary);
     if (DRY) continue;
     // 博客确认卡（publish_blog）不走泛方向卡折叠：agree 的凭证要留在 seo_card_feedback 表里，

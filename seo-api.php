@@ -4911,15 +4911,10 @@ if($m==='PUT'&&$ROUTE==='/profile'){
 /* 方向卡客户反馈（2026-08-31 Alvin 定三选一：agree 同意按建议 / hold 保持不变继续观察 / other 其他反馈带文本）。
    公开端点：卡在客户浏览器里直接 POST，无登录。防护：per-task token = md5('cardfb'+task_id+WORKER_TKN)，
    写库限长，另外把摘要追进任务 note 供看板与 feedback 流程用。空文本的 other 视为 hold。 */
-if($m==='POST'&&$ROUTE==='/card_feedback'){
-    global $WORKER_TKN;
-    $i=input();
-    $tid=(int)($i['task_id']??0);
-    $tok=(string)($i['token']??'');
-    if(!$tid||!hash_equals(md5('cardfb'.$tid.$WORKER_TKN),$tok))res(403,['error'=>'bad token']);
-    $g=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
-    $g->execute([$tid]);
-    if(!$g->fetch())res(404,['error'=>'task not found']);
+function ensure_card_feedback_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
     db()->exec("CREATE TABLE IF NOT EXISTS seo_card_feedback (
         id INT AUTO_INCREMENT PRIMARY KEY,
         task_id INT NOT NULL,
@@ -4932,6 +4927,22 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
     /* 签章列（2026-09-16 Alvin 定：卡上显示最后一次反馈时间与 IP），惰性补列 */
     $ipCol=db()->query("SELECT COUNT(*) c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_card_feedback' AND COLUMN_NAME='ip'")->fetch();
     if(!(int)($ipCol['c']??0))db()->exec("ALTER TABLE seo_card_feedback ADD COLUMN ip VARCHAR(64) NOT NULL DEFAULT ''");
+    /* actor 来源列（2026-09-21 Alvin 定：代确认与客户亲点走同一通道，靠这列分账。
+       'client' = 卡页令牌链接提交；'agency:<user>' = 看板登录用户代客户确认。
+       批文效力相同，留痕不同，客户纠纷时台账能指出这条同意是谁按的。 */
+    $acCol=db()->query("SELECT COUNT(*) c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_card_feedback' AND COLUMN_NAME='actor'")->fetch();
+    if(!(int)($acCol['c']??0))db()->exec("ALTER TABLE seo_card_feedback ADD COLUMN actor VARCHAR(80) NOT NULL DEFAULT 'client'");
+}
+if($m==='POST'&&$ROUTE==='/card_feedback'){
+    global $WORKER_TKN;
+    $i=input();
+    $tid=(int)($i['task_id']??0);
+    $tok=(string)($i['token']??'');
+    if(!$tid||!hash_equals(md5('cardfb'.$tid.$WORKER_TKN),$tok))res(403,['error'=>'bad token']);
+    $g=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
+    $g->execute([$tid]);
+    if(!$g->fetch())res(404,['error'=>'task not found']);
+    ensure_card_feedback_schema();
     /* 客户端 IP：同域中继带 X-Forwarded-For（只有中继一跳，取第一段即客户真实 IP），直连取 REMOTE_ADDR */
     $ip=trim(explode(',',(string)($_SERVER['HTTP_X_FORWARDED_FOR']??''))[0]);
     if($ip==='')$ip=(string)($_SERVER['REMOTE_ADDR']??'');
@@ -4962,7 +4973,7 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
     $dq=db()->prepare("SELECT id,created_at,ip FROM seo_card_feedback WHERE task_id=? AND item=? AND choice=? AND IFNULL(fb,'')=? AND created_at>DATE_SUB(NOW(),INTERVAL 24 HOUR) LIMIT 1");
     $dq->execute([$tid,$item,$choice,$txt]);
     if($dup=$dq->fetch())res(200,['ok'=>true,'dedup'=>true,'at'=>$dup['created_at'],'ip'=>(string)($dup['ip']??'')]);
-    db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip)VALUES(?,?,?,?,?)")->execute([$tid,$item,$choice,$txt,$ip]);
+    db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip,actor)VALUES(?,?,?,?,?,'client')")->execute([$tid,$item,$choice,$txt,$ip]);
     $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单'][$choice];
     task_append_note($tid,'[客户反馈] '.($item!==''?($item.'：'):'').$label.($txt!==''?('：'.$txt):''));
     /* 状态翻转（2026-09-13 Alvin 定第一性原则）：一条反馈就改变任务状态，
@@ -4972,6 +4983,33 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
     res(200,['ok'=>true,'at'=>date('Y-m-d H:i:s'),'ip'=>$ip]);
 }
 
+/* POST /tasks/{id}/card_feedback_proxy (admin) -> agency 代客户确认（2026-09-21 Alvin 定）。
+   与卡页同一张表同一条折叠管道，区别只在 actor 记登录用户。text 必填：客户在哪个渠道
+   口头同意的，一句话留档，这是代确认的问责底线。item 缺省为空即整卡态度（_card）。 */
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/card_feedback_proxy$#',$ROUTE,$mm)){
+    $u=auth_user();
+    $tid=(int)$mm[1];
+    $g=db()->prepare("SELECT id FROM seo_tasks WHERE id=?");
+    $g->execute([$tid]);
+    if(!$g->fetch())res(404,['error'=>'task not found']);
+    $i=input();
+    $item=mb_substr(trim((string)($i['item']??'')),0,120,'UTF-8');
+    $choice=(string)($i['choice']??'');
+    if(!in_array($choice,['agree','hold','other','flag'],true))res(400,['error'=>'bad choice']);
+    $txt=mb_substr(trim((string)($i['text']??'')),0,2000,'UTF-8');
+    if($txt==='')res(400,['error'=>'代确认必须写一句留档：客户通过什么渠道同意的']);
+    ensure_card_feedback_schema();
+    $actor='agency:'.mb_substr((string)$u['username'],0,60,'UTF-8');
+    db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip,actor)VALUES(?,?,?,?,?,?)")
+        ->execute([$tid,$item,$choice,$txt,substr((string)($_SERVER['REMOTE_ADDR']??''),0,64),$actor]);
+    $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单'][$choice];
+    task_append_note($tid,'[代确认 '.$u['username'].'] '.($item!==''?($item.'：'):'').$label.'：'.$txt);
+    ensure_review_schema();
+    db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
+    audit($u['username'],'seo_card_feedback_proxy',(string)$tid,['choice'=>$choice,'item'=>$item,'text'=>mb_substr($txt,0,200,'UTF-8')]);
+    res(200,['ok'=>true,'actor'=>$actor]);
+}
+
 /* GET /card_feedback?task_id= -> 该卡的全部反馈行（id 升序即时间序），harness 折叠用。 */
 if($m==='GET'&&$ROUTE==='/card_feedback'){
     auth_any();
@@ -4979,7 +5017,8 @@ if($m==='GET'&&$ROUTE==='/card_feedback'){
     if(!$tid)res(400,['error'=>'task_id required']);
     $rows=[];
     try{
-        $q=db()->prepare("SELECT id,item,choice,fb,created_at FROM seo_card_feedback WHERE task_id=? ORDER BY id");
+        ensure_card_feedback_schema(); /* actor 列惰性补齐，否则 SELECT 抛错会被吞成零行 */
+        $q=db()->prepare("SELECT id,item,choice,fb,created_at,actor FROM seo_card_feedback WHERE task_id=? ORDER BY id");
         $q->execute([$tid]);
         $rows=$q->fetchAll();
     }catch(Exception $e){/* 表还没建过（从未有人提交过反馈）就是空 */}

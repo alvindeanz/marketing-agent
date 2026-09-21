@@ -2570,8 +2570,21 @@ function cardRow(t){
     '<span class="badge '+st[0]+'">'+st[1]+'</span>'+
     '<span class="pr-main">'+esc(t.title)+'</span>'+
     (link?'<a class="log-toggle" href="'+esc(link)+'" target="_blank" rel="noopener">打开卡片</a>':'<span class="muted">无链接</span>')+
+    (/\[卡反馈折叠/.test(note)?'':'<button class="btn tiny ghost" onclick="proxyCardFb('+t.id+')" title="客户没空看卡时，替客户确认整卡同意，署你的名留档">代确认</button>')+
     '<span class="plan-meta">'+esc(String(t.updated_at||'').slice(0,16))+'</span>'+
     '</div>';
+}
+/* 代确认（2026-09-21 Alvin 定）：与卡页同一条反馈管道，actor 记登录用户。
+   必填留档一句：客户通过什么渠道同意的。整卡同意口径（item 空 = _card）。 */
+async function proxyCardFb(tid){
+  var why=prompt('代客户确认整卡「同意按建议」。\n必填留档：客户通过什么渠道同意的？（如：客户微信 9/21 口头同意）');
+  if(why===null)return;
+  why=String(why).trim();
+  if(!why){alert('留档不能为空，代确认必须写清客户同意的渠道');return}
+  var d=await api('/tasks/'+tid+'/card_feedback_proxy','POST',{choice:'agree',text:why});
+  if(fail(d,'代确认失败'))return;
+  toast('已代确认并署名留档，harness 下一轮折叠');
+  loadTasks();
 }
 function repPaidDraftRow(t){
   var note=String(t.result_note||'');
