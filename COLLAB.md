@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：t/k 令牌判卡 + 存量只读任务收货(Alvin 报障 badger #446/#452)
+
+- 干了什么：判卡加 t/k 反馈令牌签名(所有客户卡共同特征, badger #452 博客卡文件名是 topic-slug 全部清单认不出, 连带 midea 七条/oak 一条页面改版卡一起隐身在 Agent 泳道装「等放行」), 前端与 fleet_digest 同步。存量只读分析任务(交付早于 9/18 自动收货)补收 3 条: badger #446 核验/haakaa #342 映射表/oak #475 审计; citymed #380 是待人工发客户的博客 docx 不收, 归运营发送。
+- 坑：ops 空的任务 analysis 与博客卡同形, 区分靠有无 t/k 客户版链接; 昨天的存量清扫只扫了带卡 op 的, 漏了 ops 空的两形。
+- 下一步/认领：citymed #380 docx 发送归我; card_kind 后续对 t/k 卡回填 blog_confirmation/pageopt_confirmation 值。
+
 ### 2026-09-21 AIRA：等我队列 49 收敛到真决策(Alvin 批五件套)
 
 - 干了什么：①readonly_ops 唯一事实源迁 release_policy.json v10(补 keyword/mapping-confirmation 两个卡 op 与风险档), seo-api $READONLY_OPS 运行时从政策读, specs.test 断言改对政策文件收口 ②seo_tasks 加 card_kind 列(惰性 DDL), task_insert/PATCH ops 时由 card_kind_of() 落字段, 前端判卡字段优先正则兜底 ③harness 折叠词表/mapping 确认卡时给同客户 onpage/content 未落地任务挂 [backing] cards.tN.outcome, 到期分支同样落 outcome fact+backing, L0 凭批文直落 external/structural, 花钱/不可逆照停 ④失败任务 wait_reason 前缀「等运营」 ⑤queued 措辞改「排期（待判定/下轮自动拍板）」。tests 全绿。

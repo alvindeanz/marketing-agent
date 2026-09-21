@@ -33,6 +33,7 @@ function isPendingCard(t) {
   if (/^(卡反馈落地|卡到期落地)/.test(title)) return false;
   if (/keyword-direction|creative-direction|keyword-confirmation|mapping-confirmation/.test(String(t.ops || ''))) return true;
   if (/确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(s + String(t.output_url || ''))) return true;
+  if (/\?t=\d+&k=[a-f0-9]+/.test(s + String(t.output_url || ''))) return true; /* t/k 令牌=卡的共同签名 */
   return /确认卡|方向卡|词卡|素材卡|confirmation card/i.test(title) && /客户版|agencyreport/.test(s);
 }
 
