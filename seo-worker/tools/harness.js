@@ -30,6 +30,9 @@ if (!cid || !TOKEN) { console.error('用法：SEO_AGENT_TOKEN=... node tools/har
 const ts = () => new Date().toISOString().slice(11, 19);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (m) => console.log(ts() + ' ' + m);
+// 模块级：foldCards 与转位自愈两处都用。曾只定义在 foldCards 里，自愈段调用抛
+// ReferenceError 被段级 try/catch 吞掉，整段静默跳过（2026-09-21 批1 实测抓到）。
+const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
 
 async function call(method, p, body) {
   const r = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
@@ -59,7 +62,6 @@ function humanDecisions(note) {
    （默认 14 天）零反馈的方向卡，按卡上「未回复按建议执行」承诺视同同意。 */
 async function foldCards(sprint) {
   const all = await tasks();
-  const stamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
   for (const card of all.filter((t) => t.card_feedback_at)) {
     const rows = (await call('GET', '/card_feedback?task_id=' + card.id)).rows || [];
     const f = foldCardFeedback(rows);
