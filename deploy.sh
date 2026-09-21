@@ -9,6 +9,12 @@ cd "$(dirname "$0")"
 
 ROS="alvin@192.168.10.205";        ROS_DIR="/data/aira/seo-worker"
 BT="clawagent@192.168.10.250";     BT_DIR="/www/wwwroot/always"
+# mac 第二 worker（2026-09-21 Connie 投递促升契约）：我们只送货到 staging 并触发，
+# 促升/重启由 mac 侧 tmux 看守（alvin 上下文）执行，成败看 DEPLOYED 或 DEPLOY_ERROR。
+# mac 不在线不阻塞 ros 发布，只标待同步。
+MAC="aira@192.168.10.215";         MAC_KEY="/root/.ssh/aira_mac_deploy"
+MAC_STAGING="/data/aira/deploy-staging/seo-worker"; MAC_LIVE="/data/aira/seo-worker"
+mac_ssh(){ ssh -i "$MAC_KEY" -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$MAC" "$@"; }
 WORKER_SRC="seo-worker"
 # worker 同步白名单：只有这些进 ros，config.json/secrets/workspace 永不触碰
 WHITELIST=(listener.js runner_host.js lib runners specs)
@@ -54,6 +60,16 @@ check)
   for item in "${WHITELIST[@]}"; do
     ros_rsync -rcin --delete "$WORKER_SRC/$item" | sed 's/^/    /' || true
   done
+  echo "== mac worker 线上版本与漂移（逐文件 md5，Connie 定：别比 manifest_md5，locale 序不同） =="
+  if mac_ssh "true" 2>/dev/null; then
+    mac_ssh "cat $MAC_LIVE/DEPLOYED 2>/dev/null || echo '（mac 无 DEPLOYED 记录）'"
+    manifest_local | LC_ALL=C sort -k2 > /tmp/seo-worker.local.md5
+    mac_ssh "cd $MAC_LIVE && find ${WHITELIST[*]} -type f 2>/dev/null | LC_ALL=C sort | while read f; do md5 -r \"\$f\"; done" \
+      | awk '{print $1"  "$2}' | LC_ALL=C sort -k2 > /tmp/seo-worker.mac.md5
+    diff /tmp/seo-worker.local.md5 /tmp/seo-worker.mac.md5 >/dev/null 2>&1 && echo "    mac 与本地白名单逐文件一致" || { echo "    mac 漂移文件："; diff /tmp/seo-worker.local.md5 /tmp/seo-worker.mac.md5 | grep '^[<>]' | sed 's/^/    /' | head -20; }
+  else
+    echo "    mac 不在线或 ssh 不通"
+  fi
   echo "== 250 看板线上版本 =="
   "${SSH_BT[@]}" "cat $BT_DIR/DEPLOYED-seo 2>/dev/null || echo '（无 DEPLOYED-seo 记录）'"
   echo "== 250 看板漂移 =="
@@ -99,6 +115,33 @@ worker)
   echo "[6/6] 写 DEPLOYED 记录，清理 30 天前旧备份"
   ros_sh "printf 'rev %s\ndate %s\nmanifest_md5 %s\n' '$(rev)' '$TS' '$(md5 -q /tmp/seo-worker.manifest 2>/dev/null || md5sum /tmp/seo-worker.manifest | cut -d' ' -f1)' > $ROS_DIR/DEPLOYED; find $ROS_DIR -maxdepth 1 -name '.bak-deploy-*' -mtime +30 -exec rm -rf {} +"
   echo "worker 部署完成：rev $(rev)"
+  # ---- mac 腿（投递促升，四步契约）----
+  REV=$(rev)
+  if ! mac_ssh "true" 2>/dev/null; then
+    echo "mac 不在线或 ssh 不通，本次不同步，标记待同步（rev $REV）。上线后重跑 ./deploy.sh worker 或单独联系 Connie。"
+  else
+    echo "[mac 1/4] rsync 白名单到 staging"
+    MAC_OK=1
+    for item in "${WHITELIST[@]}"; do
+      rsync -rc --delete -e "ssh -i $MAC_KEY -o BatchMode=yes" "$WORKER_SRC/$item" "$MAC:$MAC_STAGING/" || { MAC_OK=0; break; }
+    done
+    if [ "$MAC_OK" = 1 ]; then
+      echo "[mac 2/4] 写 REV，[mac 3/4] touch .deploy-request"
+      mac_ssh "rm -f $MAC_STAGING/DEPLOY_ERROR; echo $REV > $MAC_STAGING/REV; touch $MAC_STAGING/.deploy-request"
+      echo "[mac 4/4] 轮询促升结果（看守 30 秒一拍，drain 有在飞 job 会等，最长等 10 分钟）"
+      MAC_DONE=0
+      for i in $(seq 1 60); do
+        sleep 10
+        ERR=$(mac_ssh "cat $MAC_STAGING/DEPLOY_ERROR 2>/dev/null" || true)
+        if [ -n "$ERR" ]; then echo "mac 促升被拒（live 零变动）："; echo "$ERR" | sed 's/^/    /'; exit 1; fi
+        DR=$(mac_ssh "sed -n 's/^rev //p' $MAC_LIVE/DEPLOYED 2>/dev/null" || true)
+        if [ "$DR" = "$REV" ]; then echo "mac 部署完成：rev $REV（两机同版）"; MAC_DONE=1; break; fi
+      done
+      [ "$MAC_DONE" = 1 ] || { echo "mac 促升超时（10 分钟无 DEPLOYED 更新也无 DEPLOY_ERROR），查 mac 侧 deploy-watcher.log"; exit 1; }
+    else
+      echo "mac rsync 失败，staging 未成型不触发促升，mac 保持旧版。"; exit 1
+    fi
+  fi
   ;;
 
 api)
