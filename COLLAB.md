@@ -29,6 +29,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：wordpress 能力清单 v1 + wf-agent 落地车道上线(Alvin 批, TODO 收口)
+
+- 干了什么：specs/capabilities/wordpress.md v1（wp-seo-meta-update / wp-term-seo-update / wp-redirect-add / wp-sitemap-flush 四 op agent_apply 带卡片分界；正文、Elementor、结构化数据、Woo 写 human_only 等端点；token 纪律与两站坑写进风险注记）。release_policy v12：四 op reversible 入 risk_class_by_op，connected_lanes 加 wordpress。apply_task 加 runWordpressApply（wf-agent REST，token 从客户 .secrets.env 内联取值禁止入日志，Wordfence 写间隔 2 秒，PHP warning 前缀截断，插件自动快照即回滚）。execute prepare prompt 的 X-WF-Changeset 行改按平台分流。specs 测试补 wordpress.md 与 policy 一致断言。两客户工作区补 notes/wordpress_credentials.md。rev df93cbc，worker 与 api 双端部署，全测绿。
+- 验证：两站 /status 实测通（插件 1.2.0）；sdalu harness 自愈认出平台，#592/593/594 转机器位重排判定；kiaorakids 同样转 3 条（仍被词闸 held，属预期）。kiaorakids TLS 证书已恢复（09-20 Aiden 报过期，现 200）。
+- 坑：wf-agent 1.2.0 无正文写端点（WP 原生 /wp/v2/ 的 application password 两站均未签发），content 类任务仍出稿转人工；缺口按规矩登记 Aiden，不绕插件。
+- 下一步/认领：kiaorakids 词闸处理（查工作区判静默补 fact 还是发卡）；Aiden 侧正文端点或 application password 签发后升 v2 解锁 wp-content-edit。
+
+
 ### 2026-09-21 AIRA：#339 全链收口, execute 长任务规矩与 apply 无变更分支上线(Alvin 批)
 
 - 干了什么：execute prepare prompt 加长任务规矩（长验证不留后台尾巴，抽样核对或按真实数据分批，拆不拆由 execute 撞到数据量当场判断，66adc02）；apply 补无变更方案收口分支（判据读磁盘已批方案的「本方案无 API 调用」，affected 空是预期，shopify 与 ads 两路同修，9717aca）。#339 新规矩下重跑：定点 curl 核验替代 1380 URL 全量爬取，前提被推翻（三组 301 客户 9 月中已自行落地，两站一跳 301 落地 200），无变更方案过结构闸、放行、apply 验证收口 done。拆分共识（Alvin 定）：未知量自适应拆、已知量计划拆、不为未知量提前买单，已写进 prompt 本体。
