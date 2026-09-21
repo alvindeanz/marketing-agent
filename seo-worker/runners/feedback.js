@@ -154,6 +154,13 @@ function cleanFacts(json, log) {
       log('facts: 丢弃重复的 "' + key + '"，保留先出现的那条');
       continue;
     }
+    /* 瞬时状态快照不进 confirmed（2026-09-21 haakaa 实证，与 chat.js 同口径）：
+       missing/not_set/default 这类是「当时缺什么」，当天就会被修掉，留在 facts 里
+       会让下一轮 plan 去补已补的东西。平台可实测的状态走实测刷新，不从人话解析。 */
+    if (/^(missing|not[_ -]?set|none|null|empty|unknown|n\/?a|default([_ -][a-z_ -]*)?|待设置|未设置|未配置|缺失|没有|无)$/i.test(String(value))) {
+      log('facts: 丢弃 "' + key + '"，值是瞬时状态快照（' + value + '），实测类不进 facts');
+      continue;
+    }
     if (!KNOWN_NAMESPACES.includes(key.split('.')[0])) {
       log('facts: "' + key + '" 用了不常见的命名空间，照样入库供人复核');
     }

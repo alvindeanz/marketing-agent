@@ -4266,6 +4266,27 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
     $rootRefs=inbox_refs_norm($root['refs']);
     $actions=inbox_actions_norm($i['actions']??null);
     $msgId=chat_msg_insert($root,'chat_agent',$body,'seo-worker',['drafts'=>$drafts,'actions'=>$actions]);
+    /* 任务号自动挂引用（2026-09-21 haakaa 实证：agent 正文点名 #340 却零引用，
+       人工做完的活找不到卡收口）。正文里出现的 #N 若是本客户真实任务，合并进根 refs.tasks，
+       线程侧栏即出任务卡，一键可点「置完成」。上限 10 个防灌水。 */
+    if($root['client_id']!==null&&preg_match_all('/#(\d{1,6})\b/u',$body,$tm)){
+        $cands=array_values(array_unique(array_map('intval',$tm[1])));
+        if($cands){
+            $in2=implode(',',array_fill(0,count($cands),'?'));
+            $vq=db()->prepare("SELECT id FROM seo_tasks WHERE client_id=? AND id IN ($in2)");
+            $vq->execute(array_merge([(int)$root['client_id']],$cands));
+            $okIds=array_map(function($r){return (int)$r['id'];},$vq->fetchAll());
+            if($okIds){
+                $cur=isset($rootRefs['tasks'])&&is_array($rootRefs['tasks'])?array_map('intval',$rootRefs['tasks']):[];
+                $mergedT=array_values(array_unique(array_merge($cur,$okIds)));
+                if(count($mergedT)>10)$mergedT=array_slice($mergedT,0,10);
+                if($mergedT!==$cur){
+                    $rootRefs['tasks']=$mergedT;
+                    db()->prepare("UPDATE seo_inbox SET refs=? WHERE id=?")->execute([json_encode($rootRefs,JSON_UNESCAPED_UNICODE),$rootId]);
+                }
+            }
+        }
+    }
     /* facts 先于 actions 处理（2026-09-11 快路，Alvin 批）：同轮「落批文 fact + 快路启动」
        要求 fact 在定档之前已是 confirmed，否则 structural/external 的背书永远晚一步。 */
     /* facts：人在会话里明确要求记录或更新的客户事实（含微信截图转述），模型翻译成

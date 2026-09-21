@@ -29,6 +29,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-21 AIRA：haakaa chat 复盘三修(Alvin 定, 立即修不等周末)
+
+- 干了什么：①瞬时状态快照不进 facts: chat cleanFacts 与 feedback cleanFacts 同口径拦 missing/not_set/default 类值(haakaa 实证: 三条缺陷快照当天被修掉却永久 confirmed, 下轮 plan 会去补已补的东西), chat prompt 补「facts 只记持久事实与客户决策」 ②chat 正文点名 #N 自动挂根 refs.tasks(服务端 chat_reply 校验本客户真实任务, 上限 10), prompt 补「人说做完了→点明对应任务并提醒置完成」 ③存量清理: haakaa 三条快照 fact 改写为已解决实情(带日期), #340 人工认定完成收口, #341 记四/八进度。
+- 坑：chat 与 feedback 两条 facts 管道都会写 confirmed, 修一条漏一条; 台账收口目前靠人点置完成, chat 只能提醒, 更硬的自动收口(人说做完→快路确认置完成)留观察后再定。
+- 下一步/认领：haakaa Milk Storage title 拿掉 Systems 是否违反只加不减, 周一 harness 前查 GSC systems 词底仓再定恢复与否。
+
 ### 2026-09-21 AIRA：路由元数据自愈环上线(Alvin 批, 第一性设计见当日频道)
 
 - 干了什么：统一形状=观测者提议+服务端确定性校验+执行留痕+台账回流+熔断。①归类自愈: 闸A 判定 json 加可选 reclass{module,owner_type,reason}(review_plan 清洗只认六枚举与 agent), review_result 校验(熔断[reclass]一次/仅 proposed|approved|blocked/split 工单不转/owner 转 agent 需 connected_lanes 车道在表), 过检即改库+作废旧判决+自动重排闸A, audit 留 seo_task_reclass ②转位自愈: harness 转位候选升级为当期自动转(proposed|approved+站内三 module+无人工特征词+非 split+每轮每客户上限 10), 不带 mandate 标记, 照走判定与放行分级, [auto-machine-run]熔断; 未来期照旧提示 ③policy v11 加 connected_lanes ④fleet_digest 加自愈账桶(近 N 天 reclass/转位逐条, 翻案=PATCH 回原值)。tests 全绿(review 25 过, 新增 reclass 三例, 既有 deepStrictEqual 基线补 reclass:null)。

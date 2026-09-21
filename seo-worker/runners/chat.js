@@ -427,6 +427,11 @@ function buildPrompt(opts) {
     '- facts 的 key 优先复用简报里已有的 fact key；确实是新事实才起新 key，照简报里的命名风格',
     '  （小写加点分层，如 content.warranty）。value 一句话写清事实本身，带日期与出处。',
     '- 人没让记就不要写 facts；拿不准这算不算客户事实（比如只是讨论），先问再记。最多 8 条。',
+    '- facts 只记**持久事实与客户决策**（产品特性、口径、批文、偏好）。「这页现在缺 title」「meta 没设置」',
+    '  这类瞬时状态快照不许写 facts：它明天就会被修掉，留下的 confirmed 会误导下一轮规划',
+    '  （runner 也会拦 missing/not_set/default 这类值）。现状类信息写进正文或任务里。',
+    '- **人说某件活已经人工做完时**：核对后在正文里点明它对应看板任务 #N（没有对应任务就说没有），',
+    '  提醒对方到任务卡点「置完成」收口台账，别让做完的活继续挂 approved 被下一轮重复推进。',
     task ? '' : '- 委托单流程（2026-09-11 Alvin 定，契约闸）：**提议和启动是两个时刻，中间必须隔一次人的确认**。',
     task ? '' : '  讨论收敛后你出委托单卡（drafts），正文里复述这单改什么、依据人的哪句话、风险档是直落还是等确认；',
     task ? '' : '  人在**之后的消息**里确认了（「按这个做」「第一单开工」「可以」都算），你下一轮才发',
@@ -601,6 +606,11 @@ function cleanChanActions(json, log) {
 }
 
 /* 模型给的 facts 清单规整：key 非空且不超 100 字、value 非空，坏的丢掉记日志，最多 8 条。 */
+/* 瞬时状态值黑名单（2026-09-21 haakaa 实证：seo_title=default_collection_name、
+   meta=not_set、intro=missing 当天下午就被修掉，confirmed fact 却永远记着缺陷，
+   下一轮 plan 读到会再立一单去补已补的东西）。这类「平台可实测」的状态按 facts 三分法
+   走实测刷新，不从人话进 confirmed。 */
+const SNAPSHOT_VALUE = /^(missing|not[_ -]?set|none|null|empty|unknown|n\/?a|default([_ -][a-z_ -]*)?|待设置|未设置|未配置|缺失|没有|无)$/i;
 function cleanFacts(json, log) {
   const say = log || function () {};
   const raw = json && Array.isArray(json.facts) ? json.facts : [];
@@ -611,6 +621,7 @@ function cleanFacts(json, log) {
     const key = String(f.key || f.fact_key || '').trim();
     const value = String(f.value || '').trim();
     if (!key || key.length > 100 || !value) { say('对话：丢弃一条 fact，key 或 value 不合法'); continue; }
+    if (SNAPSHOT_VALUE.test(value)) { say('对话：丢弃 fact ' + key + '，值是瞬时状态快照（' + value + '），实测类不进 facts'); continue; }
     out.push({ key, value });
   }
   return out;
