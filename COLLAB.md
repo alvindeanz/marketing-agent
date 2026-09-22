@@ -29,6 +29,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-22 AIRA：ads raw-mutate 网关上线, 硬规矩 2 在 paid 泳道落地(Alvin 定, midea #817 复盘)
+
+- 干了什么：#817（共享否词列表建挂载）熔断复盘定性为「政策已升级、实现没跟上」：硬规矩 2 说白名单是路由偏好不是能力天花板，但 ads apply 泳道仍把 mutate 白名单当唯一写通道，白名单外一律熔断。落地修复：ads_mutate.py 加 raw-mutate 网关（GoogleAdsService MutateOperation 万能包，validate_only 先行、spend/出价策略/转化配置/账务域拒绝表、单批 100 上限、resource_names 全量回吐）；ads_audit 补 sharedSets/sharedCriteria/campaignSharedSets 三类硬读；apply prompt 加 raw 泳道规矩（先 dry-run、改前 GAQL 读旧值、resource_name 进条目账本）；googleads.md 记网关章节。rev eff965f 双机部署，全测绿，实测拒绝表拦预算操作、midea 真账户 validate_only 过。
+- 坑：google-ads python 客户端 GoogleAdsService 的 mutate 方法名就叫 mutate 不是 mutate_google_ads。另发现 chat 派单卡面「等运营：落地失败」把能力缺口熔断和真失败混为一谈，展示层可分级，低优先级。
+- 下一步/认领：Alvin 在 midea chat 手动重跑 #817 验收防复发；能力缺口计数（gapHits）该单记一次。
+
+
 ### 2026-09-21 AIRA：第一性审阅四件套上线(Alvin 批: 回测/对账/冷却/复验路由)
 
 - 干了什么：①cohort_backtest.js：已落地写批次满 28 天测量窗自动拉 GSC 页级前后对称窗对比，结果落客户 notes/cohort_results.{json,md}，回流「结果层」闭环（experience_sync 只回判断层），月报证据素材副产品；周一 cron。首跑实测 Kuddles #71（结构化数据批）3 页点击 -4、位次 -4.3，样本小仅观察。②live_audit.js：宣称对账周检（done 写批次的 URL 全部现测 200 零跳转 + 改前存档可回溯），是「L0 零事故」度量缺的仪器；首跑 18 批 17 PASS，1 条 FAIL 为 note 截断的半截 URL 误报，已加截断保护后全绿。③同页冷却 28 天 + 全站独占窗 7 天：apply 前置闸读 notes/applied_ledger.jsonl（NFS 双 worker 同源），只拦同 URL 集与全站级混窗，不相交批次照常并行；博客与无变更方案豁免；四场景单测全过。④complete 端点待复验路由：数据类打 [backtest] 标归回测管道，人工类聚合建 verify: 工单继承母判决（split: 先例），不可见例外件归队。rev 8b9afc3，双机 worker 加 api 三端部署，全测绿。
