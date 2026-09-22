@@ -14,7 +14,7 @@ function runGaqlDefault(customerId, query) {
   return out.split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
-const RES_RE = /customers\/\d+\/(assetGroups|campaignBudgets|campaigns|conversionActions|assets|adGroups|campaignCriteria|adGroupCriteria)\/[\w~-]+/;
+const RES_RE = /customers\/\d+\/(assetGroups|campaignBudgets|campaigns|conversionActions|assets|adGroups|campaignCriteria|adGroupCriteria|sharedSets|sharedCriteria|campaignSharedSets)\/[\w~-]+/;
 
 /* 每类资源：查什么、怎么算符合。expectText 是条目 target_value+evidence 的合并文本，
    用来抠期望状态或 micros 数值。 */
@@ -93,6 +93,35 @@ const CHECKS = {
       if (wantMt && mt && mt !== wantMt) return '期望 ' + wantMt + ' 实际 ' + mt;
       const wantSt = /\bPAUSED\b/.test(expectText) ? 'PAUSED' : 'ENABLED';
       if (st && st !== wantSt) return '期望 ' + wantSt + ' 实际 ' + st;
+      return '';
+    },
+  },
+  /* 共享否词三件套（2026-09-22，raw-mutate 网关配套：midea #817 缺口）。 */
+  sharedSets: {
+    query: (rn) => "SELECT shared_set.resource_name, shared_set.status, shared_set.name, shared_set.type FROM shared_set WHERE shared_set.resource_name = '" + rn + "'",
+    verify(rows, expectText) {
+      if (!rows.length) return '账户里查无此 shared set';
+      const st = String(rows[0].shared_set_status || '');
+      if (st && st !== 'ENABLED') return '期望 ENABLED 实际 ' + st;
+      return '';
+    },
+  },
+  sharedCriteria: {
+    query: (rn) => "SELECT shared_criterion.resource_name, shared_criterion.keyword.text, shared_criterion.keyword.match_type FROM shared_criterion WHERE shared_criterion.resource_name = '" + rn + "'",
+    verify(rows, expectText) {
+      if (!rows.length) return '账户里查无此 shared criterion';
+      const mt = String(rows[0].shared_criterion_keyword_match_type || '');
+      const wantMt = (expectText.match(/\b(PHRASE|BROAD|EXACT)\b/) || [])[1];
+      if (wantMt && mt && mt !== wantMt) return '期望 ' + wantMt + ' 实际 ' + mt;
+      return '';
+    },
+  },
+  campaignSharedSets: {
+    query: (rn) => "SELECT campaign_shared_set.resource_name, campaign_shared_set.status FROM campaign_shared_set WHERE campaign_shared_set.resource_name = '" + rn + "'",
+    verify(rows, expectText) {
+      if (!rows.length) return '账户里查无此 campaign 挂载';
+      const st = String(rows[0].campaign_shared_set_status || '');
+      if (st && st !== 'ENABLED') return '期望 ENABLED 实际 ' + st;
       return '';
     },
   },

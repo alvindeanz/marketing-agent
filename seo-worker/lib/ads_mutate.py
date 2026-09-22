@@ -39,7 +39,17 @@ import sys
 ENV_FILE = "/data/aira/.env.google-ads"
 OPS = ["final-url-change", "ad-pause", "adgroup-pause", "keyword-pause", "negative-keyword-add",
        "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "keyword-add", "keyword-final-url",
-       "ad-create", "schedule-adjust"]
+       "ad-create", "schedule-adjust", "raw-mutate"]
+
+# raw-mutate 网关的拒绝表（2026-09-22，硬规矩 2 对齐：白名单是路由偏好不是能力天花板，
+# 白名单外的获批操作走本网关直接执行，validate_only 先行 + 零模型对账兜底）。
+# spend / 不可逆 / 账务域永远停人，网关层再拦一道，不指望调用方自觉。
+RAW_DENY = ["campaign_budget_operation", "campaignBudgetOperation",
+            "bidding_strategy_operation", "biddingStrategyOperation",
+            "bidding_data_exclusion_operation", "customer_operation", "customerOperation",
+            "billing_setup_operation", "billingSetupOperation",
+            "account_budget_proposal_operation", "accountBudgetProposalOperation",
+            "conversion_action_operation", "conversionActionOperation"]
 MATCH_TYPES = {"broad": "BROAD", "phrase": "PHRASE", "exact": "EXACT",
                "BROAD": "BROAD", "PHRASE": "PHRASE", "EXACT": "EXACT"}
 
@@ -702,6 +712,66 @@ def op_keyword_bid_adjust(client, cid, args):
          "budget_impact": "出价级，无预算变动"})
 
 
+def op_raw_mutate(client, cid, args):
+    """白名单外获批操作的统一网关（GoogleAdsService.Mutate，MutateOperation 万能包）。
+    spec 从 stdin 读 JSON：{"mutate_operations": [{"shared_set_operation": {"create": {...}}}, ...]}
+    字段名 snake_case 或 camelCase 均可（protobuf json_format 双认）。
+    硬闸：拒绝表操作直接拒；先 validate_only 全量校验并打印，--dry-run 到此为止；
+    实弹后打印每条 resource_name（对账硬读的钥匙，条目账本必须携带）。"""
+    if args.spec != "-":
+        die("raw-mutate 只收 --spec -（stdin JSON）")
+    try:
+        spec = json.load(sys.stdin)
+    except Exception as e:
+        die("spec JSON 解析失败: " + str(e)[:200])
+    ops_json = spec.get("mutate_operations")
+    if not isinstance(ops_json, list) or not ops_json:
+        die("spec 缺 mutate_operations 数组")
+    if len(ops_json) > 100:
+        die("单次最多 100 条 operation，分批来")
+    blob = json.dumps(ops_json)
+    for bad in RAW_DENY:
+        if bad in blob:
+            die("raw-mutate 拒绝 " + bad + "：spend/不可逆/账务域操作永远走人（release_policy 硬闸），本网关不收")
+    from google.protobuf import json_format
+    svc = client.get_service("GoogleAdsService")
+    req = client.get_type("MutateGoogleAdsRequest")
+    req.customer_id = cid
+    kinds = []
+    for oj in ops_json:
+        if not isinstance(oj, dict) or len(oj) != 1:
+            die("每条 mutate_operation 必须恰好一个 *_operation 键，收到: " + json.dumps(oj)[:120])
+        kinds.append(list(oj.keys())[0])
+        mo = client.get_type("MutateOperation")
+        try:
+            json_format.ParseDict(oj, mo._pb)
+        except Exception as e:
+            die("operation 解析失败（字段名或结构不对）: " + str(e)[:300])
+        req.mutate_operations.append(mo)
+    req.validate_only = True
+    try:
+        svc.mutate(request=req)
+    except Exception as e:
+        die("validate_only 未过，零改动: " + str(e)[:500], 1)
+    out({"ok": True, "stage": "validate_only", "operations": len(ops_json), "kinds": kinds})
+    if args.dry_run:
+        out({"ok": True, "op": "raw-mutate", "dry_run": True, "note": "validate_only 全过，未实弹"})
+        return
+    req.validate_only = False
+    resp = svc.mutate(request=req)
+    names = []
+    for r in resp.mutate_operation_responses:
+        rn = ""
+        for f in r._pb.DESCRIPTOR.fields:
+            v = getattr(r, f.name, None)
+            if v is not None and getattr(v, "resource_name", ""):
+                rn = v.resource_name
+                break
+        names.append(rn)
+    out({"ok": True, "op": "raw-mutate", "operations": len(ops_json), "kinds": kinds,
+         "resource_names": names, "budget_impact": "网关拒绝表已排除 spend 域，本批预算中性"})
+
+
 def main():
     p = argparse.ArgumentParser(add_help=True)
     p.add_argument("customer_id")
@@ -735,7 +805,8 @@ def main():
          "rsa-copy-update": op_rsa_copy_update,
          "keyword-add": op_keyword_add,
          "keyword-final-url": op_keyword_final_url,
-         "ad-create": op_ad_create}[args.op](client, cid, args)
+         "ad-create": op_ad_create,
+         "raw-mutate": op_raw_mutate}[args.op](client, cid, args)
     except SystemExit:
         raise
     except Exception as e:

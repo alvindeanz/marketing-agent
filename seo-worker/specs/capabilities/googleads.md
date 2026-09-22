@@ -36,6 +36,15 @@
 | creative-direction | agent_readonly | 素材方向卡，一步出报告 |
 <!-- PLANNING_VIEW_END -->
 
+## raw-mutate 网关（2026-09-22，硬规矩 2 落地：白名单是路由偏好不是能力天花板）
+
+方案获批但专用 op 覆盖不到的写操作（首例：共享否词列表建挂载，midea #817），apply 泳道走
+`ads_mutate.py <cid> --op raw-mutate --spec -`（GoogleAdsService MutateOperation 万能包）。
+网关硬闸：validate_only 先行全量校验；拒绝表直接拒 spend/出价策略/转化配置/账务域操作（那些永远走人）；
+单批上限 100 条。泳道规矩：改前 GAQL 现读旧值，实弹后 resource_name 逐条回读并进条目账本，
+零模型对账（lib/ads_audit）硬读 sharedSets / sharedCriteria / campaignSharedSets 等资源全符才收口。
+方案没批的操作，raw 网关一样不许碰。
+
 ## 操作集与自主权限
 
 risk_class 是放行分级的输入（见 ../release_policy.md）：reversible 的 prepare 任务闸A 复审过即自动放行，其余人点。
