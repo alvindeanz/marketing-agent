@@ -29,6 +29,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 ## 条目
 
+### 2026-09-22 AIRA：chat 委托单 ops 生产端校验(Alvin 定, ctomi 开工被拒复盘)
+
+- 干了什么：ctomi 共享否词委托单 ops 被模型写成散文（含「执行器不覆盖转人工」说明），错误活到人点开工才被放行政策校验拒掉。修复三层：prompt 加铁律（ops 只许政策表 op 名，落地说明进 detail）；cleanDrafts 生产端校验（合法照放；散文时人工位单连 kind 降为普通任务、原文迁 detail；agent 单按词边界打捞合法 op 防子串碰撞；change 单捞不到才丢弃）；四场景单测全过。rev 双机部署。
+- 坑：打捞初版 indexOf 子串匹配把 keyword-add 从 negative-keyword-add 里捞出来，改词边界正则；人工位 change 单清空 ops 会被服务端「改动类必须带 ops」拒，必须连 kind 一起降。
+- 下一步/认领：Alvin 在 ctomi chat 重新激活该委托单验收（预期：新单 ops=negative-keyword-add 走 raw-mutate 网关全机器落地，或降级人工单正常开工）。
+
+
 ### 2026-09-22 AIRA：ads raw-mutate 网关上线, 硬规矩 2 在 paid 泳道落地(Alvin 定, midea #817 复盘)
 
 - 干了什么：#817（共享否词列表建挂载）熔断复盘定性为「政策已升级、实现没跟上」：硬规矩 2 说白名单是路由偏好不是能力天花板，但 ads apply 泳道仍把 mutate 白名单当唯一写通道，白名单外一律熔断。落地修复：ads_mutate.py 加 raw-mutate 网关（GoogleAdsService MutateOperation 万能包，validate_only 先行、spend/出价策略/转化配置/账务域拒绝表、单批 100 上限、resource_names 全量回吐）；ads_audit 补 sharedSets/sharedCriteria/campaignSharedSets 三类硬读；apply prompt 加 raw 泳道规矩（先 dry-run、改前 GAQL 读旧值、resource_name 进条目账本）；googleads.md 记网关章节。rev eff965f 双机部署，全测绿，实测拒绝表拦预算操作、midea 真账户 validate_only 过。
