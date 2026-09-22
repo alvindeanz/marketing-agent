@@ -4309,7 +4309,11 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
     /* 任务号自动挂引用（2026-09-21 haakaa 实证：agent 正文点名 #340 却零引用，
        人工做完的活找不到卡收口）。正文里出现的 #N 若是本客户真实任务，合并进根 refs.tasks，
        线程侧栏即出任务卡，一键可点「置完成」。上限 10 个防灌水。 */
-    if($root['client_id']!==null&&preg_match_all('/#(\d{1,6})\b/u',$body,$tm)){
+    /* 频道根不挂（2026-09-22 ctomi/sungait/midea 事故）：频道里 #N 多半是消息号，撞上同号任务后
+       根 refs.tasks 非空，worker 把整条频道当成首个任务的线程跑，丢了白名单与启动能力，
+       委托单连丢三轮。挂引用只对单任务会话生效。 */
+    $isChannelRoot=!empty($rootRefs['channel'])||trim((string)($root['body']??''))==='频道';
+    if(!$isChannelRoot&&$root['client_id']!==null&&preg_match_all('/#(\d{1,6})\b/u',$body,$tm)){
         $cands=array_values(array_unique(array_map('intval',$tm[1])));
         if($cands){
             $in2=implode(',',array_fill(0,count($cands),'?'));

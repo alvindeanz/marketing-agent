@@ -471,6 +471,22 @@ async function main() {
     assert.strictEqual(r.ok, false);
   });
 
+  await ta('频道根判定：channel 标记或正文「频道」都算，任务会话不算（ctomi 2026-09-22）', async () => {
+    assert.strictEqual(chat.isChannelRoot({ body: '频道', refs: { tasks: [532] } }), true);
+    assert.strictEqual(chat.isChannelRoot({ body: 'x', refs: { channel: true, tasks: [817] } }), true);
+    assert.strictEqual(chat.isChannelRoot({ body: '任务 #532', refs: { tasks: [532] } }), false);
+  });
+
+  await ta('change 单无 ops 被丢时收集原因并拼进正文（丢卡必须露面）', async () => {
+    const dropped = [];
+    const out = chat.cleanDrafts({ drafts: [{ title: '共享否词列表加 12 条', module: 'paid', owner_type: 'agent', kind: 'change', ops: '' }] }, null, dropped);
+    assert.strictEqual(out.length, 0);
+    assert.strictEqual(dropped.length, 1);
+    const note = chat.droppedDraftsNote(dropped);
+    assert.ok(note.includes('【系统】本轮有 1 张委托单被生产端校验拦下'));
+    assert.strictEqual(chat.droppedDraftsNote([]), '');
+  });
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 }

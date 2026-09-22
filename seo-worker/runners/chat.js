@@ -422,7 +422,9 @@ function buildPrompt(opts) {
     '- owner_type 只能是：agency（自己团队做）、client（要客户配合）、agent（机器能自己跑）。',
     '  拿不准写 agency。',
     '- priority 只能是 P0 P1 P2 P3，默认 P2。sprint 最多 10 个字符，例如 W35，不确定就留空字符串。',
-    '- ops 是给执行者的一句操作提示，最多 255 字符，没有就留空字符串。',
+    task
+      ? '- ops 只填政策表 op 名，没有就留空字符串。当前可用（按风险档）：\n' + (opsWhitelistBlock() || '  （政策表读取失败，改动类先别派）')
+      : '- 非 change 单 ops 留空字符串；change 单 ops 必填，只能从下面的当前操作白名单里选。',
     '- facts 只在人明确要求记录或更新客户事实时用（「记一下」「更新档案」「客户微信说」这类，',
     '  含转述截图内容）。写入即生效并记在说话人名下，所以正文里必须用人话复述每一条改动',
     '  （原来是什么，改成什么，依据哪句话或哪张截图），人看到复述有错会让你改回来。',
@@ -672,24 +674,41 @@ function normalizeDraftOps(d, own, kind, say) {
   return { ops: '', detailPrefix: prefix };
 }
 
-function cleanDrafts(json, log) {
+/** 频道根判定：refs.channel 标记或根正文「频道」（与服务端频道查找口径一致）。 */
+function isChannelRoot(root) {
+  if (!root) return false;
+  if (root.refs && root.refs.channel) return true;
+  return String(root.body || '').trim() === '频道';
+}
+
+/** 被拦委托单的系统说明，拼在正文末尾。正文里说「附了卡」而卡不在时，人一眼看得出。 */
+function droppedDraftsNote(dropped) {
+  if (!dropped || !dropped.length) return '';
+  return '\n\n---\n【系统】本轮有 ' + dropped.length + ' 张委托单被生产端校验拦下，没有附上，正文里提到的卡以此为准：\n' +
+    dropped.map((m) => '- ' + m).join('\n') + '\n需要重出时直接说「重出委托单」。';
+}
+
+function cleanDrafts(json, log, dropped) {
   const say = log || function () {};
+  /* 丢卡必须露面（2026-09-22 ctomi 事故：三张委托单被静默丢弃，只进日志，
+     agent 正文照说「卡附在下面了」，人白等三轮）。调用方传 dropped 收集原因拼进正文。 */
+  const drop = (m) => { say(m); if (Array.isArray(dropped)) dropped.push(m.replace(/^对话：/, '')); };
   const raw = json && Array.isArray(json.drafts) ? json.drafts : [];
   const out = [];
   for (const item of raw) {
     if (out.length >= MAX_DRAFTS) {
-      say('对话：草案超过 ' + MAX_DRAFTS + ' 个，多出来的没有提交');
+      drop('对话：草案超过 ' + MAX_DRAFTS + ' 个，多出来的没有提交');
       break;
     }
     const d = item || {};
     const title = summarize(d.title, 255);
     if (!title) {
-      say('对话：丢弃一个草案，没有标题');
+      drop('对话：丢弃一个草案，没有标题');
       continue;
     }
     const mod = String(d.module || '').trim().toLowerCase();
     if (!MODULES.includes(mod)) {
-      say('对话：丢弃草案「' + truncate(title, 40) + '」，module "' + truncate(String(d.module), 20) + '" 不合法');
+      drop('对话：丢弃草案「' + truncate(title, 40) + '」，module "' + truncate(String(d.module), 20) + '" 不合法');
       continue;
     }
     const own = String(d.owner_type || '').trim().toLowerCase();
@@ -699,13 +718,13 @@ function cleanDrafts(json, log) {
     const kind = kindRaw === 'report' || kindRaw === 'change' ? kindRaw : '';
     const opsN = normalizeDraftOps(d, OWNERS.includes(own) ? own : 'agency', kind, say);
     if (opsN.ops === null) {
-      say('对话：丢弃 change 委托单「' + truncate(title, 40) + '」，ops 是散文且打捞不出政策表 op 名');
+      drop('对话：丢弃 change 委托单「' + truncate(title, 40) + '」，ops 是散文且打捞不出政策表 op 名');
       continue;
     }
     const kindFinal = opsN.kindOverride !== undefined ? opsN.kindOverride : kind;
     const ops = opsN.ops;
     if (kindFinal === 'change' && !ops) {
-      say('对话：丢弃 change 委托单「' + truncate(title, 40) + '」，没有 ops');
+      drop('对话：丢弃 change 委托单「' + truncate(title, 40) + '」，没有 ops');
       continue;
     }
     out.push({
@@ -855,7 +874,13 @@ async function runWith(ctx, parse) {
   const refTasks = (res && Array.isArray(res.ref_tasks) && res.ref_tasks) || [];
   const rootTaskIds = (root.refs && Array.isArray(root.refs.tasks) && root.refs.tasks) || [];
   let task = null;
-  if (rootTaskIds.length) {
+  /* 频道永不进线程模式（2026-09-22 ctomi 事故第二道保险）：频道根被挂上任务时，
+     线程模式会拿掉白名单与 commission_start，频道就再也派不出、启动不了委托单。 */
+  const isChannel = isChannelRoot(root);
+  if (isChannel && rootTaskIds.length) {
+    log('对话：频道根挂了任务 [' + rootTaskIds.join(',') + ']，频道不走线程模式，按普通会话处理');
+  }
+  if (rootTaskIds.length && !isChannel) {
     task = refTasks.find((t) => Number(t.id) === Number(rootTaskIds[0])) || null;
     if (task) {
       task = attachChangePlan(task, workspace, log);
@@ -902,12 +927,13 @@ async function runWith(ctx, parse) {
   }
 
   // parse 注入版可以直接给 drafts，模型版给的是 json，统一从这里规整。
-  const drafts = Array.isArray(parsed.drafts) ? parsed.drafts : cleanDrafts(parsed.json, log);
+  const droppedDrafts = [];
+  const drafts = Array.isArray(parsed.drafts) ? parsed.drafts : cleanDrafts(parsed.json, log, droppedDrafts);
   const actions = task
     ? (Array.isArray(parsed.actions) ? parsed.actions : cleanActions(parsed.json, task, log))
     : cleanChanActions(parsed.json, log);
   const facts = cleanFacts(parsed.json, log);
-  const body = replyBody(parsed.body, drafts, parsed.degraded);
+  const body = replyBody(parsed.body, drafts, parsed.degraded) + droppedDraftsNote(droppedDrafts);
   await api.postChatReply(rootId, { body, drafts, actions, facts });
   log('对话 #' + rootId + ' 已回复，正文 ' + body.length + ' 字符，委托单 ' + drafts.length + ' 张，动作 ' + actions.length + ' 个，facts ' + facts.length + ' 条');
   return { tokenUsage: 0 };
@@ -934,6 +960,8 @@ module.exports = {
   threadMessages,
   historyBlock,
   cleanDrafts,
+  droppedDraftsNote,
+  isChannelRoot,
   cleanActions,
   cleanChanActions,
   taskBlock,
