@@ -1164,6 +1164,9 @@ function inbox_refs_norm($v){
     if($v===null||$v==='')return $out;
     if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
     if(!is_array($v))return $out;
+    /* 频道标记必须穿透归一化（2026-09-22 ctomi 事故：任务号自动挂引用回写 refs 时
+       白名单重建把 channel:true 冲掉，频道根隐身，下次开频道新建空根顶掉 133 条历史）。 */
+    if(!empty($v['channel']))$out['channel']=true;
     if($v&&array_keys($v)===range(0,count($v)-1))$v=['tasks'=>$v];
     foreach(['tasks','jobs'] as $k){
         $list=(isset($v[$k])&&is_array($v[$k]))?$v[$k]:[];
@@ -4116,7 +4119,7 @@ if($m==='POST'&&$ROUTE==='/inbox/channel/reset'){
     $i=input();
     $cid=(int)($i['client_id']??0);
     if(!$cid)res(400,['error'=>'client_id required']);
-    $q=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' AND status='open' ORDER BY id DESC LIMIT 1");
+    $q=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND (refs LIKE '%\"channel\":true%' OR body='频道') AND status='open' ORDER BY id DESC LIMIT 1");
     $q->execute([$cid]);
     $cur=$q->fetch();
     $oldId=0;
@@ -4144,7 +4147,7 @@ if($m==='POST'&&$ROUTE==='/inbox/channel'){
     $c=db()->prepare("SELECT id FROM clients WHERE id=?");
     $c->execute([$cid]);
     if(!$c->fetch())res(404,['error'=>'Client not found']);
-    $q=db()->prepare("SELECT id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' AND status='open' ORDER BY id DESC LIMIT 1");
+    $q=db()->prepare("SELECT id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND (refs LIKE '%\"channel\":true%' OR body='频道') AND status='open' ORDER BY id DESC LIMIT 1");
     $q->execute([$cid]);
     $row=$q->fetch();
     if($row)res(200,['ok'=>true,'root_id'=>(int)$row['id'],'created'=>false]);
