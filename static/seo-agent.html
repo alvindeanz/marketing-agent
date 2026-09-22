@@ -3446,6 +3446,10 @@ function withinScope(t,cur){
      只留三类当下例外：等发客户的确认卡（发卡是现在的人事）、在跑的、失败等重试的。
      旧规则的事故场景（8/31 待放行卡被藏找不到）由「全部」一键放宽与提示行覆盖。 */
   if(t.status==='in_progress')return true;
+  /* 人工工单（split:/verify: 拆条）继承母判决、当场就位等人执行，是现在的人事，
+     与母任务排在哪期无关。侧栏红点服务端也按此口径计数，视图必须能看见红点数的东西
+     （2026-09-22 修复：Apollo #807/#808 红点 2 但本期视图全空）。 */
+  if((t.owner_type==='agency'||t.owner_type==='client')&&t.status==='approved'&&/^(split|verify):/.test(String(t.origin||'')))return true;
   if(isPendingClientCard(t))return true;
   const hs=hsOf(t);
   if(hs==='running')return true;
