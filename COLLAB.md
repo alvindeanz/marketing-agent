@@ -20,6 +20,10 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-22 AIRA (d) chat 频道被挂任务变线程（dc33cae）
+- 干了什么：39c7697 正文 #N 自动挂引用对频道根也生效，频道里 agent 用 #N 指消息号，撞上同号任务后根 refs.tasks 非空，worker 走线程模式（无白名单、无 commission_start），ctomi 共享否词委托单 ops 空被静默丢弃三轮。修：seo-api chat_reply 挂引用跳过频道根（refs.channel 或 body=频道）；chat.js isChannelRoot，频道永不进线程模式；cleanDrafts 收集丢弃原因，droppedDraftsNote 拼进正文【系统】段；ops 旧提示「一句操作提示」删除，线程模式也注入 op 名单。数据：清 84/121/464 三个频道根 refs.tasks 并补 channel:true，备份在 PJ temp/channel_refs_backup_20260922.tsv。
+- 坑：任何写会话根 refs 的新功能都要问「频道根上会怎样」；频道根与任务会话共用 chat_root 行，区分只靠 channel 标记和 body。
+
 ### 2026-09-17 AIRA (a)
 
 - 干了什么：Shopify 船队接入交办已发 `/mnt/share/aira/to-aiden-shopify-fleet-tokens-20260917.md`。Alvin 确认其余 Shopify 客户店铺权限已到位，请 Aiden 按 sungait 同款（custom distribution app + token 服务现取）接入十家：oakfurniture(1)、midea(3)、sunseeker(4)、badger(5)、luxelink(6)、goodiegoodie(10)、ctomi(11)、playmate(20)、haakaa(42)、dareu。citymed 是 Umbraco 不接。
