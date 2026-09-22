@@ -228,6 +228,43 @@ async function main() {
       log('SEO 两闸未过：' + (kwOk ? '' : '关键词未经客户确认（缺 keywords.* confirmed 锁定）；')
         + (mapOk ? '' : 'mapping 未定稿（缺 seo.mapping* confirmed）；')
         + 'SEO 任务本轮 held（流程：方向卡→客户确认词表→确认 mapping→SEO sprint）。paid 卡不受此闸，照常出。');
+      /* 闸材料缺失检测（2026-09-22 Alvin 批，kiaorakids 实证）：闸关是正常等待的前提是
+         「钥匙在路上」——板上存在未折叠的词表/mapping 确认卡或产卡任务。两者都没有时是
+         静默死锁：闸在等一个没人负责生产的东西，harness 每轮空转违反「每轮推一步」。
+         此时自动建一条产钥匙任务走正常判定与执行，按分野标准（老客户方向早已确立走静默
+         补 fact 提案，新客户首次定方向出确认卡）产出，落 review 放行卡留人过目。 */
+      const allForKey = await tasks();
+      const hasKey = allForKey.some((t) => {
+        if (['killed', 'blocked'].includes(String(t.status))) return false;
+        if (/\[卡反馈折叠/.test(String(t.result_note || ''))) return false;
+        return /keyword_confirmation|mapping_confirmation/.test(String(t.card_kind || ''))
+          || /keyword-confirmation|mapping-confirmation/.test(String(t.ops || ''));
+      });
+      if (!hasKey && !DRY) {
+        const detail = [
+          '本客户 SEO 两闸关闭，且板上没有任何词表/mapping 确认卡或产卡任务（闸材料缺失死锁，harness 自动建单）。',
+          '你的产出是**开闸路径的判定与对应材料**，分两步：',
+          '',
+          '一，先裁路径（分野标准，Alvin 2026-09-19 定）：',
+          '- 客户方向**早已确立**（facts 里有客户确认的词归属/页面归属决策、有历史协作定盘、工作区有既成词表或提案且与 facts 一致）→ 走**静默补 fact 路径**',
+          '- 客户**首次确立目标方向**（无既往确认痕迹）→ 走**确认卡路径**',
+          '证据在 facts（keywords.* / seo.* / content.*）与客户工作区 notes/（锁词提案、KEYWORD-MAP 类文件）。',
+          '',
+          '二，按裁定产出：',
+          '- 静默路径：产出「静默锁定提案」文档，列 keywords.locked 与 seo.mapping 两条 fact 的建议值，',
+          '  每条附证据链（哪次客户确认、哪份文件、哪条既有 fact），放行卡说明人确认后落 fact 即开闸。不直接写 fact。',
+          '- 确认卡路径：按通用模式（mapping 意见 + 快赢排序）产出词表与 mapping 一次过确认卡 HTML，进发卡流程。',
+          '两条路径产出都停 review 等人放行，不自动生效。',
+        ].join('\n');
+        const r = await call('POST', '/tasks', {
+          client_id: cid, title: 'onboard 闸材料：词表与 mapping 确认路径判定与产出',
+          detail, module: 'onpage', owner_type: 'agent', priority: 'P1',
+          ops: 'keyword-confirmation,mapping-confirmation', sprint: '',
+        });
+        log('闸材料缺失：已建产钥匙任务 #' + r.id + '（判定已排 job ' + (r.review_job_id || '?') + '），下轮拍板执行');
+      } else if (!hasKey && DRY) {
+        log('[dry] 闸材料缺失：将建产钥匙任务（词表/mapping 确认路径判定与产出）');
+      }
     } else {
       log('SEO 两闸通过：词表已确认、mapping 已定稿');
     }
@@ -259,7 +296,9 @@ async function main() {
   const inScope = (t) => {
     if (IDS) return IDS.includes(t.id);
     if (t.sprint !== sprint) return false;
-    if (!seoGateOk && String(t.module || '') !== 'paid') return false; // SEO 任务被 SEO 闸 held
+    /* 闸材料任务（确认卡/静默提案的生产者）是闸的钥匙，不受闸挡，否则鸡生蛋死锁（#659 老坑结构化修复） */
+    if (!seoGateOk && String(t.module || '') !== 'paid'
+      && !/keyword-confirmation|mapping-confirmation/.test(String(t.ops || ''))) return false; // SEO 任务被 SEO 闸 held
     return true;
   };
   if (!seoGateOk && !IDS) {
