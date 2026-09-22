@@ -414,6 +414,8 @@ function buildPrompt(opts) {
     task ? '' : null,
     'json 的规矩',
     '- drafts 是数组，最多 ' + MAX_DRAFTS + ' 个。一件活一个草案，不要把三件事塞进一个标题。',
+    '- **ops 字段只许政策表里的 op 名**（多个用英文逗号连），一个字的说明都不许写进去；',
+    '  怎么落地、转不转人工这类说明写进 detail。ops 写成句子的草案会被生产端剥掉或整条丢弃。',
     '- title 一句话说清做什么，最多 255 字符。',
     '- detail 写清楚验收标准：做什么、动哪个页面或哪篇文章、做到什么程度算完。',
     '- module 只能是：' + MODULES.join('、') + '。',
@@ -632,6 +634,44 @@ function cleanFacts(json, log) {
  * 宽进严出：字段缺了补默认值，字段坏了整条丢掉并记一行日志。
  * 丢一条草案只是人少看见一张卡，放一条坏草案过去是人点了开工才发现建不了。
  */
+/** 政策表 op 名集合（生产端 ops 校验用）。读不到政策文件返回 null（放行不校验，别把闸变成故障点）。 */
+function validOpsSet() {
+  try {
+    const pol = JSON.parse(fs.readFileSync(RELEASE_POLICY_FILE, 'utf8'));
+    const rc = pol && pol.risk_class_by_op;
+    if (!rc || typeof rc !== 'object') return null;
+    return new Set(Object.keys(rc).filter((k) => k.charAt(0) !== '_'));
+  } catch (e) { return null; }
+}
+
+/* ops 生产端校验（2026-09-22 Alvin 定，ctomi 委托单事故：ops 被写成散文，错误活到
+   人点开工才在放行政策校验炸掉。打回要在生产端不在消费端）。确定性处理，不加模型轮次：
+   全合法照放；有非法时，人工位草案把原文挪进 detail、ops 清空（转人工的说明本就该在 detail）；
+   agent 草案先从原文打捞合法 op 名，捞到用捞到的，change 单一个都捞不到才丢弃（宽进严出既有口径）。 */
+function normalizeDraftOps(d, own, kind, say) {
+  const raw = summarize(d.ops, 255);
+  if (!raw) return { ops: '', detailPrefix: '' };
+  const set = validOpsSet();
+  if (!set) return { ops: raw, detailPrefix: '' };
+  const tokens = raw.split(/[,，、;；]/).map((x) => x.trim()).filter(Boolean);
+  if (tokens.length && tokens.every((t) => set.has(t))) return { ops: tokens.join(','), detailPrefix: '' };
+  /* 打捞用词边界匹配，防子串碰撞（keyword-add 被 negative-keyword-add 包含） */
+  const salvaged = [...set].filter((op) => new RegExp('(^|[^a-z0-9-])' + op.replace(/[-]/g, '\\-') + '($|[^a-z0-9-])').test(raw));
+  const prefix = '【落地说明（自 ops 字段迁移，原文不是政策表 op 名）】' + raw + '\n\n';
+  if (own !== 'agent') {
+    /* 人工位单连 kind 一起降：服务端对一切 change 单强制定档且要 ops，人工落地单本就该是普通任务 */
+    say('对话：草案 ops 是散文非 op 名，人工位单已降为普通任务，原文迁入 detail');
+    return { ops: '', detailPrefix: prefix, kindOverride: '' };
+  }
+  if (salvaged.length) {
+    say('对话：草案 ops 含散文，打捞出合法 op [' + salvaged.join(',') + ']，原文迁入 detail');
+    return { ops: salvaged.join(','), detailPrefix: prefix };
+  }
+  if (kind === 'change') return { ops: null, detailPrefix: '' }; // 调用方丢弃
+  say('对话：agent 草案 ops 无一合法且非 change 单，ops 清空原文迁入 detail');
+  return { ops: '', detailPrefix: prefix };
+}
+
 function cleanDrafts(json, log) {
   const say = log || function () {};
   const raw = json && Array.isArray(json.drafts) ? json.drafts : [];
@@ -657,21 +697,27 @@ function cleanDrafts(json, log) {
     /* 委托单扩展（W13）：kind report/change，change 必须带 ops，客户批文进 backing_fact。 */
     const kindRaw = String(d.kind || '').trim();
     const kind = kindRaw === 'report' || kindRaw === 'change' ? kindRaw : '';
-    const ops = summarize(d.ops, 255);
-    if (kind === 'change' && !ops) {
+    const opsN = normalizeDraftOps(d, OWNERS.includes(own) ? own : 'agency', kind, say);
+    if (opsN.ops === null) {
+      say('对话：丢弃 change 委托单「' + truncate(title, 40) + '」，ops 是散文且打捞不出政策表 op 名');
+      continue;
+    }
+    const kindFinal = opsN.kindOverride !== undefined ? opsN.kindOverride : kind;
+    const ops = opsN.ops;
+    if (kindFinal === 'change' && !ops) {
       say('对话：丢弃 change 委托单「' + truncate(title, 40) + '」，没有 ops');
       continue;
     }
     out.push({
       title,
-      detail: truncate(String(d.detail == null ? '' : d.detail), 4000),
+      detail: truncate(opsN.detailPrefix + String(d.detail == null ? '' : d.detail), 4000),
       module: mod,
       owner_type: OWNERS.includes(own) ? own : 'agency',
       priority: PRIORITIES.includes(pri) ? pri : 'P2',
       sprint: truncate(summarize(d.sprint, 10), 10),
       ops,
-      kind,
-      backing_fact: kind === 'change' ? summarize(d.backing_fact, 100) : '',
+      kind: kindFinal,
+      backing_fact: kindFinal === 'change' ? summarize(d.backing_fact, 100) : '',
     });
   }
   return out;
