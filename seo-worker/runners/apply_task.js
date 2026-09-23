@@ -988,7 +988,7 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
       const store = shopifylink.storeFor(profile);
       const ref = shopifylink.articleRefOf({ result_note: affected.join('\n') + '\n' + String(j.note || '') });
       if (store && ref) {
-        const art = shopifylink.findArticle(await shopifylink.listArticles(store.alias), ref);
+        const art = shopifylink.findArticle(await shopifylink.fetchArticles(store.myshopify, [ref]), ref);
         outUrl = shopifylink.linkFor(art, profile, store.myshopify);
       }
     } catch (e) { log('task ' + taskId + ': shopify 链接回读失败，留给同步补 :: ' + e.message); }

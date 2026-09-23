@@ -698,7 +698,7 @@ async function refreshSources(ctx, opts = {}) {
   // 下线了反过来。零模型、幂等、绝不拖垮 job。
   if (/shopify/i.test(String(profile.platform || ''))) {
     try {
-      const r = await shopifylink.syncClientLinks(ctx.api, job.client_id, profile, log);
+      const r = await shopifylink.syncClientLinks(ctx.api, job.client_id, profile, log, { tasks: (context && context.tasks) || [] });
       log('shopify 链接同步：核对 ' + r.checked + ' 个任务，更新 ' + r.changed + ' 个' + (r.skipped ? '（' + r.skipped + '）' : ''));
     } catch (e) {
       log('shopify 链接同步：降级跳过 :: ' + e.message);

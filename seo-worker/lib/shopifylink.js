@@ -104,6 +104,74 @@ async function listArticles(alias) {
   return Array.isArray(d) ? d : (d && Array.isArray(d.articles) ? d.articles : []);
 }
 
+/* 轻量只读（2026-09-22）：articles list 逐篇拉 SEO 字段，十家店扫一遍要几分钟，不适合每小时跑。
+   链接只要 id/handle/blog/published_at，一篇一个 GET，只读不写（写仍然只走 shopseo）。
+   token 与 shopseo 同源：.env 的 TOKEN_ENDPOINT + TOKEN_KEY 现取，不缓存不落盘。 */
+const API_VER = '2025-07';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function readEnv(file) {
+  const out = {};
+  for (const line of safeRead(file).split('\n')) {
+    const m = line.match(/^\s*([A-Z_]+)\s*=\s*"?([^"\n]*)"?\s*$/);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+async function getToken(myshopify) {
+  const env = readEnv(SHOPSEO_DIR + '/.env');
+  if (!env.TOKEN_ENDPOINT || !env.TOKEN_KEY) throw new Error('shopseo .env 缺 TOKEN_ENDPOINT/TOKEN_KEY');
+  const r = await fetch(env.TOKEN_ENDPOINT + '?shop=' + encodeURIComponent(myshopify) + '&key=' + encodeURIComponent(env.TOKEN_KEY));
+  const j = await r.json().catch(() => ({}));
+  if (!j.access_token) throw new Error('token 服务没给 access_token（' + myshopify + '）：' + JSON.stringify(j).slice(0, 200));
+  return j.access_token;
+}
+
+async function adminGet(myshopify, token, pathQ) {
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch('https://' + myshopify + '/admin/api/' + API_VER + pathQ, { headers: { 'X-Shopify-Access-Token': token } });
+    if (r.status === 429) { await sleep(2000 * (i + 1)); continue; }
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('GET ' + pathQ + ' HTTP ' + r.status);
+    await sleep(600); // 每店 2 req/s
+    return r.json();
+  }
+  throw new Error('GET ' + pathQ + ' 连续 429');
+}
+
+/** 只取 refs 指到的文章，返回与 articles list 同形的精简对象（id/handle/blog/published_at/published）。 */
+async function fetchArticles(myshopify, refs) {
+  const token = await getToken(myshopify);
+  const bj = await adminGet(myshopify, token, '/blogs.json?fields=id,handle');
+  const blogs = (bj && bj.blogs) || [];
+  const handleOf = {};
+  for (const b of blogs) handleOf[String(b.id)] = b.handle;
+  const out = [];
+  const seen = new Set();
+  const push = (a) => {
+    if (!a || seen.has(String(a.id))) return;
+    seen.add(String(a.id));
+    out.push({ id: a.id, handle: a.handle, blog: handleOf[String(a.blog_id)] || '', published_at: a.published_at || null, published: !!a.published_at });
+  };
+  for (const ref of refs) {
+    if (!ref) continue;
+    if (ref.id) {
+      const j = await adminGet(myshopify, token, '/articles/' + ref.id + '.json?fields=id,handle,published_at,blog_id');
+      if (j && j.article) { push(j.article); continue; }
+    }
+    if (ref.handle) {
+      for (const b of blogs) {
+        if (ref.blog && b.handle !== ref.blog) continue;
+        const j = await adminGet(myshopify, token, '/blogs/' + b.id + '/articles.json?handle=' + encodeURIComponent(ref.handle) + '&fields=id,handle,published_at,blog_id');
+        const a = j && j.articles && j.articles[0];
+        if (a) { push(Object.assign({ blog_id: b.id }, a)); break; }
+      }
+    }
+  }
+  return out;
+}
+
 function findArticle(list, ref) {
   if (!ref) return null;
   if (ref.id) {
@@ -124,15 +192,24 @@ async function syncClientLinks(api, clientId, profile, log, deps) {
   const say = log || function () {};
   const store = storeFor(profile);
   if (!store) return { checked: 0, changed: 0, skipped: 'no store alias' };
-  const tasks = (deps && deps.tasks) || (await api.getTasks(clientId)) || [];
-  const list = (deps && deps.articles) || (await listArticles(store.alias));
-  let checked = 0;
-  let changed = 0;
+  /* 任务从 /context 取（auth_worker，SELECT * 带 output_url/result_note/ops）；GET /tasks 是人工登录鉴权，worker 进不去。 */
+  let tasks = deps && deps.tasks;
+  if (!tasks) {
+    const ctx = await api.getContext(clientId);
+    tasks = (ctx && ctx.tasks) || [];
+  }
+  const cands = [];
   for (const t of (Array.isArray(tasks) ? tasks : tasks.tasks || [])) {
     if (!isShopifyBlogTask(t)) continue;
     if (/\?t=\d+&k=[a-f0-9]+/.test(String(t.output_url || ''))) continue;
     const ref = articleRefOf(t);
-    if (!ref) continue;
+    if (ref) cands.push({ t, ref });
+  }
+  if (!cands.length) return { checked: 0, changed: 0 };
+  const list = (deps && deps.articles) || (await fetchArticles(store.myshopify, cands.map((c) => c.ref)));
+  let checked = 0;
+  let changed = 0;
+  for (const { t, ref } of cands) {
     const art = findArticle(list, ref);
     checked++;
     if (!art) {
@@ -156,5 +233,6 @@ module.exports = {
   isShopifyBlogTask,
   findArticle,
   listArticles,
+  fetchArticles,
   syncClientLinks,
 };
