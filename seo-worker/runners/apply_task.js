@@ -15,6 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
+const shopifylink = require('../lib/shopifylink');
 const capabilities = require('../lib/capabilities');
 const wf = require('../lib/webforger');
 const { extractTrailingJson } = require('../lib/mdjson');
@@ -980,10 +981,22 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
     '预算影响: 0（站内内容操作）',
   ].join('\n');
   if (status === 'success' && affected.length) {
+    /* 卡片链接（2026-09-22 #619）：落地后零模型回读文章，已发布给正式链接，草稿给 admin 预览链接。
+       读失败不拖垮收口，链接留给 pull_data 的同步补。 */
+    let outUrl = '';
+    try {
+      const store = shopifylink.storeFor(profile);
+      const ref = shopifylink.articleRefOf({ result_note: affected.join('\n') + '\n' + String(j.note || '') });
+      if (store && ref) {
+        const art = shopifylink.findArticle(await shopifylink.listArticles(store.alias), ref);
+        outUrl = shopifylink.linkFor(art, profile, store.myshopify);
+      }
+    } catch (e) { log('task ' + taskId + ': shopify 链接回读失败，留给同步补 :: ' + e.message); }
     await api.completeTask(taskId, {
       note: head + '\n已按授权方案执行并线上自验通过。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
+      output_url: outUrl,
     });
-    log('task ' + taskId + ': shopify applied and verified, marked done');
+    log('task ' + taskId + ': shopify applied and verified, marked done' + (outUrl ? '，卡片链接 ' + outUrl : ''));
     return { taskId, status: 'success', logFile };
   }
   if (status === 'success' && !affected.length && planDeclaresNoChange(plan)) {

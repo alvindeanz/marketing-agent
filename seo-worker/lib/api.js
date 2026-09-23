@@ -74,6 +74,11 @@ class Api {
    * POST /tasks/{id}/complete body { note } -> marks the task done.
    * Only apply_task calls this, and only after its own verification passed.
    */
+  /** POST /tasks/{id}/output_url body { output_url } -> 只改卡片产物链接，不动状态（平台状态同步用）。 */
+  async setTaskOutputUrl(id, url) {
+    return this.req('POST', '/tasks/' + encodeURIComponent(id) + '/output_url', { output_url: url });
+  }
+
   async completeTask(id, body) {
     return this.req('POST', '/tasks/' + encodeURIComponent(id) + '/complete', body);
   }

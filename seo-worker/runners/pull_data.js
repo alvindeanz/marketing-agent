@@ -5,6 +5,7 @@
 const { googlePost } = require('../lib/google');
 const { seoq, rootDomain } = require('../lib/seoq');
 const { reportWindow, safeJson } = require('../lib/util');
+const shopifylink = require('../lib/shopifylink');
 const registry = require('../lib/registry');
 const metrics = require('../lib/metrics');
 const googleads = require('../lib/googleads');
@@ -690,6 +691,17 @@ async function refreshSources(ctx, opts = {}) {
       await pullContentRegistry(ctx, profile, win, gscData);
     } catch (e) {
       log('content_registry: degraded, unexpected error :: ' + (e.stack || e.message));
+    }
+  }
+
+  // Shopify 博客任务卡片链接对齐（2026-09-22 #619）：草稿发布后 admin 预览链接换正式链接，
+  // 下线了反过来。零模型、幂等、绝不拖垮 job。
+  if (/shopify/i.test(String(profile.platform || ''))) {
+    try {
+      const r = await shopifylink.syncClientLinks(ctx.api, job.client_id, profile, log);
+      log('shopify 链接同步：核对 ' + r.checked + ' 个任务，更新 ' + r.changed + ' 个' + (r.skipped ? '（' + r.skipped + '）' : ''));
+    } catch (e) {
+      log('shopify 链接同步：降级跳过 :: ' + e.message);
     }
   }
 

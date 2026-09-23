@@ -2169,6 +2169,24 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     res(200,['ok'=>true,'review_job_id'=>$rjid]);
 }
 
+// POST /tasks/{id}/output_url body { output_url } -> worker 只改卡片产物链接，不动状态。
+// 平台状态同步用（Shopify 博客草稿发布后，admin 预览链接换成正式链接）。零模型调用方。
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/output_url$#',$ROUTE,$mm)){
+    auth_worker();
+    $tid=(int)$mm[1];
+    $i=input();
+    $ou=trim((string)($i['output_url']??''));
+    if(!preg_match('#^https?://#',$ou))res(400,['error'=>'output_url 必须是 http(s) 链接']);
+    $g=db()->prepare("SELECT output_url FROM seo_tasks WHERE id=?");
+    $g->execute([$tid]);
+    $row=$g->fetch();
+    if(!$row)res(404,['error'=>'Task not found']);
+    if((string)$row['output_url']===$ou)res(200,['ok'=>true,'changed'=>false]);
+    db()->prepare("UPDATE seo_tasks SET output_url=? WHERE id=?")->execute([mb_substr($ou,0,500,'UTF-8'),$tid]);
+    audit('seo-worker','seo_task_output_url',(string)$tid,['old'=>(string)$row['output_url'],'new'=>$ou]);
+    res(200,['ok'=>true,'changed'=>true]);
+}
+
 // POST /tasks/{id}/complete -> apply stage finished, task is done for real
 if($m==='POST'&&preg_match('#^/tasks/(\d+)/complete$#',$ROUTE,$mm)){
     auth_worker();
@@ -2183,6 +2201,9 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/complete$#',$ROUTE,$mm)){
     if($note==='')res(400,['error'=>'note required：落地结果要带「检查:」行，没有证据不能算完成']);
     $err=task_close($tid,'applied',$note);
     if($err)res(400,['error'=>$err]);
+    /* 落地产物链接（2026-09-22 sungait #619：Shopify 博客落地后卡上没有链接）。可选，给了才写。 */
+    $ouC=trim((string)($i['output_url']??''));
+    if($ouC!==''&&preg_match('#^https?://#',$ouC))db()->prepare("UPDATE seo_tasks SET output_url=? WHERE id=?")->execute([mb_substr($ouC,0,500,'UTF-8'),$tid]);
     /* Chat 改动类派单闭环：落地完成回频道说一声，人不用去看板巡。 */
     if(strpos((string)($trow['origin']??''),'chatw:')===0){
         $rootIdK=(int)substr((string)$trow['origin'],6);
