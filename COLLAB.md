@@ -20,6 +20,10 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-23 AIRA (e) 博客节奏一个 sprint 一篇（f85c527, e41ecd9）
+- 干了什么：Alvin 定合同每月两篇 = 一个 sprint 一篇。lib/blogcadence.js（开关 fact contract.blog_per_sprint，值以数字开头）；plan.js persist 与 plan_review v2 落库时缺博客的 sprint 补占位任务（detail 带 [配额博客 Sn]）；review_plan cleanVerdicts 后 protectVerdicts：写稿阶段（proposed/approved/in_progress/blocked）的配额博客判 drop/later/merge 改判 do，adjust 要求换题不空交，review 阶段等客户的 later 与同 sprint 超额的不保护；tools/blog_cadence.js 人手补缺（默认预览，--apply 建，过去 sprint 累计算欠数、后多写抵前空、2026-09-01 前不追溯）。已开开关：Apollo/PowerDekor/Louvresky/Sanmichelle/Ben's NZ/Ben's AU，建占位 #823 至 #846 共 24 个。
+- 坑：补缺不能挂 pull_data（cron），建任务会连带排判定 job 调模型，违反硬规矩 1。标题里「，内链回 /collections/x」是落点不是内链任务，判博客前先剥掉。
+
 ### 2026-09-22 AIRA (d) chat 频道被挂任务变线程（dc33cae）
 - 干了什么：39c7697 正文 #N 自动挂引用对频道根也生效，频道里 agent 用 #N 指消息号，撞上同号任务后根 refs.tasks 非空，worker 走线程模式（无白名单、无 commission_start），ctomi 共享否词委托单 ops 空被静默丢弃三轮。修：seo-api chat_reply 挂引用跳过频道根（refs.channel 或 body=频道）；chat.js isChannelRoot，频道永不进线程模式；cleanDrafts 收集丢弃原因，droppedDraftsNote 拼进正文【系统】段；ops 旧提示「一句操作提示」删除，线程模式也注入 op 名单。数据：清 84/121/464 三个频道根 refs.tasks 并补 channel:true，备份在 PJ temp/channel_refs_backup_20260922.tsv。
 - 坑：任何写会话根 refs 的新功能都要问「频道根上会怎样」；频道根与任务会话共用 chat_root 行，区分只靠 channel 标记和 body。
