@@ -22,6 +22,7 @@ const {
 } = require('../lib/distill');
 const { extractTrailingJson } = require('../lib/mdjson');
 const capabilities = require('../lib/capabilities');
+const blogcadence = require('../lib/blogcadence');
 const { refreshSources } = require('./pull_data');
 const { truncate, safeJson } = require('../lib/util');
 
@@ -147,7 +148,7 @@ function validateTasks(rawTasks, log, capability) {
  * Client facing deliverables are a different matter and are written in the
  * site's language by the execute stage.
  */
-function buildPrompt(briefing, extraInstructions, dossier, capability) {
+function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota) {
   const hasDossier = !!(dossier && dossier.present);
   const ops = (capability && capability.operations) || [];
   const applyOps = ops.filter((o) => o.autonomy === 'agent_apply').map((o) => o.name);
@@ -261,6 +262,10 @@ function buildPrompt(briefing, extraInstructions, dossier, capability) {
     '其余任务字段规则：',
     '- detail 写一到三句，让人不用回来问你就能开工。S1 的任务要点名具体页面、关键词或文件。',
     '- 每条任务都要能追溯到"做"清单里的某一条。',
+    blogQuota
+      ? '- 博客节奏（合同，硬约束）：S1 到 S6 每个 sprint 至少 ' + blogQuota + ' 条写新博文的任务（ops 含 blog-draft），' +
+        '选题取自锁定词表。缺了的 sprint 落库时会被自动补一条选题待定的占位任务，所以请自己排好选题。'
+      : '',
     '',
     '事实台账，这条是硬规则',
     'CONFIRMED 的事实是已经关闭的问题。不许写进数据缺口，不许派任务去核实，不许再问客户，',
@@ -287,7 +292,7 @@ function provenanceHeader(dossier) {
 }
 
 /** Store the prose plan, then the tasks. Task failures never fail the job. */
-async function persist(ctx, text, dossier, capability) {
+async function persist(ctx, text, dossier, capability, blogQuota) {
   const { job, api, log } = ctx;
   const parsed = extractJsonBlock(text);
   if (parsed.error) log('task block: ' + parsed.error);
@@ -326,6 +331,21 @@ async function persist(ctx, text, dossier, capability) {
         ' dropped, nothing sent to /tasks/bulk. Add tasks by hand in the board'
     );
     return { planId, taskIds: [] };
+  }
+
+  /* 博客节奏（2026-09-23 Alvin 定）：缺博客的 sprint 补占位任务，零模型。 */
+  if (blogQuota) {
+    const hasBlogOp = ((capability && capability.operations) || []).some((o) => o.name === 'blog-draft');
+    const by = blogcadence.countBySprint(tasks);
+    let added = 0;
+    for (const sp of SPRINTS) {
+      const missing = blogQuota - (by[sp] ? by[sp].length : 0);
+      for (let k = 0; k < missing; k++) {
+        tasks.push(blogcadence.placeholderTask({ sprint: sp, target: sp, missing, catchup: false, range: null }, k, hasBlogOp));
+        added++;
+      }
+    }
+    if (added) log('博客节奏：方案里 ' + added + ' 个 sprint 位缺博客，已补占位任务（选题待定）');
   }
 
   try {
@@ -477,7 +497,9 @@ async function run(ctx) {
     );
   }
 
-  const prompt = buildPrompt(briefing.text, payload.instructions, dossier, capability);
+  const blogQuota = blogcadence.quotaOf(context);
+  if (blogQuota) log('博客节奏：每个 sprint ' + blogQuota + ' 篇（fact ' + blogcadence.FACT_KEY + '）');
+  const prompt = buildPrompt(briefing.text, payload.instructions, dossier, capability, blogQuota);
   log('step 3 of 4: planning pass, model ' + cfg.planModel + ', prompt ' + prompt.length + ' chars');
 
   let result = { planId: null, taskIds: [] };
@@ -491,7 +513,7 @@ async function run(ctx) {
     logFullText: false, // the plan lives in /plans, not in the job log
     postDraft: async ({ text }) => {
       log('step 4 of 4: persisting');
-      result = await persist(ctx, text, dossier, capability);
+      result = await persist(ctx, text, dossier, capability, blogQuota);
     },
   });
 

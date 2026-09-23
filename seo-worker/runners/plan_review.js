@@ -14,6 +14,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const blogcadence = require('../lib/blogcadence');
 const { runClaude } = require('../lib/llm');
 const { extractTrailingJson } = require('../lib/mdjson');
 const { buildPlanningBriefing } = require('../lib/distill');
@@ -257,6 +258,21 @@ async function runWith(ctx, judge) {
 
   const cleaned = cleanOutput(judged.json, capability, log);
   if (!cleaned.tasks.length) throw new Error('v2 没有任何合法任务，不落库（' + cleaned.dropped.join('；') + '）');
+  /* 博客节奏（2026-09-23 Alvin 定）：v2 缺博客的 sprint 同样补占位任务，方案层合并不许把配额并掉。 */
+  const blogQuota = blogcadence.quotaOf(context);
+  if (blogQuota) {
+    const hasBlogOp = capability.operations.some((o) => o.name === 'blog-draft');
+    const by = blogcadence.countBySprint(cleaned.tasks);
+    let added = 0;
+    for (const sp of ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']) {
+      const missing = blogQuota - by[sp].length;
+      for (let k = 0; k < missing; k++) {
+        cleaned.tasks.push(blogcadence.placeholderTask({ sprint: sp, target: sp, missing, catchup: false, range: null }, k, hasBlogOp));
+        added++;
+      }
+    }
+    if (added) log('博客节奏：v2 有 ' + added + ' 个 sprint 位缺博客，已补占位任务');
+  }
   if (!judged.body || judged.body.length < 200) throw new Error('v2 正文太短（' + (judged.body || '').length + ' 字），不落库');
   const version = Number(plan.version || 1) + 1;
   const header = '<!-- plan v' + version + ' by plan_review from v' + plan.version + ' (plan #' + planId + '), ' + new Date().toISOString().slice(0, 10) + ' -->';

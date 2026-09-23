@@ -21,6 +21,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const blogcadence = require('../lib/blogcadence');
 const { runClaude } = require('../lib/llm');
 const { extractTrailingJson } = require('../lib/mdjson');
 const { buildPlanningBriefing } = require('../lib/distill');
@@ -362,6 +363,8 @@ async function runWith(ctx, judge) {
   const batchIds = batch.map((t) => Number(t.id));
   const knownIds = allTasks.map((t) => Number(t.id));
   const cleaned = cleanVerdicts(judged.json, batchIds, knownIds, log);
+  /* 博客节奏保护（2026-09-23 Alvin 定）：写稿阶段的配额博客不许判掉或延后，零模型改判。 */
+  cleaned.verdicts = blogcadence.protectVerdicts(cleaned.verdicts, context, log);
   const tally = cleaned.verdicts.reduce((acc, v) => {
     acc[v.verdict] = (acc[v.verdict] || 0) + 1;
     return acc;
