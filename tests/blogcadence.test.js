@@ -20,6 +20,9 @@ t('开关：没有 fact 不受约束，有 fact 读出数字', () => {
 
 t('博客任务识别：写新文算，内链/封面/修订不算', () => {
   assert.ok(bc.isBlogTask({ title: '博客：钱包选购信息型', ops: '' }));
+  assert.ok(bc.isBlogTask({ title: '博客：钱包选购信息型，内链回 /collections/wallets/', ops: '' }), '内链回是落点不是内链任务');
+  assert.ok(!bc.isBlogTask({ title: '成本类文章补新西兰市场行情区间', ops: 'blog-draft' }), '改旧文不算新文');
+  assert.ok(!bc.isBlogTask({ title: '发布博客：纱帘的夜间隐私（#130 草稿）', ops: '' }), '发布动作不算新文');
   assert.ok(bc.isBlogTask({ title: 'S3 配额博客：选题在锁定词表内自定', ops: 'blog-draft' }));
   assert.ok(!bc.isBlogTask({ title: '现有 7 篇博客补内链指向 made-to-measure 页', ops: '' }));
   assert.ok(!bc.isBlogTask({ title: '博客一二篇封面图与发布方案', ops: 'blog-draft' }));
@@ -39,6 +42,15 @@ t('缺口：死任务不占配额，已过 sprint 补在当前 sprint，9 月前
   assert.ok(bySprint.S3 && !bySprint.S3.catchup, 'S3 的 B 已死要补');
   assert.ok(!bySprint.S4);
   assert.ok(bySprint.S5 && bySprint.S6);
+  const surplus = bc.gaps(ctx([
+    { id: 5, title: '博客：X', sprint: 'S2', status: 'done' },
+    { id: 6, title: '博客：Y', sprint: 'S2', status: 'done' },
+    { id: 7, title: '博客：Z', sprint: 'S3', status: 'proposed' },
+    { id: 8, title: '博客：W', sprint: 'S4', status: 'proposed' },
+    { id: 9, title: '博客：V', sprint: 'S5', status: 'proposed' },
+    { id: 10, title: '博客：U', sprint: 'S6', status: 'proposed' },
+  ]), '2026-09-23');
+  assert.strictEqual(surplus.length, 0, 'S1 空 S2 两篇，累计交够不补');
   const old = bc.gaps(ctx([], true, '2026-07-01'), '2026-09-23');
   assert.ok(!old.some((x) => x.range.end < '2026-09-01'), '9 月前结束的 sprint 不追溯');
 });

@@ -21,7 +21,7 @@ const SPRINTS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 /* 补缺只追到这一天为止：规矩 9 月立，9 月以前空掉的 sprint 不追溯。 */
 const CATCHUP_FROM = '2026-09-01';
 
-const NOT_BLOG_RE = /内链|封面|修订|体检|询盘|直链|死链|分类|补图|图片|hreflang|长音|确认页|复盘|审计/;
+const NOT_BLOG_RE = /内链|封面|修订|体检|询盘|直链|死链|分类|补图|图片|hreflang|长音|确认页|复盘|审计|改稿|补新西兰|行情区间/;
 
 function factsOf(context) {
   const f = (context && context.facts) || {};
@@ -36,13 +36,17 @@ function quotaOf(context) {
   return m ? Math.max(0, Number(m[1])) : 0;
 }
 
-/** 写新博文的任务（不含内链、封面、修订这类围着博客转的活）。 */
+/** 写新博文的任务（不含内链、封面、修订、发布这类围着博客转的活）。
+ *  标题里「，内链回 /collections/...」是交代落点，不算内链任务，先剥掉再判排除词。 */
 function isBlogTask(t) {
   if (!t) return false;
   const ops = Array.isArray(t.ops) ? t.ops.join(',') : String(t.ops || '');
   const title = String(t.title || '');
-  if (/blog-draft/.test(ops)) return !NOT_BLOG_RE.test(title) || /配额博客/.test(title);
-  return /博客|博文|新文/.test(title) && !NOT_BLOG_RE.test(title);
+  if (/配额博客/.test(title)) return true;
+  const core = title.replace(/[，,]\s*(内链|导流)回.*$/, '');
+  if (NOT_BLOG_RE.test(core) || /^\s*发布/.test(core)) return false;
+  if (/博客|博文|新文|篇.*blog|blog post/i.test(core)) return true;
+  return false;
 }
 
 /** 已死的任务（砍掉、并入、不做）不占配额。 */
@@ -93,10 +97,12 @@ function countBySprint(tasks) {
 }
 
 /**
- * 算缺口。返回 [{ sprint, missing, catchup, range }]：
- *   sprint 仍在未来或当前：缺多少补多少，任务落在该 sprint；
- *   sprint 已过去且结束日在 CATCHUP_FROM 之后：欠交，补在当前 sprint（catchup=true）；
- *   更早的不追溯。
+ * 算缺口。返回 [{ sprint, missing, catchup, range, target }]：
+ *   已过去与当前 sprint（结束日不早于 CATCHUP_FROM）按累计算：应交 = 配额 x sprint 数，
+ *     实有 = 这些 sprint 里的活博客任务；后面多写的抵前面空的（Ben's AU S1 空 S2 两篇 = 交够）。
+ *     欠数从最早的空 sprint 记起，全部补在当前 sprint；
+ *   未来 sprint 逐个算，缺多少补多少，任务落在该 sprint；
+ *   CATCHUP_FROM 之前结束的 sprint 不追溯。
  */
 function gaps(context, today) {
   const quota = quotaOf(context);
@@ -107,17 +113,27 @@ function gaps(context, today) {
   const cur = currentSprint(anchor, today);
   const by = countBySprint(context.tasks || []);
   const out = [];
-  for (let n = 1; n <= 6; n++) {
+  let required = 0;
+  let have = 0;
+  const empties = [];
+  for (let n = 1; n <= cur; n++) {
+    const range = sprintRange(anchor, n);
+    if (range.end < CATCHUP_FROM) continue;
+    const s = 'S' + n;
+    required += quota;
+    have += by[s].length;
+    for (let k = by[s].length; k < quota; k++) empties.push({ sprint: s, range, isCur: n === cur });
+  }
+  let deficit = required - have;
+  for (const e of empties) {
+    if (deficit <= 0) break;
+    out.push({ sprint: e.sprint, missing: 1, catchup: !e.isCur, range: e.range, target: 'S' + cur });
+    deficit--;
+  }
+  for (let n = cur + 1; n <= 6; n++) {
     const s = 'S' + n;
     const missing = quota - by[s].length;
-    if (missing <= 0) continue;
-    const range = sprintRange(anchor, n);
-    if (n < cur) {
-      if (range.end < CATCHUP_FROM) continue;
-      out.push({ sprint: s, missing, catchup: true, range, target: 'S' + cur });
-    } else {
-      out.push({ sprint: s, missing, catchup: false, range, target: s });
-    }
+    if (missing > 0) out.push({ sprint: s, missing, catchup: false, range: sprintRange(anchor, n), target: s });
   }
   return out;
 }
