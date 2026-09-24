@@ -56,15 +56,19 @@ footer{text-align:center;color:#94a3b8;font-size:12px;padding:24px 0;margin-top:
 FBX_CSS_JS = """<style>
 .fbx{border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin:12px 0 26px;font-size:13.5px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)}
 .fbx-t{display:block;margin-bottom:10px;font-weight:700;color:#0f172a;font-size:14px}
-.fbx-b{font-family:inherit;font-size:13px;font-weight:700;line-height:1.4;padding:9px 15px;margin:0 8px 8px 0;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#0057b8;cursor:pointer}
+.fbx .fbrow{display:flex;gap:8px;flex-wrap:wrap}
+.fbx-b{font-family:inherit;font-size:13px;font-weight:700;line-height:1.4;padding:9px 15px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#0057b8;cursor:pointer}
 .fbx-b:hover{background:#e0edff}
 .fbx-b.done{background:#0057b8;border-color:#0057b8;color:#fff;pointer-events:none}
 .fbx-b:disabled{opacity:.55;cursor:default}
-.fbx-ta{display:block;width:100%;box-sizing:border-box;min-height:78px;margin:4px 0 8px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f6f9fc;color:#0f172a;font-family:inherit;font-size:13.5px;line-height:1.7;resize:vertical}
+.fbx .fbwrap{margin-top:10px;display:none}
+.fbx .fbwrap.open{display:block}
+.fbx-ta{display:block;width:100%;box-sizing:border-box;min-height:78px;margin:0 0 8px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f6f9fc;color:#0f172a;font-family:inherit;font-size:13.5px;line-height:1.7;resize:vertical}
 .fbx-ta:focus{outline:none;border-color:#bfdbfe;background:#fff}
-.fbx-s{font-size:12.5px;color:#16a34a;font-weight:600}
+.fbx-s{display:block;margin-top:8px;font-size:12.5px;color:#16a34a;font-weight:600}
 </style>
 <script>
+/* 与方向卡同一条反馈通路与交互（点「有调整」才展开留言框）。t/k 取自链接参数。 */
 (function(){
 var API='/reports/card_feedback.php';
 var FB='https://always.horntech-dev.com/seo-api.php/card_feedback';
@@ -72,24 +76,35 @@ var q=new URLSearchParams(window.location.search);
 var t=parseInt(q.get('t'),10),k=q.get('k');
 function post(body,ok,bad){body.task_id=t;body.token=k;
 fetch(API,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){if(!r.ok)throw 0;ok()}).catch(function(){fetch(FB,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){r.ok?ok():bad()}).catch(bad)});}
-document.querySelectorAll('.fbx').forEach(function(box){var item=box.getAttribute('data-item');
-box.querySelectorAll('.fbx-b').forEach(function(btn){btn.addEventListener('click',function(){
-if(!t||!k){box.querySelector('.fbx-s').textContent='链接缺少令牌，请用我们发您的原始链接打开';return}
-var choice=btn.getAttribute('data-c');var fb=box.querySelector('.fbx-ta').value.trim();
-if(choice==='other'&&!fb){box.querySelector('.fbx-s').textContent='请先在留言框写下想法，再点这个按钮';return}
-btn.disabled=true;
-post({item:item,choice:choice,fb:fb},function(){btn.classList.add('done');box.querySelector('.fbx-s').textContent='已收到，谢谢！我们会跟进。';box.querySelectorAll('.fbx-b').forEach(function(b){b.disabled=true});},function(){btn.disabled=false;box.querySelector('.fbx-s').textContent='提交没成功，请稍后再试或直接回消息给我们'});
-});});});
+document.querySelectorAll('.fbx').forEach(function(box){
+var item=box.getAttribute('data-item');
+var st=box.querySelector('.fbx-s'),wrap=box.querySelector('.fbwrap'),ta=box.querySelector('.fbx-ta');
+function need(){if(!t||!k){st.textContent='链接缺少令牌，请用我们发您的原始链接打开';return false}return true}
+function lock(msg){st.textContent=msg;box.querySelectorAll('.fbx-b').forEach(function(b){b.disabled=true})}
+box.querySelector('[data-c="agree"]').addEventListener('click',function(){
+if(!need())return;var btn=this;btn.disabled=true;
+post({item:item,choice:'agree',fb:''},function(){btn.classList.add('done');wrap.classList.remove('open');lock('已收到，谢谢！我们会照此推进。')},function(){btn.disabled=false;st.textContent='提交没成功，请稍后再试或直接回消息给我们'});
+});
+box.querySelector('[data-c="other"]').addEventListener('click',function(){
+wrap.classList.toggle('open');if(wrap.classList.contains('open'))ta.focus();
+});
+box.querySelector('.fbx-send').addEventListener('click',function(){
+if(!need())return;var fb=ta.value.trim();
+if(!fb){st.textContent='请先写下想调整的内容再提交';ta.focus();return}
+var btn=this;btn.disabled=true;
+post({item:item,choice:'other',fb:fb},function(){btn.classList.add('done');lock('已收到您的调整意见，谢谢！我们会逐条跟进。')},function(){btn.disabled=false;st.textContent='提交没成功，请稍后再试或直接回消息给我们'});
+});
+});
 })();
 </script>"""
 
 def fbx_block(item, label):
-    # card_feedback 通路的页内表态组件（lint 规则 feedback_widget 认 marker）
-    return (f'<div class="fbx" data-item="{item}">'
-            f'<span class="fbx-t">{label}，您的意见：</span>'
-            f'<button class="fbx-b" data-c="agree">没问题，照此推进</button>'
-            f'<button class="fbx-b" data-c="other">有调整（先写留言再点我）</button>'
-            f'<textarea class="fbx-ta" placeholder="想换题、改角度、调月份，直接写在这里"></textarea>'
+    # card_feedback 通路组件（交互同方向卡：点「有调整」才展开留言框；lint 认 marker）
+    return (f'<div class="fbx" data-item="{item}"><span class="fbx-t">{label}，您的意见：</span>'
+            f'<div class="fbrow"><button class="fbx-b" data-c="agree">没问题，照此推进</button>'
+            f'<button class="fbx-b" data-c="other">有调整（写留言）</button></div>'
+            f'<div class="fbwrap"><textarea class="fbx-ta" placeholder="想换题、改角度、调月份，直接写在这里"></textarea>'
+            f'<button class="fbx-b fbx-send">提交留言</button></div>'
             f'<span class="fbx-s"></span></div>')
 
 def main():
