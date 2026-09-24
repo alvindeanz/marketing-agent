@@ -2448,7 +2448,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
                 }
                 list($ts,$te)=task_fields_clean([
                     'title'=>mb_substr('人工落地：#'.$tid.' '.$task['title'],0,255,'UTF-8'),
-                    'detail'=>"母任务 #".$tid." 的方案里以下 ".count($blocked)." 处写入不在机器白名单，按判定期分流转人工。逐条做完在母任务条目账本上对账（或在本任务备注写明），验收标准以母任务方案为准。\n\n".implode("\n",$lines),
+                    'detail'=>"母任务 #".$tid." 的方案里以下 ".count($blocked)." 处写入不在机器白名单，按判定期分流转人工。逐条做完在母任务条目账本上对账（或在本任务备注写明），验收标准以母任务方案为准。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。\n\n".implode("\n",$lines),
                     'module'=>(string)$task['module'],'owner_type'=>'agency','priority'=>(string)$task['priority'],'ops'=>'','sprint'=>$splitSprint,
                 ],['status_force'=>'approved']);
                 if(!$te){

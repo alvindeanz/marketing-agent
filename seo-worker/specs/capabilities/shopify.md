@@ -4,7 +4,7 @@
      （/data/aira/tools/shopseo/shopseo，token 服务现取不落盘，写命令默认 dry-run，--yes 实弹且写前自动快照）。
      店铺清单见 /data/aira/tools/stores.conf（alias 与 profile.workspace_dir 同名，apply_task 靠它定位店铺）；
      2026-09-17 起共 10 店（sungait + 9 家新入列，oakfurniture 待装 app）。
-     v3 新增 collections 命令面（collections list / collection get / set-meta / create / publish / unpublish，
+     v4（2026-09-24 同日）加 product 面三 op 与 collection 改名、封面 alt（Alvin 三问定则：CLI 没写不等于做不到）；v3 新增 collections 命令面（collections list / collection get / set-meta / create / publish / unpublish，
      scope 走 write_products 全船队已授，零 app 改动）；products/pages 未接通，相关任务保持交付包模式；
      导航菜单需 write_online_store_navigation scope（全船队未授，补授要客户重装 app），保持人工。
      放行口径（2026-09-17 Alvin 定，midea S1 试点）：客户卡替代人工放行，见 ../release_policy.md「SEO 客户卡放行」。
@@ -24,6 +24,9 @@
 | collection-meta-update | agent_apply | 改集合页 title_tag / description_tag，纯 metafield 不动正文；双闸授权域内免卡直落，无双闸客户覆盖已有值走网页调整卡 |
 | collection-create | agent_prepare | 新建 custom collection（UNPUBLISHED），含描述文案与选品清单；mapping 表列明新建的承接页属授权域免卡，mapping 外新方向走卡；发布是另一个 op |
 | collection-publish | agent_prepare | 发布或下线集合页，发布对外可见，凭证走客户卡批文 fact；下线即回滚手段 |
+| collection-title-update | agent_apply | 改集合 title（即店面 H1），handle 与 URL 不变；双闸授权域内免卡 |
+| product-meta-update | agent_apply | 改 PDP title_tag / description_tag，纯 metafield；双闸授权域规则同 collection-meta-update |
+| product-content-edit | agent_prepare | 改 PDP 正文（body_html 整替，读改写），方案逐处点名；双闸授权域内免卡 |
 <!-- PLANNING_VIEW_END -->
 
 ## 操作集说明
@@ -36,6 +39,10 @@
 - collection-meta-update [risk_class: reversible]：shopseo collection set-meta。60/160 字符规矩与品牌后缀式样同 article-meta-update；**授权域同 article-meta-update 条**。custom 与 smart collection 都支持。
 - collection-create [risk_class: reversible]：shopseo collection create（--title/--handle/--body-file/--products/--meta-title/--meta-desc）。**published:false 硬编码，本 op 永不发布**；--products 收 handle 或数字 id，给定顺序即页面顺序（sort manual），命令会先逐个解析产品并在 dry-run 里列出，缺一个整单拒绝。mapping 表列明新建的承接页属双闸授权域免卡（如 sungait oversized/rimless 页，客户在 #641 卡 empty_collections/rimless_plan 双双 agree 且催加速）；mapping 外的新方向仍走卡。
 - collection-publish [risk_class: external]：shopseo collection publish/unpublish。发布对外可见走客户卡批文 fact（external_with_backing_fact=auto），无批文停 review；unpublish 可逆，是 create 后的回滚手段。
+- collection-title-update [risk_class: reversible]：shopseo collection rename。改的是店面 H1，URL 不动；快照回滚。
+- product-meta-update [risk_class: reversible]：shopseo product set-meta。60/160 与品牌后缀规矩同族；双闸授权域免卡。
+- product-content-edit [risk_class: reversible]：shopseo product update --body-file。读现值改点名处整替，未点名的客户原文一字不动；写前快照。
+- 文章封面 alt：shopseo article set-cover-alt，语义归 article-meta-update，不另立 op（2026-09-24 三问教训：这行曾被当 capability-gap 排了人工单 #861）。
 - blog-draft [risk_class: external]：prepare 阶段按 /data/aira/seo-worker/specs/sops/seo-blog-sop.md 产出完整成稿
   （Style Roll 文件头注释、骨架轮换、指纹查重、13 条红线自检、封面图必配且只用客户站 CDN 已有图、
   内链按 KEYWORD-MAP、锁定词表内选题）；apply 阶段 shopseo article create（--title/--body-file/--meta-title/
