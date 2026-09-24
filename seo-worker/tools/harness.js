@@ -271,38 +271,48 @@ async function main() {
   } else {
     log('注意：--skip-gates 跳过词表与 mapping 确认闸，理由自负');
   }
-  /* 「本期」是推导值不是存量值（2026-09-17，midea S1 实证：板上指针 S2、plan v2 任务标 S1，
-     默认口径一条都扫不到，只能 --ids 硬点）。推导规则：未结任务（proposed/approved/blocked）
-     里最小的 S 号就是本期；两处真相只留一处，板上 current_sprint 降级为无未结任务时的兜底。
-     人要强指用 --sprint SN。 */
+  /* 「本期」口径（2026-09-24 Alvin 拍板，取代 2026-09-17「未结任务最小期」）：
+     日历本期 + 过期未结（欠账）。旧口径把指针钉在最老欠账上，一单人工尾巴锁死整期，
+     后面的机器活全在下一期干等（sungait S1 #616 实证：跑五六轮清不完）。新口径：
+     指针走板上日历锚（2026-08-28 定的日历 sprint），过期未结任务并进本期一起推进并
+     点名为欠账，不再匿名拖指针；midea S1 那类「板上 S2、任务标 S1」的场景同样被
+     欠账并入覆盖，比旧推导只多不少。未来期照旧折叠。人要强指用 --sprint SN。 */
+  const sprintNum = (s) => { const m = /^S(\d+)$/i.exec(String(s || '')); return m ? parseInt(m[1], 10) : null; };
   const boardSprint = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
   let sprint = boardSprint;
   if (SPRINT_ARG) {
     sprint = SPRINT_ARG;
     log('本期由 --sprint 指定为 ' + sprint);
-  } else {
+  }
+  let curNum = sprintNum(sprint);
+  if (curNum === null) {
+    // 板上指针坏了才退回旧推导：未结任务最小期兜底，别让整轮空转。
     const openNums = (await tasks())
       .filter((t) => ['proposed', 'approved', 'blocked'].includes(t.status))
-      .map((t) => { const m = /^S(\d+)$/i.exec(String(t.sprint || '')); return m ? parseInt(m[1], 10) : null; })
-      .filter((n) => n !== null);
-    if (openNums.length) {
-      sprint = 'S' + Math.min.apply(null, openNums);
-      if (sprint !== boardSprint) log('本期推导为 ' + sprint + '（未结任务最小期），板上指针 ' + boardSprint + ' 仅作展示，建议对齐');
-    }
+      .map((t) => sprintNum(t.sprint)).filter((n) => n !== null);
+    curNum = openNums.length ? Math.min.apply(null, openNums) : 1;
+    sprint = 'S' + curNum;
+    log('板上指针无效，退回未结最小期推导 ' + sprint);
   }
-  log(`${bc.name}（${cid}）本期 ${sprint}` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
+  const overdue = (await tasks()).filter((t) => ['proposed', 'approved', 'blocked', 'review', 'in_progress'].includes(t.status)
+    && sprintNum(t.sprint) !== null && sprintNum(t.sprint) < curNum);
+  if (overdue.length) {
+    log('欠账 ' + overdue.length + ' 条（过期未结，并入本期推进，不锁指针）：' + overdue.map((t) => '#' + t.id + '(' + t.sprint + '/' + t.status + (t.owner_type !== 'agent' ? '/' + t.owner_type : '') + ')').join(' '));
+  }
+  log(`${bc.name}（${cid}）本期 ${sprint}（日历锚）` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
   /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id。
      SEO 闸未过时 SEO 任务 held（module 非 paid 视为 SEO 口径），paid 任务照过。--ids 点名的仍以 id 为准。 */
+  const inSprintScope = (t) => { const n = sprintNum(t.sprint); return n !== null && n <= curNum; };
   const inScope = (t) => {
     if (IDS) return IDS.includes(t.id);
-    if (t.sprint !== sprint) return false;
+    if (!inSprintScope(t)) return false;
     /* 闸材料任务（确认卡/静默提案的生产者）是闸的钥匙，不受闸挡，否则鸡生蛋死锁（#659 老坑结构化修复） */
     if (!seoGateOk && String(t.module || '') !== 'paid'
       && !/keyword-confirmation|mapping-confirmation/.test(String(t.ops || ''))) return false; // SEO 任务被 SEO 闸 held
     return true;
   };
   if (!seoGateOk && !IDS) {
-    const held = (await tasks()).filter((t) => t.sprint === sprint && String(t.module || '') !== 'paid'
+    const held = (await tasks()).filter((t) => inSprintScope(t) && String(t.module || '') !== 'paid'
       && ['proposed', 'approved', 'blocked'].includes(t.status)).length;
     if (held) log('SEO 闸未过，本期 ' + held + ' 个 SEO 任务 held，仅推进 paid 卡');
   }
@@ -313,12 +323,11 @@ async function main() {
   // 口径下扫（--ids 指定任务时不动别的任务）。
   if (!IDS) {
     const allNow = await tasks();
-    const laterStuck = allNow.filter((t) => t.status === 'review' && t.sprint === sprint
+    const laterStuck = allNow.filter((t) => t.status === 'review' && inSprintScope(t)
       && String(t.review_effective || t.review_verdict || '') === 'later');
     for (const t of laterStuck) {
-      const m = /^S(\d)$/i.exec(String(t.sprint || ''));
-      if (!m) continue;
-      const next = 'S' + Math.min(parseInt(m[1], 10) + 1, 9);
+      // 挪到本期之后那一期：欠账里的 later 挪回任务自己的下一期还是 <= 本期，会原地打转
+      const next = 'S' + Math.min(curNum + 1, 9);
       if (DRY) { log('#' + t.id + ' later 存量，would 挪 ' + next); continue; }
       await call('PATCH', '/tasks/' + t.id, { sprint: next, result_note: String(t.result_note || '') + '\n[later] 存量挪期到 ' + next + '（判决与产出保留，到期随下期进放行流程）' });
       log('#' + t.id + ' later 存量，挪 ' + next);
@@ -376,10 +385,10 @@ async function main() {
       const why = [];
       if (!inScope(t)) {
         // 区分「不在本期」与「本期但被 SEO 闸 held」，别让 held 的 S1 任务错报成不在本期（2026-09-18）
-        if (!IDS && t.sprint === sprint && !seoGateOk && String(t.module || '') !== 'paid') {
+        if (!IDS && inSprintScope(t) && !seoGateOk && String(t.module || '') !== 'paid') {
           why.push('本期，但 SEO 闸 held（词表/mapping 未客户确认，paid 卡不受此闸）');
         } else {
-          why.push('不在本期（任务 ' + (t.sprint || '无标签') + '，本期口径 ' + (IDS ? '--ids' : sprint) + '）');
+          why.push('不在本期（任务 ' + (t.sprint || '无标签') + '，本期口径 ' + (IDS ? '--ids' : sprint + ' 含欠账') + '）');
         }
       }
       else {
@@ -427,7 +436,10 @@ async function main() {
 }
 
 async function report(all, sprint, retried) {
-  const mine = all.filter((t) => (IDS ? IDS.includes(t.id) : t.sprint === sprint));
+  // 与 main 的本期口径一致：日历本期 + 欠账（2026-09-24）
+  const sn = (s) => { const m = /^S(\d+)$/i.exec(String(s || '')); return m ? parseInt(m[1], 10) : null; };
+  const cn = sn(sprint);
+  const mine = all.filter((t) => (IDS ? IDS.includes(t.id) : (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn)));
   const blockers = [];
   const ready = [];
   for (const t of mine) {
