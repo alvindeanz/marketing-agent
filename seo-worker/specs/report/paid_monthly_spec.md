@@ -8,6 +8,8 @@
 
 - `reports/{client_slug}_paid_monthly_{YYYY-MM}.draft.html`：完整月报草稿，文件名带 `.draft`，
   页首固定一行内部水印「内部草稿，未经人审不得发客户」。
+  滚动窗口任务（detail 里写「报告窗口：X 至 Y（N 天）」而非「报告月份」）文件名用
+  `{client_slug}_paid_{YYYYMMDD}-{YYYYMMDD}.draft.html`，页内周期一律写完整日期区间，不写成某个月。
 - 草稿顶部第一屏是【自检清单】卡（见下），后面才是正文；人审通过后由人去掉水印与自检卡再发。
 - 结果摘要里写：每个关键数字的取数来源一行一个，方便人审对账。
 
@@ -23,10 +25,10 @@
 
 | 数字 | 默认来源 | 口径要点 |
 |---|---|---|
-| 各系列花费/曝光/点击/CTR/CPC | Google Ads API `FROM campaign`，CID 取 facts `ads.google.customer_id` 或 profile | 整月；**先核投放天数 = 自然月天数**，缺天必须在统计说明里写明（Ben's NZ 8 月断投 5 天的教训） |
+| 各系列花费/曝光/点击/CTR/CPC | Google Ads API `FROM campaign`，CID 取 facts `ads.google.customer_id` 或 profile | 按任务给的报告窗口拉（整月任务即自然月，滚动窗口任务按 detail 的起止日期）；**先核投放天数 = 窗口天数**，缺天必须在统计说明里写明（Ben's NZ 8 月断投 5 天的教训） |
 | 广告询盘（对客数字） | 看 facts `paid.report_lead_source`：`wf_backend` 则取 WebForger 后台 lead 的 meta 带 gclid/gbraid/wbraid 条数；未设或 `ads` 则用账户计数转化 | WF 口径注意**捕获起点**（facts `paid.gclid_capture_since`，之前的月份不可比不得重算）；AU 站要筛 `meta.state` 有值 |
 | 系列间询盘分配 | `segments.conversion_action_name` 过滤到计数转化 | 只用于分配，不当总数；PMax 小数用最大余数法取整 |
-| 全站询盘合计 | WebForger `GET /api/leads/list` 按 createdAt 的 UTC 月份 | 各渠道行加总可略小于合计，表下注明 |
+| 全站询盘合计 | WebForger `GET /api/leads/list` 按 createdAt 落在报告窗口内（UTC，整月任务即该 UTC 月份） | 各渠道行加总可略小于合计，表下注明 |
 | GA4 会话/渠道 | facts/profile 的 GA4 property，**必须加 hostName 过滤**防姊妹站串码 | 渠道表合计与概览 sessions 两数并存时用渠道表合计 |
 
 - 转化一律按 facts `ads.google.conversion_scope` 的干净口径，官方 Conversions 列的注水部分不参与判断。
@@ -35,7 +37,7 @@
 
 ## 自检清单（草稿顶卡，逐项打勾，答不了写「待人核」）
 
-1. 投放天数 = 自然月天数？缺投日期列出。
+1. 投放天数 = 报告窗口天数（整月任务即自然月天数）？缺投日期列出。滚动窗口任务的环比对比期 = 前一个等长紧邻时段，不做同比。
 2. 询盘口径用的哪个（写明来源与筛选条件），与客户后台界面能对上吗？
 3. 转化口径是否 facts 的 conversion_scope，有没有混入注水动作？
 4. 环比两期口径一致吗？不一致的卡去掉环比了吗？

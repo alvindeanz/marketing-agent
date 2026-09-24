@@ -227,6 +227,48 @@ t('跨年往回推一个月', () => {
   assert.strictEqual(p.compare.start, '2025-12-01');
   assert.strictEqual(p.compare.end, '2025-12-31');
 });
+t('滚动窗口：终点往回 N 天含当日，对比前一个等长紧邻窗', () => {
+  const p = F.computePeriod({ type: 'custom', start: '2026-08-25', end: '2026-09-23', today: '2026-09-27', lagDays: 3 });
+  assert.strictEqual(p.rolling, true);
+  assert.strictEqual(p.days, 30);
+  assert.strictEqual(p.start, '2026-08-25');
+  assert.strictEqual(p.end, '2026-09-23');
+  assert.strictEqual(p.partial, false);
+  assert.ok(p.label.indexOf('2026年8月25日 至 9月23日') > -1, p.label);
+  assert.ok(p.label.indexOf('30 天') > -1);
+  assert.strictEqual(p.compare.start, '2026-07-26');
+  assert.strictEqual(p.compare.end, '2026-08-24');
+});
+t('滚动窗口：终点超过 clampEnd 时整窗平移，天数不变', () => {
+  const p = F.computePeriod({ type: 'custom', start: '2026-09-01', end: '2026-09-28', today: '2026-09-27', clampEnd: '2026-09-24' });
+  assert.strictEqual(p.end, '2026-09-24');
+  assert.strictEqual(p.start, '2026-08-28');
+  assert.strictEqual(p.days, 28);
+  assert.strictEqual(F.diffDays(p.compare.start, p.compare.end) + 1, 28);
+});
+t('滚动窗口跨年：标签带两个年份，对比窗跨到去年', () => {
+  const p = F.computePeriod({ type: 'custom', start: '2025-12-20', end: '2026-01-16', today: '2026-01-20', lagDays: 3 });
+  assert.strictEqual(p.days, 28);
+  assert.ok(p.label.indexOf('2025年12月20日') > -1, p.label);
+  assert.ok(p.label.indexOf('2026年1月16日') > -1, p.label);
+  assert.strictEqual(p.compare.start, '2025-11-22');
+  assert.strictEqual(p.compare.end, '2025-12-19');
+});
+t('滚动窗口不做同比', () => {
+  const p = F.computePeriod({ type: 'custom', start: '2026-08-25', end: '2026-09-23', today: '2026-09-27' });
+  assert.strictEqual(F.yoyPeriodOf(p), null);
+});
+t('ptCutoffYmd：PT 今天减 2，NZ 时钟不参与', () => {
+  // 2026-09-24 08:00 UTC = PT（PDT，UTC-7）2026-09-24 01:00 -> cutoff 09-22
+  assert.strictEqual(F.ptCutoffYmd(new Date('2026-09-24T08:00:00Z')), '2026-09-22');
+  // 2026-09-24 05:00 UTC = PT 2026-09-23 22:00 -> cutoff 09-21（NZ 此刻已是 24 日下午）
+  assert.strictEqual(F.ptCutoffYmd(new Date('2026-09-24T05:00:00Z')), '2026-09-21');
+});
+t('整月模式给 clampEnd 时按它夹取', () => {
+  const p = F.computePeriod({ start: '2026-09-01', today: '2026-09-27', clampEnd: '2026-09-22' });
+  assert.strictEqual(p.end, '2026-09-22');
+  assert.strictEqual(p.partial, true);
+});
 t('monthsBack 出 13 个月且末尾是本月', () => {
   const m = F.monthsBack('2026-08', 13);
   assert.strictEqual(m.length, 13);

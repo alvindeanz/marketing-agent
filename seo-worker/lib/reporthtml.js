@@ -827,7 +827,9 @@ function renderReport(pack, narrative, opts = {}) {
     : trend.gsc_clicks || [];
   const hasTrend = trendValues.length > 0;
 
-  const partialNote = meta.period.partial
+  const partialNote = meta.period.rolling
+    ? '本期为 ' + meta.period.label + ' 的滚动统计，环比用前一个等长时段，不做同比。'
+    : meta.period.partial
     ? '截至 ' + meta.period.through_day + ' 日，本月尚未结束，环比用上月同一时段。'
     : '';
 
@@ -845,11 +847,14 @@ function renderReport(pack, narrative, opts = {}) {
 
   const data = {
     client_name: meta.client_name,
+    // 滚动窗口不是月报，页眉与 <title> 都不能写「月度」（2026-09-24 拍板）。
+    report_kind: meta.period.rolling ? 'SEO 阶段报告' : 'SEO 月度报告',
     period_label: meta.period.label,
     prev_period_label: meta.compare.label,
     period_short: meta.period.short,
     prev_period_short: meta.compare.short,
-    next_period_short: nextMonthShort(meta.period.start),
+    // 滚动窗口没有「下个月」可言，标题退成「下阶段」；整月照旧写具体月份。
+    next_period_short: meta.period.rolling ? '下阶段' : nextMonthShort(meta.period.start),
     site_domain: meta.domain,
     market: meta.market || '',
     platform: meta.platform || '',

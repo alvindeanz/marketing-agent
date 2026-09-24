@@ -597,17 +597,27 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
 
       <div class="sec">
         <div class="sec-head">
-          <div class="sec-title">生成月报</div>
+          <div class="sec-title">生成报告</div>
           <div class="tb-group">
+            <button class="btn" id="repModeLast" onclick="setRepGenMode('last')">上个月</button>
+            <button class="btn ghost" id="repModeRange" onclick="setRepGenMode('range')">自选窗口</button>
             <input type="month" class="tb-select" id="repMonth">
-            <button class="btn" id="repGenBtn" onclick="fireRepGen(this)">生成月报</button>
+            <input type="date" class="tb-select hidden" id="repEndDate">
+            <select class="tb-select hidden" id="repDays">
+              <option value="28">回溯 28 天</option>
+              <option value="29">回溯 29 天</option>
+              <option value="30" selected>回溯 30 天</option>
+              <option value="31">回溯 31 天</option>
+            </select>
+            <button class="btn" id="repGenBtnSeo" onclick="fireRepGenSeo(this)">SEO 月报</button>
+            <button class="btn hidden" id="repGenBtnPaid" onclick="fireRepGenPaid(this)">Paid 月报</button>
           </div>
         </div>
         <div class="panel">
           <div id="repJobBanner" class="banner hidden" style="margin-bottom:10px"></div>
           <div class="plan-meta" style="margin-bottom:10px">
-            默认上一个完整自然月。点下去只是排队，跑完要几分钟，链接会出现在下面的版本列表里。
-            同一个月可以重复生成，每次叠一个新版本，旧链接不会失效。
+            「上个月」出完整自然月（默认上一个完整月，可回选更早月份，带同比）；「自选窗口」从终点日期往回数 N 天出滚动统计（只环比不同比）。
+            点下去只是排队，跑完要几分钟，链接会出现在下面的版本列表里。同一周期可以重复生成，每次叠一个新版本，旧链接不会失效。
           </div>
           <div class="fld">
             <label>备注给生成器（可选）</label>
@@ -2239,17 +2249,34 @@ function repReset(){
   if(repJobTimer){clearTimeout(repJobTimer);repJobTimer=null}
   var b=document.getElementById('repJobBanner');
   if(b){b.classList.add('hidden');b.textContent=''}
-  var btn=document.getElementById('repGenBtn');
-  if(btn){btn.disabled=false;btn.textContent='生成月报'}
+  repGenMode='last';
+  var btn=document.getElementById('repGenBtnSeo');
+  if(btn){btn.disabled=false;btn.textContent='SEO 月报'}
+  var pbtn=document.getElementById('repGenBtnPaid');
+  if(pbtn){pbtn.disabled=false;pbtn.textContent='Paid 月报'}
 }
 
-/* 上一个完整自然月，给 <input type="month"> 当默认值 */
+/* GSC 可用日期上限（2026-09-24 Alvin 拍板）：GSC 日期桶对所有站点按太平洋时间切，
+   桶关后 final 数据约再等 48 小时，上限 = PT 今天减 2 天。与 seo-api 的
+   gsc_cutoff_ymd()、worker 的 ptCutoffYmd() 同口径。NZ 白天等于 NZ 今天减 3，
+   NZ 晚间 PT 翻日后自动多放出一天。 */
+function repPtToday(){
+  try{return new Date().toLocaleDateString('en-CA',{timeZone:'America/Los_Angeles'})}
+  catch(e){return insToday()} /* 兜底走 insToday（本地减 3），只会更紧不会更松 */
+}
+function repDataCutoff(){return insShift(repPtToday(),-2)}
+
+/* 最近一个数据齐全的完整自然月，给 <input type="month"> 当默认值与上限。
+   以前写死「上个月」，月初头几天前端放行、后端 400，现在跟 cutoff 对齐。 */
 function repDefaultMonth(){
-  var t=insToday();
-  return insMonthStart(insShift(insMonthStart(t),-1)).slice(0,7);
+  var cut=repDataCutoff();
+  var m=insMonthStart(cut);
+  if(insMonthEnd(m)>cut)m=insMonthStart(insShift(m,-1));
+  return m.slice(0,7);
 }
 function repMonthTitle(ymd){
   var s=String(ymd||'');
+  if(s.indexOf(' 至 ')>=0)return s; /* 滚动窗口的分组键就是完整区间，原样显示 */
   if(s.length<7)return s||'未标注周期';
   return (+s.slice(0,4))+'年'+(+s.slice(5,7))+'月';
 }
@@ -2339,22 +2366,37 @@ function repChanTabsHtml(){
   return '<button class="btn '+(repChan==='seo'?'':'ghost')+'" onclick="setRepChan(\'seo\')">SEO</button>'+
     '<button class="btn '+(repChan==='paid'?'':'ghost')+'" onclick="setRepChan(\'paid\')">Paid</button>';
 }
-/* 生成按钮合并为一颗：文案与行为跟随当前视图，视图即意图 */
+/* 生成入口（2026-09-24 Alvin 定）：按钮拆成「SEO 月报」「Paid 月报」两颗，
+   不再跟上面的 SEO/Paid 页签联动；没开 paid 服务的客户只显示 SEO 那颗，
+   内部草稿提示进 hover title 与 toast。
+   周期二选一：last=完整自然月（老逻辑，默认上个月，可回选更早月份，带同比），
+   range=滚动窗口（终点日期往回 28 到 31 天，只环比不同比）。 */
+var repGenMode='last';
+function setRepGenMode(m){repGenMode=(m==='range')?'range':'last';renderRepGenBtn()}
+window.setRepGenMode=setRepGenMode;
 function renderRepGenBtn(){
-  var b=document.getElementById('repGenBtn');
-  if(!b)return;
-  if(repChan==='paid'){
-    b.textContent='生成 Paid 月报（内部草稿）';
-    b.title='按 AU 基准口径出内部草稿，人工验收后才可对客';
-  }else{
-    b.textContent='生成月报';
-    b.title='';
+  var bl=document.getElementById('repModeLast'),br=document.getElementById('repModeRange');
+  if(bl)bl.className='btn'+(repGenMode==='last'?'':' ghost');
+  if(br)br.className='btn'+(repGenMode==='range'?'':' ghost');
+  var mm=document.getElementById('repMonth'),de=document.getElementById('repEndDate'),ds=document.getElementById('repDays');
+  if(mm)mm.classList.toggle('hidden',repGenMode!=='last');
+  if(de)de.classList.toggle('hidden',repGenMode!=='range');
+  if(ds)ds.classList.toggle('hidden',repGenMode!=='range');
+  if(repGenMode==='last'&&mm){mm.max=repDefaultMonth();if(!mm.value||mm.value>mm.max)mm.value=repDefaultMonth()}
+  if(repGenMode==='range'&&de){de.max=repDataCutoff();if(!de.value||de.value>de.max)de.value=repDataCutoff()}
+  var sb=document.getElementById('repGenBtnSeo');
+  if(sb)sb.title='出对客 SEO 报告，跑完落在下面的版本列表';
+  var c=repClientRow();
+  var pb=document.getElementById('repGenBtnPaid');
+  if(pb){
+    pb.classList.toggle('hidden',!(c&&insSvcPaid(c)));
+    pb.title='内部草稿：按 AU 基准口径出稿，人工验收后才可对客';
   }
 }
-function fireRepGen(btn){
-  if(repChan==='paid')firePaidMonthly(btn);
-  else fireReportJob(btn);
-}
+function fireRepGenSeo(btn){fireReportJob(btn)}
+function fireRepGenPaid(btn){firePaidMonthly(btn)}
+window.fireRepGenSeo=fireRepGenSeo;
+window.fireRepGenPaid=fireRepGenPaid;
 function repPaidKpiCards(metrics,from,to){
   var m=metrics||{},P=repKpiPeriod(from,to);
   function g(k,r){return insSumRange(m[k]||[],r.from,r.to)}
@@ -2467,16 +2509,27 @@ async function loadReportMetrics(force){
 /* ---- 生成 ---- */
 async function fireReportJob(btn){
   if(!curId)return;
-  var el=document.getElementById('repMonth');
-  var ym=el?String(el.value||''):'';
-  if(!/^\d{4}-\d{2}$/.test(ym)){toast('先选一个月份',true);return}
-  if(ym>repDefaultMonth()){toast('月报只出完整自然月，当前可生成的最新月份是 '+repDefaultMonth(),true);return}
-  var ps=ym+'-01',pe=insMonthEnd(ps);
+  var body={client_id:curId};
+  if(repGenMode==='range'){
+    var de=document.getElementById('repEndDate'),dsl=document.getElementById('repDays');
+    var end=de?String(de.value||''):'';
+    var days=dsl?parseInt(dsl.value,10)||30:30;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(end)){toast('先选窗口终点日期',true);return}
+    if(end>repDataCutoff()){toast('GSC 数据按太平洋时间分日、约两天后才齐全，最晚可选 '+repDataCutoff(),true);return}
+    body.period_type='custom';
+    body.period_end=end;
+    body.period_start=insShift(end,-(days-1));
+  }else{
+    var el=document.getElementById('repMonth');
+    var ym=el?String(el.value||''):'';
+    if(!/^\d{4}-\d{2}$/.test(ym)){toast('先选一个月份',true);return}
+    if(ym>repDefaultMonth()){toast('整月报告只出完整自然月，当前可生成的最新月份是 '+repDefaultMonth(),true);return}
+    var ps=ym+'-01';
+    body.period_type='month';body.period_start=ps;body.period_end=insMonthEnd(ps);
+  }
   var box=document.getElementById('repInstr');
   var extra=box?String(box.value||'').trim():'';
-  var body={client_id:curId,period_type:'month',period_start:ps,period_end:pe};
   if(extra)body.instructions=extra;
-  var label=btn.textContent;
   btn.disabled=true;
   var d=await api('/reports/generate','POST',body);
   if(!d){btn.disabled=false;return}
@@ -2486,7 +2539,7 @@ async function fireReportJob(btn){
     return;
   }
   /* 400 原样回显后端的话，缺 workspace_dir 这类提示要让 sales 看见原文 */
-  if(fail(d,'生成月报失败')){btn.disabled=false;return}
+  if(fail(d,'生成报告失败')){btn.disabled=false;return}
   var jid=d.job_id||d.id||'?';
   btn.textContent='已排队 job #'+jid;
   toast('已排队 job #'+jid+'（生成报告）');
@@ -2503,7 +2556,7 @@ async function repCheckJob(){
   var d=await api('/jobs?client_id='+curId+'&limit=10');
   if(!d||d._status>=400)return;
   var jobs=(d.jobs||[]).filter(function(j){return j.type==='report'&&(j.status==='queued'||j.status==='running')});
-  var b=document.getElementById('repJobBanner'),btn=document.getElementById('repGenBtn');
+  var b=document.getElementById('repJobBanner'),btn=document.getElementById('repGenBtnSeo');
   if(jobs.length){
     var j=jobs[0];
     var when=String(j.claimed_at||j.created_at||'').slice(11,16);
@@ -2513,7 +2566,7 @@ async function repCheckJob(){
   }else{
     var was=b&&!b.classList.contains('hidden');
     if(b){b.classList.add('hidden');b.textContent=''}
-    if(btn){btn.disabled=false;btn.textContent='生成月报'}
+    if(btn){btn.disabled=false;btn.textContent='SEO 月报'}
     if(was){toast('报告生成完成，版本列表已刷新');loadReportList()}
   }
 }
@@ -2650,7 +2703,7 @@ function renderReportList(){
     var meta0=document.getElementById('repVerMeta');
     var list0=repState.paidDrafts||[];
     if(meta0)meta0.textContent='Paid 草稿 '+list0.length+' 份（人审验收后才可对客）';
-    if(box0)box0.innerHTML=list0.length?list0.map(repPaidDraftRow).join(''):'<span class="muted">还没有 Paid 月报草稿。上面选好月份点「生成 Paid 月报」。</span>';
+    if(box0)box0.innerHTML=list0.length?list0.map(repPaidDraftRow).join(''):'<span class="muted">还没有 Paid 月报草稿。上面选好周期点「Paid 月报」。</span>';
     return;
   }
   var box=document.getElementById('repVersions');
@@ -2659,13 +2712,15 @@ function renderReportList(){
   var rs=repState.reports||[],i,k,r;
   if(meta)meta.textContent=rs.length?('共 '+rs.length+' 个版本'):'';
   if(!rs.length){
-    box.innerHTML='<span class="lane-empty">还没有生成过报告。选好月份点「生成月报」。</span>';
+    box.innerHTML='<span class="lane-empty">还没有生成过报告。上面选好周期点「SEO 月报」。</span>';
     return;
   }
   var groups={},order=[];
   for(i=0;i<rs.length;i++){
     r=rs[i];
-    k=String(r.period_start||'');
+    k=String(r.period_start||'').slice(0,10);
+    /* 滚动窗口按完整区间分组，不然 08-25 起的窗口会顶着「2026年8月」的帽子 */
+    if(String(r.period_type||'')==='custom')k=k+' 至 '+String(r.period_end||'').slice(0,10);
     if(!groups[k]){groups[k]=[];order.push(k)}
     groups[k].push(r);
   }
@@ -2724,17 +2779,28 @@ window.toggleRepStatus=toggleRepStatus;
 var paidMonthlyBusy=false;
 async function firePaidMonthly(btn){
   if(paidMonthlyBusy)return;
-  var mEl=document.getElementById('repMonth');
-  var mon=mEl?String(mEl.value||''):'';
-  if(!/^\d{4}-\d{2}$/.test(mon)){toast('先选报告月份',true);return}
+  var body={client_id:curId};
+  if(repGenMode==='range'){
+    var de=document.getElementById('repEndDate'),dsl=document.getElementById('repDays');
+    var end=de?String(de.value||''):'';
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(end)){toast('先选窗口终点日期',true);return}
+    if(end>repDataCutoff()){toast('数据约两天后才齐全，最晚可选 '+repDataCutoff(),true);return}
+    body.end_date=end;
+    body.days=dsl?parseInt(dsl.value,10)||30:30;
+  }else{
+    var mEl=document.getElementById('repMonth');
+    var mon=mEl?String(mEl.value||''):'';
+    if(!/^\d{4}-\d{2}$/.test(mon)){toast('先选报告月份',true);return}
+    body.month=mon;
+  }
   paidMonthlyBusy=true;
   if(btn){btn.disabled=true;btn.textContent='生成中…'}
-  var d=await api('/reports/paid_monthly','POST',{client_id:curId,month:mon});
+  var d=await api('/reports/paid_monthly','POST',body);
   paidMonthlyBusy=false;
-  if(btn){btn.disabled=false;renderRepGenBtn()}
-  if(d&&d._status===409){toast((d.error||'该月草稿已在跑')+'，任务 #'+(d.task_id||'?'),true);return}
+  if(btn){btn.disabled=false;btn.textContent='Paid 月报'}
+  if(d&&d._status===409){toast((d.error||'该周期草稿已在跑')+'，任务 #'+(d.task_id||'?'),true);return}
   if(fail(d,'Paid 月报任务创建失败'))return;
-  toast('已建任务 #'+d.task_id+'（job #'+d.job_id+'），草稿出来后在任务视图人审验收，不会自动发客户');
+  toast('已建任务 #'+d.task_id+'（job #'+d.job_id+'），内部草稿：在任务视图人审验收后才可对客，不会自动发客户');
 }
 
 function loadReportChanBoot(){repChanInit();renderRepGenBtn()}
@@ -2742,9 +2808,8 @@ function loadReport(){
   loadReportChanBoot();
   if(!curId)return;
   if(repState.client&&repState.client!==curId)repReset();
-  var mel=document.getElementById('repMonth');
-  /* 月报只出完整自然月：最晚可选的就是上一个完整月（含 3 天数据延迟），默认也是它 */
-  if(mel){mel.max=repDefaultMonth();if(!mel.value||mel.value>mel.max)mel.value=repDefaultMonth();}
+  /* 周期控件的上限、默认值与显隐都在 renderRepGenBtn 里按当前模式收拾 */
+  renderRepGenBtn();
   if(!repState.from||!repState.to){
     setRepPreset(repPreset==='custom'?'last_month':repPreset);
   }else{

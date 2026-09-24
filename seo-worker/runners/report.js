@@ -20,7 +20,7 @@ const path = require('node:path');
 const { runClaude } = require('../lib/llm');
 const { extractTrailingJson } = require('../lib/mdjson');
 const { ensureClientWorkspace, clientDirName, localYmd, truncate } = require('../lib/util');
-const { buildFactsPack, computePeriod } = require('../lib/factspack');
+const { buildFactsPack, computePeriod, ptCutoffYmd } = require('../lib/factspack');
 const { renderReport, KPI_DEFS } = require('../lib/reporthtml');
 const { lintText, lintReport, numbersFromPack, checkNumbers, problemList } = require('../lib/reportlint');
 const { publishReport } = require('../lib/publish');
@@ -39,7 +39,8 @@ const GSC_LAG_DAYS = 3;
 function headerBlock(pack) {
   const meta = pack.meta;
   const lines = [
-    '你是一家新西兰数字营销公司的 SEO 客户经理，为下面这个客户写 ' + meta.period.label + ' 的 SEO 月报叙事。',
+    '你是一家新西兰数字营销公司的 SEO 客户经理，为下面这个客户写 ' + meta.period.label +
+      (meta.period.rolling ? ' 的 SEO 阶段报告叙事。' : ' 的 SEO 月报叙事。'),
     '读者是客户老板，不懂技术。报告数字已经由系统算好（DATA PACK），你只写解读与计划，一次写完，无人答疑。',
     '',
     '铁律：',
@@ -54,7 +55,11 @@ function headerBlock(pack) {
     '9. 统一用「询盘」不用「线索」；语言按 ' + meta.report_lang + '（zh 写中文，en 写英文）。',
     '10. 这份报告是向客户汇报工作的：本月做了什么要写足写具体，数据变化要与我方动作对应起来说，让客户看到投入和成果。',
   ];
-  if (meta.period.partial) {
+  if (meta.period.rolling) {
+    lines.push(
+      '11. 本期是滚动窗口（' + meta.period.label + '），不是自然月：全文不得把本期称为某个月份，环比只与前一个等长时段比，不做同比。'
+    );
+  } else if (meta.period.partial) {
     lines.push(
       '11. 本期是月中出报，全文必须写明「截至 ' + meta.period.through_day + ' 日，本月尚未结束」，环比只与上月同一时段比，不做同比。'
     );
@@ -309,12 +314,15 @@ async function run(ctx) {
   const slug = clientDirName(profile, cfg);
   const today = localYmd();
 
+  // clampEnd：数据可用上限统一走 PT 口径（见 factspack.ptCutoffYmd 注释），
+  // 与 seo-api 的校验同源，避免 API 放行的终点在这里被本地时区多夹一天。
   const period = computePeriod({
     type: String(payload.period_type || 'month'),
     start: payload.period_start || defaultPeriodStart(today),
     end: payload.period_end || null,
     today,
     lagDays: GSC_LAG_DAYS,
+    clampEnd: ptCutoffYmd(),
   });
   log(
     '报告周期 ' + period.start + ' 至 ' + period.end + '（' + period.label + '），对比 ' +
@@ -404,7 +412,9 @@ async function run(ctx) {
   }
 
   // ---- 落盘 ----
-  const ym = period.start.slice(0, 7);
+  // 滚动窗口的产物名带完整区间：一个 08-25 至 09-23 的窗口叫 report-2026-08
+  // 会被人当成 8 月月报（2026-09-24 拍板：新流程产物按日期区间标注）。
+  const ym = period.rolling ? period.start + '_' + period.end : period.start.slice(0, 7);
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
   fs.mkdirSync(outDir, { recursive: true });
   let localHtml = path.join(outDir, 'report-' + ym + '-v' + versionHint + '.html');

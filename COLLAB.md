@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-24 AIRA (f) 月报生成入口改版：按钮拆两颗 + 周期二选一 + PT cutoff
+
+- 干了什么：Alvin 2026-09-24 三轮拍板（细节在 PJ DECISIONS）。①前端报告 tab：生成按钮拆「SEO 月报」「Paid 月报」两颗，不再跟 SEO/Paid 页签联动，没开 paid 的客户只见 SEO 那颗，内部草稿提示进 hover title 与 toast；周期二选一：「上个月」= 完整自然月老逻辑（month 选择器保留可回选更早月份，带同比），「自选窗口」= 日期选择器 + 回溯天数下拉 28/29/30/31（默认 30），窗口 = 终点往回 N 天含当日。②数据可用上限统一成 PT 口径：GSC 日期桶按 America/Los_Angeles 切、桶关后约 48 小时才 final，上限 = PT 今天减 2；三处同源实现 seo-api `gsc_cutoff_ymd()`、前端 `repDataCutoff()`、worker `factspack.ptCutoffYmd()`（runner 以 clampEnd 传入），month 老校验的「月末 + 3 天」也换成它；前端 `repDefaultMonth()` 顺手修掉月初头几天前端放行、后端 400 的错位。③后端 /reports/generate 加 `period_type=custom` 分支（28 到 31 天、终点不超 cutoff），ENUM 本来就有 custom 零 DDL；/reports/paid_monthly 兼容 `{month}` 与 `{end_date, days}` 两种 body，标题即去重键（滚动窗用完整区间）。④worker：computePeriod 加 custom 滚动窗分支（compare = 前一个等长紧邻窗，label 全日期区间），yoyPeriodOf 对 rolling 返回 null（YoY 只留整月），趋势锚点改窗口终点所在月，模板 title/页眉徽标参数化 `{{report_kind}}`（滚动窗写「SEO 阶段报告」），产物名 report-YYYY-MM-DD_YYYY-MM-DD-vN；paid_monthly_spec 投放天数核对改按窗口核。测试：node tests/ 全套过（report 118 含 7 条新 case、insights 100、ui 5、specs ok），前端整段 script 抽出 node --check 过。
+- 坑：worker 的 clampEnd 不传就退回 today-lagDays 老行为（单测兜底用）；滚动窗终点若被 clamp，整窗平移保天数，不缩窗（缩窗环比两边天数不等全是假数）。seo_reports 版本唯一键仍是 (client, period_type, period_start)，同起点不同天数的 custom 窗会叠进同一版本序列，属已知可接受。
+- 下一步/认领：api 与 worker 随本次一起部署（Alvin 拍板「按照你的规划去做」）；paid 滚动窗首单出稿后人工核一遍投放天数口径。
+
 ### 2026-09-23 AIRA (e) 博客节奏一个 sprint 一篇（f85c527, e41ecd9）
 - 干了什么：Alvin 定合同每月两篇 = 一个 sprint 一篇。lib/blogcadence.js（开关 fact contract.blog_per_sprint，值以数字开头）；plan.js persist 与 plan_review v2 落库时缺博客的 sprint 补占位任务（detail 带 [配额博客 Sn]）；review_plan cleanVerdicts 后 protectVerdicts：写稿阶段（proposed/approved/in_progress/blocked）的配额博客判 drop/later/merge 改判 do，adjust 要求换题不空交，review 阶段等客户的 later 与同 sprint 超额的不保护；tools/blog_cadence.js 人手补缺（默认预览，--apply 建，过去 sprint 累计算欠数、后多写抵前空、2026-09-01 前不追溯）。已开开关：Apollo/PowerDekor/Louvresky/Sanmichelle/Ben's NZ/Ben's AU，建占位 #823 至 #846 共 24 个。
 - 坑：补缺不能挂 pull_data（cron），建任务会连带排判定 job 调模型，违反硬规矩 1。标题里「，内链回 /collections/x」是落点不是内链任务，判博客前先剥掉。

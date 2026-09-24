@@ -121,6 +121,35 @@ function ymOf(s) {
   return String(s || '').slice(0, 7);
 }
 
+/** 两个日期相差的天数（b - a），同一天为 0。 */
+function diffDays(a, b) {
+  const pa = splitYmd(a);
+  const pb = splitYmd(b);
+  if (!pa || !pb) return null;
+  return Math.round((Date.UTC(pb.y, pb.m - 1, pb.d) - Date.UTC(pa.y, pa.m - 1, pa.d)) / 86400000);
+}
+
+/** '2026-08-25' -> '2026年8月25日'（omitYear 时省掉年份）。 */
+function cnDate(s, omitYear) {
+  const p = splitYmd(s);
+  if (!p) return String(s || '');
+  return (omitYear ? '' : p.y + '年') + p.m + '月' + p.d + '日';
+}
+
+/**
+ * GSC 数据可用日期上限（2026-09-24 Alvin 拍板）：GSC 的日期桶对所有站点按
+ * 太平洋时间（America/Los_Angeles）切，桶关之后 final 数据约再等 48 小时，
+ * 所以可用上限 = PT 的今天减 2 天。用 PT 而不是本地时区减固定天数：NZ 白天
+ * 时两者等价（等于 NZ 今天减 3），NZ 晚间 PT 翻日后自动多放出一天。
+ * now 可传 Date 便于测试，默认取当前时钟。
+ */
+function ptCutoffYmd(now) {
+  const d = now instanceof Date ? now : new Date();
+  // en-CA 的日期格式就是 YYYY-MM-DD；toLocaleDateString 自带 DST 处理。
+  const ptToday = d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  return addDays(ptToday, -2);
+}
+
 /** 从 endYm 往回数 n 个月，返回 ['2025-08', ... , endYm]，正序。 */
 function monthsBack(endYm, n) {
   const out = [];
@@ -144,13 +173,17 @@ function monthsBack(endYm, n) {
 function computePeriod(opts) {
   const o = opts || {};
   const type = o.type || 'month';
+  // 滚动窗口（period_type=custom，2026-09-24 Alvin 定的「新流程」）：
+  // 窗口 = 终点日期往回数 N 天含当日，起点不锚定月初；环比与前一个等长
+  // 紧邻时段比，不做同比（yoyPeriodOf 对 rolling 返回 null）。
+  if (type === 'custom') return computeRollingPeriod(o);
   const start = monthStartOf(o.start) || o.start;
   const p = splitYmd(start);
   if (!p) throw new Error('computePeriod 拿到的 period_start 不是 YYYY-MM-DD：' + o.start);
   const mEnd = monthEndOf(start);
   const lag = Number.isFinite(Number(o.lagDays)) ? Number(o.lagDays) : 3;
   const today = o.today || new Date().toISOString().slice(0, 10);
-  const lagged = addDays(today, -lag);
+  const lagged = o.clampEnd || addDays(today, -lag);
 
   // 不管有没有显式给 end，都要夹到「今天减延迟天数」：GSC 最近几天没数据，
   // 传月末进来照拉会把 22 天当 31 天比，环比全是假下滑（2026-08-25 v1 踩过）。
@@ -192,11 +225,55 @@ function computePeriod(opts) {
 }
 
 /**
+ * 滚动窗口的周期计算，computePeriod 的 custom 分支。
+ * opts: { start, end, today, lagDays, clampEnd }
+ *   end 必填（窗口终点即用户选的日期）；start 可省，省了按 end 往回 30 天。
+ *   clampEnd 是数据可用上限（PT 今天减 2，见 ptCutoffYmd），终点超了就夹回来，
+ *   夹完窗口起点跟着平移，保住窗口天数不变（缩窗比挪窗更坑：两边天数不等，
+ *   环比全是假数）。
+ * 返回结构与 month 分支同形，多 rolling:true 与 days 两个字段。
+ */
+function computeRollingPeriod(o) {
+  const lag = Number.isFinite(Number(o.lagDays)) ? Number(o.lagDays) : 3;
+  const today = o.today || new Date().toISOString().slice(0, 10);
+  const clamp = o.clampEnd || addDays(today, -lag);
+  let end = o.end ? String(o.end) : clamp;
+  let start = o.start ? String(o.start) : null;
+  if (!splitYmd(end)) throw new Error('computePeriod(custom) 拿到的 period_end 不是 YYYY-MM-DD：' + o.end);
+  let days = start && splitYmd(start) ? diffDays(start, end) + 1 : 30;
+  if (!(days > 0)) throw new Error('computePeriod(custom) 窗口天数不是正数：' + start + ' 至 ' + end);
+  if (end > clamp) end = clamp;
+  start = addDays(end, -(days - 1));
+  const prevEnd = addDays(start, -1);
+  const prevStart = addDays(prevEnd, -(days - 1));
+  const sameYear = ymOf(start).slice(0, 4) === ymOf(end).slice(0, 4);
+  const label = cnDate(start) + ' 至 ' + cnDate(end, sameYear) + '（' + days + ' 天）';
+  return {
+    type: 'custom',
+    rolling: true,
+    days,
+    start,
+    end,
+    label,
+    short: '近 ' + days + ' 天',
+    partial: false,
+    through_day: null,
+    compare: {
+      start: prevStart,
+      end: prevEnd,
+      label: 'vs 前一时段（' + cnDate(prevStart, sameYear) + ' 至 ' + cnDate(prevEnd, sameYear) + '）',
+      short: '前一时段',
+    },
+  };
+}
+
+/**
  * 同比周期：去年同一个自然月。只对整月报告成立，月中出报的契约是
  * 只与上月同窗环比、不做同比（README 周期规则），传 partial 进来返回 null。
+ * 滚动窗口（rolling）同样不做同比（2026-09-24 定：YoY 只留在整月模式）。
  */
 function yoyPeriodOf(per) {
-  if (!per || per.partial) return null;
+  if (!per || per.partial || per.rolling) return null;
   const start = addMonths(per.start, -12);
   if (!start) return null;
   const p = splitYmd(start);
@@ -1319,17 +1396,21 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   }
 
   // ---- 趋势 ----
-  const months = monthsBack(ymOf(per.start), TREND_MONTHS);
-  let trend = { months, gsc_clicks: [], ga4_sessions_organic: [], last_partial: !!per.partial };
+  // 滚动窗口锚在终点所在月（起点所在月往往只占几天），且终点没到月末时
+  // 最后一根柱是不完整月，图注要标出来。
+  const trendAnchorYm = per.rolling ? ymOf(per.end) : ymOf(per.start);
+  const trendLastPartial = per.rolling ? per.end < monthEndOf(per.end) : !!per.partial;
+  const months = monthsBack(trendAnchorYm, TREND_MONTHS);
+  let trend = { months, gsc_clicks: [], ga4_sessions_organic: [], last_partial: trendLastPartial };
   try {
     const from = months[0] + '-01';
     const res = await api.getMetrics(clientId, from, per.end, ['gsc_clicks', 'ga4_sessions_organic']);
     inputs.api_calls += 1;
-    trend = buildTrend(res && res.metrics, months, per.partial);
+    trend = buildTrend(res && res.metrics, months, trendLastPartial);
     say('trend: 取到 ' + months.length + ' 个月的时序');
   } catch (e) {
     // 这个端点现在还是 admin only，worker 拿到 403 是已知状态，不该把报告拖挂。
-    trend = { months, gsc_clicks: [], ga4_sessions_organic: [], last_partial: !!per.partial };
+    trend = { months, gsc_clicks: [], ga4_sessions_organic: [], last_partial: trendLastPartial };
     gaps.push('历史趋势数据本期未取到（' + String(e.message || e).slice(0, 120) + '），趋势图暂缺');
     say('trend: 取数失败，按空趋势处理：' + e.message);
   }
@@ -1455,6 +1536,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
         short: per.short,
         partial: per.partial,
         through_day: per.through_day,
+        rolling: !!per.rolling,
+        days: per.days || null,
       },
       compare: {
         start: per.compare.start,
@@ -1514,6 +1597,9 @@ module.exports = {
   addDays,
   ymOf,
   monthsBack,
+  diffDays,
+  cnDate,
+  ptCutoffYmd,
   computePeriod,
   pctDelta,
   absDelta,

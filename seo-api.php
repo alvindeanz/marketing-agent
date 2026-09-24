@@ -420,6 +420,18 @@ function ensure_reports_schema(){
    不做"猜一下用户想要哪天"这种事。 */
 function ymd_ok($s){return (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/',(string)$s);}
 
+/* GSC 数据可用日期上限（2026-09-24 Alvin 拍板）：GSC 的日期桶对所有站点按
+   太平洋时间（America/Los_Angeles）切，桶关之后 final 数据约再等 48 小时，
+   所以上限 = PT 的今天减 2 天。用 PT 而不是服务器本地时区减固定天数：
+   NZ 白天两者等价（等于 NZ 今天减 3），NZ 晚间 PT 翻日后自动多放出一天。
+   报告周期校验（month 与 custom 两条路）和 worker 的 clampEnd 都吃这一个口径，
+   worker 侧同名逻辑在 seo-worker/lib/factspack.js 的 ptCutoffYmd()。 */
+function gsc_cutoff_ymd(){
+    $d=new DateTime('now',new DateTimeZone('America/Los_Angeles'));
+    $d->modify('-2 days');
+    return $d->format('Y-m-d');
+}
+
 /* POST /metrics 的整批校验与去重，抽成函数是为了能单测：这里一行判错，
    要么整批 400 挡住正常写入，要么把脏数据放进时序表。
    返回 [$rows, null] 或 [null, '错误说明']。全批先校验再写，一行不合格整批拒，
@@ -4094,16 +4106,30 @@ if($m==='GET'&&$ROUTE==='/inbox/chats'){
 // POST /inbox/chat -> 开一个新会话。
 // body { client_id, title?, text }，一次请求做三件事：建根、写第一条人消息、
 // 排 chat job。标题不给就从第一句话截一段，人懒得起名是常态。
-/* POST /reports/paid_monthly body { client_id, month:"YYYY-MM" } -> { task_id, job_id }
-   报告 tab 的「生成 Paid 月报」按钮：建 analysis 任务按 specs/report/paid_monthly_spec.md 出内部草稿，
+/* POST /reports/paid_monthly body { client_id, month:"YYYY-MM" }
+   或 { client_id, end_date:"YYYY-MM-DD", days:28..31 }（滚动窗口，2026-09-24 定）
+   -> { task_id, job_id }
+   报告 tab 的「Paid 月报」按钮：建 analysis 任务按 specs/report/paid_monthly_spec.md 出内部草稿，
    走正常 review 人审（红线：对客发送必须人审）。 */
 if($m==='POST'&&$ROUTE==='/reports/paid_monthly'){
     $u=auth_user();
     $i=input();
     $cid=(int)($i['client_id']??0);
     $mon=(string)($i['month']??'');
+    $wend=(string)($i['end_date']??'');
+    $wdays=(int)($i['days']??0);
     if(!$cid)res(400,['error'=>'client_id required']);
-    if(!preg_match('#^\d{4}-\d{2}$#',$mon))res(400,['error'=>'month 要 YYYY-MM']);
+    $winLabel='';$winStart='';
+    if($wend!==''){
+        if(!ymd_ok($wend))res(400,['error'=>'end_date 必须是 YYYY-MM-DD']);
+        if($wdays<28||$wdays>31)res(400,['error'=>'days 只支持 28 到 31']);
+        $cut=gsc_cutoff_ymd();
+        if(strcmp($wend,$cut)>0)res(400,['error'=>'数据约两天后才齐全，end_date 最晚 '.$cut,'latest_date'=>$cut]);
+        $winStart=date('Y-m-d',strtotime($wend.' -'.($wdays-1).' days'));
+        $winLabel=$winStart.' 至 '.$wend.'（'.$wdays.' 天）';
+    }elseif(!preg_match('#^\d{4}-\d{2}$#',$mon)){
+        res(400,['error'=>'month 要 YYYY-MM，滚动窗口改传 end_date + days']);
+    }
     /* services 在 seo_profiles 上（惰性列），不在 clients 表 */
     $c=db()->prepare("SELECT c.id,c.name,p.services FROM clients c LEFT JOIN seo_profiles p ON p.client_id=c.id WHERE c.id=?");
     $c->execute([$cid]);
@@ -4112,21 +4138,28 @@ if($m==='POST'&&$ROUTE==='/reports/paid_monthly'){
     $svc=strtolower((string)($cl['services']??''));
     if(!in_array($svc,['sem','paid','both'],true))res(400,['error'=>'这个客户没有 paid 服务']);
     ensure_task_origin();
+    /* 标题同时是去重键：整月用 YYYY-MM，滚动窗口用完整区间，互不撞。 */
+    $title=$wend!==''?('Paid 月报草稿 '.$winStart.' 至 '.$wend):('Paid 月报草稿 '.$mon);
     $dq=db()->prepare("SELECT id,status FROM seo_tasks WHERE client_id=? AND title=? AND origin LIKE 'report:%' AND status NOT IN ('done') ORDER BY id DESC LIMIT 1");
-    $dq->execute([$cid,'Paid 月报草稿 '.$mon]);
+    $dq->execute([$cid,$title]);
     $dup=$dq->fetch();
-    if($dup)res(409,['error'=>'该月草稿任务已在跑（#'.$dup['id'].'，状态 '.$dup['status'].'），别重复点','task_id'=>(int)$dup['id']]);
+    if($dup)res(409,['error'=>'该周期草稿任务已在跑（#'.$dup['id'].'，状态 '.$dup['status'].'），别重复点','task_id'=>(int)$dup['id']]);
+    $winText=$wend!==''
+        ?("报告窗口：".$winLabel."（滚动窗口，终点日期往回 ".$wdays." 天含当日，不是自然月）。\n"
+            ."投放天数核对按该窗口核，不按自然月天数；环比与前一个等长紧邻时段比，不做同比。\n")
+        :("报告月份：".$mon."。\n");
     list($clean,$err)=task_fields_clean([
-        'title'=>'Paid 月报草稿 '.$mon,
-        'detail'=>"按 /data/aira/seo-worker/specs/report/paid_monthly_spec.md 出 ".$mon." 的 paid 月报内部草稿。\n"
-            ."报告月份：".$mon."。口径以该 spec 与客户 facts（ads.google.conversion_scope、paid.report_lead_source 等）为准，数字全部现拉现算。\n"
+        'title'=>$title,
+        'detail'=>"按 /data/aira/seo-worker/specs/report/paid_monthly_spec.md 出 ".($wend!==''?$winLabel:$mon)." 的 paid 月报内部草稿。\n"
+            .$winText
+            ."口径以该 spec 与客户 facts（ads.google.conversion_scope、paid.report_lead_source 等）为准，数字全部现拉现算。\n"
             ."产出草稿 HTML 到 reports/ 并跑 lint，摘要里给自检清单结论与各数字来源。\n\n[来源] 报告页一键生成，由 ".$u['username']." 发起；内部草稿，人工验收后才可对客。",
         'module'=>'paid','owner_type'=>'agent','priority'=>'P1','ops'=>'','sprint'=>'',
     ],['status_force'=>'approved']);
     if($err)res(400,['error'=>$err]);
     $tid=task_insert($cid,$clean,$u['username'],'report:ui');
     list($jids,)=queue_task_jobs($cid,'execute_task',[$tid],$u['username'],'paid_monthly_report');
-    audit($u['username'],'seo_paid_monthly_report',(string)$tid,['client_id'=>$cid,'month'=>$mon,'job_id'=>$jids?$jids[0]:0]);
+    audit($u['username'],'seo_paid_monthly_report',(string)$tid,['client_id'=>$cid,'month'=>$mon,'end_date'=>$wend,'days'=>$wdays,'job_id'=>$jids?$jids[0]:0]);
     res(200,['ok'=>true,'task_id'=>$tid,'job_id'=>$jids?$jids[0]:0]);
 }
 
@@ -6331,17 +6364,23 @@ if($m==='POST'&&$ROUTE==='/reports/generate'){
     $pe=(string)($i['period_end']??'');
     if(!ymd_ok($ps)||!ymd_ok($pe))res(400,['error'=>'period_start/period_end 必须是 YYYY-MM-DD']);
     if(strcmp($ps,$pe)>0)res(400,['error'=>'period_start 不能晚于 period_end']);
-    /* 月报只出完整自然月（Alvin 2026-08-25 定）：period_end 必须是该月最后一天，
-       且月末加 GSC 3 天延迟不晚于今天，否则拒绝并告知当前可出的最新月份。 */
+    /* 周期二选一（Alvin 2026-09-24 定，收编 2026-08-25「只出完整自然月」规矩）：
+       month = 完整自然月（老逻辑），custom = 滚动窗口（终点日期往回 28 到 31 天）。
+       两条路的数据可用上限共用 gsc_cutoff_ymd()（PT 今天减 2）。 */
+    $cut=gsc_cutoff_ymd();
     if($ptype==='month'){
-        $lag=3;
         if($ps!==date('Y-m-01',strtotime($ps)))res(400,['error'=>'月报的 period_start 必须是当月 1 日']);
         if($pe!==date('Y-m-t',strtotime($ps)))res(400,['error'=>'月报的 period_end 必须是当月最后一天']);
         $latest=date('Y-m-t',strtotime(date('Y-m-01').' -1 day'));
-        while(strtotime($latest)+$lag*86400>time()){
+        while(strcmp($latest,$cut)>0){
             $latest=date('Y-m-t',strtotime(date('Y-m-01',strtotime($latest)).' -1 day'));
         }
-        if(strtotime($pe)+$lag*86400>time())res(400,['error'=>'该月尚未结束或数据尚未齐全，当前可生成的最新月份是 '.substr($latest,0,7),'latest_month'=>substr($latest,0,7)]);
+        if(strcmp($pe,$cut)>0)res(400,['error'=>'该月尚未结束或数据尚未齐全，当前可生成的最新月份是 '.substr($latest,0,7),'latest_month'=>substr($latest,0,7)]);
+    }
+    if($ptype==='custom'){
+        $days=(int)round((strtotime($pe)-strtotime($ps))/86400)+1;
+        if($days<28||$days>31)res(400,['error'=>'自定义窗口只支持 28 到 31 天，收到的是 '.$days.' 天']);
+        if(strcmp($pe,$cut)>0)res(400,['error'=>'GSC 数据按太平洋时间分日、约两天后才齐全，当前可选的最晚日期是 '.$cut,'latest_date'=>$cut]);
     }
     /* 工作区目录是成品落地的地方，缺了 worker 领到活也只能抛错，
        与其让人去 job 日志里找原因，不如在这里就说清楚该补哪里。 */
