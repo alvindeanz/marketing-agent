@@ -52,6 +52,44 @@ td.num{font-family:"SF Mono",Menlo,monospace;font-size:12px;white-space:nowrap}
 footer{text-align:center;color:#94a3b8;font-size:12px;padding:24px 0;margin-top:20px}
 @media(max-width:720px){.topic dl{grid-template-columns:1fr}}"""
 
+
+FBX_CSS_JS = """<style>
+.fbx{border:1px solid #e3e3e3;border-radius:6px;padding:12px 14px;margin:10px 0 26px;font-size:14px;background:#fafafa}
+.fbx-t{display:block;margin-bottom:8px;font-weight:600}
+.fbx-b{margin:0 8px 8px 0;padding:7px 14px;border:1px solid #222;border-radius:4px;background:#fff;cursor:pointer;font-size:13px}
+.fbx-b:hover{background:#222;color:#fff}
+.fbx-b.done{background:#222;color:#fff;pointer-events:none}
+.fbx-ta{display:block;width:100%;box-sizing:border-box;min-height:52px;margin:4px 0 6px;padding:8px;border:1px solid #ddd;border-radius:4px;font:inherit}
+.fbx-s{font-size:12px;color:#2e7d32}
+</style>
+<script>
+(function(){
+var API='/reports/card_feedback.php';
+var FB='https://always.horntech-dev.com/seo-api.php/card_feedback';
+var q=new URLSearchParams(window.location.search);
+var t=parseInt(q.get('t'),10),k=q.get('k');
+function post(body,ok,bad){body.task_id=t;body.token=k;
+fetch(API,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){if(!r.ok)throw 0;ok()}).catch(function(){fetch(FB,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){r.ok?ok():bad()}).catch(bad)});}
+document.querySelectorAll('.fbx').forEach(function(box){var item=box.getAttribute('data-item');
+box.querySelectorAll('.fbx-b').forEach(function(btn){btn.addEventListener('click',function(){
+if(!t||!k){box.querySelector('.fbx-s').textContent='链接缺少令牌，请用我们发您的原始链接打开';return}
+var choice=btn.getAttribute('data-c');var fb=box.querySelector('.fbx-ta').value.trim();
+if(choice==='other'&&!fb){box.querySelector('.fbx-s').textContent='请先在留言框写下想法，再点这个按钮';return}
+btn.disabled=true;
+post({item:item,choice:choice,fb:fb},function(){btn.classList.add('done');box.querySelector('.fbx-s').textContent='已收到，谢谢！我们会跟进。';box.querySelectorAll('.fbx-b').forEach(function(b){b.disabled=true});},function(){btn.disabled=false;box.querySelector('.fbx-s').textContent='提交没成功，请稍后再试或直接回消息给我们'});
+});});});
+})();
+</script>"""
+
+def fbx_block(item, label):
+    # card_feedback 通路的页内表态组件（lint 规则 feedback_widget 认 marker）
+    return (f'<div class="fbx" data-item="{item}">'
+            f'<span class="fbx-t">{label}，您的意见：</span>'
+            f'<button class="fbx-b" data-c="agree">没问题，照此推进</button>'
+            f'<button class="fbx-b" data-c="other">有调整（先写留言再点我）</button>'
+            f'<textarea class="fbx-ta" placeholder="想换题、改角度、调月份，直接写在这里"></textarea>'
+            f'<span class="fbx-s"></span></div>')
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__); sys.exit(2)
@@ -97,7 +135,7 @@ def main():
         body = "".join(render_topic(t) for t in cfg["topics"] if t["month"] == m["tag"])
         months.append(f'<section class="card" id="m{m["tag"].replace("-","")}">'
                       f'<h2><span class="num">{m["tag"]}</span>{m["title"]}</h2>'
-                      f'<div class="desc">{m["desc"]}</div>{body}</section>')
+                      f'<div class="desc">{m["desc"]}</div>{body}{fbx_block("topics_"+m["tag"], m["title"]+" 选题")}</section>')
     n_new = sum(1 for t in cfg["topics"] if t["type"] == "新写")
     legend = cfg.get("legend", f'<span><span class="tag new">新写</span> 共 {len(cfg["topics"])} 篇，其中新写 {n_new} 篇</span>')
     doc = (f'<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">'
@@ -109,7 +147,7 @@ def main():
            f'<span><b>数据窗口</b> {cfg["window_label"]}</span>'
            f'<span><b>成稿</b> {cfg["made_on"]}</span></div>'
            f'<div class="legend">{legend}</div></header>'
-           f'{cfg.get("intro","")}{"".join(months)}{cfg.get("outro","")}'
+           f'{cfg.get("intro","")}{"".join(months)}{fbx_block("_card","对整份排期的总体意见")}{cfg.get("outro","")}{FBX_CSS_JS}'
            f'<footer>{cfg.get("footer","")}</footer></div></body></html>')
     rng = cfg.get("range_slug") or cfg["range_label"].replace(" ", "")
     out = f"{base}/reports/blog_topic_plan_{slug}_{rng}.html"
