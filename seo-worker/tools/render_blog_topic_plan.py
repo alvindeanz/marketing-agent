@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """博客选题规划渲染器（零 LLM，通用化自 sunseeker 2026-09-10 版）。
+【标准模板 2026-09-24 Alvin 定版】本渲染器产物即 topic 确认的标准形态：分月表格+我方/客户徽标+每月反馈组件（点「有调整」才展开留言，card_feedback 通路）+整份排期全局表态，卡设计系 token。以后一切选题确认一律走本产线出页，不手写 HTML（lint 规则 feedback_widget 兜底）。样板见 clients/sungait/reports/blog_topic_plan_2026-09_to_2027-02.html。
 用法：python3 tools/render_blog_topic_plan.py <slug> <plan.json> [gaps.json]
 plan.json 由选题任务（agent）产出，结构：
   {"title","h1","sub","intro","outro","footer","range_label","window_label","made_on",

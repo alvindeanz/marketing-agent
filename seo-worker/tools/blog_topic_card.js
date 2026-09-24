@@ -2,7 +2,9 @@
 'use strict';
 // 可选：从已发布的选题规划生成「博客选题确认卡」任务（通用模式，客户逐题勾选）。
 // 用法：SEO_AGENT_TOKEN=<admin jwt> node tools/blog_topic_card.js <client_id> <slug> <plan_url> [--sprint S1] [--mode we_write|client_writes]
-// 只建任务进闸A，卡本体由 execute 客户版产物通道出（与词表/mapping 确认卡同产线）。
+// 只建任务进闸A。卡本体 = render_blog_topic_plan.py 标准模板产物（2026-09-24 Alvin 定版：
+// 自带每月反馈组件与全局表态，card_feedback 通路），execute 只准备数据 json 调渲染器出页，
+// 不手写 HTML，不再另做一页独立卡（选题页带反馈即确认卡本体）。
 // mode 语义（2026-09-19 设计）：we_write = 客户勾选后放行我方写稿；client_writes = 卡即交付物，
 //   勾选生成等稿跟踪，稿到转上传加内链（haakaa 型）。折叠分支未接通前，mode 只写进任务说明供折叠时人裁。
 const API = process.env.SEO_API_BASE || 'https://always.horntech-dev.com/seo-api.php';
