@@ -2432,10 +2432,24 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
             if(!$sr){
                 $lines=[];
                 foreach($blocked as $b)$lines[]='- '.$b['entity'].($b['target_value']!==''?('：'.mb_substr($b['target_value'],0,200,'UTF-8')):'').($b['op']!==''&&$b['op']!=='manual'?'（缺执行器 '.$b['op'].'）':'');
+                /* split 工单落当期不继承母期（2026-09-24 Alvin 定，配合本期视图铁律）：
+                   拆条出来的是当下就能做的手活，顶着母任务的未来期号会被视图铁律藏掉，
+                   「即时就位」就成了空话（#861 继承 S3 实证）。当期按日历锚算，无锚回退母期。 */
+                $splitSprint=(string)$task['sprint'];
+                $apq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
+                $apq->execute([$cid]);
+                $apr=$apq->fetch();
+                $apq->closeCursor();
+                if($apr&&$apr['created_at']){
+                    $anchorD=new DateTime(substr((string)$apr['created_at'],0,10));
+                    $nowD=new DateTime('today');
+                    $sn=$anchorD>$nowD?1:((int)floor($nowD->diff($anchorD)->days/14)+1);
+                    $splitSprint='S'.max(1,min($sn,6));
+                }
                 list($ts,$te)=task_fields_clean([
                     'title'=>mb_substr('人工落地：#'.$tid.' '.$task['title'],0,255,'UTF-8'),
                     'detail'=>"母任务 #".$tid." 的方案里以下 ".count($blocked)." 处写入不在机器白名单，按判定期分流转人工。逐条做完在母任务条目账本上对账（或在本任务备注写明），验收标准以母任务方案为准。\n\n".implode("\n",$lines),
-                    'module'=>(string)$task['module'],'owner_type'=>'agency','priority'=>(string)$task['priority'],'ops'=>'','sprint'=>(string)$task['sprint'],
+                    'module'=>(string)$task['module'],'owner_type'=>'agency','priority'=>(string)$task['priority'],'ops'=>'','sprint'=>$splitSprint,
                 ],['status_force'=>'approved']);
                 if(!$te){
                     $splitTid=task_insert($cid,$ts,'seo-worker','split:'.$tid);

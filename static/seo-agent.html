@@ -3505,16 +3505,13 @@ function scopeHorizon(cur){
 }
 function withinScope(t,cur){
   if(sprintScope==='all')return true;
-  /* 排期视野对 review 一视同仁（2026-09-19 Alvin 定，取代 2026-08-31 的
-     「review 无条件可见」）：方案备好但放行排在未来 sprint 的（如 #703 排 S3、
-     放行前置是 301 落地），是未来的活，本期视图不显示，底部提示行计数兜底。
-     只留三类当下例外：等发客户的确认卡（发卡是现在的人事）、在跑的、失败等重试的。
-     旧规则的事故场景（8/31 待放行卡被藏找不到）由「全部」一键放宽与提示行覆盖。 */
-  if(t.status==='in_progress')return true;
-  if(isPendingClientCard(t))return true;
-  const hs=hsOf(t);
-  if(hs==='running')return true;
-  if(hs==='wait_me'&&/失败/.test(String(t.wait_reason||'')))return true;
+  /* 铁律定版（2026-09-24 Alvin，取代 2026-09-19 三类例外版）：未来期任务在
+     current/near 视野下绝不出现，不再有任何状态例外——in_progress、等发的卡、
+     在跑、失败待重试，只要排在未来期一律藏，几十个客户的规模看不过来。
+     欠账（n<cur）照显示并标逾期，无 S 标签视同本期。未来的活要看，
+     点「30 天」（cur+1）或「全部」，底部提示行计数兜底。
+     配套：split 人工工单出生即落当期（seo-api 2026-09-24），不再继承母任务
+     未来期号，「即时就位」与本条不再打架。 */
   const n=sprintNum(t);
   if(n===null)return true; // 没有 S 标签的任务永远算本期
   return n<=scopeHorizon(cur);
