@@ -4174,7 +4174,9 @@ if($m==='POST'&&$ROUTE==='/reports/paid_monthly'){
             .$winText
             ."口径以该 spec 与客户 facts（ads.google.conversion_scope、paid.report_lead_source 等）为准，数字全部现拉现算。\n"
             ."产出草稿 HTML 到 reports/ 并跑 lint，摘要里给自检清单结论与各数字来源。\n\n[来源] 报告页一键生成，由 ".$u['username']." 发起；内部草稿，人工验收后才可对客。",
-        'module'=>'paid','owner_type'=>'agent','priority'=>'P1','ops'=>'','sprint'=>'',
+        /* paid-report-draft（2026-09-24 Alvin 定）：只读交付 op，政策表 readonly_ops 在册，
+           交付即自动收货，月报草稿不进 review 等人（sdalu #822/#857 躺一天的教训）。 */
+        'module'=>'paid','owner_type'=>'agent','priority'=>'P1','ops'=>'paid-report-draft','sprint'=>'',
     ],['status_force'=>'approved']);
     if($err)res(400,['error'=>$err]);
     $tid=task_insert($cid,$clean,$u['username'],'report:ui');
