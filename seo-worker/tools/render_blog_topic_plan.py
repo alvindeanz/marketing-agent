@@ -54,13 +54,15 @@ footer{text-align:center;color:#94a3b8;font-size:12px;padding:24px 0;margin-top:
 
 
 FBX_CSS_JS = """<style>
-.fbx{border:1px solid #e3e3e3;border-radius:6px;padding:12px 14px;margin:10px 0 26px;font-size:14px;background:#fafafa}
-.fbx-t{display:block;margin-bottom:8px;font-weight:600}
-.fbx-b{margin:0 8px 8px 0;padding:7px 14px;border:1px solid #222;border-radius:4px;background:#fff;cursor:pointer;font-size:13px}
-.fbx-b:hover{background:#222;color:#fff}
-.fbx-b.done{background:#222;color:#fff;pointer-events:none}
-.fbx-ta{display:block;width:100%;box-sizing:border-box;min-height:52px;margin:4px 0 6px;padding:8px;border:1px solid #ddd;border-radius:4px;font:inherit}
-.fbx-s{font-size:12px;color:#2e7d32}
+.fbx{border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin:12px 0 26px;font-size:13.5px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.fbx-t{display:block;margin-bottom:10px;font-weight:700;color:#0f172a;font-size:14px}
+.fbx-b{font-family:inherit;font-size:13px;font-weight:700;line-height:1.4;padding:9px 15px;margin:0 8px 8px 0;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#0057b8;cursor:pointer}
+.fbx-b:hover{background:#e0edff}
+.fbx-b.done{background:#0057b8;border-color:#0057b8;color:#fff;pointer-events:none}
+.fbx-b:disabled{opacity:.55;cursor:default}
+.fbx-ta{display:block;width:100%;box-sizing:border-box;min-height:78px;margin:4px 0 8px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f6f9fc;color:#0f172a;font-family:inherit;font-size:13.5px;line-height:1.7;resize:vertical}
+.fbx-ta:focus{outline:none;border-color:#bfdbfe;background:#fff}
+.fbx-s{font-size:12.5px;color:#16a34a;font-weight:600}
 </style>
 <script>
 (function(){
