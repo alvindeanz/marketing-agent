@@ -1,13 +1,14 @@
-# Shopify 能力清单（博客与 redirect 车道 v2）
+# Shopify 能力清单（博客、redirect 与 collections 车道 v3）
 
-<!-- SHOPIFY-CAP-V2（2026-09-17 船队扩容）：执行通道是 shopseo CLI（/data/aira/tools/shopseo/shopseo，
-     token 服务现取不落盘，写命令默认 dry-run，--yes 实弹且写前自动快照）。
+<!-- SHOPIFY-CAP-V3（2026-09-24 collections 扩面，Alvin 拍板 B1，Aira 扩 CLI）：执行通道是 shopseo CLI
+     （/data/aira/tools/shopseo/shopseo，token 服务现取不落盘，写命令默认 dry-run，--yes 实弹且写前自动快照）。
      店铺清单见 /data/aira/tools/stores.conf（alias 与 profile.workspace_dir 同名，apply_task 靠它定位店铺）；
      2026-09-17 起共 10 店（sungait + 9 家新入列，oakfurniture 待装 app）。
-     本版仍只覆盖 CLI 已有命令面：博客文章 meta/正文/发布状态与 URL redirect。
-     collections 命令面 Aiden 扩建中（2026-09-17 COLLAB 答复），接通后另起 op；products/pages 未接通，相关任务保持交付包模式。
+     v3 新增 collections 命令面（collections list / collection get / set-meta / create / publish / unpublish，
+     scope 走 write_products 全船队已授，零 app 改动）；products/pages 未接通，相关任务保持交付包模式；
+     导航菜单需 write_online_store_navigation scope（全船队未授，补授要客户重装 app），保持人工。
      放行口径（2026-09-17 Alvin 定，midea S1 试点）：客户卡替代人工放行，见 ../release_policy.md「SEO 客户卡放行」。
-     v1.1（2026-09-10）加 blog-draft；v1 试点客户 sungait。 -->
+     v2（2026-09-17）船队扩容；v1.1（2026-09-10）加 blog-draft；v1 试点客户 sungait。 -->
 
 ## 规划视图
 
@@ -20,6 +21,9 @@
 | article-unpublish | agent_apply | 下线文章，可逆（再发布即回） |
 | redirect-add | agent_apply | 加 301 redirect；加前必查目标零跳转防叠链 |
 | blog-draft | agent_prepare | 按 seo-blog-sop 写完整成稿，apply 仅建 DRAFT（published:false）绝不发布 |
+| collection-meta-update | agent_apply | 改集合页 title_tag / description_tag，纯 metafield 不动正文；空补齐免卡，改已有值的批次先过网页调整卡 |
+| collection-create | agent_prepare | 新建 custom collection（UNPUBLISHED），含描述文案与选品清单，凭证走网页调整卡或客户卡批文；发布是另一个 op |
+| collection-publish | agent_prepare | 发布或下线集合页，发布对外可见，凭证走客户卡批文 fact；下线即回滚手段 |
 <!-- PLANNING_VIEW_END -->
 
 ## 操作集说明
@@ -29,6 +33,9 @@
 - article-publish [risk_class: external]：对外发布，凭证走客户卡批文 fact（external_with_backing_fact=auto），无批文停在 review。
 - article-unpublish [risk_class: reversible]：下线即回滚手段之一。
 - redirect-add [risk_class: reversible]：新 301 前先 curl 目标确认 200 零跳转（该店存量 2169 条 redirect 且有多跳链，禁止叠链）。
+- collection-meta-update [risk_class: reversible]：shopseo collection set-meta。60/160 字符规矩与品牌后缀式样同 article-meta-update；**卡片分界同款**：空补齐免卡直接 L0，覆盖已有值的批次走网页调整卡。custom 与 smart collection 都支持。
+- collection-create [risk_class: reversible]：shopseo collection create（--title/--handle/--body-file/--products/--meta-title/--meta-desc）。**published:false 硬编码，本 op 永不发布**；--products 收 handle 或数字 id，给定顺序即页面顺序（sort manual），命令会先逐个解析产品并在 dry-run 里列出，缺一个整单拒绝。新页文案属「页面说什么」域，凭证走网页调整卡或客户卡批文（如 sungait #641 卡 rimless_plan 项）。
+- collection-publish [risk_class: external]：shopseo collection publish/unpublish。发布对外可见走客户卡批文 fact（external_with_backing_fact=auto），无批文停 review；unpublish 可逆，是 create 后的回滚手段。
 - blog-draft [risk_class: external]：prepare 阶段按 /data/aira/seo-worker/specs/sops/seo-blog-sop.md 产出完整成稿
   （Style Roll 文件头注释、骨架轮换、指纹查重、13 条红线自检、封面图必配且只用客户站 CDN 已有图、
   内链按 KEYWORD-MAP、锁定词表内选题）；apply 阶段 shopseo article create（--title/--body-file/--meta-title/

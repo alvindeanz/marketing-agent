@@ -39,6 +39,31 @@ const BLOG_OP = 'blog-draft';
 const SOCIAL_OPEN = '<<<';
 const SOCIAL_CLOSE = '>>>';
 
+/**
+ * OPS_CHECK 声明解析（2026-09-24 产线 op 必填刀）。分析模式的交付必须以
+ * OPS_CHECK 行自证形态：readonly（纯只读交付）/ needs op,op（含待执行变更）/
+ * capability-gap 说明（要变更但没有登记 op）。取全文最后一次出现，找不到返回 null
+ * （温和上线：不声明就维持空 ops 从严，不打回任务）。
+ */
+function parseOpsCheck(text) {
+  const lines = String(text || '').split('\n');
+  let hit = null;
+  for (const line of lines) {
+    const m = /^\s*OPS_CHECK:\s*(.+?)\s*$/i.exec(line);
+    if (m) hit = m[1];
+  }
+  if (!hit) return null;
+  if (/^readonly$/i.test(hit)) return { kind: 'readonly' };
+  const needs = /^needs\s+([a-z0-9_\s,-]+)$/i.exec(hit);
+  if (needs) {
+    const ops = needs[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    return ops.length ? { kind: 'needs', ops } : { kind: 'gap', note: '声明 needs 但没给 op 名' };
+  }
+  const gap = /^capability-gap\s*(.*)$/i.exec(hit);
+  if (gap) return { kind: 'gap', note: (gap[1] || '').trim() || '（未说明缺口内容）' };
+  return { kind: 'gap', note: 'OPS_CHECK 格式不识别：' + hit.slice(0, 120) };
+}
+
 /** ops arrives as a comma separated string from the server, or an array. */
 function taskOps(task) {
   const raw = (task && task.ops) || '';
@@ -107,6 +132,19 @@ function buildPrompt(brief, task, workspace) {
     '   internal file paths you read, capability checks, id strings: none of that belongs',
     '   in the deliverable. If a verification trail matters, put it in a short appendix',
     '   section at the very end.',
+    '7. OPS_CHECK, mandatory last line of your reply (after any facts block). Declare what',
+    '   your deliverable is, one of exactly three forms:',
+    '   OPS_CHECK: readonly',
+    '     the deliverable is a pure read-only artifact (report, list, card, audit). It does',
+    '     not contain site or account changes that still need executing.',
+    '   OPS_CHECK: needs <op-name>[,<op-name>...]',
+    '     the whole point of the deliverable is changes that must be executed later, and',
+    '     those changes map to registered operation names you saw in the brief or the',
+    '     capability manifest. Never invent an op name.',
+    '   OPS_CHECK: capability-gap <one short line, what execution ability is missing>',
+    '     changes are needed but no registered operation covers them.',
+    '   Misdeclaring readonly when changes are pending is the worst outcome, it closes the',
+    '   task while the work silently never happens. When unsure, use capability-gap.',
     '',
     'FACTS, only when the task was a check or a verification',
     'If this task had you verify something about the client and the answer is a stable,',
@@ -2138,7 +2176,31 @@ async function runOne(ctx, context, workspace, taskId) {
       log('task ' + taskId + ': 条目账本写入失败（方案照常待放行，账本缺行需人工补）:: ' + e.message);
     }
   }
-  await api.postTaskResult(taskId, { output_url: '', note: noteFinal });
+  /* OPS_CHECK 落账（2026-09-24 产线 op 必填刀）：分析模式的交付按 agent 自证盖 op。
+     readonly 盖 analysis-readonly（服务端 analysis_task 据此自动收货）；needs 回填真 op
+     名（服务端整包校验，编名拒收留痕）；capability-gap 标 attention 进运营清理队列。
+     不声明就维持空 ops 从严，与今天行为一致。已有 ops 或卡类任务一律不动。 */
+  const resultExtra = {};
+  if (!prepare) {
+    const oc = parseOpsCheck(output);
+    const hadOps = taskOps(task).length > 0 || String(task.card_kind || '').trim() !== '';
+    if (!oc) {
+      log('task ' + taskId + ': 交付没带 OPS_CHECK 声明，空 ops 从严照旧');
+    } else if (hadOps) {
+      log('task ' + taskId + ': OPS_CHECK ' + oc.kind + '，但任务已有 ops 或属卡类，不回填');
+    } else if (oc.kind === 'readonly') {
+      resultExtra.ops = 'analysis-readonly';
+      log('task ' + taskId + ': OPS_CHECK readonly，回填 analysis-readonly（只读交付自动收货）');
+    } else if (oc.kind === 'needs') {
+      resultExtra.ops = oc.ops.join(',');
+      log('task ' + taskId + ': OPS_CHECK needs ' + resultExtra.ops + '，回填待服务端校验');
+    } else {
+      resultExtra.attention = true;
+      noteFinal = 'capability-gap：' + oc.note + '（缺执行能力，进运营清理队列，补执行器是既定定则）\n' + noteFinal;
+      log('task ' + taskId + ': OPS_CHECK capability-gap :: ' + oc.note);
+    }
+  }
+  await api.postTaskResult(taskId, Object.assign({ output_url: '', note: noteFinal }, resultExtra));
   log(
     'task ' +
       taskId +
@@ -2187,6 +2249,7 @@ async function run(ctx) {
 
 module.exports = {
   run,
+  parseOpsCheck,
   lintPlan,
   lintReleaseCard,
   planReleaseCard,

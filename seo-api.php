@@ -2025,7 +2025,27 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
             ->execute([$note,$tid]);
     }
     if(isset($i['ops'])){
-        db()->prepare("UPDATE seo_tasks SET ops=? WHERE id=?")->execute([(string)$i['ops'],$tid]);
+        /* 生产端校验（2026-09-24 产线 op 必填刀，同 9/22 chat 委托单 cleanDrafts 的路数）：
+           结果回填 ops 只在任务现有 ops 为空时接受，且每个 op 必须是政策表登记过的名字
+           （readonly_ops 或 risk_class_by_op），不合格整包拒收只留痕。防两件事：
+           agent 编 op 名骗放行分档、迟到结果冲掉人工修过的 ops。 */
+        global $READONLY_OPS;
+        $curOpsQ=db()->prepare("SELECT ops FROM seo_tasks WHERE id=?");
+        $curOpsQ->execute([$tid]);
+        $curOps=trim((string)($curOpsQ->fetchColumn()?:''));
+        $newOps=array_values(array_filter(array_map('trim',explode(',',(string)$i['ops']))));
+        $pol=release_policy_load();
+        $known=array_keys(isset($pol['risk_class_by_op'])&&is_array($pol['risk_class_by_op'])?$pol['risk_class_by_op']:[]);
+        $bad=[];
+        foreach($newOps as $op){if($op==='_doc'||(!in_array($op,$known,true)&&!in_array($op,$READONLY_OPS,true)))$bad[]=$op;}
+        if($curOps!==''){
+            task_append_note($tid,'[ops-stamp] 结果想回填 ops('.implode(',',$newOps).') 但任务已有 ops('.$curOps.')，按现值为准未改');
+        }elseif($bad||!$newOps){
+            task_append_note($tid,'[ops-stamp] 结果回填的 ops 含未登记名('.implode(',',$bad?:['(空)']).')，整包拒收，任务保持空 ops 从严');
+        }else{
+            db()->prepare("UPDATE seo_tasks SET ops=? WHERE id=?")->execute([implode(',',$newOps),$tid]);
+            audit('seo-worker','seo_task_ops_stamp',(string)$tid,['ops'=>implode(',',$newOps)]);
+        }
     }
     if(isset($i['attention'])){
         db()->prepare("UPDATE seo_tasks SET attention=? WHERE id=?")->execute([$i['attention']?1:0,$tid]);

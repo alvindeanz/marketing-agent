@@ -442,6 +442,20 @@ t('放行卡：提取、超长打回、夹带 curl 或接口路径打回', () =>
   assert.ok(E.lintReleaseCard(plan.replace('改回原值', '跑 curl 回读')).some((x) => x.indexOf('夹带') > -1));
 });
 
+t('OPS_CHECK 声明解析：readonly / needs / capability-gap / 缺失 / 花名', () => {
+  assert.deepStrictEqual(E.parseOpsCheck('报告正文\nOPS_CHECK: readonly'), { kind: 'readonly' });
+  assert.deepStrictEqual(E.parseOpsCheck('x\nOPS_CHECK: needs collection-meta-update, redirect-add\n'), {
+    kind: 'needs', ops: ['collection-meta-update', 'redirect-add'],
+  });
+  const gap = E.parseOpsCheck('x\nOPS_CHECK: capability-gap 导航菜单没有机器通路');
+  assert.strictEqual(gap.kind, 'gap');
+  assert.ok(gap.note.indexOf('导航菜单') > -1);
+  assert.strictEqual(E.parseOpsCheck('全文没有声明'), null, '不声明返回 null，维持从严');
+  assert.strictEqual(E.parseOpsCheck('OPS_CHECK: readonly\n后文\nOPS_CHECK: capability-gap 后者算数').kind, 'gap', '取最后一次出现');
+  assert.strictEqual(E.parseOpsCheck('OPS_CHECK: 随便写点什么').kind, 'gap', '不识别的格式按 gap 从严');
+  assert.strictEqual(E.parseOpsCheck('OPS_CHECK: needs ').kind, 'gap', 'needs 空列表按 gap');
+});
+
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

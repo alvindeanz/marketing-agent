@@ -895,7 +895,7 @@ function buildShopifyPrompt(opts) {
     '店铺别名：' + shopAlias + '（shopseo --shop ' + shopAlias + '，写死，不许对其他店操作）。',
     '',
     '工具与铁律：',
-    '- 唯一写通道是 ' + SHOPSEO_CLI + '，不发任何裸 API 写请求。读用 article get / articles list / redirect list。',
+    '- 唯一写通道是 ' + SHOPSEO_CLI + '，不发任何裸 API 写请求。读用 article get / articles list / collections list / collection get / redirect list。',
     '- 每条写命令先不带 --yes 跑一遍（默认 dry-run 出 diff），核对与方案一致后再加 --yes 实弹。',
     '- 写前必须现读线上当前值：客户会自行改站，读到的现值与方案里的「改前值」不符时**停手（aborted）**，',
     '  把差异写进执行记录，不要动那一处，也不要「纠正」客户的改动。',

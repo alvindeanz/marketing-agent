@@ -1,6 +1,6 @@
 {
   "_doc": "放行分级政策，类目无关（SEO 与 paid 同一份，Alvin 拥有，Aira 起草）。risk_class 定义在各渠道/平台能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行与 Chat 分级派单（dispatch_rules），deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
-  "version": 12,
+  "version": 13,
   "seo_client_card": {
     "_doc": "2026-09-18 Alvin 第一性原理定版（取代 v8 人工后检口径）：默认放行，可逆自动放行零闸，快照兜底，事后抽查（人工手动触发+harness 按需抽查器）+原地还原+堵整类。只读卡交付即自动收货（seo-api seo_task_result analysis_task auto-accept）。硬闸只剩花钱越权/不可逆实害/合同级=权限授权类。external 客户方向走客户卡落 confirmed 批文 fact 走 external_with_backing_fact=auto。等 Alvin 只剩 bug/卡壳/权限三类。",
     "default": "auto-release-reversible",
@@ -82,7 +82,11 @@
     "gtm-edit": "reversible",
     "keyword-direction": "reversible",
     "creative-direction": "reversible",
+    "analysis-readonly": "reversible",
     "article-meta-update": "reversible",
+    "collection-meta-update": "reversible",
+    "collection-create": "reversible",
+    "collection-publish": "external",
     "article-content-edit": "reversible",
     "article-publish": "external",
     "article-unpublish": "reversible",
@@ -98,8 +102,9 @@
     "wp-sitemap-flush": "reversible"
   },
   "readonly_ops": {
-    "_doc": "analysis 只读 op 白名单（v10 2026-09-21 Alvin 批）：seo-api analysis_task 的唯一事实源（$READONLY_OPS 从此读，PHP 内只留兜底拷贝）。带这些 op 且 owner=agent 的任务是只读分析/卡产出，交付即自动收货，不停放行。新卡类型 op 必须同时进本表与 risk_class_by_op。",
+    "_doc": "analysis 只读 op 白名单（v10 2026-09-21 Alvin 批）：seo-api analysis_task 的唯一事实源（$READONLY_OPS 从此读，PHP 内只留兜底拷贝）。带这些 op 且 owner=agent 的任务是只读分析/卡产出，交付即自动收货，不停放行。新卡类型 op 必须同时进本表与 risk_class_by_op。analysis-readonly（v13 2026-09-24 产线 op 必填刀）是通用只读交付 op：execute 分析模式收尾时由 agent 自证「纯只读交付、不含待执行变更」并经服务端校验后盖上，空 ops 从严兜底只应在真没登记时触发。",
     "ops": [
+      "analysis-readonly",
       "ga4-audit",
       "gsc-audit",
       "gbp-audit",
