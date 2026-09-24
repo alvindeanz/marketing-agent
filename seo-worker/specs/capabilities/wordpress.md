@@ -19,7 +19,7 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 
 | operation | autonomy | 说明 |
 |---|---|---|
-| wp-seo-meta-update | agent_apply | post/page/product 的 title、description、focus、canonical，走 `/seo/<post_id>`。**卡片分界**（对齐 shopify article-meta-update）：目标字段为空的补齐批次免卡直接 L0；覆盖已有值的批次属「改页面说什么」，需网页调整卡确认后执行 |
+| wp-seo-meta-update | agent_apply | post/page/product 的 title、description、focus、canonical，走 `/seo/<post_id>`。**授权域**（对齐 shopify article-meta-update 2026-09-24 版）：双闸 confirmed 客户在锁词/mapping 页面范围内免卡直落；无双闸客户覆盖已有值走网页调整卡 |
 | wp-term-seo-update | agent_apply | 分类 term（含 Woo 产品分类）的 SEO 字段，走 `/seo/term/<term_id>`，分界同上 |
 | wp-redirect-add | agent_apply | Rank Math 重定向增改，走 `/rankmath/redirections`；source 只收路径不收全 URL；加前必查目标零跳转防叠链 |
 | wp-sitemap-flush | agent_apply | 清 Rank Math sitemap 缓存，走 `/rankmath/sitemap/flush`，配合前三个 op 收尾用 |

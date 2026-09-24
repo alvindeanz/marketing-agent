@@ -15,26 +15,26 @@
 <!-- PLANNING_VIEW_START -->
 | operation | autonomy | note |
 |---|---|---|
-| article-meta-update | agent_apply | 改博客文章 title_tag / description_tag，纯 metafield 不动正文；空补齐免卡，改已有值的批次先过网页调整卡 |
-| article-content-edit | agent_prepare | 改博客正文（压缩、内链、H2 调整、扩写），方案先行，凭证走网页调整卡 |
+| article-meta-update | agent_apply | 改博客文章 title_tag / description_tag，纯 metafield 不动正文；双闸授权域内免卡直落（见操作集说明），无双闸客户覆盖已有值走网页调整卡 |
+| article-content-edit | agent_prepare | 改博客正文（压缩、内链、H2 调整、扩写），方案先行；双闸授权域内免卡直落，无双闸客户走网页调整卡 |
 | article-publish | agent_prepare | 发布未发布文章，对外可见，凭证走客户卡批文 fact |
 | article-unpublish | agent_apply | 下线文章，可逆（再发布即回） |
 | redirect-add | agent_apply | 加 301 redirect；加前必查目标零跳转防叠链 |
 | blog-draft | agent_prepare | 按 seo-blog-sop 写完整成稿，apply 仅建 DRAFT（published:false）绝不发布 |
-| collection-meta-update | agent_apply | 改集合页 title_tag / description_tag，纯 metafield 不动正文；空补齐免卡，改已有值的批次先过网页调整卡 |
-| collection-create | agent_prepare | 新建 custom collection（UNPUBLISHED），含描述文案与选品清单，凭证走网页调整卡或客户卡批文；发布是另一个 op |
+| collection-meta-update | agent_apply | 改集合页 title_tag / description_tag，纯 metafield 不动正文；双闸授权域内免卡直落，无双闸客户覆盖已有值走网页调整卡 |
+| collection-create | agent_prepare | 新建 custom collection（UNPUBLISHED），含描述文案与选品清单；mapping 表列明新建的承接页属授权域免卡，mapping 外新方向走卡；发布是另一个 op |
 | collection-publish | agent_prepare | 发布或下线集合页，发布对外可见，凭证走客户卡批文 fact；下线即回滚手段 |
 <!-- PLANNING_VIEW_END -->
 
 ## 操作集说明
 
-- article-meta-update [risk_class: reversible]：shopseo article set-meta。60/160 字符规矩、品牌后缀式样按客户约定（如 sungait 的「| SUNGAIT」）。**卡片分界**：目标字段为空（no title_tag / no desc_tag）的补齐批次免卡直接 L0；覆盖已有值的批次属「改页面说什么」，需网页调整卡确认后执行。分界由 plan/execute 阶段落实，ramp 期后检核对。
+- article-meta-update [risk_class: reversible]：shopseo article set-meta。60/160 字符规矩、品牌后缀式样按客户约定（如 sungait 的「| SUNGAIT」）。**双闸授权域（2026-09-24 Alvin 拍板，取代 ramp 期逐次卡）：客户词表与 mapping 双闸 confirmed 后，锁定词表内、mapping 已确认页面的站内优化（title/meta/H1/正文调整、mapping 表列明新建的承接页）即已授权执行域，可逆+快照，L0 直落免卡，改动月报汇总告知客户；仍走卡的只剩：mapping 外新方向、结构性动作（删页/301/导航）、客户亲笔内容、承诺与价格类主张；客户级 fact content.review_before_write=1 可切回逐次确认模式；写前现值与方案不符（客户自改）停手报告，此条永远保留**。
 - article-content-edit [risk_class: reversible]：shopseo article update --body-file。方案必须逐处列出改动（改哪段、改成什么、为什么），未点名的客户原文一字不动；改动遵守客户工作区 KEYWORD-MAP / 词归属表（改 title/H2 前必查，没有词表的客户先做 mapping 再动正文）。凭证走网页调整卡。
 - article-publish [risk_class: external]：对外发布，凭证走客户卡批文 fact（external_with_backing_fact=auto），无批文停在 review。
 - article-unpublish [risk_class: reversible]：下线即回滚手段之一。
 - redirect-add [risk_class: reversible]：新 301 前先 curl 目标确认 200 零跳转（该店存量 2169 条 redirect 且有多跳链，禁止叠链）。
-- collection-meta-update [risk_class: reversible]：shopseo collection set-meta。60/160 字符规矩与品牌后缀式样同 article-meta-update；**卡片分界同款**：空补齐免卡直接 L0，覆盖已有值的批次走网页调整卡。custom 与 smart collection 都支持。
-- collection-create [risk_class: reversible]：shopseo collection create（--title/--handle/--body-file/--products/--meta-title/--meta-desc）。**published:false 硬编码，本 op 永不发布**；--products 收 handle 或数字 id，给定顺序即页面顺序（sort manual），命令会先逐个解析产品并在 dry-run 里列出，缺一个整单拒绝。新页文案属「页面说什么」域，凭证走网页调整卡或客户卡批文（如 sungait #641 卡 rimless_plan 项）。
+- collection-meta-update [risk_class: reversible]：shopseo collection set-meta。60/160 字符规矩与品牌后缀式样同 article-meta-update；**授权域同 article-meta-update 条**。custom 与 smart collection 都支持。
+- collection-create [risk_class: reversible]：shopseo collection create（--title/--handle/--body-file/--products/--meta-title/--meta-desc）。**published:false 硬编码，本 op 永不发布**；--products 收 handle 或数字 id，给定顺序即页面顺序（sort manual），命令会先逐个解析产品并在 dry-run 里列出，缺一个整单拒绝。mapping 表列明新建的承接页属双闸授权域免卡（如 sungait oversized/rimless 页，客户在 #641 卡 empty_collections/rimless_plan 双双 agree 且催加速）；mapping 外的新方向仍走卡。
 - collection-publish [risk_class: external]：shopseo collection publish/unpublish。发布对外可见走客户卡批文 fact（external_with_backing_fact=auto），无批文停 review；unpublish 可逆，是 create 后的回滚手段。
 - blog-draft [risk_class: external]：prepare 阶段按 /data/aira/seo-worker/specs/sops/seo-blog-sop.md 产出完整成稿
   （Style Roll 文件头注释、骨架轮换、指纹查重、13 条红线自检、封面图必配且只用客户站 CDN 已有图、
