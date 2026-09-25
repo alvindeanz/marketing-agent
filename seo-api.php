@@ -4771,19 +4771,25 @@ if($m==='GET'&&$ROUTE==='/clients'){
     ensure_review_schema();
     ensure_task_origin();
     $agentTasks=[];$manualTasks=[];
-    foreach(db()->query("SELECT client_id,owner_type,COUNT(*) AS n FROM seo_tasks WHERE status IN('proposed','in_progress','review') GROUP BY client_id,owner_type")->fetchAll() as $r){
-        $id=$r['client_id'];
-        if((string)$r['owner_type']==='agent')$agentTasks[$id]=($agentTasks[$id]??0)+(int)$r['n'];
-    }
     /* 红点只数本期（2026-09-22 Alvin 定，取代跨期全数）：未来期的人工活到期自然亮，
        提前闹红点是注意力税。in_progress 例外（已动手的活不消失）；无 sprint 标签视同本期；
-       无 active plan 的客户拿不到期指针，保守全数。origin 同时认 split: 与 verify: 工单。 */
+       无 active plan 的客户拿不到期指针，保守全数。origin 同时认 split: 与 verify: 工单。
+       2026-09-25 Alvin 定：同口径推广到蓝点（agent 任务）与待发卡，三处徽标全部只亮本期。 */
     $todayB=new DateTime('today');$curBy=[];
     foreach(db()->query("SELECT client_id,created_at FROM seo_plans WHERE status='active'")->fetchAll() as $p){
         $aB=new DateTime(substr((string)$p['created_at'],0,10));
         $nB=(int)floor($todayB->diff($aB)->days/14)+1;
         if($aB>$todayB)$nB=1;
         $curBy[(int)$p['client_id']]=max(1,min($nB,6));
+    }
+    foreach(db()->query("SELECT client_id,sprint,status FROM seo_tasks WHERE owner_type='agent' AND status IN('proposed','in_progress','review')")->fetchAll() as $r){
+        $idA=(int)$r['client_id'];
+        if($r['status']!=='in_progress'){
+            $curA=$curBy[$idA]??null;$snA=null;
+            if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smA))$snA=(int)$smA[1];
+            if($curA!==null&&$snA!==null&&$snA>$curA)continue;
+        }
+        $agentTasks[$idA]=($agentTasks[$idA]??0)+1;
     }
     foreach(db()->query("SELECT client_id,sprint,status FROM seo_tasks WHERE owner_type<>'agent' AND (status IN('in_progress','review') OR (status='approved' AND (origin LIKE 'split:%' OR origin LIKE 'verify:%')))")->fetchAll() as $r){
         $idB=(int)$r['client_id'];
@@ -4795,9 +4801,13 @@ if($m==='GET'&&$ROUTE==='/clients'){
         $manualTasks[$idB]=($manualTasks[$idB]??0)+1;
     }
     /* 待发卡：出了没发（sent_at 空）也没折叠的客户卡，owner agent 与上面的人工计数天然不重。
-       判卡认 card_kind 字段或 t/k 反馈令牌（存量卡无字段靠令牌兜底）。 */
-    foreach(db()->query("SELECT client_id,COUNT(*) AS n FROM seo_tasks WHERE owner_type='agent' AND status IN('review','done') AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE '%?t=%&k=%') AND result_note NOT LIKE '%[卡反馈折叠%' GROUP BY client_id")->fetchAll() as $r){
-        $manualTasks[$r['client_id']]=($manualTasks[$r['client_id']]??0)+(int)$r['n'];
+       判卡认 card_kind 字段或 t/k 反馈令牌（存量卡无字段靠令牌兜底）。本期过滤同上（2026-09-25）。 */
+    foreach(db()->query("SELECT client_id,sprint FROM seo_tasks WHERE owner_type='agent' AND status IN('review','done') AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE '%?t=%&k=%') AND result_note NOT LIKE '%[卡反馈折叠%'")->fetchAll() as $r){
+        $idC=(int)$r['client_id'];
+        $curC=$curBy[$idC]??null;$snC=null;
+        if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smC))$snC=(int)$smC[1];
+        if($curC!==null&&$snC!==null&&$snC>$curC)continue;
+        $manualTasks[$idC]=($manualTasks[$idC]??0)+1;
     }
     /* per-user 星标（2026-09-15）：跟登录用户绑定，同事各标各的负责客户，不共享不乱窜。 */
     ensure_stars_schema();
