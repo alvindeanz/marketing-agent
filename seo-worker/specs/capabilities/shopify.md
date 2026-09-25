@@ -27,6 +27,9 @@
 | collection-title-update | agent_apply | 改集合 title（即店面 H1），handle 与 URL 不变；双闸授权域内免卡 |
 | product-meta-update | agent_apply | 改 PDP title_tag / description_tag，纯 metafield；双闸授权域规则同 collection-meta-update |
 | product-content-edit | agent_prepare | 改 PDP 正文（body_html 整替，读改写），方案逐处点名；双闸授权域内免卡 |
+| theme-text-edit | agent_apply | 改主题模板 JSON 里既有字符串字段（H1 块/副文案块），shopseo theme set-text：只动 main 主题、只许 string 字段、写前快照、写前写后 jq 校验 |
+| theme-template-create | agent_prepare | 复制现有集合模板为新模板（theme copy，拒绝覆盖已存在的），配合 collection-template-assign 使用 |
+| collection-template-assign | agent_apply | 指派集合 template_suffix，模板不存在则拒绝（防店面 500） |
 <!-- PLANNING_VIEW_END -->
 
 ## 操作集说明
@@ -43,6 +46,7 @@
 - product-meta-update [risk_class: reversible]：shopseo product set-meta。60/160 与品牌后缀规矩同族；双闸授权域免卡。
 - product-content-edit [risk_class: reversible]：shopseo product update --body-file。读现值改点名处整替，未点名的客户原文一字不动；写前快照。
 - 文章封面 alt：shopseo article set-cover-alt，语义归 article-meta-update，不另立 op（2026-09-24 三问教训：这行曾被当 capability-gap 排了人工单 #861）。
+- theme-text-edit / theme-template-create / collection-template-assign [risk_class: reversible]：shopseo 1.3.0 theme 族（2026-09-25 Alvin「发挥到极致」）。三道护栏内建：只动 main 主题、set-text 只许改既有 string 字段（类型不符拒绝）、写前快照且写前写后 jq 解析。首战 sungait round H1/首屏、oversized 与 rimless 两张专用模板全链落地线上验证。导航菜单仍无通路（缺 write_online_store_navigation scope），是 shopify 面最后一个真人工位。
 - blog-draft [risk_class: external]：prepare 阶段按 /data/aira/seo-worker/specs/sops/seo-blog-sop.md 产出完整成稿
   （Style Roll 文件头注释、骨架轮换、指纹查重、13 条红线自检、封面图必配且只用客户站 CDN 已有图、
   内链按 KEYWORD-MAP、锁定词表内选题）；apply 阶段 shopseo article create（--title/--body-file/--meta-title/
