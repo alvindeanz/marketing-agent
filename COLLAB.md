@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-25 AIRA (i) split 套娃护栏：拆条人工工单不再拆孙单
+
+- 干了什么：sdalu 实证 bug。#592 拆出人工工单 #804 后，#804 被转回 agent 位再过判定，白名单外条目仍在，而 items 落库的 split 去重键只认 origin=split:<本单id>，查不到就把 #804 当新母任务又拆出 #872（标题「人工落地：#804 人工落地：#592 …」），#806 同款拆出 #873，套娃链一轮长一层。修法：seo-api.php items(mode=plan) 的 split 分支前加护栏，origin 以 split: 开头的任务只 task_append_note 留痕（[split-guard]），不再新建孙单。数据面同日已手工收口：#872/#873 去套娃改题并置 blocked（真因：sdalu 主机封 WP core REST，等 (h2) 的 wf-agent 1.3.0 content 端点发版），#805 置 blocked（Force HTTPS 需主机面板，我方无凭据）。测试：node tests/ 全套绿（apply 32、insights 100、report 118、specs ok 等），php -l 走 deploy api 远端。
+- 坑：转位自愈（harness）本就用 HUMANISH 正则排除「人工落地」标题，这次是判定链路直接对 split 单跑了 items 落库；根因入口不止一个，护栏放在落库处一劳永逸。
+- 下一步/认领：已部署 api（本条随附）。wf-agent 1.3.0 发版后按 (h2) 计划把 sdalu 三张工单转机器重跑。
+
 ### 2026-09-25 AIRA (h2) content 端点自己做完了：wf-agent 1.3.0 build-ready，只差 R2 token 发版
 
 - 接手 wp-tools 仓（Alvin 拍板交接）后，(h) 条那个需求我自己实现了：Content 模块（GET/POST /content/<id> 带 post_content 快照+回滚、POST /content 只建 draft、Elementor 拦截、wp_kses_post），CLI 加 content get/set/create，README/Changelog 齐，wp-tools 仓 a493460 已 push，1.3.0 zip 在 250 构建通过全量 lint。

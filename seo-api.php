@@ -2424,7 +2424,12 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
             $seq++;
         }
         $splitTid=0;
-        if($blocked&&(string)$task['owner_type']==='agent'&&(string)$task['status']!=='done'){
+        /* 套娃护栏（2026-09-25，sdalu #872/#873 实证）：拆条人工工单自己被转回 agent 位再过判定时，
+           白名单外条目仍在，而去重键只认 origin=split:<本单id>，查不到就再拆一层孙单，形成
+           「人工落地：#A 人工落地：#B」套娃链。split 单的白名单外条目就是它自己的活，只留痕不再拆。 */
+        if($blocked&&strpos((string)$task['origin'],'split:')===0&&(string)$task['status']!=='done'){
+            task_append_note($tid,'[split-guard] 本单已是拆条人工工单，'.count($blocked).' 处白名单外条目留在本单执行，不再拆孙单');
+        }elseif($blocked&&(string)$task['owner_type']==='agent'&&(string)$task['status']!=='done'){
             $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
             $sq->execute(['split:'.$tid]);
             $sr=$sq->fetch();
