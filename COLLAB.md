@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-25 AIRA (h) 需求给 Aiden：wf-agent 插件加 content 端点（sdalu #804-806 的唯一通路）
+
+- 背景：sdalu 主机把 WP 核心 REST 整个掐了（/wp-json/wp/v2/* 连 GET 都 HTTP 000 断连，带 cookie 同样），只有 wf-agent 命名空间放行。application password 路线（含自签）同样死于该封锁，实测三次。正文编辑当前只能人工，三张 S2 工单（#804/805/806）压着。
+- 需求（contract 对齐现有 /seo/ 端点风格）：`GET /wf-agent/v1/content/{post_id}` 返回 post_type/status/title/content(raw)/modified；`POST /wf-agent/v1/content/{post_id}` 收 {title?, content?}，写前自动 wf 快照（同 /seo/ 的快照机制），返回新 modified 与 revision id；权限沿用现有 token；可选 `POST /wf-agent/v1/content`（新建 draft，permit post_type page|post，永不直接 publish）。
+- MA 侧接线我包：op 注册（wp-content-edit/wp-page-draft）、apply 泳道、release_policy、sdalu 三张工单转机器重跑。插件端点好了 COLLAB 回包即可。
+- 优先级：sdalu 三张 S2 工单在等，全 WP 客户（sdalu + kiaorakids）受益。
+
 ### 2026-09-24 AIRA (g) 判定还给机器五件套：collections 扩面 + OPS_CHECK + 批文回填 + site_hygiene + 卫生活划域（rev 6d5d5c0）
 
 - 干了什么：起因是 sungait 板 13 个活任务 8 个等人而其中只有 0 个真需要 Alvin 判定（详见 PJ DECISIONS 2026-09-24 系列）。①**B1 collections 扩面**：shopseo 1.1.0 加 collections list / collection get / set-meta / create / publish / unpublish（工作区仓 cd3caae，纪律与 article 族一致，create 硬编码 published:false；scope 走 write_products 全船队已授，sungait/haakaa/midea whoami 实测，零 app 改动）；shopify.md v3 + release_policy v13 登记 collection-meta-update(reversible) / collection-create(reversible) / collection-publish(external)；apply prompt 读命令面补 collections。导航菜单需 write_online_store_navigation（全船队未授，补授要客户重装）保持人工。原 2026-09-17 该活认领在 Aiden，一周未回包且 9/17 Alvin 校准 shopseo 归 Aira，本次由 Aira 落，Aiden 看到这条若有并行进度请吼。②**产线 op 必填（OPS_CHECK）**：execute 分析模式交付必须以 OPS_CHECK 行自证（readonly / needs op,op / capability-gap 说明），runner 按声明回填 ops（readonly 盖新增的通用只读 op analysis-readonly，自动收货恢复）或标 attention 进运营清理队列；seo-api /tasks/{id}/result 对回填 ops 做生产端校验：仅任务现有 ops 为空可回填、名字必须在政策表，编名整包拒收留痕。空 ops 从严兜底原样保留，只是让它回到「真没登记才触发」。③**tools/backfill_card_outcomes.js**：折叠机制（9/21）上线前收货的卡补 cards.tN.outcome fact + 同簇 [backing]，默认预览 --apply 才写；全船队预览实测欠账仅 sungait #641 一张（客户 9/9 已批 8 项，#642 白等 15 天）。④**tools/site_hygiene.js**：零模型周检 sitemap 杂项 + 90 天零曝光差集，台账落客户 notes/site_hygiene.md，cron 周日 19:00 UTC 与 live_audit/cohort 同族；首轮 22 家实测发现 agents.md 混 sitemap 是 Shopify 平台全船队行为（11 家全带，站侧不可编辑 sitemap）。⑤**plan_experience 三条**：卫生收录类不立 sprint 任务（巡检域已覆盖）、技术任务无量化增量数字不进方案、需客户配合动作不塞 agent 任务。sungait #618（sitemap 剔 agents.md + 5 零曝光 PDP 补收录，execute 30 分钟超时）按 Alvin 定性收口 [dropped] 归巡检。测试全绿（apply 32 含 OPS_CHECK 7 断言、specs 一致性、报告 118），api+worker 双端 rev 6d5d5c0。
