@@ -3552,8 +3552,9 @@ function isPendingClientCard(t){
   const urls=(s.match(/https?:\/\/\S+/g)||[]).join(' ')+' '+String(t.output_url||'');
   if(/确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(urls))return true;
   /* t/k 反馈令牌是所有客户卡的共同签名（badger #452 博客卡实证：文件名是 topic-slug，
-     上面的清单全认不出）。有令牌链接就是在途卡，比文件名可靠。 */
-  if(/\?t=\d+&k=[a-f0-9]+/.test(urls))return true;
+     上面的清单全认不出）。只认自己任务号的令牌（2026-09-25 修）：卡链接天生带 t=自己的 id，
+     引用别家卡链接的修订/执行任务不算卡（sdalu #862 等 5 张引用 #857 链接被误钉实证）。 */
+  if(new RegExp('[?&]t='+t.id+'&k=[a-f0-9]+').test(urls))return true;
   /* 文件名正则跟不上新卡命名（goodie negatives_direction 漏网实证），标题兜底：
      像卡的标题且已有客户版链接的，一律当在途卡。长期解法是显式字段，见 COLLAB 2026-09-20。 */
   return /确认卡|方向卡|词卡|素材卡|confirmation card/i.test(title)&&/客户版|agencyreport/.test(s);
