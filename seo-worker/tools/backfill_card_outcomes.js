@@ -87,6 +87,10 @@ async function runClient(c) {
     });
     const bk = '[backing] cards.t' + card.id + '.outcome';
     for (const t of scope) await call('PATCH', '/tasks/' + t.id, { detail: String(t.detail || '') + '\n' + bk });
+    // 退场标记（2026-09-25 UI 钉卡实证）：note 无 [卡反馈折叠 的卡永远钉人工泳道，回填批文时一并补
+    if (String(card.status) === 'done') {
+      await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n[卡反馈折叠 存量回填] 批文已落 cards.t' + card.id + '.outcome，生命周期完结退场。', card_feedback_done: 1 });
+    }
     console.log('   已写入' + (scope.length ? '，backing 已挂 ' + scope.length + ' 个任务' : ''));
   }
   return acted;

@@ -80,7 +80,7 @@ async function runClient(c) {
     });
     await call('PATCH', '/tasks/' + card.id, {
       status: 'done',
-      result_note: String(card.result_note || '') + '\n[fold_sweep ' + stamp() + '] ' + summary + '，全部保持观察无跟进，卡使命完成自动收口。',
+      result_note: String(card.result_note || '') + '\n[卡反馈折叠 fold_sweep ' + stamp() + '] ' + summary + '，全部保持观察无跟进，卡使命完成自动收口。',
       card_feedback_done: 1,
     });
   }

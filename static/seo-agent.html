@@ -3546,10 +3546,14 @@ function isPendingClientCard(t){
   /* card_kind 显式字段优先（2026-09-21 上线，建卡时服务端落好），下面的正则全是存量兜底 */
   if(t.card_kind)return true;
   if(/keyword-direction|creative-direction|keyword-confirmation|mapping-confirmation/.test(String(t.ops||'')))return true;
-  if(/确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(s+String(t.output_url||'')))return true;
+  /* 文件名与 t/k 令牌两条兜底只扫链接不扫散文（2026-09-25 修）：备注正文里
+     「提到调整卡/确认卡」的执行任务曾被误钉成卡（sungait #614/#642 实证），
+     卡的签名只可能出现在 URL 里。 */
+  const urls=(s.match(/https?:\/\/\S+/g)||[]).join(' ')+' '+String(t.output_url||'');
+  if(/确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(urls))return true;
   /* t/k 反馈令牌是所有客户卡的共同签名（badger #452 博客卡实证：文件名是 topic-slug，
      上面的清单全认不出）。有令牌链接就是在途卡，比文件名可靠。 */
-  if(/\?t=\d+&k=[a-f0-9]+/.test(s+String(t.output_url||'')))return true;
+  if(/\?t=\d+&k=[a-f0-9]+/.test(urls))return true;
   /* 文件名正则跟不上新卡命名（goodie negatives_direction 漏网实证），标题兜底：
      像卡的标题且已有客户版链接的，一律当在途卡。长期解法是显式字段，见 COLLAB 2026-09-20。 */
   return /确认卡|方向卡|词卡|素材卡|confirmation card/i.test(title)&&/客户版|agencyreport/.test(s);
