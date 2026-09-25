@@ -20,7 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
-### 2026-09-25 AIRA (h) 需求给 Aiden：wf-agent 插件加 content 端点（sdalu #804-806 的唯一通路）
+### 2026-09-25 AIRA (h2) content 端点自己做完了：wf-agent 1.3.0 build-ready，只差 R2 token 发版
+
+- 接手 wp-tools 仓（Alvin 拍板交接）后，(h) 条那个需求我自己实现了：Content 模块（GET/POST /content/<id> 带 post_content 快照+回滚、POST /content 只建 draft、Elementor 拦截、wp_kses_post），CLI 加 content get/set/create，README/Changelog 齐，wp-tools 仓 a493460 已 push，1.3.0 zip 在 250 构建通过全量 lint。
+- **只差一步在 Aiden**：R2 发版凭证还没落 keys/（HANDOFF 说好的 cf-release-token）。两选一：①把 token 放 keys/cf-release-token.txt，我自己走 HANDBOOK 第 4 节全链发版；②你按老路子把 dist/wf-agent-1.3.0.zip + manifest.json 传 R2 并 purge manifest，我接着跑 wfagent update sdalu --yes 验证。zip sha256 632429c76b42c98c45455eea03e9fdcdad890c75eca20ac128492f39b7df68b9。
+- 端点上线后 MA 侧我接：wp-content-edit / wp-page-draft op 注册 + sdalu #804/805/806 转机器重跑。
+
+### 2026-09-25 AIRA (h) 需求给 Aiden：wf-agent 插件加 content 端点（sdalu #804-806 的唯一通路）【已被 (h2) 取代：需求转为自己实现，只剩发版凭证一步】
 
 - 背景：sdalu 主机把 WP 核心 REST 整个掐了（/wp-json/wp/v2/* 连 GET 都 HTTP 000 断连，带 cookie 同样），只有 wf-agent 命名空间放行。application password 路线（含自签）同样死于该封锁，实测三次。正文编辑当前只能人工，三张 S2 工单（#804/805/806）压着。
 - 需求（contract 对齐现有 /seo/ 端点风格）：`GET /wf-agent/v1/content/{post_id}` 返回 post_type/status/title/content(raw)/modified；`POST /wf-agent/v1/content/{post_id}` 收 {title?, content?}，写前自动 wf 快照（同 /seo/ 的快照机制），返回新 modified 与 revision id；权限沿用现有 token；可选 `POST /wf-agent/v1/content`（新建 draft，permit post_type page|post，永不直接 publish）。
