@@ -1,6 +1,6 @@
-# WordPress 能力清单 v1
+# WordPress 能力清单 v2
 
-<!-- WP-CAP-V1（2026-09-21）：首版。执行通道是 wf-agent 插件 1.2.0 的 REST 命名空间
+<!-- WP-CAP-V1（2026-09-21）：首版。执行通道是 wf-agent 插件 1.3.0 的 REST 命名空间（v2 2026-09-25：content 模块上线，正文编辑与 draft 建稿转机器道；插件与 CLI 现由 Aira 全权共维，wp-tools 仓）
      `<domain>/wp-json/wf-agent/v1`，token 鉴权（header `X-WF-Agent-Token`），Aiden 维护。
      接入包与回执见 /mnt/share/aiden/to-aira-wp-sites-access-20260920-1847.md（阅后即删的交接文件，
      长期真相源是各客户工作区 CLAUDE.md 与 notes/wordpress_credentials.md）。 -->
@@ -25,7 +25,8 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 | wp-sitemap-flush | agent_apply | 清 Rank Math sitemap 缓存，走 `/rankmath/sitemap/flush`，配合前三个 op 收尾用 |
 | ga4-audit | agent_readonly | 只读审计 GA4，口径同 webforger.md |
 | gsc-audit | agent_readonly | 只读审计 GSC，口径同 webforger.md |
-| wp-content-edit | human_only | 正文编辑无机器通道：WP 原生 `/wp/v2/` 需 application password（两站均未签发，要用先找 Aiden 补包）；Elementor 正文在 `_elementor_data` postmeta，插件无写端点，改 `/wp/v2/pages` 的 content 前端不生效 |
+| wp-content-edit | agent_prepare | 正文/标题/摘要编辑，走插件 1.3.0 `/content/<post_id>`（写前自动快照 post_content 类，可回滚，另有 WP 原生 revisions）。方案逐处点名读改写；双闸授权域内免卡。Elementor 页端点自动拒写（正文在 _elementor_data），撞到即转人工。核心 /wp/v2 被主机封锁的旧说明作废，一切走插件隧道 |
+| wp-draft-create | agent_prepare | 新建 draft（post/page），走插件 `/content`，post_status 硬编码 draft 永不直接发布；发布是 status 字段另一次显式写（对外可见，凭证走客户卡批文） |
 | wp-structured-data | human_only | FAQ/JSON-LD 走 Rank Math（正文内联 JSON-LD 会被剥），插件暂无端点 |
 | wp-woocommerce-write | human_only | Woo 商品数据（价格、库存、描述正文）插件无端点，SEO meta 除外（走 wp-seo-meta-update） |
 | wp-plugin-theme-ops | human_only | 插件、主题、核心更新与配置，一律人工 |
