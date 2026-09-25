@@ -3,3 +3,4 @@
 .DS_Store
 .credentials.md
 .deploy-env
+__pycache__/
