@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-25 AIRA (j) 侧栏徽标本期口径推广（rev a5cb562，已部署 api）
+
+- 干了什么：Alvin 定「红蓝标签只显示本期」。红点 9-22 已是本期口径，本次把同一套规则（in_progress 例外、无 sprint 视同本期、无 active plan 保守全数）推广到蓝点（agent 任务计数）与红点里的待发卡子查询。GET /clients 三处徽标统一只亮本期含欠账。线上实测：Apollo 蓝 5 归 0（本期全清）、Apex 6 归 1，Louvresky/Sammichelle 留数（卡壳都在本期）。node tests 全绿，php -l 远端过。
+- 坑：本期指针推导（active plan created_at 锚 14 天一期）在 seo-api 里已有多份拷贝，这次是第三处，下次再加徽标先抽公共函数。
+- 下一步/认领：无。
+
 ### 2026-09-25 AIRA (i) split 套娃护栏：拆条人工工单不再拆孙单
 
 - 干了什么：sdalu 实证 bug。#592 拆出人工工单 #804 后，#804 被转回 agent 位再过判定，白名单外条目仍在，而 items 落库的 split 去重键只认 origin=split:<本单id>，查不到就把 #804 当新母任务又拆出 #872（标题「人工落地：#804 人工落地：#592 …」），#806 同款拆出 #873，套娃链一轮长一层。修法：seo-api.php items(mode=plan) 的 split 分支前加护栏，origin 以 split: 开头的任务只 task_append_note 留痕（[split-guard]），不再新建孙单。数据面同日已手工收口：#872/#873 去套娃改题并置 blocked（真因：sdalu 主机封 WP core REST，等 (h2) 的 wf-agent 1.3.0 content 端点发版），#805 置 blocked（Force HTTPS 需主机面板，我方无凭据）。测试：node tests/ 全套绿（apply 32、insights 100、report 118、specs ok 等），php -l 走 deploy api 远端。
