@@ -834,7 +834,7 @@ let chanRootId=0,chatHistOpen=false,chatLimit=50; /* 频道根与历史区开关
 /* 收件箱对话：会话按当前客户过滤，会话详情 5 秒轮询一次等 agent 回复，
    会话关掉或者离开这个视图就把轮询停掉，别让它在后台空转。
    chatSpawned 记这一轮点过开工的草案（key 是 消息id:序号），刷新后靠系统行补回来。 */
-let chatList=[],chatRootId=0,chatItem=null,chatMsgs=[],chatPending=0,chatTimer=null,chatSending=false,chatSpawned={};
+let chatList=[],chatRootId=0,chatItem=null,chatMsgs=[],chatPending=0,chatTimer=null,chatSending=false,chatSpawned={},chatSig='';
 
 function priIdx(p){const n=PRIORITIES.indexOf(p||'P2');return n<0?2:n}
 function getRole(){
@@ -2836,7 +2836,7 @@ function chStart(){
 }
 function chReset(){
   chStop();
-  chatList=[];chatRootId=0;chanRootId=0;chatHistOpen=false;chatItem=null;chatMsgs=[];chatPending=0;chatSending=false;chatSpawned={};
+  chatList=[];chatRootId=0;chanRootId=0;chatHistOpen=false;chatItem=null;chatMsgs=[];chatPending=0;chatSending=false;chatSpawned={};chatSig='';
   /* 换客户时把上一位客户的频道从 DOM 上抹掉，别让旧线程在那儿挂着 */
   ['chMain','chHist'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
   const hb=document.getElementById('chHist');if(hb)hb.classList.add('hidden');
@@ -2907,6 +2907,11 @@ async function loadChatThread(silent){
   chatItem=d.item||null;
   chatPending=d.chat_pending||0;
   chatMsgs=(d.replies||[]).filter(r=>r.kind==='chat_user'||r.kind==='chat_agent').sort((a,b)=>a.id-b.id);
+  /* 轮询免重绘（2026-09-26 Alvin 报的选区丢失）：数据指纹没变就不动 DOM，
+     innerHTML 重写会吃掉用户正在复制的文字选区。手动加载（silent=false）照常重画。 */
+  const sig=[chatRootId,chatMsgs.length,chatMsgs.length?chatMsgs[chatMsgs.length-1].id:0,chatPending,chatItem&&chatItem.status,chatItem&&chatItem.updated_at].join('|');
+  if(silent&&sig===chatSig&&document.getElementById('chStream'))return;
+  chatSig=sig;
   if(!document.getElementById('chStream'))renderChatMain();
   renderChatStream();
   renderChatStatus();
