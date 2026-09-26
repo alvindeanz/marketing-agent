@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-26 AIRA (k) chat 轮询免重绘（rev 624af24，已部署 api）
+
+- 干了什么：Alvin 报 chat 里选中文字约 3 秒丢选区。根因：chatTimer 5 秒轮询 loadChatThread 后 renderChatStream 无条件重写 chStream 的 innerHTML，DOM 换新选区即失。修法：loadChatThread 加数据指纹（root id、消息数、末条 id、pending、item 状态与 updated_at），silent 轮询下指纹未变直接 return 零重绘；手动加载照常重画。ui.test 5 过，整段 script node --check 过。
+- 坑：以后任何轮询驱动的视图重绘都先问「指纹变没变」，innerHTML 重写对用户手上的选区、输入焦点都是破坏性的；boot 里 15 秒全局轮询已有 INPUT/TEXTAREA 焦点守卫，但守不住文字选区，同款问题别的视图再犯就把指纹跳过抽成公共函数。
+- 下一步/认领：无。
+
 ### 2026-09-25 AIRA (j) 侧栏徽标本期口径推广（rev a5cb562，已部署 api）
 
 - 干了什么：Alvin 定「红蓝标签只显示本期」。红点 9-22 已是本期口径，本次把同一套规则（in_progress 例外、无 sprint 视同本期、无 active plan 保守全数）推广到蓝点（agent 任务计数）与红点里的待发卡子查询。GET /clients 三处徽标统一只亮本期含欠账。线上实测：Apollo 蓝 5 归 0（本期全清）、Apex 6 归 1，Louvresky/Sammichelle 留数（卡壳都在本期）。node tests 全绿，php -l 远端过。
