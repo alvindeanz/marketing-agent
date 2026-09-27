@@ -32,6 +32,7 @@ const KNOWN_TYPES = [
   'chat',
   'plan_review',
   'review_plan',
+  'release_review',
 ];
 
 function send(msg) {

@@ -10,7 +10,7 @@
 
 ## Job 类型
 
-pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert 时序指标）、discover（opus 摸底）、plan（fable 90 天规划）、execute_task（opus，blog-draft ops 走博客产线含蚕食撞车拦截与配图）、apply_task（opus 照方案落地）、feedback（sonnet 解析人话成 facts）、triage（fable 巡检出 digest）、ruling（fable 解析收件箱裁决成白名单动作）、chat（opus 收件箱对话，只读加任务草案）、backfill_metrics（零 LLM 回填 180 天）、report（占位）。
+pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert 时序指标）、discover（opus 摸底）、plan（fable 90 天规划）、execute_task（opus，blog-draft ops 走博客产线含蚕食撞车拦截与配图）、apply_task（opus 照方案落地）、feedback（sonnet 解析人话成 facts）、triage（fable 巡检出 digest）、ruling（fable 解析收件箱裁决成白名单动作）、chat（opus 收件箱对话，只读加任务草案）、backfill_metrics（零 LLM 回填 180 天）、report（占位）、release_review（opus 放行官：L2 待放行判 release/hold_human/redo，spend 与 irreversible 判后 24h 静默期，见 specs/release_review.md）。
 
 ## 硬规矩
 

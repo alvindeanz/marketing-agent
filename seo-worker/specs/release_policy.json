@@ -1,6 +1,6 @@
 {
   "_doc": "放行分级政策，类目无关（SEO 与 paid 同一份，Alvin 拥有，Aira 起草）。risk_class 定义在各渠道/平台能力清单里跟着操作走，这里只做 class 到档位的映射。服务端 seo-api 读本文件执行 L0 自动放行与 Chat 分级派单（dispatch_rules），deploy.sh api 随 seo-api.php 一起部署。说明文档见 release_policy.md。",
-  "version": 17,
+  "version": 18,
   "seo_client_card": {
     "_doc": "2026-09-18 Alvin 第一性原理定版（取代 v8 人工后检口径）：默认放行，可逆自动放行零闸，快照兜底，事后抽查（人工手动触发+harness 按需抽查器）+原地还原+堵整类。只读卡交付即自动收货（seo-api seo_task_result analysis_task auto-accept）。硬闸只剩花钱越权/不可逆实害/合同级=权限授权类。external 客户方向走客户卡落 confirmed 批文 fact 走 external_with_backing_fact=auto。等 Alvin 只剩 bug/卡壳/权限三类。",
     "default": "auto-release-reversible",
@@ -132,6 +132,30 @@
       "shopify",
       "googleads",
       "wordpress"
+    ]
+  },
+  "release_review": {
+    "_doc": "L2 放行官（2026-09-27 Alvin 定方案 B）：待放行任务由 release_review job（opus，模型键 releaseReviewModel）按 specs/release_review.md 判 release/hold_human/redo。release 且 ops 含 spend/irreversible 先进静默期（window_hours，人可在窗口内改判或不做否决，到期后 harness 走 /tasks/release 落地），其余 release 立即按人放行同路由执行（分析验收/博客写正文/排 apply）。服务端执行层 seo-api /tasks/release_review_result，熔断：apply 有历史不自动放、redo 一次为限。",
+    "model_key": "releaseReviewModel",
+    "verdicts": [
+      "release",
+      "hold_human",
+      "redo"
+    ],
+    "delayed_classes": [
+      "spend",
+      "irreversible"
+    ],
+    "window_hours": 24,
+    "fuses": {
+      "apply_history_blocks_auto": true,
+      "redo_once": true
+    },
+    "note_markers": [
+      "[auto-release L2-opus]",
+      "[pending-release",
+      "[hold-human opus",
+      "[redo opus"
     ]
   }
 }

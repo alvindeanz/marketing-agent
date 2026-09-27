@@ -9,8 +9,25 @@
 | 档 | 谁放行 | 覆盖 |
 |---|---|---|
 | L0 自动放行 | 闸A 复审判 do 即自动排 apply，人月度抽查放行记录（搜 note `[auto-release L0]`） | 全部 ops 均 reversible，且不在 L0 排除表，且非博客、非分析 |
-| L2 人点 | Alvin（或授权的人） | 其他一切：spend、irreversible、external、分析验收、无 ops 任务、L0 排除表内的 |
+| L2 opus 放行官 | release_review job（opus）判定：release 即落地，spend 与 irreversible 的 release 先进 24 小时静默期（人可否决），hold_human 才停人 | 其他一切：spend、irreversible、external、分析验收、无 ops 任务、L0 排除表内的 |
 | L1 冷静期 | 未启用 | 触发条件：L2 连续两周超 3 张再建（48 小时不否决自动放） |
+
+## L2 放行官（2026-09-27 Alvin 定，方案 B，version 18）
+
+L2 不再默认停人。harness 每轮把待放行任务批量排给 release_review job（opus，模型键
+releaseReviewModel），按 specs/release_review.md 的冲突清单判：
+
+- **release**：立即按人放行同一路由执行（分析验收 / 博客写正文 / 排 apply）。例外：ops 含
+  spend 或 irreversible 的，先写 `[pending-release ... until <ts>Z]` 静默期标记，24 小时内
+  人可用改判或不做否决；到期后下一轮 harness 调 /tasks/release 落地（harness 人触发，
+  不违硬规矩 1）。
+- **hold_human**：note 写 `[hold-human opus]` 加命中的冲突条，attention 亮灯，人处理。
+- **redo**：方案有错打回，自动排 execute 重出，一次为限，第二次降 hold_human。
+
+熔断（服务端 /tasks/release_review_result，模型说了不算）：apply 有任何历史（含失败）的
+任务不自动放；redo 只自动一次。人放行端点 /tasks/release 原样保留，人永远可以直接放或
+否决。度量随周批跑 digest 看三个数：opus 放行数、hold_human 数、被人推翻数；推翻率
+趋零后再谈撤静默期（切方案 A）。
 
 ## risk_class 四个值
 

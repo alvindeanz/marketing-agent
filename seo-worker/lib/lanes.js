@@ -15,7 +15,7 @@
 
 const LANES = {
   heavy: ['pull_data', 'discover', 'plan', 'execute_task', 'apply_task', 'report', 'backfill_metrics'],
-  light: ['review_plan', 'ruling', 'feedback', 'triage', 'plan_review'],
+  light: ['review_plan', 'ruling', 'feedback', 'triage', 'plan_review', 'release_review'],
   // chat 单独一条道（2026-09-07）：聊天是人在等的交互，几十秒的回复不能排在
   // 几分钟的 fable 评审后面。同一会话仍一轮一问（服务端 409 闸），道内跨会话串行。
   chat: ['chat'],

@@ -473,6 +473,38 @@ async function report(all, sprint, retried) {
     if (!DRY) await call('PATCH', '/tasks/' + id, { attention: 1, result_note: note + block });
   }
 
+  // 放行判定（2026-09-27 Alvin 定方案 B）：待放行不再默认停人，排 opus 放行官批量判定
+  // （release 即落 / spend 与 irreversible 进 24h 静默期 / hold_human 才停人）。静默期到点的
+  // 在这里走人放行同一端点落地。harness 本身是人触发的，不违硬规矩 1。
+  const judgeIds = [];
+  const matured = [];
+  for (const r of ready) {
+    const t = mine.find((x) => x.id === r.id) || {};
+    const note = String(t.result_note || '');
+    const pend = note.match(/\[pending-release [^\]]*until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})Z\]/g);
+    if (pend) {
+      const ts = ((pend[pend.length - 1].match(/until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})Z/) || [])[1]) || '';
+      if (ts && Date.now() >= Date.parse(ts.replace(' ', 'T') + ':00Z')) matured.push(r.id);
+      continue; // 静默期内不重判，窗口留给人否决
+    }
+    if (note.includes('[hold-human opus')) continue; // opus 已停人，人动过才再判
+    if (note.includes('[auto-release L2-opus')) continue; // 已放行在落，别再判出熔断噪音
+    if (t.review_pending) continue;
+    judgeIds.push(r.id);
+  }
+  if (matured.length && !DRY) {
+    const rel = await call('POST', '/tasks/release', { client_id: cid, task_ids: matured });
+    console.log('\n## 静默期满自动放行（' + matured.length + '）：#' + matured.join(' #') + (rel && rel.ok ? '' : '（响应：' + JSON.stringify(rel).slice(0, 120) + '）'));
+  } else if (matured.length) {
+    console.log('\n## 静默期满待放行（dry）：#' + matured.join(' #'));
+  }
+  if (judgeIds.length && !DRY) {
+    const jr = await call('POST', '/jobs', { client_id: cid, type: 'release_review', payload: { task_ids: judgeIds.slice(0, 20) } });
+    console.log('\n## 放行判定已排（opus 放行官，' + Math.min(judgeIds.length, 20) + ' 张）' + (jr && jr.id ? ' job #' + jr.id : '（响应：' + JSON.stringify(jr).slice(0, 120) + '）'));
+  } else if (judgeIds.length) {
+    console.log('\n## 放行判定候选（dry）：#' + judgeIds.join(' #'));
+  }
+
   // 输出
   console.log('\n## 放行卡（' + ready.length + '）');
   for (const r of ready) console.log('- #' + r.id + ' ' + r.title + (r.preview ? ' ' + r.preview : ''));

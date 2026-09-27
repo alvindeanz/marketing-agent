@@ -54,6 +54,8 @@ const DEFAULTS = {
   // 2026-09-17 Alvin 定降 opus：这是 fable 定好 plan 框架之内的单任务 go/no-go，边界清楚；
   // 判断漂了由季度 planReview（仍 fable）重规划纠回。全流水线最高频调用，premium 从高频挪走。
   reviewModel: 'opus',
+  // 放行官（2026-09-27 Alvin 定方案 B）：opus 判 release/hold_human/redo，服务端执行分流
+  releaseReviewModel: 'opus',
   // 方案层过闸：整份方案按跨客户经验改成 v2 并出方向确认卡，一个客户一季度一次，给大模型。
   planReviewModel: 'fable',
   // 任务线程（chat runner 的任务模式）。落看板层动作（改任务、重派、改判）。

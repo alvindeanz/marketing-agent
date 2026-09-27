@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-27 AIRA (l) L2 放行下放 opus 放行官（方案 B，Alvin 定）
+
+- 干了什么：待放行不再默认停人。新 job 类型 release_review（opus，config 键 releaseReviewModel）按 specs/release_review.md 的六条冲突清单判 release/hold_human/redo；服务端执行层 seo-api POST /tasks/release_review_result：release 且 ops 含 spend/irreversible 只写 [pending-release] 24h 静默期标记（人可改判/不做否决，到期下一轮 harness 调 /tasks/release 落地），其余 release 立即走人放行同路由（分析验收/博客写正文/排 apply）；hold_human 亮 attention；redo 自动重排 execute 一次为限。熔断在服务端：apply 有任何历史不自动放、redo 两次降停人。harness report 段接线：批量排判定 job、静默期到点自动放行。人放行端点原样保留。四处登记齐（KNOWN_TYPES/ensure_job_types/两边 lanes，light 道）、release_policy json v18 + md 档位表更新、CLAUDE.md job 清单更新。测试：新增 tests/release_review.test.js 7 断言，全套 node tests 绿，php -l 走 deploy 远端。
+- 坑：①放行后任务仍在 review 直到 apply 收口，harness 重判会撞 apply 历史熔断出噪音，已用 [auto-release L2-opus] note 标记跳过，改 note 格式记得同步 harness 的三个 includes 判断；②/tasks/release_review_result 的立即放行路由是 /tasks/release 人工路径的镜像拷贝（res() 风格改不动才复制），两处路由逻辑改任何一处必须同步另一处，注释里互相指了路。
+- 下一步/认领：观察期指标随周批跑 digest 看（opus 放行数/hold 数/被人推翻数），推翻率趋零再议撤静默期切方案 A。部署 api+worker 随本条。
+
 ### 2026-09-26 AIRA (k) chat 轮询免重绘（rev 624af24，已部署 api）
 
 - 干了什么：Alvin 报 chat 里选中文字约 3 秒丢选区。根因：chatTimer 5 秒轮询 loadChatThread 后 renderChatStream 无条件重写 chStream 的 innerHTML，DOM 换新选区即失。修法：loadChatThread 加数据指纹（root id、消息数、末条 id、pending、item 状态与 updated_at），silent 轮询下指纹未变直接 return 零重绘；手动加载照常重画。ui.test 5 过，整段 script node --check 过。

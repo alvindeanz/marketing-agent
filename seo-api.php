@@ -296,7 +296,7 @@ function ensure_job_types(){
     $done=true;
     /* backfill_metrics 加在这里的同时必须加进 seo-worker/runner_host.js 的
        KNOWN_TYPES，两边漏一边 worker 领到活直接崩。2026-08 apply_task 就是这么炸的。 */
-    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics','chat','review_plan','plan_review'];
+    $want=['discover','pull_data','plan','execute_task','apply_task','report','feedback','triage','ruling','backfill_metrics','chat','review_plan','plan_review','release_review'];
     $q=db()->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='type'");
     $q->execute();
     $col=$q->fetch();
@@ -1660,7 +1660,7 @@ function jobs_inflight_tasks($type){
    拆开的理由只有一个：判定不能排在 10 分钟的 execute 后面等。不在表里的类型归 heavy。 */
 define('JOB_LANES',[
     'heavy'=>['pull_data','discover','plan','execute_task','apply_task','report','backfill_metrics'],
-    'light'=>['review_plan','ruling','feedback','triage','plan_review'],
+    'light'=>['review_plan','ruling','feedback','triage','plan_review','release_review'],
     'chat'=>['chat'],
 ]);
 function job_lane($type){
@@ -5594,6 +5594,104 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
     res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'reclassed'=>$reclassed]);
 }
 
+/* POST /tasks/release_review_result -> opus 放行官判决执行（2026-09-27 Alvin 定方案 B）。
+   worker 回传 release / hold_human / redo，本端点是执行层，模型说了不算的都在这里：
+   - release：ops 含 spend/irreversible → 只写 [pending-release] 静默期标记（24h，人可
+     在窗口内改判或不做否决，到期后下一轮 harness 走人放行同一端点落地）；其余按
+     /tasks/release 的人放行同一路由（分析验收 / 博客写正文 / 排 apply），两处路由若改
+     必须同步。
+   - hold_human：留待放行 + attention，note 写命中的冲突条。
+   - redo：排 execute 重出方案，一次为限，第二次降 hold_human。
+   熔断：apply 有任何历史（含失败）的任务不自动放，降 hold_human（同 chat auto 口径）。 */
+if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
+    auth_worker();
+    ensure_review_schema();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    $rows=$i['results']??null;
+    if(!$cid||!is_array($rows)||!$rows)res(400,['error'=>'client_id and results required']);
+    if(count($rows)>20)res(400,['error'=>'batch too large, max 20']);
+    $pol=release_policy_load();
+    $rc=is_array($pol)&&isset($pol['risk_class_by_op'])&&is_array($pol['risk_class_by_op'])?$pol['risk_class_by_op']:[];
+    $stamp=gmdate('Y-m-d H:i');
+    $act=['released'=>[],'delayed'=>[],'held'=>[],'redo'=>[],'skipped'=>[]];
+    foreach($rows as $r){
+        $tid=(int)($r['task_id']??0);
+        $verdict=(string)($r['verdict']??'');
+        $reason=mb_substr(trim((string)($r['reason']??'')),0,300,'UTF-8');
+        if(!$tid||!in_array($verdict,['release','hold_human','redo'],true)){if($tid)$act['skipped'][]=$tid;continue;}
+        $q=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
+        if(!$t||(int)$t['client_id']!==$cid||$t['status']!=='review'){$act['skipped'][]=$tid;continue;}
+        $note=(string)$t['result_note'];
+        if($verdict==='hold_human'){
+            $cf=isset($r['conflicts'])&&is_array($r['conflicts'])?implode(',',array_map('strval',array_slice($r['conflicts'],0,6))):'';
+            task_append_note($tid,'[hold-human opus '.$stamp.'] 冲突['.$cf.']：'.$reason);
+            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+            audit('opus-release','seo_release_hold',(string)$tid,['reason'=>$reason,'conflicts'=>$cf]);
+            $act['held'][]=$tid;continue;
+        }
+        if($verdict==='redo'){
+            if(strpos($note,'[redo opus')!==false){
+                task_append_note($tid,'[hold-human opus '.$stamp.'] redo 已用过一次仍不过，停人：'.$reason);
+                db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+                audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'redo twice: '.$reason]);
+                $act['held'][]=$tid;continue;
+            }
+            task_append_note($tid,'[redo opus '.$stamp.'] 方案打回重出：'.$reason);
+            list($jr,)=queue_task_jobs($cid,'execute_task',[$tid],'opus-release','seo_release_redo');
+            audit('opus-release','seo_release_redo',(string)$tid,['reason'=>$reason,'job'=>$jr?$jr[0]:0]);
+            $act['redo'][]=$tid;continue;
+        }
+        /* release。熔断先行：apply 有任何历史不自动放（一任务一 job，payload 形如 {"task_ids":[N]}）。 */
+        $h=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload LIKE ?");
+        $h->execute([$cid,'%"task_ids":['.$tid.']%']);
+        $hc=$h->fetch();
+        if((int)($hc['c']??0)>0){
+            task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：apply 已有历史（含失败），重放归人。判词：'.$reason);
+            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+            audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'apply history fuse']);
+            $act['held'][]=$tid;continue;
+        }
+        $opsArr=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
+        $money=false;
+        foreach($opsArr as $op){$c=(string)($rc[$op]??'');if($c==='spend'||$c==='irreversible'){$money=true;break;}}
+        if($money){
+            if(strpos($note,'[pending-release')===false){
+                $until=gmdate('Y-m-d H:i',time()+24*3600);
+                task_append_note($tid,'[pending-release opus '.$stamp.' until '.$until.'Z] 静默期 24 小时：期间改判或不做即否决，到期后下一轮 harness 自动放行落地。判词：'.$reason);
+                audit('opus-release','seo_release_pending',(string)$tid,['until'=>$until,'reason'=>$reason]);
+            }
+            $act['delayed'][]=$tid;continue;
+        }
+        if(analysis_task($t)){
+            if(trim((string)$t['output_url'])===''&&strpos($note,'预览: ')===false){
+                task_append_note($tid,'[hold-human opus '.$stamp.'] 分析任务无产出链接与预览，无法验收');
+                db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+                $act['held'][]=$tid;continue;
+            }
+            $err=task_close($tid,'accepted','分析报告已验收（opus 放行官）：'.$reason,'opus-release');
+            if($err){$act['skipped'][]=$tid;continue;}
+            audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'analysis_accept']);
+            $act['released'][]=$tid;continue;
+        }
+        if(blog_outline_stage($t)){
+            list($jb,)=blog_release_as_write($cid,$t,'opus-release');
+            task_append_note($tid,'[auto-release L2-opus '.$stamp.'] '.$reason);
+            audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'blog_write','jobs'=>$jb]);
+            $act['released'][]=$tid;continue;
+        }
+        if(!$opsArr){
+            task_append_note($tid,'[hold-human opus '.$stamp.'] 无 ops：没有 change plan 排落地必失败，需人工验收或补 ops 重跑');
+            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+            $act['held'][]=$tid;continue;
+        }
+        list($ja,)=queue_task_jobs($cid,'apply_task',[$tid],'opus-release','seo_task_release_opus');
+        task_append_note($tid,'[auto-release L2-opus '.$stamp.'] '.$reason);
+        $act['released'][]=$tid;
+    }
+    res(200,['ok'=>true,'actions'=>$act]);
+}
+
 // POST /tasks/{id}/review_override body { verdict, note } -> 人推翻 fable 的判决，理由必填。
 // 前端在这之后再往 /tasks/{id}/feedback 投一条备注，让理由走 feedback job 变成 fact，
 // 下次判定 fable 就带着它。这里只记推翻本身。
@@ -6289,10 +6387,10 @@ if($m==='POST'&&$ROUTE==='/jobs'){
        triage is read only: it looks at everything and writes a report, nothing else. */
     /* backfill_metrics 零 LLM，把 GSC/GA4 的历史按日数据补进 seo_metrics_daily。
        幂等可重跑，所以放开给控制台手动触发。 */
-    if(!in_array($type,['discover','pull_data','plan','execute_task','report','feedback','triage','backfill_metrics'],true))res(400,['error'=>'bad type']);
+    if(!in_array($type,['discover','pull_data','plan','execute_task','report','feedback','triage','backfill_metrics','release_review'],true))res(400,['error'=>'bad type']);
     if($type==='feedback')ensure_feedback_schema();
     if($type==='report')ensure_reports_schema();
-    if($type==='triage')ensure_job_types();
+    if($type==='triage'||$type==='release_review')ensure_job_types();
     if($type==='backfill_metrics'){ensure_job_types();ensure_metrics_schema();}
     $payloadIn=$i['payload']??null;
     if($type==='execute_task'&&is_array($payloadIn)&&isset($payloadIn['task_ids'])&&is_array($payloadIn['task_ids'])){

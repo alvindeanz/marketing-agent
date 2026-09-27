@@ -209,6 +209,11 @@ class Api {
     return this.req('POST', '/tasks/review_result', body);
   }
 
+  /** POST /tasks/release_review_result body { client_id, job_id, summary, results } -> { actions } */
+  async postReleaseReviewResult(body) {
+    return this.req('POST', '/tasks/release_review_result', body);
+  }
+
   /** GET /snapshots/{id} -> one snapshot including its full data */
   async getSnapshot(id) {
     return this.req('GET', '/snapshots/' + encodeURIComponent(id));
