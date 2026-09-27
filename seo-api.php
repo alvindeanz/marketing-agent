@@ -5753,7 +5753,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/decide$#',$ROUTE,$mm)){
         /* 空 ops 任务的人工同意 = 显式验收成稿（区别于 auto-accept：这里有人看过点头，
            不违反「未登记默认从严」；机器落地仍然被挡，见各放行路护栏）。 */
         if(analysis_task($t)||!array_filter(array_map('trim',explode(',',(string)$t['ops'])))){
-            if(trim((string)$t['output_url'])===''&&strpos((string)$t['result_note'],'预览: ')===false)res(400,['error'=>'分析任务没有产出链接也没有预览，无法验收']);
+            $hasOutD=trim((string)$t['output_url'])!==''||strpos((string)$t['result_note'],'预览: ')!==false;
+            if(!$hasOutD){
+                /* 交付文件也是产出证据（卡上就是拿它给人验收的），与 /tasks/release_review_result 同标准。 */
+                $dqD=db()->prepare("SELECT COUNT(*) c FROM seo_deliverables WHERE task_id=?");$dqD->execute([$tid]);
+                $hasOutD=(int)(($dqD->fetch()['c'])??0)>0;
+            }
+            if(!$hasOutD)res(400,['error'=>'分析任务没有产出链接、预览或交付文件，无法验收']);
             $err=task_close($tid,'accepted','分析报告已验收',$u['username']);
             if($err)res(400,['error'=>$err]);
             audit($u['username'],'seo_task_decide',(string)$tid,['yes'=>1,'did'=>'accept']);

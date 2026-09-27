@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-27 AIRA (l2) 放行官首验通过 + 三个连带洞（rev 8af3e00 起，已部署双端）
+
+- 干了什么：Ideal #851 全链路首验：harness 自动排 release_review job 1598，opus 判 release 并正确识别 spend 类该进静默期；服务端 apply 历史熔断把它降 hold_human（9/23 有过一次中止 apply），铁律压过模型判决，行为与 (l) 条规格完全一致。首验路上挖出三个存量洞并修掉：① 'S'+null 拼出字面量 Snull sprint，本期口径解析不了任务隐身（harness 192 行，无锚改空标签）；② review 判定的 reviewArtifactFor 不认分析模式交付文档 task-N-*.md，交付类 review 任务被永远判「方案缺失」延后死循环；③ 分析验收只认 output_url/预览不认交付文件，opus 放行端点与人工 decide 两处同标准补上 seo_deliverables 证据。tests 全绿。
+- 坑：熔断语义注意：opus 判 release 的 spend 单若有 apply 历史，held 优先于静默期（保险丝在前），卡上 note 是 [hold-human opus ... 熔断] 不是 [pending-release]，别误读成静默期。
+- 下一步/认领：#851 落地本身（否词 CSV 进账户）等人放行或按直接执行边界人工代跑。
+
 ### 2026-09-27 AIRA (l) L2 放行下放 opus 放行官（方案 B，Alvin 定）
 
 - 干了什么：待放行不再默认停人。新 job 类型 release_review（opus，config 键 releaseReviewModel）按 specs/release_review.md 的六条冲突清单判 release/hold_human/redo；服务端执行层 seo-api POST /tasks/release_review_result：release 且 ops 含 spend/irreversible 只写 [pending-release] 24h 静默期标记（人可改判/不做否决，到期下一轮 harness 调 /tasks/release 落地），其余 release 立即走人放行同路由（分析验收/博客写正文/排 apply）；hold_human 亮 attention；redo 自动重排 execute 一次为限。熔断在服务端：apply 有任何历史不自动放、redo 两次降停人。harness report 段接线：批量排判定 job、静默期到点自动放行。人放行端点原样保留。四处登记齐（KNOWN_TYPES/ensure_job_types/两边 lanes，light 道）、release_policy json v18 + md 档位表更新、CLAUDE.md job 清单更新。测试：新增 tests/release_review.test.js 7 断言，全套 node tests 绿，php -l 走 deploy 远端。
