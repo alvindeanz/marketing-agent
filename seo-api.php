@@ -5664,8 +5664,14 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             $act['delayed'][]=$tid;continue;
         }
         if(analysis_task($t)){
-            if(trim((string)$t['output_url'])===''&&strpos($note,'预览: ')===false){
-                task_append_note($tid,'[hold-human opus '.$stamp.'] 分析任务无产出链接与预览，无法验收');
+            $hasOut=trim((string)$t['output_url'])!==''||strpos($note,'预览: ')!==false;
+            if(!$hasOut){
+                /* 交付文件也是产出证据（看板卡上就是这么给人验收的），别只认 output_url。 */
+                $dq=db()->prepare("SELECT COUNT(*) c FROM seo_deliverables WHERE task_id=?");$dq->execute([$tid]);
+                $hasOut=(int)(($dq->fetch()['c'])??0)>0;
+            }
+            if(!$hasOut){
+                task_append_note($tid,'[hold-human opus '.$stamp.'] 分析任务无产出链接、预览或交付文件，无法验收');
                 db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
                 $act['held'][]=$tid;continue;
             }

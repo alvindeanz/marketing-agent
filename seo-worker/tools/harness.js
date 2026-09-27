@@ -189,7 +189,10 @@ async function foldCards(sprint) {
 async function main() {
   const bc = await boardClient();
   if (!bc) throw new Error('board 上没有 client ' + cid);
-  const sprintEarly = /^S/.test(String(bc.current_sprint)) ? String(bc.current_sprint) : 'S' + bc.current_sprint;
+  /* 无日历锚的客户 current_sprint 是 null，'S'+null 会拼出字面量 Snull 写进折叠产出的任务
+     （Ideal #851 实证，2026-09-27），本期口径解析不了直接隐身。没锚就空标签，视同本期。 */
+  const sprintEarly = /^S\d/.test(String(bc.current_sprint)) ? String(bc.current_sprint)
+    : (Number.isFinite(+bc.current_sprint) && +bc.current_sprint > 0 ? 'S' + +bc.current_sprint : '');
   await foldCards(sprintEarly);
   // 入 sprint 前的两道客户确认闸（2026-09-09 Alvin 定的全局流程：轻链方向卡 → 客户确认关键词 →
   // 客户确认 mapping → 才进 sprint）。证据看 facts：词表确认与 mapping 确认各要一条 confirmed 记录。

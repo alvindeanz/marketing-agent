@@ -66,7 +66,7 @@ function taskBlock(t) {
     const kind = t.artifact_kind || '变更方案';
     rows.push(
       '  这个任务已出' + kind + '、等放行，判的是这份' + kind + '该不该照它往下走。' +
-        (kind === '变更方案' ? '' : '博客产出的判决语义：do = 按它写正文 / 放行发布，later = 先不写并写清等什么，drop = 不做，merge = 并入其他任务。') +
+        (kind.indexOf('博客') === 0 ? '博客产出的判决语义：do = 按它写正文 / 放行发布，later = 先不写并写清等什么，drop = 不做，merge = 并入其他任务。' : '') +
         kind + '正文（超长已截断）：',
       '  ----- ' + kind + '开始 -----',
       truncate(String(t.change_plan), MAX_PLAN_CHARS),
@@ -99,6 +99,16 @@ function reviewArtifactFor(workspace, taskId) {
       .filter((f) => f.indexOf('blog-task-' + taskId + '-') === 0 && /\.md$/.test(f))
       .sort();
     if (drafts.length) return { kind: '博客草稿', file: path.join(out, drafts[drafts.length - 1]) };
+  } catch (e) { /* no output dir */ }
+  /* 分析模式的交付文档（execute 走 /tasks/{id}/result 落盘，名字是 task-N-<ts>.md）。
+     不认这个名字的话，交付类 review 任务会被永远判「方案缺失」延后（Ideal #851 实证，
+     2026-09-27：CSV 重出了判定还在等 change-plan-task-851.md）。取最新一份。 */
+  try {
+    const dumps = fs
+      .readdirSync(out)
+      .filter((f) => f.indexOf('task-' + taskId + '-') === 0 && /\.md$/.test(f))
+      .sort();
+    if (dumps.length) return { kind: '交付文档', file: path.join(out, dumps[dumps.length - 1]) };
   } catch (e) { /* no output dir */ }
   return null;
 }
