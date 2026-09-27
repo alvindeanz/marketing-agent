@@ -75,13 +75,15 @@ function cleanVerdicts(json, batchIds, log) {
     const conflicts = Array.isArray(v.conflicts)
       ? v.conflicts.map((c) => String(c).slice(0, 4)).slice(0, 6)
       : [];
-    byId.set(tid, { task_id: tid, verdict, reason: summarize(reason, MAX_REASON_CHARS), conflicts });
+    /* backing：spend/irreversible 的 release 引用批文 fact key，服务端自己去 facts 表验真。 */
+    const backing = String(v.backing || '').replace(/[^A-Za-z0-9_.\-]/g, '').slice(0, 120);
+    byId.set(tid, { task_id: tid, verdict, reason: summarize(reason, MAX_REASON_CHARS), conflicts, backing });
   }
   const out = [];
   for (const tid of batchIds) {
     if (byId.has(tid)) { out.push(byId.get(tid)); continue; }
     say('放行判定：#' + tid + ' 没拿到判决，记 hold_human');
-    out.push({ task_id: tid, verdict: 'hold_human', reason: '模型未给出判决，需人工看', conflicts: [] });
+    out.push({ task_id: tid, verdict: 'hold_human', reason: '模型未给出判决，需人工看', conflicts: [], backing: '' });
   }
   return { verdicts: out, summary: summarize(json && json.summary, 300) };
 }

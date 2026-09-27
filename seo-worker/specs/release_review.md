@@ -56,5 +56,8 @@
 
 - verdict 三选一：release / hold_human / redo。
 - reason ≤160 字，写你核了什么，不写套话。
+- backing：任务涉及 spend / irreversible 时，release 判决要带 backing 字段 = 覆盖本次改动的
+  客户批文 fact key（如 cards.t798.outcome）。服务端会去 facts 表验真（confirmed 才算），
+  验上了跳过静默期直接落地，验不上进静默期。没有批文就不写，让它走静默期，别编 key。
 - conflicts 数组：hold_human 时列命中的清单条号（如 ["1","3"]），release 时空数组。
 - 自检后再输出：每个 task_id 都在本批里、json 可解析、字符串里的英文双引号已转义。

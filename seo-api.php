@@ -5642,9 +5642,15 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             audit('opus-release','seo_release_redo',(string)$tid,['reason'=>$reason,'job'=>$jr?$jr[0]:0]);
             $act['redo'][]=$tid;continue;
         }
-        /* release。熔断先行：apply 有任何历史不自动放（一任务一 job，payload 形如 {"task_ids":[N]}）。 */
-        $h=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload LIKE ?");
-        $h->execute([$cid,'%"task_ids":['.$tid.']%']);
+        /* release。熔断先行，但按方案版本计不按任务终身计（2026-09-27 Alvin 上帝视角修正）：
+           bm 事故防的是同一份方案盲目重放；方案重出过（execute done 晚于上次 apply）旧失败就是
+           过期证据，每版方案仍只自动落一次，防环性质不变。payload 形如 {"task_ids":[N]}。 */
+        $likeT='%"task_ids":['.$tid.']%';
+        $eq=db()->prepare("SELECT MAX(created_at) t FROM agent_jobs WHERE client_id=? AND type='execute_task' AND status='done' AND payload LIKE ?");
+        $eq->execute([$cid,$likeT]);
+        $lastExec=(string)((($eq->fetch())['t'])??'');
+        $h=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload LIKE ?".($lastExec!==''?' AND created_at>?':''));
+        $h->execute($lastExec!==''?[$cid,$likeT,$lastExec]:[$cid,$likeT]);
         $hc=$h->fetch();
         if((int)($hc['c']??0)>0){
             task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：apply 已有历史（含失败），重放归人。判词：'.$reason);
@@ -5656,12 +5662,24 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
         $money=false;
         foreach($opsArr as $op){$c=(string)($rc[$op]??'');if($c==='spend'||$c==='irreversible'){$money=true;break;}}
         if($money){
-            if(strpos($note,'[pending-release')===false){
-                $until=gmdate('Y-m-d H:i',time()+24*3600);
-                task_append_note($tid,'[pending-release opus '.$stamp.' until '.$until.'Z] 静默期 24 小时：期间改判或不做即否决，到期后下一轮 harness 自动放行落地。判词：'.$reason);
-                audit('opus-release','seo_release_pending',(string)$tid,['until'=>$until,'reason'=>$reason]);
+            /* 客户批文压过静默期（2026-09-27 Alvin 定）：opus 引用批文 fact key，这里自己去
+               facts 表验（confirmed 才算，不信模型转述），验上了 spend/irreversible 也直接放。 */
+            $bk=preg_replace('/[^A-Za-z0-9_.\-]/','',(string)($r['backing']??''));
+            $bkOk=false;
+            if($bk!==''){
+                $bq=db()->prepare("SELECT COUNT(*) c FROM seo_facts WHERE client_id=? AND fact_key=? AND status='confirmed'");
+                $bq->execute([$cid,$bk]);
+                $bkOk=(int)((($bq->fetch())['c'])??0)>0;
             }
-            $act['delayed'][]=$tid;continue;
+            if(!$bkOk){
+                if(strpos($note,'[pending-release')===false){
+                    $until=gmdate('Y-m-d H:i',time()+24*3600);
+                    task_append_note($tid,'[pending-release opus '.$stamp.' until '.$until.'Z] 静默期 24 小时'.($bk!==''?'（引用批文 '.$bk.' 未验上）':'（无批文引用）').'：期间改判或不做即否决，到期后下一轮 harness 自动放行落地。判词：'.$reason);
+                    audit('opus-release','seo_release_pending',(string)$tid,['until'=>$until,'reason'=>$reason,'backing_cited'=>$bk]);
+                }
+                $act['delayed'][]=$tid;continue;
+            }
+            $reason='批文 '.$bk.' 已验（confirmed），跳过静默期。'.$reason;
         }
         if(analysis_task($t)){
             $hasOut=trim((string)$t['output_url'])!==''||strpos($note,'预览: ')!==false;

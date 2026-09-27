@@ -24,8 +24,11 @@ releaseReviewModel），按 specs/release_review.md 的冲突清单判：
 - **hold_human**：note 写 `[hold-human opus]` 加命中的冲突条，attention 亮灯，人处理。
 - **redo**：方案有错打回，自动排 execute 重出，一次为限，第二次降 hold_human。
 
-熔断（服务端 /tasks/release_review_result，模型说了不算）：apply 有任何历史（含失败）的
-任务不自动放；redo 只自动一次。人放行端点 /tasks/release 原样保留，人永远可以直接放或
+熔断（服务端 /tasks/release_review_result，模型说了不算）：apply 历史按**方案版本**计，
+不按任务终身计（2026-09-27 Alvin 上帝视角修正：方案重出过，旧失败就是过期证据；每版方案
+仍只自动落一次，bm 事故的防环性质不变）；redo 只自动一次。**批文压过静默期**：opus 判
+release 时引用批文 fact key（backing 字段），服务端自己去 facts 表验 confirmed，验上了
+spend/irreversible 也直接放，验不上才进静默期。人放行端点 /tasks/release 原样保留，人永远可以直接放或
 否决。度量随周批跑 digest 看三个数：opus 放行数、hold_human 数、被人推翻数；推翻率
 趋零后再谈撤静默期（切方案 A）。
 
