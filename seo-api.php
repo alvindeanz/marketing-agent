@@ -5681,7 +5681,8 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             }
             $reason='批文 '.$bk.' 已验（confirmed），跳过静默期。'.$reason;
         }
-        if(analysis_task($t)){
+        /* 空 ops 与分析任务同路：放行 = 验收（与人工 decide 同口径，别照 /tasks/release 拒空 ops）。 */
+        if(analysis_task($t)||!$opsArr){
             $hasOut=trim((string)$t['output_url'])!==''||strpos($note,'预览: ')!==false;
             if(!$hasOut){
                 /* 交付文件也是产出证据（看板卡上就是这么给人验收的），别只认 output_url。 */
@@ -5703,11 +5704,6 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             task_append_note($tid,'[auto-release L2-opus '.$stamp.'] '.$reason);
             audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'blog_write','jobs'=>$jb]);
             $act['released'][]=$tid;continue;
-        }
-        if(!$opsArr){
-            task_append_note($tid,'[hold-human opus '.$stamp.'] 无 ops：没有 change plan 排落地必失败，需人工验收或补 ops 重跑');
-            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
-            $act['held'][]=$tid;continue;
         }
         list($ja,)=queue_task_jobs($cid,'apply_task',[$tid],'opus-release','seo_task_release_opus');
         task_append_note($tid,'[auto-release L2-opus '.$stamp.'] '.$reason);
