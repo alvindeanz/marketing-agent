@@ -309,9 +309,12 @@ async function main() {
   const inScope = (t) => {
     if (IDS) return IDS.includes(t.id);
     if (!inSprintScope(t)) return false;
-    /* 闸材料任务（确认卡/静默提案的生产者）是闸的钥匙，不受闸挡，否则鸡生蛋死锁（#659 老坑结构化修复） */
+    /* 闸材料任务（确认卡/静默提案的生产者）是闸的钥匙，不受闸挡，否则鸡生蛋死锁（#659 老坑结构化修复）。
+       2026-09-28 补第二类钥匙：卡反馈落地 / onboard 闸材料任务（客户已回卡，落地即写 confirmed fact 开闸），
+       这些 ops 为空按 title 认，否则闸把开闸任务自己扣死（Badger #847 等四家实证的死锁）。 */
     if (!seoGateOk && String(t.module || '') !== 'paid'
-      && !/keyword-confirmation|mapping-confirmation/.test(String(t.ops || ''))) return false; // SEO 任务被 SEO 闸 held
+      && !/keyword-confirmation|mapping-confirmation/.test(String(t.ops || ''))
+      && !/卡反馈落地|onboard 闸材料/.test(String(t.title || ''))) return false; // SEO 任务被 SEO 闸 held
     return true;
   };
   if (!seoGateOk && !IDS) {
