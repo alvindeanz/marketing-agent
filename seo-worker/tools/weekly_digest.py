@@ -111,6 +111,25 @@ def digest(before_f, after_f, prev_f=None):
     lines.insert(2, '**总结：顺利跑完 %d 家（%s），卡壳 %d 家，本轮共收口任务 %d 条。**' % (
         len(smooth), '、'.join(smooth) or '无', len(stuck_clients), tot_done))
     lines.insert(3, '')
+    # 放行官观察期三个数（2026-09-27 方案 B）：本轮新增的 opus 放行 / 静默期 / 停人。
+    # 按 note 标记 diff 计数（before 没有 after 有才算本轮），推翻数看 audit 归人工复盘。
+    rel = {'auto': 0, 'pend': 0, 'hold': 0}
+    pend_wait = []
+    for cid, a in A.items():
+        bst2 = {t['id']: str(t.get('result_note') or '') for t in B.get(cid, {'tasks': []})['tasks']}
+        for t in a['tasks']:
+            n, bn = str(t.get('result_note') or ''), bst2.get(t['id'], '')
+            for key, mark in (('auto', '[auto-release L2-opus'), ('pend', '[pending-release'), ('hold', '[hold-human opus')):
+                if mark in n and mark not in bn:
+                    rel[key] += 1
+            if '[pending-release' in n and t.get('status') == 'review':
+                m = re.search(r'until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})Z', n)
+                pend_wait.append('%s #%s（%s 到期）' % (a['name'], t['id'], m.group(1) if m else '?'))
+    if any(rel.values()) or pend_wait:
+        lines.insert(4, '**放行官本轮：自动放行 %d，进静默期 %d，停人 %d。%s**' % (
+            rel['auto'], rel['pend'], rel['hold'],
+            ('静默期在窗：' + '；'.join(pend_wait) + '。窗口内改判或不做即否决。') if pend_wait else ''))
+        lines.insert(5, '')
     if stuck_all:
         lines.append('## 人工修复清单（按原因分组）')
         for bucket, rows in sorted(stuck_all.items(), key=lambda kv: (not kv[0].startswith('!'), kv[0])):
