@@ -5555,14 +5555,21 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
                 &&task_mandate_ok($t)&&mandate_scope_ok($tid,$ops);
             if(!$mand0)continue;
         }
-        /* 熔断（2026-09-08 job577-586 空转教训，与 chatw 派单同一条规矩）：同任务只自动放行一次。
-           apply 失败会经 /tasks/{id}/result 把任务送回判定，没有这道闸就是
-           review→auto-release→apply→review 的死循环（bm 事故根因）。有任何 apply 历史一律留人。 */
-        $seen0=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload=?");
-        $seen0->execute([$cid,json_encode(['task_ids'=>[$tid]],JSON_UNESCAPED_UNICODE)]);
+        /* 熔断（2026-09-08 job577-586 空转教训；2026-09-28 对齐 policy v20 的判后重试口径）：
+           每版方案自动落地至多两次（首落 + 复审判 do 后重试一次），第三次留人。方案版本以
+           execute done 晚于上次 apply 界定。复审判 do 本身就是带方案的判定，与放行官同权。
+           防环性质不变：失败方案想循环必须夹一次判定，同版只有一次重试额度（bm 事故根因仍被堵死）。 */
+        $like0='%"task_ids":['.$tid.']%';
+        $le0=db()->prepare("SELECT MAX(created_at) t FROM agent_jobs WHERE client_id=? AND type='execute_task' AND status='done' AND payload LIKE ?");
+        $le0->execute([$cid,$like0]);
+        $lx0=(string)((($le0->fetch())['t'])??'');
+        $seen0=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload LIKE ?".($lx0!==''?' AND created_at>?':''));
+        $seen0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
         $r0=$seen0->fetch();
-        if($r0&&(int)$r0['c']>0){
-            task_append_note($tid,'[auto-release 熔断] 已有 apply 历史，不再自动放行，留人处理');
+        $an0=(int)(($r0['c'])??0);
+        if($an0>=2){
+            if(strpos((string)$t['result_note'],'[auto-release 熔断] 本版方案')===false)
+                task_append_note($tid,'[auto-release 熔断] 本版方案已自动落地 '.$an0.' 次，第三次留人处理');
             continue;
         }
         list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],$mand0?'mandate-carry':'release-policy-l0','seo_tasks_release');
