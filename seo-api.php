@@ -5652,12 +5652,17 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
         $h=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload LIKE ?".($lastExec!==''?' AND created_at>?':''));
         $h->execute($lastExec!==''?[$cid,$likeT,$lastExec]:[$cid,$likeT]);
         $hc=$h->fetch();
-        if((int)($hc['c']??0)>0){
-            task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：apply 已有历史（含失败），重放归人。判词：'.$reason);
+        $applyN=(int)($hc['c']??0);
+        /* 2026-09-28 Alvin 定：熔断防的是无判断的盲目重放，放行官判过的重试放一次。
+           每版方案自动落地至多两次（首落 + 判后重试一次），第三次必停人。防环性质不变：
+           失败方案想循环，中间必须夹一次判定，且同版只有一次重试额度。 */
+        if($applyN>=2){
+            task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：本版方案已自动落地 '.$applyN.' 次（含判后重试），第三次归人。判词：'.$reason);
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
-            audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'apply history fuse']);
+            audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'apply retry cap','apply_n'=>$applyN]);
             $act['held'][]=$tid;continue;
         }
+        $retryTag=$applyN===1?'（判后重试 1/1）':'';
         $opsArr=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
         $money=false;
         foreach($opsArr as $op){$c=(string)($rc[$op]??'');if($c==='spend'||$c==='irreversible'){$money=true;break;}}
@@ -5701,12 +5706,12 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
         }
         if(blog_outline_stage($t)){
             list($jb,)=blog_release_as_write($cid,$t,'opus-release');
-            task_append_note($tid,'[auto-release L2-opus '.$stamp.'] '.$reason);
+            task_append_note($tid,'[auto-release L2-opus '.$stamp.']'.$retryTag.' '.$reason);
             audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'blog_write','jobs'=>$jb]);
             $act['released'][]=$tid;continue;
         }
         list($ja,)=queue_task_jobs($cid,'apply_task',[$tid],'opus-release','seo_task_release_opus');
-        task_append_note($tid,'[auto-release L2-opus '.$stamp.'] '.$reason);
+        task_append_note($tid,'[auto-release L2-opus '.$stamp.']'.$retryTag.' '.$reason);
         $act['released'][]=$tid;
     }
     res(200,['ok'=>true,'actions'=>$act]);

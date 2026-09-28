@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-28 AIRA (m) 熔断放宽为判后重试一次（policy v20，Alvin 定）
+
+- 干了什么：首战轮 10 张 hold 里 5 张是同一形态：apply 安全中止过一次、方案没重出、放行官复核已确认没问题，老熔断照拦。Alvin 定流程优化：熔断防的是无判断的盲目重放，放行官判过的重试放一次。改为每版方案自动落地至多两次（首落 + 判后重试一次），第三次必停人；spec 同步要求判词说明上次失败原因已解除，说不清就 hold。note 带（判后重试 1/1）标记。防环性质不变：失败方案想循环必须夹一次判定且同版只有一次额度。tests 全绿。
+- 坑：applyN 计数只认 execute done 之后的 apply（同 (l2) 的方案版本口径），重出方案即清零重试额度，这是有意的：新方案值得新的首落 + 重试预算。
+- 下一步/认领：部署 api 后把首战轮 5 张熔断 hold（Apollo #102、Ben's NZ #114、HT AU #725/#726、Sammichelle #307）清标重判，走判后重试自动落地。
+
 ### 2026-09-27 AIRA (l2) 放行官首验通过 + 三个连带洞（rev 8af3e00 起，已部署双端）
 
 - 干了什么：Ideal #851 全链路首验：harness 自动排 release_review job 1598，opus 判 release 并正确识别 spend 类该进静默期；服务端 apply 历史熔断把它降 hold_human（9/23 有过一次中止 apply），铁律压过模型判决，行为与 (l) 条规格完全一致。首验路上挖出三个存量洞并修掉：① 'S'+null 拼出字面量 Snull sprint，本期口径解析不了任务隐身（harness 192 行，无锚改空标签）；② review 判定的 reviewArtifactFor 不认分析模式交付文档 task-N-*.md，交付类 review 任务被永远判「方案缺失」延后死循环；③ 分析验收只认 output_url/预览不认交付文件，opus 放行端点与人工 decide 两处同标准补上 seo_deliverables 证据。tests 全绿。
