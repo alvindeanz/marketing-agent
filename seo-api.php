@@ -313,6 +313,17 @@ function ensure_job_types(){
 /* 多 worker 收尸隔离（2026-09-18，第二 worker 接入前置）：agent_jobs 惰性补 claimed_by。
    claim 时写认领它的 worker id，reap 只收本 worker 名下的 running 孤儿，别再全表判 failed
    把别的 worker 正在跑的活杀掉。MariaDB 10.3 无 ADD COLUMN IF NOT EXISTS，information_schema 幂等。 */
+/* /stop 取消标记（2026-09-29 ticket #10）：排队中的直接置 failed，跑着的打这个标记，
+   认领它的 listener 轮询到就杀子进程。information_schema 幂等，同 claimed_by 套路。 */
+function ensure_job_cancel_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='cancel_requested'");
+    $q->execute();
+    if(!$q->fetch())db()->exec("ALTER TABLE agent_jobs ADD COLUMN cancel_requested TINYINT NOT NULL DEFAULT 0");
+}
+
 function ensure_jobs_worker_schema(){
     static $done=false;
     if($done)return;
@@ -1961,6 +1972,19 @@ if($m==='GET'&&$ROUTE==='/jobs/queue'){
 
 // PATCH /jobs/{id} -> worker progress: status / log_append / token_usage
 // GET /jobs/{id} -> 一条 job 连同完整日志，任务卡上「看日志」用。admin 层。
+/* GET /jobs/cancel_flags?ids=1,2 -> worker 轮询自己在跑 job 的 /stop 标记（auth_worker，
+   /jobs/{id} 是 JWT 面不给 worker 用）。只读，返回被打了标记的 id 列表。 */
+if($m==='GET'&&$ROUTE==='/jobs/cancel_flags'){
+    auth_worker();
+    ensure_job_cancel_schema();
+    $ids=array_values(array_filter(array_map('intval',explode(',',(string)($_GET['ids']??'')))));
+    if(!$ids||count($ids)>20)res(400,['error'=>'ids required, max 20']);
+    $in=implode(',',array_fill(0,count($ids),'?'));
+    $q=db()->prepare("SELECT id FROM agent_jobs WHERE id IN ($in) AND cancel_requested=1");
+    $q->execute($ids);
+    res(200,['cancel'=>array_map(function($r){return (int)$r['id'];},$q->fetchAll())]);
+}
+
 if($m==='GET'&&preg_match('#^/jobs/(\d+)$#',$ROUTE,$mm)){
     auth_user();
     $g=db()->prepare("SELECT j.*,c.name AS client_name FROM agent_jobs j LEFT JOIN clients c ON c.id=j.client_id WHERE j.id=?");
@@ -4353,8 +4377,26 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
     }
     $src=(isset($i['source'])&&$i['source']==='client')?'client':'manual';
     if($text===''&&!$imgs&&!$files)res(400,['error'=>'text required']);
+    /* /stop（2026-09-29 ticket #10）：手滑发送后的刹车，语义同 PJ 的打断。故意放在 409 闸
+       之前（agent 处理中恰是要停的时候）。排队中 CAS 置 failed 零副作用；跑着的打
+       cancel_requested 标记，认领的 listener 轮询到即杀子进程。本消息不入会话流水不排新 job。 */
+    if($text==='/stop'){
+        $sj=chat_job_inflight($rootId);
+        if(!$sj)res(200,['ok'=>true,'stopped'=>0,'note'=>'当前没有进行中的回复']);
+        ensure_job_cancel_schema();
+        $upS=db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE id=? AND status='queued'");
+        $upS->execute(["\n[".gmdate('Y-m-d H:i:s')."Z] [cancelled] 用户 /stop：排队中取消，未启动。失败 job 不自动重试的口径不变。",$sj]);
+        $didS='queued-cancelled';
+        if($upS->rowCount()===0){
+            db()->prepare("UPDATE agent_jobs SET cancel_requested=1 WHERE id=? AND status='running'")->execute([$sj]);
+            $didS='cancel-requested';
+        }
+        chat_msg_insert($root,'chat_agent','本轮回复已按 /stop 停止（job #'.$sj.'）。补好上下文再发新消息即可。',$u['username']);
+        audit($u['username'],'seo_chat_stop',(string)$rootId,['job_id'=>$sj,'did'=>$didS]);
+        res(200,['ok'=>true,'stopped'=>$sj,'did'=>$didS]);
+    }
     $busy=chat_job_inflight($rootId);
-    if($busy)res(409,['error'=>'这个会话还在等上一条回复','job_id'=>$busy]);
+    if($busy)res(409,['error'=>'这个会话还在等上一条回复（/stop 可打断）','job_id'=>$busy]);
     $msgRefs=($imgs||$files||$src==='client')?['images'=>$imgs,'files'=>$files,'source'=>$src]:null;
     $msgId=chat_msg_insert($root,'chat_user',$text===''?'（见附件）':$text,$u['username'],$msgRefs);
     $jid=chat_job_queue($root,$msgId,$u['username']);

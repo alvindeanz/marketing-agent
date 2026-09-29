@@ -3078,7 +3078,15 @@ async function sendChat(){
     loadChats();
     return;
   }
-  if(text.charAt(0)==='/'&&text.length<20){toast('支持的命令：/reset 翻篇（旧频道归档进历史，开新频道）',true);return}
+  if(text==='/stop'){
+    const dS=await api('/inbox/'+chatRootId+'/chat','POST',{text:'/stop'});
+    if(!dS||fail(dS,'/stop 失败'))return;
+    if(el)el.value='';
+    toast(dS.stopped?('已停止本轮回复（job #'+dS.stopped+'）'):'当前没有进行中的回复');
+    await loadChatThread(false);
+    return;
+  }
+  if(text.charAt(0)==='/'&&text.length<20){toast('支持的命令：/reset 翻篇、/stop 停止本轮回复',true);return}
   const key=-chatRootId;
   const all=fbImgs[key]||[];
   const imgs=all.filter(fbIsImg);

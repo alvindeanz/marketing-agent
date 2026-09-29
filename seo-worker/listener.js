@@ -148,6 +148,24 @@ function runJob(job, lane) {
       }, 15000).unref();
     }, timeoutMs);
 
+    /* /stop 取消轮询（2026-09-29 ticket #10）：只查本 listener 自己这单的标记，15 秒一拍，
+       多 worker 安全（各查各的认领）。取消是用户意志不是环境病，下面 finalize 里不喂熔断。 */
+    let cancelled = false;
+    const cancelTimer = setInterval(async () => {
+      try {
+        const rC = await api.getCancelFlags([job.id]);
+        if (rC && Array.isArray(rC.cancel) && rC.cancel.indexOf(job.id) !== -1) {
+          cancelled = true;
+          clearInterval(cancelTimer);
+          push('[cancelled] 用户 /stop，终止 runner');
+          log(jobTag + ': cancel_requested, SIGTERM');
+          try { child.kill('SIGTERM'); } catch (e) { /* already gone */ }
+          setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) { /* gone */ } }, 10000).unref();
+        }
+      } catch (e) { /* 查询失败不动作，下一拍再试 */ }
+    }, 15000);
+    cancelTimer.unref();
+
     child.on('message', (msg) => {
       if (!msg || typeof msg !== 'object') return;
       if (msg.t === 'log') push(msg.line);
@@ -161,7 +179,9 @@ function runJob(job, lane) {
 
     child.on('close', (code, signal) => {
       let err = null;
-      if (timedOut) {
+      if (cancelled) {
+        err = new Error('cancelled by user /stop');
+      } else if (timedOut) {
         err = new Error(
           'job timed out after ' + timeoutMin + ' minutes and was killed (signal ' + signal + ')'
         );
@@ -181,6 +201,7 @@ function runJob(job, lane) {
       finished = true;
       clearTimeout(killTimer);
       clearInterval(flushTimer);
+      clearInterval(cancelTimer);
       const jobStartedAt = (ls.currentJobs[job.id] || {}).startedAt || 0;
       delete ls.currentJobs[job.id];
 
@@ -193,7 +214,7 @@ function runJob(job, lane) {
         /* 连续秒挂熔断（2026-09-16，登录过期连烧 5 个 job 的教训）：起跑即挂是环境病
            （凭据/磁盘/网络），不是这单任务的病，连续 3 个就拉闸停领新单；预检防不住
            任意时刻过期，熔断才是真兜底。人修好环境后删熔断文件恢复。 */
-        if (runMs < 90000) {
+        if (runMs < 90000 && !cancelled) {
           state.fastFails += 1;
           if (state.fastFails >= 3 && !fs.existsSync(FUSE_FILE)) {
             fs.writeFileSync(FUSE_FILE, JSON.stringify({ at: ts(), last_job: job.id, reason: summarize(err.message, 200), note: '连续 ' + state.fastFails + ' 个 job 起跑即挂，已停止领单。修好环境（多半是 claude 登录过期）后删除本文件恢复。' }, null, 1));

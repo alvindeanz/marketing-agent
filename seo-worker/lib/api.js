@@ -214,6 +214,11 @@ class Api {
     return this.req('POST', '/tasks/release_review_result', body);
   }
 
+  /** GET /jobs/cancel_flags?ids= -> { cancel: [job ids] } 被 /stop 打了取消标记的 */
+  async getCancelFlags(ids) {
+    return this.req('GET', '/jobs/cancel_flags?ids=' + ids.join(','));
+  }
+
   /** GET /snapshots/{id} -> one snapshot including its full data */
   async getSnapshot(id) {
     return this.req('GET', '/snapshots/' + encodeURIComponent(id));
