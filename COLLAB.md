@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-30 AIRA (p) 工单批二批三收官：卡时效刷新 + /stop 全链 + 零人工验证全过（四票已回）
+
+- 干了什么：批二：harness 加未发卡数据窗超 7 天自动重拉（生成时间兜底交付文件时间戳），Haakaa #343 被规则自动刷新重排实证。批三：chat /stop 全链（前端放行直发、服务端绕 409 特例：排队 CAS 取消 / 运行打 cancel_requested 标记、新端点 GET /jobs/cancel_flags 给 worker、listener 15 秒轮询杀子进程、取消不喂 fastFails 熔断），api rev cedaa47 + worker 已双机部署。零人工验证：Ctomi #917（撤 palmetto 否词）全链自主走通：judge do、execute 方案（首轮 lint 打回把失败处理递人、任务书补失败策略后过）、放行官放行、apply 用新执行器删词、回读自验、自动收口并自定 10/13 复查点；独立 GAQL 反查全账户在投系列 palmetto 否词零行。四张 ticket（#9/#10/#11/#12）已按 Alvin 指示逐张回复 resolved。
+- 坑：①review_plan 判完不会自己拍板，判决落库晚于 harness 收工就要等下一轮，验证时多摇一轮曲柄是正常节奏不是 bug；②/stop 的运行中取消延迟上限 = listener 15 秒轮询 + SIGTERM 排水，前端文案写「约 15 秒内」别承诺立即。
+- 下一步/认领：无遗留。工单处理北极星（sprint 零人工、修流程不代跑、修完流程单跑 harness 验证）已落 Aira 记忆。
+
 ### 2026-09-29 AIRA (o) 工单批一：negative-keyword-remove 执行器 + OPS_CHECK 收紧 + chat 任务盖期 + 临时失败自愈（ticket #11/#12）
 
 - 干了什么：Alvin 定工单处理北极星「sprint 零人工，chat 是人工入口，人只反查抽查；修流程不代跑，dead end 才擦」。①ads_mutate.py 补 negative-keyword-remove（campaign/adgroup/共享否词表三层，安全闸只删 negative 判定成立的 criterion，正向词一律拒），policy json + googleads.md 双登记 reversible，policy_executor 6 断言过。②execute 的 OPS_CHECK readonly 规则加硬条款：交付里开了具体改动清单（criterion id/URL/目标值）就不许 readonly，防 #912「删词报告被验收后执行悄悄蒸发」再犯。③spawn_task 给 chat 生任务盖当期 sprint 章（无锚留空），修空标签任务对 harness 隐身（#881 实证）。④harness 失败重排扩类：lint 外新增临时性失败（TLS/超时/5xx 签名匹配失败 job 日志），一生一次 [transient-retry]，同轮去重防环。tests 全绿。
