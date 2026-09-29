@@ -4713,6 +4713,21 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
     $t['detail']=trim($t['detail']);
     $t['detail']=($t['detail']===''?$src:($t['detail']."\n\n".$src));
     $cid=(int)$root['client_id'];
+    /* 当期 sprint 章（2026-09-29 ticket #12）：chat 生的任务历来不带 sprint 标签，而 harness
+       本期口径只认 S 号，空标签任务失败后对失败重排彻底隐身（Sunseeker #881 实证：TLS 断连
+       后没人重排）。有日历锚盖当期章（与 split 工单 2026-09-24 同口径），无锚留空。 */
+    if(trim((string)$t['sprint'])===''){
+        $apqS=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
+        $apqS->execute([$cid]);
+        $aprS=$apqS->fetch();
+        $apqS->closeCursor();
+        if($aprS&&$aprS['created_at']){
+            $anchorS=new DateTime(substr((string)$aprS['created_at'],0,10));
+            $nowS=new DateTime('today');
+            $snS=$anchorS>$nowS?1:((int)floor($nowS->diff($anchorS)->days/14)+1);
+            $t['sprint']='S'.max(1,min($snS,6));
+        }
+    }
     /* 委托单按钮路径与频道一句话确认同权（2026-09-11 W13）：卡带 kind=change 时
        走同一套定档与 origin，方案出来后照旧自动落地或停放行卡，两条确认路不许分叉。 */
     $kindS=in_array((string)($i['kind']??''),['report','change'],true)?(string)$i['kind']:'';

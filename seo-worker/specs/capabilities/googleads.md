@@ -15,6 +15,7 @@
 | operation | autonomy | note |
 |---|---|---|
 | negative-keyword-add | agent_apply | 加否词，关键词级或共享否词表，否词不放竞品牌名 |
+| negative-keyword-remove | agent_apply | 撤否词，campaign/adgroup/共享否词表三层，只删 negative 判定成立的 criterion |
 | ad-pause | agent_apply | 暂停单条 ad，学习期拒杀 |
 | adgroup-pause | agent_apply | 暂停单个 ad group，学习期拒杀 |
 | keyword-bid-adjust | agent_apply | 单关键词出价调整，脚本硬闸 ±20% |
@@ -51,6 +52,7 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 
 ### agent_apply（机器可直接执行，apply 阶段落地并回读）
 - negative-keyword-add [risk_class: reversible]：加否词（关键词级 / 共享否词表）。否词不放竞品牌名，除非客户点名。
+- negative-keyword-remove [risk_class: reversible]：撤否词（campaign / adgroup / 共享否词表）。安全闸只删 negative criterion，正向词一律拒；反向操作即 negative-keyword-add 原参数，可随时加回。
 - ad-pause / adgroup-pause [risk_class: reversible]：暂停单条 ad 或单个 ad group。
 - keyword-pause [risk_class: reversible]：暂停单个关键词，只停不删，回读验证。
 - keyword-bid-adjust [risk_class: reversible]：单关键词出价调整，幅度 ±20% 以内。

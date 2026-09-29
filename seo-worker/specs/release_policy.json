@@ -57,6 +57,7 @@
     "blog-draft": "external",
     "image-generate": "reversible",
     "negative-keyword-add": "reversible",
+    "negative-keyword-remove": "reversible",
     "final-url-change": "reversible",
     "ad-pause": "reversible",
     "adgroup-pause": "reversible",

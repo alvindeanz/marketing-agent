@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-09-29 AIRA (o) 工单批一：negative-keyword-remove 执行器 + OPS_CHECK 收紧 + chat 任务盖期 + 临时失败自愈（ticket #11/#12）
+
+- 干了什么：Alvin 定工单处理北极星「sprint 零人工，chat 是人工入口，人只反查抽查；修流程不代跑，dead end 才擦」。①ads_mutate.py 补 negative-keyword-remove（campaign/adgroup/共享否词表三层，安全闸只删 negative 判定成立的 criterion，正向词一律拒），policy json + googleads.md 双登记 reversible，policy_executor 6 断言过。②execute 的 OPS_CHECK readonly 规则加硬条款：交付里开了具体改动清单（criterion id/URL/目标值）就不许 readonly，防 #912「删词报告被验收后执行悄悄蒸发」再犯。③spawn_task 给 chat 生任务盖当期 sprint 章（无锚留空），修空标签任务对 harness 隐身（#881 实证）。④harness 失败重排扩类：lint 外新增临时性失败（TLS/超时/5xx 签名匹配失败 job 日志），一生一次 [transient-retry]，同轮去重防环。tests 全绿。
+- 坑：transient 判定读的是 job log 尾部 1500 字符签名，新失败形态要扩 TRANSIENT 正则；[transient-retry] 是一生一次不是每版一次，故意比 apply 重试更紧（网络问题重复出现该查环境不是重试）。
+- 下一步/认领：部署 api+worker 后按零人工验证：Ctomi 建正规删词任务单跑 harness 看全自主落地；ticket #9 卡时效刷新、#10 /stop 分两批随后。
+
 ### 2026-09-28 AIRA (n) 排错轮：L0 熔断对齐 + SEO 闸死锁修复（rev 990825d 起）
 
 - 干了什么：①L0 自动放行路径里的第二颗老熔断（任务终身口径）对齐 policy v20 判后重试一次，复审判 do 与放行官同权（#307 实证：放行官放了、L0 旧熔断刷噪音）。②修 SEO 闸死锁：卡反馈落地任务被闸自己扣死（客户已回卡、落地才写开闸 fact、闸因 fact 未写不放行），闸豁免加第二类钥匙（title 认卡反馈落地/onboard 闸材料，原豁免只认 ops）。四张压了一周的落地单当场跑通：Badger #847、Oak #854 收口，Ctomi #876、Sunseeker #878 方案出等判；开闸 fact 按卡批文补四家，闸 dry-run 实测全开；Badger #449/#450 客户决策按 #790 批文收口。③#307 apply 正确中止确认为平台缺口：WF 商城集合 title/seo 字段无写接口，需 Aiden 补端点（同 h2 content 端点一类），短期人工后台填、填前核对在售款式漂移（31/45/8/128 → 30/44/8/125）。

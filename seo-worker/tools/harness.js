@@ -428,7 +428,27 @@ async function main() {
       const r = await call('POST', '/tasks/' + t.id + '/decide', { yes: true, note: 'harness：方案 lint 打回，重出一次' });
       log('#' + t.id + ' lint 打回，重排 -> job ' + JSON.stringify(r.job_ids));
     }
-    if (!running.length && !lintFailed.length) break;
+    /* 临时性失败自动重排（2026-09-29 ticket #12）：网络断连/超时/5xx 是环境噪音不是方案错，
+       零人工原则下该 harness 自愈。确定性分类（读失败 job 日志匹配签名），一生一次
+       （note 打 [transient-retry] 标记，第二次同类失败留人），同轮 retried 去重防环。 */
+    const TRANSIENT = /socketCloseListener|TLSSocket|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|claude timed out|timed out after|HTTP 5\d\d/;
+    const failedNow = mine.filter((t) => t.human_state === 'wait_me' && t.fail_reason && !retried[t.id]
+      && !/lint 未过/.test(t.fail_reason) && !String(t.result_note || '').includes('[transient-retry'));
+    for (const t of failedNow) {
+      const jm = /job #(\d+)/.exec(String(t.fail_reason || ''));
+      if (!jm) continue;
+      let jl = null;
+      try { jl = await call('GET', '/jobs/' + jm[1]); } catch (e) { continue; }
+      const logText = String((jl && (jl.job || jl) && ((jl.job || jl).log_text)) || '');
+      if (!TRANSIENT.test(logText.slice(-1500))) continue;
+      retried[t.id] = true;
+      const rr = await call('POST', '/jobs/' + jm[1] + '/retry', {});
+      if (rr && rr.ok) {
+        await call('PATCH', '/tasks/' + t.id, { result_note: String(t.result_note || '') + '\n[transient-retry] harness 判定 job #' + jm[1] + ' 为临时性失败（网络/超时），自动重排 job #' + rr.id + '；再失败留人' });
+        log('#' + t.id + ' 临时性失败，自动重排 job #' + jm[1] + ' -> #' + rr.id);
+      }
+    }
+    if (!running.length && !lintFailed.length && !failedNow.some((t) => retried[t.id])) break;
     log('在跑 ' + running.map((t) => '#' + t.id + '(' + t.run_note + ')').join(' '));
     if (Date.now() - t0 > BUDGET_MS) { log('超过 3 小时预算，先收口'); break; }
   }

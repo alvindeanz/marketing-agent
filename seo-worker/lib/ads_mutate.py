@@ -7,6 +7,8 @@
   adgroup-pause        --ad-group-id N                    暂停单个 ad group
   keyword-pause        --criterion-resource RES           暂停单个关键词（只停不删）
   negative-keyword-add --level adgroup|campaign --target-id N --text 词 --match broad|phrase|exact
+  negative-keyword-remove --criterion-resource RES     撤否词（campaign/adgroup/共享否词表三层通吃，
+                       只删 negative 判定成立的 criterion，正向词一律拒；before 全量打印做回滚依据）
   keyword-bid-adjust   --criterion-resource RES --new-bid-micros N   （幅度硬闸 ±20%）
   adgroup-create       --spec - 从 stdin 读 JSON 建组单（structural，预算中性：不动 campaign 预算与出价策略。
                        流程：查重名拒重复 → 建 PAUSED 组 → 录词/否词/RSA → 逐项回读核数 → 全对才 ENABLED，
@@ -37,7 +39,7 @@ import os
 import sys
 
 ENV_FILE = "/data/aira/.env.google-ads"
-OPS = ["final-url-change", "ad-pause", "adgroup-pause", "keyword-pause", "negative-keyword-add",
+OPS = ["final-url-change", "ad-pause", "adgroup-pause", "keyword-pause", "negative-keyword-add", "negative-keyword-remove",
        "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "keyword-add", "keyword-final-url",
        "ad-create", "schedule-adjust", "raw-mutate"]
 
@@ -227,6 +229,67 @@ def op_negative_keyword_add(client, cid, args):
         c.keyword.match_type = getattr(client.enums.KeywordMatchTypeEnum, match)
         res = svc.mutate_campaign_criteria(customer_id=cid, operations=[op])
     out({"ok": True, "op": "negative-keyword-add", "resource_name": res.results[0].resource_name,
+         "budget_impact": 0})
+
+
+def op_negative_keyword_remove(client, cid, args):
+    # 撤否词（2026-09-29，ticket #11：删词方案验收后没人删，缺口第二次撞上后按定则补齐）。
+    # 三层通吃：campaignCriteria / adGroupCriteria / sharedCriteria（共享否词表成员）。
+    # 安全闸：只删 negative 判定成立的（campaign/adgroup 看 negative 标志，shared 看父集
+    # 类型是 NEGATIVE_KEYWORDS），正向词一律拒，防 resource name 抄错删掉在投词。
+    if not args.criterion_resource:
+        die("negative-keyword-remove 需要 --criterion-resource（criterion 完整 resource name）")
+    rn = args.criterion_resource
+    ga = client.get_service("GoogleAdsService")
+    if "/campaignCriteria/" in rn:
+        q = ("SELECT campaign_criterion.negative, campaign_criterion.keyword.text, "
+             "campaign_criterion.keyword.match_type FROM campaign_criterion "
+             "WHERE campaign_criterion.resource_name = '%s'" % rn)
+        rows = list(ga.search(customer_id=cid, query=q))
+        if not rows:
+            die("criterion 不存在：" + rn)
+        r = rows[0].campaign_criterion
+        if not r.negative:
+            die("拒绝：该 campaign criterion 不是否定词（negative=false），不删正向词")
+        text, match = r.keyword.text, r.keyword.match_type.name
+        svc, op = client.get_service("CampaignCriterionService"), client.get_type("CampaignCriterionOperation")
+        mutate = lambda o: svc.mutate_campaign_criteria(customer_id=cid, operations=[o])
+    elif "/adGroupCriteria/" in rn:
+        q = ("SELECT ad_group_criterion.negative, ad_group_criterion.keyword.text, "
+             "ad_group_criterion.keyword.match_type FROM ad_group_criterion "
+             "WHERE ad_group_criterion.resource_name = '%s'" % rn)
+        rows = list(ga.search(customer_id=cid, query=q))
+        if not rows:
+            die("criterion 不存在：" + rn)
+        r = rows[0].ad_group_criterion
+        if not r.negative:
+            die("拒绝：该 ad group criterion 不是否定词（negative=false），不删正向词")
+        text, match = r.keyword.text, r.keyword.match_type.name
+        svc, op = client.get_service("AdGroupCriterionService"), client.get_type("AdGroupCriterionOperation")
+        mutate = lambda o: svc.mutate_ad_group_criteria(customer_id=cid, operations=[o])
+    elif "/sharedCriteria/" in rn:
+        q = ("SELECT shared_criterion.keyword.text, shared_criterion.keyword.match_type, "
+             "shared_set.type, shared_set.name FROM shared_criterion "
+             "WHERE shared_criterion.resource_name = '%s'" % rn)
+        rows = list(ga.search(customer_id=cid, query=q))
+        if not rows:
+            die("criterion 不存在：" + rn)
+        if rows[0].shared_set.type_.name != "NEGATIVE_KEYWORDS":
+            die("拒绝：所在共享集类型是 %s 不是 NEGATIVE_KEYWORDS" % rows[0].shared_set.type_.name)
+        r = rows[0].shared_criterion
+        text, match = r.keyword.text, r.keyword.match_type.name
+        svc, op = client.get_service("SharedCriterionService"), client.get_type("SharedCriterionOperation")
+        mutate = lambda o: svc.mutate_shared_criteria(customer_id=cid, operations=[o])
+    else:
+        die("resource name 不是 campaignCriteria / adGroupCriteria / sharedCriteria 三层之一：" + rn)
+    out({"step": "before", "op": "negative-keyword-remove", "resource_name": rn,
+         "text": text, "match": match})
+    if args.dry_run:
+        out({"ok": True, "dry_run": True})
+        return
+    op.remove = rn
+    res = mutate(op)
+    out({"ok": True, "op": "negative-keyword-remove", "resource_name": res.results[0].resource_name,
          "budget_impact": 0})
 
 
@@ -800,6 +863,7 @@ def main():
          "adgroup-pause": op_adgroup_pause,
          "keyword-pause": op_keyword_pause,
          "negative-keyword-add": op_negative_keyword_add,
+         "negative-keyword-remove": op_negative_keyword_remove,
          "keyword-bid-adjust": op_keyword_bid_adjust,
          "adgroup-create": op_adgroup_create,
          "rsa-copy-update": op_rsa_copy_update,
