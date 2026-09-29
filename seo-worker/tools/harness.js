@@ -499,6 +499,56 @@ async function report(all, sprint, retried) {
     if (!DRY) await call('PATCH', '/tasks/' + id, { attention: 1, result_note: note + block });
   }
 
+  // 卡时效刷新（2026-09-29 ticket #9）：数据窗在卡生成时定死，卡在发卡队列里躺久了
+  // 数字就是旧的（Haakaa #343 实证：9/7 生成、月底才发，窗口停在 9/6）。已验收未发的卡
+  // 生成时间超 7 天自动重排 execute 全量重拉（同任务同反馈链接，改的是数字不是日期标签）。
+  // note 打 [card-refresh <date>] 防抖：距上次刷新不足 7 天不再刷。
+  const CARD_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+  const cardRefresh = [];
+  let jobsCache = null;
+  for (const t of mine) {
+    if (t.sent_at) continue;
+    const note = String(t.result_note || '');
+    if (!(t.card_kind || /[?&]t=\d+&k=/.test(note))) continue;
+    if (!['review', 'done'].includes(t.status)) continue;
+    if (/\[卡反馈折叠/.test(note)) continue;
+    const rm = note.match(/\[card-refresh (\d{4}-\d{2}-\d{2})/g);
+    if (rm) {
+      const last = rm[rm.length - 1].slice('[card-refresh '.length);
+      if (Date.now() - Date.parse(last + 'T00:00:00Z') < CARD_MAX_AGE_MS) continue;
+    }
+    if (!jobsCache) {
+      const jr = await call('GET', '/jobs?client_id=' + cid + '&limit=200');
+      jobsCache = (jr && jr.jobs) || [];
+    }
+    let gen = jobsCache.filter((j) => j.type === 'execute_task' && j.status === 'done'
+      && j.payload && Array.isArray(j.payload.task_ids) && j.payload.task_ids.includes(t.id))
+      .map((j) => Date.parse(String(j.finished_at || j.created_at).replace(' ', 'T') + 'Z'))
+      .filter((x) => !isNaN(x));
+    if (!gen.length) {
+      /* 生成 job 滚出 jobs 窗口（老卡必然如此），退回交付文件时间戳。 */
+      try {
+        const dr = await call('GET', '/tasks/' + t.id + '/deliverables');
+        gen = ((dr && dr.deliverables) || []).map((d) => Date.parse(String(d.created_at).replace(' ', 'T') + 'Z')).filter((x) => !isNaN(x));
+      } catch (e) { /* 拉不到就跳过，别把年龄当零 */ }
+    }
+    if (!gen.length) continue;
+    if (Date.now() - Math.max.apply(null, gen) < CARD_MAX_AGE_MS) continue;
+    cardRefresh.push(t);
+  }
+  if (cardRefresh.length && !DRY) {
+    for (const t of cardRefresh) {
+      const jr = await call('POST', '/jobs', { client_id: cid, type: 'execute_task', payload: { task_ids: [t.id] } });
+      const jid = jr && (jr.id || (jr.ids && jr.ids[0]));
+      if (jid) {
+        await call('PATCH', '/tasks/' + t.id, { result_note: String(t.result_note || '') + '\n[card-refresh ' + new Date().toISOString().slice(0, 10) + '] 未发卡数据窗超 7 天，自动重拉重出（job #' + jid + '），数字全量刷新，反馈链接不变' });
+      }
+    }
+    console.log('\n## 卡时效刷新（' + cardRefresh.length + ' 张未发卡数据超龄，已重排）：#' + cardRefresh.map((t) => t.id).join(' #'));
+  } else if (cardRefresh.length) {
+    console.log('\n## 卡时效刷新候选（dry）：#' + cardRefresh.map((t) => t.id).join(' #'));
+  }
+
   // 放行判定（2026-09-27 Alvin 定方案 B）：待放行不再默认停人，排 opus 放行官批量判定
   // （release 即落 / spend 与 irreversible 进 24h 静默期 / hold_human 才停人）。静默期到点的
   // 在这里走人放行同一端点落地。harness 本身是人触发的，不违硬规矩 1。
