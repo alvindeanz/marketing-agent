@@ -47,6 +47,7 @@
 - product-content-edit [risk_class: reversible]：shopseo product update --body-file。读现值改点名处整替，未点名的客户原文一字不动；写前快照。
 - 文章封面 alt：shopseo article set-cover-alt，语义归 article-meta-update，不另立 op（2026-09-24 三问教训：这行曾被当 capability-gap 排了人工单 #861）。
 - 文章封面图更换：shopseo article set-cover（1.3.1 起，--src https 图址，可带 --alt），语义同归 article-meta-update，不另立 op（2026-09-30 Sunseeker #932 实证：agent 曾以 article-set-cover-image 报 capability-gap 停手，缺的是 CLI 不是能力）。
+- 文章 slug：shopseo article set-handle（1.3.2 起，仅 DRAFT，已发布拒绝：Shopify 不自动 301，动在售 slug 走人工评估加 redirect）；article create 也收 --handle 直接建成短 slug。语义归 article-meta-update，不另立 op（2026-09-30 Badger #884 发布前阻断项实证）。
 - theme-text-edit / theme-template-create / collection-template-assign [risk_class: reversible]：shopseo 1.3.0 theme 族（2026-09-25 Alvin「发挥到极致」）。三道护栏内建：只动 main 主题、set-text 只许改既有 string 字段（类型不符拒绝）、写前快照且写前写后 jq 解析。首战 sungait round H1/首屏、oversized 与 rimless 两张专用模板全链落地线上验证。导航菜单仍无通路（缺 write_online_store_navigation scope），是 shopify 面最后一个真人工位。
 - blog-draft [risk_class: external]：prepare 阶段按 /data/aira/seo-worker/specs/sops/seo-blog-sop.md 产出完整成稿
   （Style Roll 文件头注释、骨架轮换、指纹查重、13 条红线自检、封面图必配且只用客户站 CDN 已有图、
