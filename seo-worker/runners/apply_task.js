@@ -34,7 +34,9 @@ const STATUSES = ['success', 'aborted', 'failed'];
 // apply 这里漏了 blog-edit 会让改稿掉进通用 change-plan 分支必然失败（#96 事故）。
 // 三者都走 runBlogPublish（内部按发布前状态分 draft 发布 / 已发布改稿两条路），
 // 都过客户同意发布硬闸。
-const BLOG_OPS = ['blog-draft', 'blog-publish', 'blog-edit'];
+/* article-publish 于 2026-09-30 补入（ticket 后续 + Sungait #946 实证）：发布草稿是该 URL 的
+   首次曝光，没有前窗数据可保护，冷却闸拦发布纯属误伤，执行 agent 在 #946 备注里自己点过名。 */
+const BLOG_OPS = ['blog-draft', 'blog-publish', 'blog-edit', 'article-publish'];
 
 /** Same shape as execute_task's helper. Kept local so runners stay independent. */
 function taskOps(task) {
@@ -1178,9 +1180,26 @@ function cooldownGate(workspace, taskOps_, taskId) {
     if (age < COOLDOWN_DAYS && urls.length && (e.urls || []).some((u) => urls.indexOf(u) !== -1)) {
       const until = new Date(new Date(e.date + 'T00:00:00Z').getTime() + COOLDOWN_DAYS * 86400000).toISOString().slice(0, 10);
       const hit = (e.urls || []).filter((u) => urls.indexOf(u) !== -1);
-      return { blocked: true, until, why: '同页冷却：' + hit[0] + (hit.length > 1 ? ' 等 ' + hit.length + ' 页' : '') + ' 已被 #' + e.task + '（' + e.date + '）触碰，测量窗未走完' };
+      return { blocked: true, until, why: '同页冷却：' + hit[0] + (hit.length > 1 ? ' 等 ' + hit.length + ' 页' : '') + ' 已被 #' + e.task + '（' + e.date + '）触碰，测量窗未走完', hitUrls: hit };
     }
   }
+  return { blocked: false };
+}
+
+/* 冷却闸只保护活页（2026-09-30，Sunseeker #932 实证：给未发布草稿修封面被自己草稿期的
+   触碰记录拦了一个月）。命中同页冷却时逐个探目标页，全都不是 200 就没有测量窗可言，放行。
+   网络失败按保守处理（当作活页照拦），冷却闸宁严不松是它的本性。 */
+async function cooldownGateLive(workspace, taskOps_, taskId, log) {
+  const gate = cooldownGate(workspace, taskOps_, taskId);
+  if (!gate.blocked || !Array.isArray(gate.hitUrls) || !gate.hitUrls.length) return gate;
+  if (gate.why && gate.why.indexOf('同页冷却') !== 0) return gate; // 全站独占窗不看 liveness
+  for (const u of gate.hitUrls.slice(0, 5)) {
+    try {
+      const r = await fetch(u, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(8000) });
+      if (r.status === 200) return gate; // 有活页，照拦
+    } catch (e) { return gate; } // 探不到当活页处理，保守
+  }
+  if (log) log('冷却闸放行：命中页 ' + gate.hitUrls.join(' ') + ' 实测均非 200（未发布），无测量窗可保护');
   return { blocked: false };
 }
 
@@ -1203,7 +1222,7 @@ async function runOne(ctx, context, workspace, taskId) {
   // 且有客户确认闸把节奏）。挡下的任务保持 review，note 带 [cooldown-until]，到期重放行即可。
   const gateOps = taskOps(task);
   if (!gateOps.some((op) => BLOG_OPS.indexOf(op) !== -1)) {
-    const gate = cooldownGate(workspace, gateOps, taskId);
+    const gate = await cooldownGateLive(workspace, gateOps, taskId, log);
     if (gate.blocked) {
       const msg = '[cooldown-until ' + gate.until + '] 落地暂缓：' + gate.why + '。' + gate.until + ' 后重放行即可，方案与判决保留。';
       try { await api.postTaskResult(taskId, { output_url: String(task.output_url || ''), note: msg, attention: false }); } catch (e) { log('task ' + taskId + ': cooldown note write failed :: ' + e.message); }
@@ -1451,6 +1470,7 @@ async function run(ctx) {
 
 module.exports = {
   cooldownGate,
+  cooldownGateLive,
   planTargetUrls,
   appendLedger,
   run,
