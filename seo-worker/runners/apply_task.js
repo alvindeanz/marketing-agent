@@ -545,8 +545,21 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   // 客户同意发布是硬前置（2026-09-15）：博客对外发布的终局裁决权在客户，fable 判 do、
   // 人放行都不构成发布凭证，必须确认卡上客户点过「同意，安排发布」(publish_blog=agree，
   // 以最后一次表态为准)。杜绝未经客户确认的草稿被误发（#138/#139 收账时误放行事故）。
-  const fbres = await api.cardFeedback(taskId).catch(() => ({ rows: [] }));
-  const pub = (fbres.rows || []).filter((r) => String(r.item) === 'publish_blog');
+  /* 凭证所在的卡不一定是本任务（2026-10-01 Kuddles #921 实证：发布单独立拆出，客户的
+     publish_blog=agree 落在确认卡任务 #75 上，按本任务查永远是空，两次误拦烧光重试额度）。
+     候选顺序：本任务 → detail/note 里引用的确认页任务号，取到 publish_blog 行即停。 */
+  const refIds = [];
+  const refSrc = String(task.detail || '') + '\n' + String(task.result_note || '');
+  for (const m of refSrc.matchAll(/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)/g)) {
+    const rid = Number(m[1] || m[2]);
+    if (rid && rid !== taskId && refIds.indexOf(rid) === -1) refIds.push(rid);
+  }
+  let pub = [];
+  for (const cand of [taskId].concat(refIds)) {
+    const fbres = await api.cardFeedback(cand).catch(() => ({ rows: [] }));
+    const rows = (fbres.rows || []).filter((r) => String(r.item) === 'publish_blog');
+    if (rows.length) { pub = rows; record('发布凭证取自任务 #' + cand + ' 的确认卡'); break; }
+  }
   const lastPub = pub.length ? pub[pub.length - 1] : null;
   if (!lastPub || String(lastPub.choice) !== 'agree') {
     throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
