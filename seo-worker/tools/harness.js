@@ -262,7 +262,10 @@ async function main() {
         const r = await call('POST', '/tasks', {
           client_id: cid, title: 'onboard 闸材料：词表与 mapping 确认路径判定与产出',
           detail, module: 'onpage', owner_type: 'agent', priority: 'P1',
-          ops: 'keyword-confirmation,mapping-confirmation', sprint: '',
+          ops: 'keyword-confirmation,mapping-confirmation',
+          /* 盖当期章（2026-10-01 Citymed #850 实证）：空 sprint 的钥匙任务被本期口径筛掉，
+             闸永远开不了。无锚客户留空（走最小期兜底）。 */
+          sprint: /^S\d/.test(String(sprintEarly || '')) ? sprintEarly : '',
         });
         log('闸材料缺失：已建产钥匙任务 #' + r.id + '（判定已排 job ' + (r.review_job_id || '?') + '），下轮拍板执行');
       } else if (!hasKey && DRY) {
