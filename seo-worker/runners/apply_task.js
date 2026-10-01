@@ -753,6 +753,7 @@ function buildAdsPrompt(opts) {
     '- 涉及 final URL 的，提交前先 curl -sIL 验证目标 URL 200 且零跳转（Location 链为空），不过就停手。',
     '- 外部页面复验一律带浏览器 UA 并退避重试：curl -A "Mozilla/5.0 (compatible; HorntechVerify)" --retry 3 --retry-delay 20 --retry-all-errors；',
     '  连续 429 视为站点限流（临时性环境问题，不是方案错），正文写明「429 限流」后按中止报，别当失败定性（2026-10-02 Haakaa #940 四连 429 教训）。',
+    '- 落地页属于我方管理的 Shopify 客户站时，复验优先走 Admin API（shopseo product get <handle>：status=active 且 published_at 非空且 handle 与 URL 一致 = 200 零跳转等价证据），前台 429 时严禁以 curl 结果定性（#940 三次拉锯的终局修法）。',
     '- 每个 mutate 的旧值必须出现在你的执行记录里（回滚依据）。',
     '- 你是一次性进程：没有后台、没有定时器、没有下一轮，「稍后再查」不存在（2026-09-14 job779 教训：',
     '  agent 等谷歌审核想「15:06 后台复查」，进程早退了，活干成了账没上）。本轮能验的验完就写终态；',
