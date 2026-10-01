@@ -14,6 +14,7 @@
 <!-- PLANNING_VIEW_START -->
 | operation | autonomy | note |
 |---|---|---|
+| campaign-pause | agent_apply | 暂停整条 campaign，spend 档；安全位场景（失败回滚半装配新建对象）免分级 |
 | negative-keyword-add | agent_apply | 加否词，关键词级或共享否词表，否词不放竞品牌名 |
 | negative-keyword-remove | agent_apply | 撤否词，campaign/adgroup/共享否词表三层，只删 negative 判定成立的 criterion |
 | ad-pause | agent_apply | 暂停单条 ad，学习期拒杀 |
@@ -51,6 +52,7 @@
 risk_class 是放行分级的输入（见 ../release_policy.md）：reversible 的 prepare 任务闸A 复审过即自动放行，其余人点。
 
 ### agent_apply（机器可直接执行，apply 阶段落地并回读）
+- campaign-pause [risk_class: spend]：暂停整条在投 campaign 是生意动作，常规派单照 spend 档停人确认。例外：apply 失败安全位对本次新建的半装配 campaign 自动调用，属失败回滚路径（同 restore），不经分级。幂等只停不启。
 - negative-keyword-add [risk_class: reversible]：加否词（关键词级 / 共享否词表）。否词不放竞品牌名，除非客户点名。
 - negative-keyword-remove [risk_class: reversible]：撤否词（campaign / adgroup / 共享否词表）。安全闸只删 negative criterion，正向词一律拒；反向操作即 negative-keyword-add 原参数，可随时加回。
 - ad-pause / adgroup-pause [risk_class: reversible]：暂停单条 ad 或单个 ad group。

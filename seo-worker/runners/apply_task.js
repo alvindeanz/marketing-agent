@@ -12,6 +12,7 @@
 // retried automatically, because a half applied change is a human's problem.
 
 const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
@@ -750,6 +751,8 @@ function buildAdsPrompt(opts) {
     '  断言了一个没写过的字段报败，触发整条重试链）。',
     '- 方案没写的资产一根手指都不许碰。响应与方案预期不符就停手（aborted），不要随机应变。',
     '- 涉及 final URL 的，提交前先 curl -sIL 验证目标 URL 200 且零跳转（Location 链为空），不过就停手。',
+    '- 外部页面复验一律带浏览器 UA 并退避重试：curl -A "Mozilla/5.0 (compatible; HorntechVerify)" --retry 3 --retry-delay 20 --retry-all-errors；',
+    '  连续 429 视为站点限流（临时性环境问题，不是方案错），正文写明「429 限流」后按中止报，别当失败定性（2026-10-02 Haakaa #940 四连 429 教训）。',
     '- 每个 mutate 的旧值必须出现在你的执行记录里（回滚依据）。',
     '- 你是一次性进程：没有后台、没有定时器、没有下一轮，「稍后再查」不存在（2026-09-14 job779 教训：',
     '  agent 等谷歌审核想「15:06 后台复查」，进程早退了，活干成了账没上）。本轮能验的验完就写终态；',
@@ -858,6 +861,29 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
       log('task ' + taskId + ': agent 泳道对账通过，硬读 ' + audit.checked + ' 项');
     } else {
       const why = audit.failures.map((f) => f.entity + '：' + f.why).join('；') || '零行可硬审（条目缺 resource name，不符下放契约）';
+      /* 失败安全位（2026-10-02 Alvin 批，Ben's AU #1029 双投实证）：对账未过时熔断只防重试
+         不防烧钱，本次新建的 campaign 若已 ENABLED 就是半装配带病投放。零判断力动作：
+         从条目与对账失败项里抠出新建 campaign id（old_value 为空 = 本次新建），逐个
+         campaign-pause（幂等可逆），账户回到安全位再停人。 */
+      try {
+        const createdCampaigns = [];
+        const pool = JSON.stringify(itemsA || []) + ' ' + JSON.stringify(audit.failures || []);
+        for (const it of (itemsA || [])) {
+          const rn = String(it.resource_name || it.entity || '');
+          const m = rn.match(/customers\/\d+\/campaigns\/(\d+)/);
+          if (m && !String(it.old_value || '').trim() && createdCampaigns.indexOf(m[1]) === -1) createdCampaigns.push(m[1]);
+        }
+        for (const f of (audit.failures || [])) {
+          const m = String(f.entity || '').match(/customers\/\d+\/campaigns\/(\d+)/);
+          if (m && /期望 PAUSED|expected PAUSED/i.test(String(f.why || '')) && createdCampaigns.indexOf(m[1]) === -1) createdCampaigns.push(m[1]);
+        }
+        void pool;
+        for (const cidNum of createdCampaigns.slice(0, 5)) {
+          const r = spawnSync('python3', [ADS_MUTATE, customerId, '--op', 'campaign-pause', '--campaign-id', cidNum], { encoding: 'utf8', timeout: 120000 });
+          log('task ' + taskId + ': 安全位 campaign-pause ' + cidNum + ' :: ' + summarize(String(r.stdout || r.stderr || ''), 160));
+        }
+        if (createdCampaigns.length) oldVals.push('安全位：新建 campaign ' + createdCampaigns.join(',') + ' 已自动 PAUSE（对账未过，防半装配带病投放）');
+      } catch (e) { log('task ' + taskId + ': 安全位执行异常（不阻塞失败流程）:: ' + e.message); }
       const headA = [
         '受影响: ' + (affected.join('；') || '（未声明）'),
         '改前旧值: ' + (oldVals.join('；') || '（见执行记录）'),

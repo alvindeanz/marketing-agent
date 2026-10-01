@@ -434,7 +434,7 @@ async function main() {
     /* 临时性失败自动重排（2026-09-29 ticket #12）：网络断连/超时/5xx 是环境噪音不是方案错，
        零人工原则下该 harness 自愈。确定性分类（读失败 job 日志匹配签名），一生一次
        （note 打 [transient-retry] 标记，第二次同类失败留人），同轮 retried 去重防环。 */
-    const TRANSIENT = /socketCloseListener|TLSSocket|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|claude timed out|timed out after|HTTP 5\d\d/;
+    const TRANSIENT = /socketCloseListener|TLSSocket|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|claude timed out|timed out after|HTTP 5\d\d|HTTP 429|限流|rate.?limit/i;
     const failedNow = mine.filter((t) => t.human_state === 'wait_me' && t.fail_reason && !retried[t.id]
       && !/lint 未过/.test(t.fail_reason) && !String(t.result_note || '').includes('[transient-retry'));
     for (const t of failedNow) {

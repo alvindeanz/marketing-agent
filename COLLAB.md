@@ -26,6 +26,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 坑：①review_plan 判完不会自己拍板，判决落库晚于 harness 收工就要等下一轮，验证时多摇一轮曲柄是正常节奏不是 bug；②/stop 的运行中取消延迟上限 = listener 15 秒轮询 + SIGTERM 排水，前端文案写「约 15 秒内」别承诺立即。
 - 下一步/认领：无遗留。工单处理北极星（sprint 零人工、修流程不代跑、修完流程单跑 harness 验证）已落 Aira 记忆。
 
+### 2026-10-02 AIRA (q) paid 半状态安全位 + 四连修（Ben's AU #1029 双投 / Haakaa #940 #1023 实证）
+
+- 干了什么：①热修：Ben's AU Adelaide 新系列（24310902206）apply 失败后 ENABLED 半装配与原系列双投，手动 PAUSE 回读确认并留痕（Alvin 批含安全位方案后执行）。②失败安全位：apply agent 泳道零模型对账未过时，自动把本次新建（old_value 空）的 campaign 逐个 campaign-pause（幂等可逆，≤5 个），回到安全位再停人。③ads_mutate 补 campaign-pause op（spend 档照旧停人，安全位调用属失败回滚路径同 restore 不经分级，pending 表除名）；修 enum stringify 坑：RSA 类型判断把 str(enum)=裸数字 "15" 误杀正牌 RSA（Haakaa #1023），加 enum_name() 助手，pinned_field 同坑同修。④harness 临时失败签名加 429/限流/rate limit（Haakaa #940 四连 429 被当死债）。⑤apply 复验指引加 UA+退避重试 curl 模板，429 定性为临时性中止。⑥execute 方案模板内置失败处理铁律默认段（原子零写入/新建对象自动退 PAUSED/改值回写还原），终结逐任务书手工贴补丁。tests 全绿（policy_executor 与 specs 一致性含新 op）。
+- 坑：campaign-pause 政策里本来就是 spend 档挂 pending，别因为安全位需要就降档，分级归分级、回滚归回滚是两条路；enum 比较全文件扫过一遍，以后新 op 禁 str(enum) 裸比。
+- 下一步/认领：campaign-create L1 三段式执行器与 chat 直落轨批一（Alvin 已批方向）下批做；Ben's AU 恢复顺序＝#1033 四步人工完成后 ENABLE 新系列。
+
 ### 2026-09-29 AIRA (o) 工单批一：negative-keyword-remove 执行器 + OPS_CHECK 收紧 + chat 任务盖期 + 临时失败自愈（ticket #11/#12）
 
 - 干了什么：Alvin 定工单处理北极星「sprint 零人工，chat 是人工入口，人只反查抽查；修流程不代跑，dead end 才擦」。①ads_mutate.py 补 negative-keyword-remove（campaign/adgroup/共享否词表三层，安全闸只删 negative 判定成立的 criterion，正向词一律拒），policy json + googleads.md 双登记 reversible，policy_executor 6 断言过。②execute 的 OPS_CHECK readonly 规则加硬条款：交付里开了具体改动清单（criterion id/URL/目标值）就不许 readonly，防 #912「删词报告被验收后执行悄悄蒸发」再犯。③spawn_task 给 chat 生任务盖当期 sprint 章（无锚留空），修空标签任务对 harness 隐身（#881 实证）。④harness 失败重排扩类：lint 外新增临时性失败（TLS/超时/5xx 签名匹配失败 job 日志），一生一次 [transient-retry]，同轮去重防环。tests 全绿。

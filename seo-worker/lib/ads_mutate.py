@@ -39,7 +39,7 @@ import os
 import sys
 
 ENV_FILE = "/data/aira/.env.google-ads"
-OPS = ["final-url-change", "ad-pause", "adgroup-pause", "keyword-pause", "negative-keyword-add", "negative-keyword-remove",
+OPS = ["final-url-change", "ad-pause", "adgroup-pause", "campaign-pause", "keyword-pause", "negative-keyword-add", "negative-keyword-remove",
        "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "keyword-add", "keyword-final-url",
        "ad-create", "schedule-adjust", "raw-mutate"]
 
@@ -115,6 +115,14 @@ def campaign_learning(client, cid, campaign_id):
         return False
     reasons = [str(r) for r in rows[0].campaign.primary_status_reasons]
     return any("LEARNING" in r for r in reasons)
+
+
+def enum_name(v):
+    # proto 枚举 str() 在不同库形态下可能是 "AdType.RESPONSIVE_SEARCH_AD"、"RESPONSIVE_SEARCH_AD"
+    # 或裸数字 "15"（2026-10-02 Haakaa #1023 实证：正牌 RSA 被 "type 15" 误杀）。
+    # 统一取 .name，取不到再退 str()。
+    n = getattr(v, "name", None)
+    return n if n else str(v)
 
 
 def op_final_url_change(client, cid, args):
@@ -291,6 +299,33 @@ def op_negative_keyword_remove(client, cid, args):
     res = mutate(op)
     out({"ok": True, "op": "negative-keyword-remove", "resource_name": res.results[0].resource_name,
          "budget_impact": 0})
+
+
+def op_campaign_pause(client, cid, args):
+    # 安全位专用 + 通用止投（2026-10-02 Ben's AU #1029 双投实证）：半装配 campaign 的唯一
+    # 确定性出口。只 PAUSE 不 ENABLE，幂等：已是 PAUSED 原样回报。
+    if not args.campaign_id:
+        die("campaign-pause 需要 --campaign-id")
+    rows = gaql(client, cid, "SELECT campaign.id, campaign.name, campaign.status FROM campaign WHERE campaign.id = " + str(int(args.campaign_id)))
+    if not rows:
+        die("campaign " + str(args.campaign_id) + " 不存在")
+    cur = enum_name(rows[0].campaign.status)
+    out({"step": "before", "op": "campaign-pause", "campaign_id": str(args.campaign_id),
+         "name": rows[0].campaign.name, "status": cur})
+    if cur == "PAUSED":
+        out({"ok": True, "op": "campaign-pause", "noop": True, "status": "PAUSED", "budget_impact": 0})
+        return
+    if args.dry_run:
+        out({"ok": True, "dry_run": True})
+        return
+    svc = client.get_service("CampaignService")
+    op = client.get_type("CampaignOperation")
+    op.update.resource_name = svc.campaign_path(cid, int(args.campaign_id))
+    op.update.status = client.enums.CampaignStatusEnum.PAUSED
+    op.update_mask.CopyFrom(field_mask(["status"]))
+    svc.mutate_campaigns(customer_id=cid, operations=[op])
+    rows2 = gaql(client, cid, "SELECT campaign.status FROM campaign WHERE campaign.id = " + str(int(args.campaign_id)))
+    out({"ok": True, "op": "campaign-pause", "status": enum_name(rows2[0].campaign.status), "budget_impact": 0})
 
 
 def op_keyword_pause(client, cid, args):
@@ -519,13 +554,14 @@ def op_rsa_copy_update(client, cid, args):
     if not rows:
         die("ad " + str(ad_id) + " 不存在")
     ad = rows[0].ad_group_ad.ad
-    if str(ad.type_) != "AdType.RESPONSIVE_SEARCH_AD" and "RESPONSIVE_SEARCH_AD" not in str(ad.type_):
-        die("ad " + str(ad_id) + " 不是 RSA（type " + str(ad.type_) + "），本操作只改 RSA 文案")
+    ad_type = enum_name(ad.type_)
+    if "RESPONSIVE_SEARCH_AD" not in ad_type and int(getattr(ad.type_, "value", 0) or (ad.type_ if isinstance(ad.type_, int) else 0)) != 15:
+        die("ad " + str(ad_id) + " 不是 RSA（type " + ad_type + "），本操作只改 RSA 文案")
     def dump(assets):
         out_l = []
         for a in assets:
             row = {"text": a.text}
-            pf = str(a.pinned_field)
+            pf = enum_name(a.pinned_field)
             if "HEADLINE_" in pf:
                 row["pin"] = int(pf.rsplit("_", 1)[1])
             out_l.append(row)
@@ -841,6 +877,7 @@ def main():
     p.add_argument("--op", required=True, choices=OPS)
     p.add_argument("--ad-id", type=int)
     p.add_argument("--ad-group-id", type=int)
+    p.add_argument("--campaign-id", type=int)
     p.add_argument("--new-url")
     p.add_argument("--level")
     p.add_argument("--target-id", type=int)
@@ -861,6 +898,7 @@ def main():
         {"final-url-change": op_final_url_change,
          "ad-pause": op_ad_pause,
          "adgroup-pause": op_adgroup_pause,
+         "campaign-pause": op_campaign_pause,
          "keyword-pause": op_keyword_pause,
          "negative-keyword-add": op_negative_keyword_add,
          "negative-keyword-remove": op_negative_keyword_remove,
