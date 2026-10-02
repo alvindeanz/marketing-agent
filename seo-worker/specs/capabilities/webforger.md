@@ -45,7 +45,7 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 - page-rewrite: reversible（L0 排除：整页覆盖影响面大）
 - page-rebuild: reversible（L0 排除）
 - redirect-batch: reversible
-- blog-draft: external
+- blog-draft: reversible（2026-10-02 Alvin 去官僚化降档：草稿不对外，外露由发布 op 与客户确认卡把门）
 - blog-publish: external
 - image-generate: reversible
 - styles-fragment: reversible（L0 排除：全站样式）

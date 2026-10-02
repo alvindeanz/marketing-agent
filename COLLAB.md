@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-02 AIRA (r) chat 去官僚化分层：只读直答 + 产出类无条件快路 + blog-draft 降档 reversible
+
+- 干了什么：Alvin 定新边界「不动账户的都不要委托单，报告更新之类只读数字流程无条件放行」。①chat 工具带补两条只读取数线：lib/ga4_query.py（GA4 Data API runReport，SA 凭据 secrets/ga4_sa.json，便捷/原生双写法）、lib/wf_read.py（WF §24 分析面 leads/funnel/overview，GET 白名单外全拒，凭据读工作区 .secrets.env，浏览器 UA 防 WAF），两件均 louvresky 实测通过（GA4 31 行来源表、WF funnel 与 leads 正常返回、白名单拒绝 /api/content 路径）。②chat prompt 委托单改三层（2026-10-02 Alvin 定）：只读类当场答不出单不留记录；产出类不动账户不动线上（kind 空/report）无条件快路同轮直启；动账户动线上（kind change）契约闸照旧。服务端零改动：快路对非 change 单本就不拦，引语对上最新人类消息即走。③release_policy blog-draft external 降 reversible（草稿不对外，外露由 blog-publish 与客户确认卡把门），webforger.md 与 shopify.md 能力清单同步。tests 全绿（chat 39、specs、policy_executor 6、release_review 7），php 未动。
+- 坑：①快路服务端只认最新一条人类消息的逐字引语，产出类指令在更早消息里时 prompt 已写明「留卡请人回一句开工」，别硬凑引语；②wf_read 解析 .secrets.env 要剥引号（louvresky 的密码带引号，401 踩过）；③blog-draft 降档会让 L2 放行官自动放博客草稿任务，发卡给客户仍是人工动作，对客外露面没变。
+- 下一步/认领：待部署（worker）。观察一周：chat 频道还出不出只读核查单、产出类直启有没有误伤，有再收。
+
 ### 2026-09-30 AIRA (p) 工单批二批三收官：卡时效刷新 + /stop 全链 + 零人工验证全过（四票已回）
 
 - 干了什么：批二：harness 加未发卡数据窗超 7 天自动重拉（生成时间兜底交付文件时间戳），Haakaa #343 被规则自动刷新重排实证。批三：chat /stop 全链（前端放行直发、服务端绕 409 特例：排队 CAS 取消 / 运行打 cancel_requested 标记、新端点 GET /jobs/cancel_flags 给 worker、listener 15 秒轮询杀子进程、取消不喂 fastFails 熔断），api rev cedaa47 + worker 已双机部署。零人工验证：Ctomi #917（撤 palmetto 否词）全链自主走通：judge do、execute 方案（首轮 lint 打回把失败处理递人、任务书补失败策略后过）、放行官放行、apply 用新执行器删词、回读自验、自动收口并自定 10/13 复查点；独立 GAQL 反查全账户在投系列 palmetto 否词零行。四张 ticket（#9/#10/#11/#12）已按 Alvin 指示逐张回复 resolved。

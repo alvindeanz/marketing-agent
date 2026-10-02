@@ -53,7 +53,7 @@
     "content-edit": "reversible",
     "redirect-batch": "reversible",
     "gbp-update": "external",
-    "blog-draft": "external",
+    "blog-draft": "reversible",
     "image-generate": "reversible",
     "negative-keyword-add": "reversible",
     "negative-keyword-remove": "reversible",
