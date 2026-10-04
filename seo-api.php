@@ -4338,9 +4338,17 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
             $rq=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND status='running'");
             $rq->execute([$cidH]);
             $runH=array_map(function($r){return (int)$r['id'];},$rq->fetchAll());
+            /* 在跑 job 不再「只能等跑完」：打 cancel_requested 标记，认领的 listener 轮询到即杀
+               子进程（约 15 秒，机制同 ticket #10 的轻刹车；2026-10-04 midea 事故并入：原轻刹车
+               分支排在本分支之后永远走不到，monica 手滑消息想停本轮回复却吃了全闩还解不开）。 */
+            if($runH){
+                ensure_job_cancel_schema();
+                $inR=implode(',',$runH);
+                db()->exec("UPDATE agent_jobs SET cancel_requested=1 WHERE id IN ($inR) AND status='running'");
+            }
             halt_set($cidH,'on '.date('Y-m-d H:i').' by '.$whoH);
             $lineH='已止损（/stop by '.$whoH.'）：撤销排队 job '.($cancelledH?('#'.implode(' #',$cancelledH)):'0 个')
-                .'；'.($runH?('在跑 job #'.implode(' #',$runH).' 无法中断，但跑完不会自动接落地或放行'):'无在跑 job')
+                .'；'.($runH?('在跑 job #'.implode(' #',$runH).' 已请求中断（约 15 秒内生效），即便跑完也不会自动接落地或放行'):'无在跑 job')
                 .'。止损闩已落：本客户新派单、自动落地、自动放行全部暂停，恢复发 /resume。';
             chat_msg_insert($root,'chat_agent',$lineH,$whoH);
             audit($whoH,'seo_chat_stop',(string)$cidH,['cancelled'=>$cancelledH,'running'=>$runH]);
@@ -4377,24 +4385,8 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
     }
     $src=(isset($i['source'])&&$i['source']==='client')?'client':'manual';
     if($text===''&&!$imgs&&!$files)res(400,['error'=>'text required']);
-    /* /stop（2026-09-29 ticket #10）：手滑发送后的刹车，语义同 PJ 的打断。故意放在 409 闸
-       之前（agent 处理中恰是要停的时候）。排队中 CAS 置 failed 零副作用；跑着的打
-       cancel_requested 标记，认领的 listener 轮询到即杀子进程。本消息不入会话流水不排新 job。 */
-    if($text==='/stop'){
-        $sj=chat_job_inflight($rootId);
-        if(!$sj)res(200,['ok'=>true,'stopped'=>0,'note'=>'当前没有进行中的回复']);
-        ensure_job_cancel_schema();
-        $upS=db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE id=? AND status='queued'");
-        $upS->execute(["\n[".gmdate('Y-m-d H:i:s')."Z] [cancelled] 用户 /stop：排队中取消，未启动。失败 job 不自动重试的口径不变。",$sj]);
-        $didS='queued-cancelled';
-        if($upS->rowCount()===0){
-            db()->prepare("UPDATE agent_jobs SET cancel_requested=1 WHERE id=? AND status='running'")->execute([$sj]);
-            $didS='cancel-requested';
-        }
-        chat_msg_insert($root,'chat_agent','本轮回复已按 /stop 停止（job #'.$sj.'）。补好上下文再发新消息即可。',$u['username']);
-        audit($u['username'],'seo_chat_stop',(string)$rootId,['job_id'=>$sj,'did'=>$didS]);
-        res(200,['ok'=>true,'stopped'=>$sj,'did'=>$didS]);
-    }
+    /* ticket #10 的独立 /stop 轻刹车分支已删（2026-10-04）：上面的止损闩分支正则先吞掉
+       一切 /stop，这里从上线起就是死代码；轻刹车的在跑 cancel_requested 已并入止损闩分支。 */
     $busy=chat_job_inflight($rootId);
     if($busy)res(409,['error'=>'这个会话还在等上一条回复（/stop 可打断）','job_id'=>$busy]);
     $msgRefs=($imgs||$files||$src==='client')?['images'=>$imgs,'files'=>$files,'source'=>$src]:null;

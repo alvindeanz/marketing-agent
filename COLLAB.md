@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-04 AIRA (s) chat /resume 修通 + /stop 双语义撞车收口（midea 死锁实证）
+
+- 干了什么：midea 频道死锁定位：monica 手滑消息想停本轮回复发 /stop，吃到的是全客户止损闩，而前端输入框只放行 /reset 与 /stop，/resume 根本发不到服务端（服务端 /resume 一直是好的），闩落了没人解得开。三处修：①前端 /resume 直通服务端并更新命令提示与 /stop 的 toast 文案；②服务端止损闩 /stop 分支并入轻刹车：在跑 job 打 cancel_requested（listener 约 15 秒杀子进程），不再「只能等跑完」；③删掉 ticket #10 的独立 /stop 分支：止损闩正则在前先吞一切 /stop，该分支从上线起是死代码，其 cancel_requested 链路借此复活。node tests 全绿；php -l 走 deploy 远端闸。
+- 坑：①COLLAB (p) 批三验证过的「/stop 全链」实际验证的是排队 CAS 和 cancel_flags 端点，没验「从聊天输入框发 /stop 走哪个分支」，同名命令的两个分支谁先吞要在路由顺序层面看，不能只看各自单测；②止损闩拦人时的提示要把「谁拉的闩 + 怎么解」顶在第一行，这次 midea 等了一天才被发现。
+- 下一步/认领：待部署（api + 前端）。midea 的闩由 monica 或 Alvin 发 /resume 解，解完确认 1744 的落地单即恢复。
+
 ### 2026-10-02 AIRA (r) chat 去官僚化分层：只读直答 + 产出类无条件快路 + blog-draft 降档 reversible
 
 - 干了什么：Alvin 定新边界「不动账户的都不要委托单，报告更新之类只读数字流程无条件放行」。①chat 工具带补两条只读取数线：lib/ga4_query.py（GA4 Data API runReport，SA 凭据 secrets/ga4_sa.json，便捷/原生双写法）、lib/wf_read.py（WF §24 分析面 leads/funnel/overview，GET 白名单外全拒，凭据读工作区 .secrets.env，浏览器 UA 防 WAF），两件均 louvresky 实测通过（GA4 31 行来源表、WF funnel 与 leads 正常返回、白名单拒绝 /api/content 路径）。②chat prompt 委托单改三层（2026-10-02 Alvin 定）：只读类当场答不出单不留记录；产出类不动账户不动线上（kind 空/report）无条件快路同轮直启；动账户动线上（kind change）契约闸照旧。服务端零改动：快路对非 change 单本就不拦，引语对上最新人类消息即走。③release_policy blog-draft external 降 reversible（草稿不对外，外露由 blog-publish 与客户确认卡把门），webforger.md 与 shopify.md 能力清单同步。tests 全绿（chat 39、specs、policy_executor 6、release_review 7），php 未动。
