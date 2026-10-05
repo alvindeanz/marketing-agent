@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-05 AIRA (y) 工单批四：前提冲突自愈流（ticket #16）+ 委托单卡对齐三层（ticket #20）
+
+- 干了什么：①#16 机制修复：execute 前提闸加结构化出口 premise_revision（末尾 json 块字段），前提被平台真值推翻但目标仍可达时，不再交干等人的无变更方案，由新窄端点 POST /tasks/{id}/premise_revision 把修订块写进任务书并自动重排一轮 prepare。闸：一单一次（detail 的 [前提修订] 标记即计数器，CAS 防并发双写）、排重先于写入防锁死、approved/review 之外不收；修订版方案照旧走放行官与静默期，判定权不前移，端点拒绝即回老路停 review。平台真值先落 fact（worker 调 postFact）。②#20：产出类委托单卡去掉开工（改「补排」口径加免确认说明），改动类保留开工=契约闸确认；快路直启回执（已执行频道指令：已启动委托单 #N）计入已排产标记；spawn_task 服务端按 title+origin 防重（与 commission_start 同一套）回 409 带任务号，前端把 409 标回已排产不报错。测试：node tests/ 全套 22 个文件全绿（apply 新增 3 条、ui 新增 2 条），php -l 远端过。commit be7aa77，api 与双 worker 已同版部署。
+- 坑：首例 #1004 没走到自愈分支，因为真实世界先一步解决了它：10-01 重开单 #1017 已按选 B 建成素材组，本轮 execute 实读账户后正确交了「目标已达成、零写入」核验单，并明确自述「不出 premise_revision（没有可修订后再执行的写入）」，prompt 契约被正确理解。自愈链路的端到端实跑要等下一个自然前提冲突，护栏已冒烟验证（终态任务 400、无鉴权 401、排重与 CAS 有单测）。另两个教训：快路直启的回执行文与人点按钮的回执行文不同，任何靠正则认系统行的 UI 都要把两种来源都列上；spawn 类按钮凡有自动路径并行，服务端防重是底线（ticket #20 的重复任务隐患在防重缺位时只是没人点而已）。
+- 下一步/认领：下一个自然前提冲突案例落地后回查自愈链路日志（搜 log「前提冲突自愈」）；#1004 的零写入核验单已排 release_review（job 3163）等放行官关单。
+
 ### 2026-10-05 AIRA (x) closed_kind 推断修正 + paid spec 挂框架 + sungait v6 全绿终验
 
 - 干了什么：①(w) 的 closed_kind 过滤首版形同虚设：/context 给 runner 的任务行不带 closed_kind（服务端在 /tasks 流水线现推），filter 永远读到空。改为 worker 侧照服务端同款两段正则从 result_note 推（末行标签优先），单测覆盖 dropped/merged 剔除与 accepted 保留。②paid_monthly_spec 挂客户汇报框架条款（execute 产线的报告任务同口径）。③sungait v6 终验全绿：pack 工作项 54 降 38（12 张 merged 旧单与 618/623 砍单全出，938/942 客户自写博文在），成品询盘 0、红 0、-42.4% 0、sitemap 虚报句 0，客户自写博文进本月工作节；外链仅剩真实完成的 nofollow 项与「按客户要求放缓」措辞。对客发 v6，v1 至 v5 作废。
