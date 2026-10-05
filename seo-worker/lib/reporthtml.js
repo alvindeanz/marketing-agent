@@ -556,10 +556,23 @@ function buildChannelKpis(pack) {
   const total = (pack.ga4 && pack.ga4.channels_total) || null;
   const org = (pack.ga4 && pack.ga4.organic) || {};
   if (!total || !org.cur) return [];
+  const isEcom = pack.meta && pack.meta.biz_type === 'ecommerce' && pack.ga4.funnel && pack.ga4.funnel.kind === 'ecommerce';
   const shareCur = total.sessions > 0 ? org.cur.sessions / total.sessions : null;
   const sharePrev = total.prev_sessions > 0 ? org.prev.sessions / total.prev_sessions : null;
   const shortPrev = shortPrevCoverage(pack, 'ga4');
-  const dTotal = deltaCountCovered(total.sessions, total.prev_sessions, shortPrev);
+  /* 基数异常时卡面环比直接用剔除后口径（2026-10-05 客户汇报框架）：审核官改不了
+     卡面文字，叙事打补丁治标，根治在这里。note 标明已剔除，原始数字叙事层作对照。 */
+  const anom = pack.ga4.anomaly;
+  let dTotal = deltaCountCovered(total.sessions, total.prev_sessions, shortPrev);
+  let totalNote = withDayNote('vs ' + pack.meta.compare.short, shortPrev);
+  if (anom && anom.all_sessions_adj_delta_pct !== null && anom.all_sessions_adj_delta_pct !== undefined) {
+    const pct = anom.all_sessions_adj_delta_pct;
+    dTotal = {
+      text: (pct > 0 ? '+' : '') + (pct * 100).toFixed(1) + '%',
+      color: pct > 0 ? GREEN : AMBER,
+    };
+    totalNote = 'vs ' + pack.meta.compare.short + '，已剔除异常天';
+  }
   const dLeads = deltaCountCovered(total.leads, total.prev_leads, shortPrev);
   const dShare = deltaPp(shareCur, sharePrev);
   const vsNote = withDayNote('vs ' + pack.meta.compare.short, shortPrev);
@@ -569,11 +582,11 @@ function buildChannelKpis(pack) {
       label: '全渠道访问',
       delta: dTotal.text,
       delta_color: dTotal.color,
-      note: vsNote,
+      note: totalNote,
     },
     {
       value: fmtInt(total.leads),
-      label: '全渠道询盘',
+      label: isEcom ? '全渠道转化事件' : '全渠道询盘',
       delta: dLeads.text,
       delta_color: dLeads.color,
       note: vsNote,
