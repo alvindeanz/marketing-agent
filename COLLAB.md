@@ -20,6 +20,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-05 AIRA (x) closed_kind 推断修正 + paid spec 挂框架 + sungait v6 全绿终验
+
+- 干了什么：①(w) 的 closed_kind 过滤首版形同虚设：/context 给 runner 的任务行不带 closed_kind（服务端在 /tasks 流水线现推），filter 永远读到空。改为 worker 侧照服务端同款两段正则从 result_note 推（末行标签优先），单测覆盖 dropped/merged 剔除与 accepted 保留。②paid_monthly_spec 挂客户汇报框架条款（execute 产线的报告任务同口径）。③sungait v6 终验全绿：pack 工作项 54 降 38（12 张 merged 旧单与 618/623 砍单全出，938/942 客户自写博文在），成品询盘 0、红 0、-42.4% 0、sitemap 虚报句 0，客户自写博文进本月工作节；外链仅剩真实完成的 nofollow 项与「按客户要求放缓」措辞。对客发 v6，v1 至 v5 作废。
+- 坑：跨 API 的字段假设要实测：/tasks 与 /context 的任务行字段集不同，写过滤前先 dump 一行真实数据看字段在不在，别信路由 A 的形状在路由 B 也成立（这次靠 v5 复验抓住，单测全绿也没拦住，因为单测喂的是自己造的带字段数据）。
+- 下一步/认领：已部署 4ac3496 两机同版。无遗留。
 ### 2026-10-05 AIRA (w) 工作节数据污染修复 + 审核官漏项核对（sungait v4 校对实证，Alvin 定十月起生效不返工九月）
 
 - 干了什么：对着任务台账逐条校对 sungait v4「本月工作」发现三类问题并修两类：①buildWork 把 status=done 但 closed_kind=dropped/killed/merged 的任务全算完成工作，导致被砍的 #618「sitemap 移除文件」写进报告成虚报、9-03 merged 的 12 张旧单重复计数，已加 closed_kind 过滤；②54 条工作项压缩成 8 组时丢了 #938/942 客户自写博文（已完成却被写进 10 月计划当未来事），审核官 hints 现在附 work.items 原始清单逐条核对，checklist 第 8 条升级为「漏项点名打回、已完成写成未来事同样打回」；③外链口径矛盾（9-24 Alvin 定移出 MA，报告却承诺筹备中）由①的过滤自然消除，对客默认只字不提。手工月报线同步补抓手：deliverable_lint _default 禁 #dc2626（坏消息琥珀），记忆新增 feedback_client_reporting_frame（手写月报八条清单，指向 specs 权威版）。范围决定（Alvin）：九月存量报告不返工，十月起全部报告带此口径，手工线人工执行。
