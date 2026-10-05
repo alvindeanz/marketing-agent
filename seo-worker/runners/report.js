@@ -22,7 +22,8 @@ const { extractTrailingJson } = require('../lib/mdjson');
 const { ensureClientWorkspace, clientDirName, localYmd, truncate } = require('../lib/util');
 const { buildFactsPack, computePeriod, ptCutoffYmd } = require('../lib/factspack');
 const { renderReport, KPI_DEFS } = require('../lib/reporthtml');
-const { lintText, lintReport, numbersFromPack, checkNumbers, problemList } = require('../lib/reportlint');
+const { reviewReport } = require('../lib/reportreview');
+const { lintText, lintReport, numbersFromPack, checkNumbers, problemList, lintRepeatedDecline, textOf } = require('../lib/reportlint');
 const { publishReport } = require('../lib/publish');
 
 const OUTPUT_DIRNAME = 'seo-agent-output';
@@ -72,6 +73,34 @@ function headerBlock(pack) {
         '）。总量环比因此天然虚高，点击、曝光、访问、询盘一类的环比一律改用日均口径描述，标题与本月信号里不得出现「翻倍」「双双大涨」这类由残缺基数得出的说法，并在流量概览一节写明对比期缺了多少天。'
     );
   }
+  // 客户汇报框架（2026-10-05 Alvin 定）：汇报立场规则。数字不造假不隐瞒，
+  // 但叙事取景以我方工作盘为主、坏消息带台阶，不替别的渠道背锅，不重复渲染同一个坏数。
+  const frame = [
+    '坏指标单点出现：同一个下跌的数字全文只写一次，写它的那一处必须紧跟原因与下月抓手；其他小节再涉及该指标只写方向，不再重复数字。',
+    'hero_kpi_keys 四个里至多一个负向指标，招牌位优先放我方可控且向好的指标；hero_headline 永远是正向信号。',
+    '非自然渠道的大盘波动（如直接访问、付费渠道的涨跌）只进统计说明，不作招牌结论：那不是 SEO 工作的盘，既不邀功也不背锅。',
+  ];
+  if (pack.ga4 && pack.ga4.anomaly) {
+    frame.push(
+      '流量基数含异常天（ga4.anomaly 节点）：全渠道环比必须引用 all_sessions_adj_delta_pct 的剔除后数字叙述，并在渠道一节写一句统计说明交代异常（事实按 anomaly.note，措辞可顺），原始环比最多作为对照一笔带过。'
+    );
+  }
+  const br = pack.gsc && pack.gsc.brand;
+  if (br && br.nonbrand_cur_clicks !== undefined && br.nonbrand_cur_clicks !== null) {
+    frame.push(
+      '点击环比先讲非品牌口径（gsc.brand 的 nonbrand_* 字段，这是我方工作的考核盘），品牌词的波动单独一句说明，不与非品牌混在一起下结论。'
+    );
+  }
+  const gd = pack.gsc && pack.gsc.delta;
+  if (gd && Number(gd.impressions) > 0 && Number(gd.ctr_pp) < 0) {
+    frame.push(
+      '本期曝光上升而点击率下降：解读必须写明这是覆盖扩张的结构效应（新页面与低位次词带来的新增曝光天然点击率低，稀释平均值），不得把平均点击率下降单独当成质量退步的结论。'
+    );
+  }
+  let no = 13;
+  lines.push('');
+  lines.push('客户汇报框架（与铁律同级，逐条遵守）：');
+  for (const f of frame) lines.push(no++ + '. ' + f);
   return lines.join('\n');
 }
 
@@ -245,6 +274,8 @@ function validateNarrative(n, allowedNumbers) {
   const lint = lintText(text);
   const nums = checkNumbers(text, allowedNumbers);
   problems.push.apply(problems, problemList(lint.hits, nums.bad));
+  // 坏指标单点出现（客户汇报框架）：叙事里同一个负向百分比写两次即回喂。
+  for (const h of lintRepeatedDecline(text, 2)) problems.push(h.desc);
   // 成对 callout 缺一条不算致命，渲染层会把两列降成单列，只提醒不回喂。
   return problems;
 }
@@ -409,6 +440,61 @@ async function run(ctx) {
     throw new Error(
       '报告渲染后仍未通过发布前检查：' + lint.hits.map((h) => h.rule + '（' + h.sample + '）').join('；')
     );
+  }
+
+  // ---- 第四层：审核官（2026-10-05 Alvin 定，每份报告出稿后过一遍）----
+  // 审成品取景与叙事立场，意见回喂叙事层重出一轮，至多一轮；审核与重出
+  // 任何一步失败都交付现有版本，审核不挡交付。
+  if (narrative && narrativeStatus === 'ok') {
+    const review = await reviewReport(cfg, {
+      reportText: textOf(html),
+      pack,
+      workspace,
+      log,
+      label: 'report ' + period.start,
+    });
+    if (review.note) log('审核官：' + review.note);
+    if (!review.pass && review.revisions.length) {
+      log('审核官提出 ' + review.revisions.length + ' 条修订，回喂叙事层重出一轮：' + review.revisions.slice(0, 3).join(' | '));
+      try {
+        const res2 = await runClaude(cfg, {
+          prompt:
+            buildPrompt(pack) +
+            '\n\n审核官对上一版的修订要求（逐条落实，其余内容保持同等质量重写）：\n' +
+            review.revisions.map((r, i) => i + 1 + '. ' + r).join('\n'),
+          cwd: workspace,
+          log,
+          model: cfg.reportModel,
+          allowedTools: ALLOWED_TOOLS,
+          label: 'report ' + period.start + ' rev',
+          timeoutMs: (Number(cfg.reportTimeoutMin) || 45) * 0.5 * 60 * 1000,
+        });
+        const parsed2 = extractTrailingJson(String(res2.stdout || '').trim());
+        const problems2 = parsed2.json ? validateNarrative(parsed2.json, allowedNumbers) : ['json 块不是对象'];
+        if (!problems2.length) {
+          stripUnknownUrls(parsed2.json, pack, log);
+          const html2 = renderReport(pack, parsed2.json, {});
+          const lint2 = lintReport(html2);
+          if (lint2.ok) {
+            narrative = parsed2.json;
+            html = html2;
+            lint = lint2;
+            // narrative_status 是 DB ENUM('ok','fallback')，别写新值（会被静默截空），
+            // 审核痕迹走 note。
+            narrativeNote = (narrativeNote ? narrativeNote + ' / ' : '') + '审核官修订 ' + review.revisions.length + ' 条已落实';
+            log('审核修订版通过校验，采用修订版');
+          } else {
+            log('审核修订版渲染未过 lint（' + lint2.hits.map((h) => h.rule).join('、') + '），沿用首版');
+          }
+        } else {
+          log('审核修订版叙事校验未过（' + problems2.slice(0, 3).join('；') + '），沿用首版');
+        }
+      } catch (e) {
+        log('审核修订轮失败（' + String(e.message || e).slice(0, 150) + '），沿用首版');
+      }
+    } else if (review.pass && !review.note) {
+      log('审核官判通过，无修订');
+    }
   }
 
   // ---- 落盘 ----

@@ -159,13 +159,49 @@ function lintClassCollision(html) {
 }
 
 /**
+ * A8：对客报告坏消息走琥珀不用红（2026-10-05 客户汇报框架）。渲染层负向环比
+ * 已全部改 AMBER，成品里出现 #dc2626 说明有渲染路径漏改或模板硬编码。
+ */
+function lintRedBan(html) {
+  const s = String(html == null ? '' : html);
+  const i = s.indexOf('#dc2626');
+  if (i === -1) return [];
+  return [{ rule: 'red_delta', desc: '成品出现红色 #dc2626，坏消息一律琥珀 #d97706', sample: s.slice(Math.max(0, i - 40), i + 20).replace(/\s+/g, ' ') }];
+}
+
+/**
+ * A9：坏指标单点出现（2026-10-05 客户汇报框架）。只查叙事文字：同一个负向
+ * 百分比在叙事里至多出现一次，第二次起就是在反复渲染坏消息。数字块与对比表
+ * 的结构性出现不在此列（threshold 由调用方给，叙事层传 2）。
+ */
+function lintRepeatedDecline(text, threshold) {
+  const hits = [];
+  const counts = new Map();
+  // 徽章形态（-24.2%）与叙事形态（下降/回落/减少 24.2%）算同一个坏指标。
+  const re = /(?:-|(?:下降|回落|减少)\s?)(\d{1,3}(?:\.\d)?)%/g;
+  let m;
+  const s = String(text);
+  while ((m = re.exec(s)) !== null) {
+    const key = '-' + m[1] + '%';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const cap = Number(threshold) || 3;
+  for (const [k, n] of counts) {
+    if (n >= cap) {
+      hits.push({ rule: 'repeated_decline', desc: '同一负向环比「' + k + '」出现 ' + n + ' 次，坏指标叙事里至多出现一次并带原因与抓手', sample: k });
+    }
+  }
+  return hits;
+}
+
+/**
  * 报告 HTML 的完整检查。返回 { ok, hits: [{ rule, sample }] }。
  * exit 0 等价于 ok === true，这是 scp 之前的最后一道闸。
  */
 function lintReport(html) {
   const text = textOf(html);
   const base = lintText(text, { scope: 'html' });
-  const hits = base.hits.concat(lintCallouts(html), lintClassCollision(html));
+  const hits = base.hits.concat(lintCallouts(html), lintClassCollision(html), lintRedBan(html));
   return { ok: hits.length === 0, hits };
 }
 
@@ -295,6 +331,8 @@ module.exports = {
   lintReport,
   lintCallouts,
   lintClassCollision,
+  lintRedBan,
+  lintRepeatedDecline,
   numbersFromPack,
   numberForms,
   checkNumbers,

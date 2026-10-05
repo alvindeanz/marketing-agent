@@ -70,6 +70,8 @@ const DEFAULTS = {
   // 月报叙事层。数字由数据层算好，模型只写解读，但读者是客户老板，
   // 一次写完无人答疑，所以给大模型。
   reportModel: 'opus',
+  // 报告审核官（2026-10-05 客户汇报框架）：成品出稿后按清单审一遍取景与立场。
+  reportReviewModel: 'opus',
   // 报告成品上传到 250 用的 ssh Host 别名（root 的 ~/.ssh/config 已配好免密）。
   reportSsh: 'blogpreview',
   // 250 上报告的物理根目录，报告落在 {reportRemoteRoot}/{slug}/ 下。
@@ -204,6 +206,7 @@ function load() {
   cfg.lintRulesFile = String(cfg.lintRulesFile || DEFAULTS.lintRulesFile);
   cfg.memoryDir = String(cfg.memoryDir || DEFAULTS.memoryDir);
   cfg.reportModel = String(cfg.reportModel || DEFAULTS.reportModel);
+  cfg.reportReviewModel = String(cfg.reportReviewModel || DEFAULTS.reportReviewModel);
   cfg.reportSsh = String(cfg.reportSsh || DEFAULTS.reportSsh);
   // 两个路径都去掉结尾斜杠，拼接时统一自己补，避免出现双斜杠的 URL。
   cfg.reportRemoteRoot = String(cfg.reportRemoteRoot || DEFAULTS.reportRemoteRoot).replace(/\/+$/, '');

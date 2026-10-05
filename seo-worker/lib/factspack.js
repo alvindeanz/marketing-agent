@@ -855,6 +855,58 @@ async function ga4ChannelEvents(ctx, propertyId, range, eventNames) {
   }));
 }
 
+/** 渠道 x 日的会话数，基数异常检测用。 */
+async function ga4DailyChannelSessions(ctx, propertyId, range) {
+  const rows = await ga4Report(ctx, propertyId, {
+    dateRanges: [{ startDate: range.start, endDate: range.end }],
+    dimensions: [{ name: 'date' }, { name: 'sessionDefaultChannelGroup' }],
+    metrics: [{ name: 'sessions' }],
+  });
+  return rows.map((r) => ({
+    date: String(r.date || ''),
+    channel: String(r.sessionDefaultChannelGroup || ''),
+    sessions: Number(r.sessions) || 0,
+  }));
+}
+
+/**
+ * 日级基数异常检测（2026-10-05 客户汇报框架）。拿异常月当环比基数会把客户
+ * 看得见的「全线回落」建立在 bot 波或一次性冲量上（sungait 2026-08 Direct 五天
+ * 冲掉全渠道七成的实证）。规则：对每个渠道取窗口内日值中位数，某天超过
+ * max(4 倍中位数, 中位数 + 80) 记为异常日，超出中位数的部分记为异常量；
+ * 渠道异常量不足 max(渠道总量 15%, 300) 的不标，避免把正常波动当异常。
+ * 返回 null（无异常）或 { channels: [{channel, spike_days, excess}], excess_total }。
+ */
+function detectDailyAnomalies(dailyRows) {
+  const byCh = new Map();
+  for (const r of dailyRows || []) {
+    if (!byCh.has(r.channel)) byCh.set(r.channel, []);
+    byCh.get(r.channel).push(r.sessions);
+  }
+  const flagged = [];
+  for (const [channel, vals] of byCh.entries()) {
+    if (vals.length < 7) continue;
+    const sorted = vals.slice().sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const cut = Math.max(median * 4, median + 80);
+    let excess = 0;
+    let days = 0;
+    for (const v of vals) {
+      if (v > cut) {
+        excess += v - median;
+        days += 1;
+      }
+    }
+    const total = vals.reduce((a, b) => a + b, 0);
+    if (days > 0 && excess >= Math.max(total * 0.15, 300)) {
+      flagged.push({ channel, spike_days: days, excess: Math.round(excess) });
+    }
+  }
+  if (!flagged.length) return null;
+  flagged.sort((a, b) => b.excess - a.excess);
+  return { channels: flagged, excess_total: flagged.reduce((a, c) => a + c.excess, 0) };
+}
+
 async function ga4LandingPages(ctx, propertyId, range) {
   const rows = await ga4Report(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
@@ -1140,6 +1192,17 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
         cur_clicks: brandCurClicks,
         prev_clicks: brandPrevClicks,
         share_cur: curTotals.clicks > 0 ? round4(brandCurClicks / curTotals.clicks) : null,
+        // 非品牌口径是我方工作盘（2026-10-05 客户汇报框架）：数字先算好放进 pack，
+        // 铁律禁止模型自行做减法，不给这几个字段它就没法按非品牌口径解读点击变化。
+        nonbrand_cur_clicks: Math.max(0, (curTotals.clicks || 0) - brandCurClicks),
+        nonbrand_prev_clicks: Math.max(0, (prevTotals.clicks || 0) - brandPrevClicks),
+        nonbrand_clicks_delta_pct: round4(
+          pctDelta(
+            Math.max(0, (curTotals.clicks || 0) - brandCurClicks),
+            Math.max(0, (prevTotals.clicks || 0) - brandPrevClicks)
+          )
+        ),
+        brand_clicks_delta: absDelta(brandCurClicks, brandPrevClicks),
       },
       top_queries: curQueryRows
         .slice()
@@ -1181,6 +1244,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const prevEv = await ga4ChannelEvents(ctx, ga4Property, per.compare, wantEvents);
     const curLp = await ga4LandingPages(ctx, ga4Property, per);
     const prevLp = await ga4LandingPages(ctx, ga4Property, per.compare);
+    const curDaily = await ga4DailyChannelSessions(ctx, ga4Property, per);
+    const prevDaily = await ga4DailyChannelSessions(ctx, ga4Property, per.compare);
     ga4Coverage = {
       cur: buildCoverage(per, await ga4DayCount(ctx, ga4Property, per)),
       prev: buildCoverage(per.compare, await ga4DayCount(ctx, ga4Property, per.compare)),
@@ -1232,6 +1297,40 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
 
     ecom = await ga4Ecommerce(ctx, ga4Property, per, say);
     if (ecom) inputs.ga4_calls += 1;
+    inputs.ga4_calls += 2;
+
+    // 基数异常：本期与对比期分别检测。对比期有异常时给出剔除后的全渠道环比，
+    // 叙事层按铁律必须用剔除后口径描述全渠道变化。数字都放进 pack，模型只许照抄。
+    let anomaly = null;
+    const curAnom = detectDailyAnomalies(curDaily);
+    const prevAnom = detectDailyAnomalies(prevDaily);
+    if (curAnom || prevAnom) {
+      const curTotalAll = curCh.reduce((a, r) => a + r.sessions, 0);
+      const prevTotalAll = prevCh.reduce((a, r) => a + r.sessions, 0);
+      const curAdj = curTotalAll - (curAnom ? curAnom.excess_total : 0);
+      const prevAdj = prevTotalAll - (prevAnom ? prevAnom.excess_total : 0);
+      anomaly = {
+        cur: curAnom,
+        prev: prevAnom,
+        all_sessions_cur_adjusted: curAdj,
+        all_sessions_prev_adjusted: prevAdj,
+        all_sessions_adj_delta_pct: round4(pctDelta(curAdj, prevAdj)),
+        note:
+          (prevAnom
+            ? '对比期 ' + prevAnom.channels.map((c) => c.channel + ' 有 ' + c.spike_days + ' 天异常流量约 ' + c.excess + ' 次').join('、') + '。'
+            : '') +
+          (curAnom
+            ? '本期 ' + curAnom.channels.map((c) => c.channel + ' 有 ' + c.spike_days + ' 天异常流量约 ' + c.excess + ' 次').join('、') + '。'
+            : ''),
+      };
+      say(
+        'ga4: 日级基数异常命中（' +
+          (prevAnom ? '对比期剔除 ' + prevAnom.excess_total + ' 次' : '') +
+          (curAnom ? (prevAnom ? '，' : '') + '本期剔除 ' + curAnom.excess_total + ' 次' : '') +
+          '），剔除后全渠道环比 ' + (anomaly.all_sessions_adj_delta_pct === null ? '不可算' : (anomaly.all_sessions_adj_delta_pct * 100).toFixed(1) + '%')
+      );
+      gaps.push('流量基数含异常天，全渠道环比以剔除异常后的口径为准（见 ga4.anomaly）');
+    }
 
     ga4 = {
       organic: {
@@ -1248,6 +1347,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       },
       channels: merged.channels,
       channels_total: merged.total,
+      anomaly,
       funnel: {
         steps: [
           { key: 'sessions', label: '自然搜索访问', cur: organicCur.sessions, prev: organicPrev.sessions },

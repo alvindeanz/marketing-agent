@@ -20,7 +20,9 @@ const TEMPLATE_DIR = path.join(__dirname, '..', 'specs', 'report');
 // 漏斗三步的配色，与模板里 nth-child 的顶边颜色一致。
 const FUNNEL_COLORS = ['#8b5cf6', '#06b6d4', '#10b981'];
 const GREEN = '#16a34a';
-const RED = '#dc2626';
+const AMBER = '#d97706';
+/* 对客报告坏消息走琥珀不用红（既有交付规矩，2026-10-05 落进渲染层）：
+   负向环比一律 AMBER，红色保留给真正的错误态，当前渲染层不再输出 #dc2626。 */
 const MUTED = 'var(--muted)';
 const BLUE = '#2563eb';
 
@@ -175,7 +177,7 @@ function deltaCount(cur, prev) {
   const pct = (c - p) / p;
   if (c === p) return { text: '持平', color: MUTED };
   const sign = pct > 0 ? '+' : '';
-  return { text: sign + (pct * 100).toFixed(1) + '%', color: pct > 0 ? GREEN : RED };
+  return { text: sign + (pct * 100).toFixed(1) + '%', color: pct > 0 ? GREEN : AMBER };
 }
 
 /** 位次环比。数值变小是提升，一律写「提升 N 位」，绝不写收紧。 */
@@ -188,7 +190,7 @@ function deltaPosition(cur, prev) {
   const d = c - p;
   if (Math.abs(d) < 0.05) return { text: '基本持平', color: MUTED };
   if (d < 0) return { text: '提升 ' + Math.abs(d).toFixed(1) + ' 位', color: GREEN };
-  return { text: '回落 ' + d.toFixed(1) + ' 位', color: RED };
+  return { text: '回落 ' + d.toFixed(1) + ' 位', color: AMBER };
 }
 
 /** 比例类环比，用百分点。 */
@@ -199,7 +201,7 @@ function deltaPp(cur, prev) {
   const d = (c - p) * 100;
   if (Math.abs(d) < 0.05) return { text: '基本持平', color: MUTED };
   const sign = d > 0 ? '+' : '';
-  return { text: sign + d.toFixed(1) + ' 个百分点', color: d > 0 ? GREEN : RED };
+  return { text: sign + d.toFixed(1) + ' 个百分点', color: d > 0 ? GREEN : AMBER };
 }
 
 /** 四至八字的短评，给漏斗对比表用，确定性生成，不经模型。 */
@@ -505,8 +507,8 @@ function buildRankDist(pack) {
     let deltaColor = MUTED;
     if (diff !== 0) {
       deltaText = (diff > 0 ? '+' : '') + diff;
-      if (d.good === 'up') deltaColor = diff > 0 ? GREEN : RED;
-      else if (d.good === 'down') deltaColor = diff > 0 ? RED : GREEN;
+      if (d.good === 'up') deltaColor = diff > 0 ? GREEN : AMBER;
+      else if (d.good === 'down') deltaColor = diff > 0 ? AMBER : GREEN;
     }
     return {
       label: d.label,
@@ -631,7 +633,24 @@ function buildFunnel(pack) {
 
 function buildKeywordRows(pack) {
   const rows = ((pack.rankings && pack.rankings.rows) || []).slice();
-  rows.sort((a, b) => (a.is_brand === b.is_brand ? 0 : a.is_brand ? -1 : 1));
+  /* 词表好到差排（既有交付规矩，2026-10-05 落进渲染层）：品牌词置顶后，
+     提升幅度大的在前，新进榜次之，持平再次，回落靠后且小回落在前，无曝光垫底。 */
+  const tier = (r) => {
+    if (r.pos !== null && r.prev_pos === null) return 1; // 新进榜
+    if (r.delta === null) return 4; // 本月无曝光
+    if (r.delta < -0.05) return 0; // 提升
+    if (r.delta > 0.05) return 3; // 回落
+    return 2; // 持平
+  };
+  rows.sort((a, b) => {
+    if (a.is_brand !== b.is_brand) return a.is_brand ? -1 : 1;
+    const ta = tier(a);
+    const tb = tier(b);
+    if (ta !== tb) return ta - tb;
+    if (ta === 0) return a.delta - b.delta; // 提升幅度大的在前（delta 更负）
+    if (ta === 3) return a.delta - b.delta; // 回落小的在前
+    return (b.impressions || 0) - (a.impressions || 0);
+  });
   return rows.map((r) => {
     let posColor = MUTED;
     if (r.band === 'top10') posColor = GREEN;
@@ -648,7 +667,7 @@ function buildKeywordRows(pack) {
         deltaColor = GREEN;
       } else {
         deltaText = '回落 ' + r.delta.toFixed(1) + ' 位';
-        deltaColor = RED;
+        deltaColor = AMBER;
       }
     }
     return {

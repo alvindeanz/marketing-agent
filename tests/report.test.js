@@ -900,7 +900,7 @@ t('buildRankDist：四档计数、对照与占比条', () => {
   assert.strictEqual(none.count, 1);
   assert.strictEqual(none.prev_count, 0);
   assert.strictEqual(none.delta_text, '+1');
-  assert.strictEqual(none.delta_color, '#dc2626');
+  assert.strictEqual(none.delta_color, '#d97706');
   assert.ok(Math.abs(top10.width_pct - 66.7) < 0.01);
 });
 t('buildRankDist：词表为空整块不出', () => {

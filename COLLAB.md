@@ -20,6 +20,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-05 AIRA (t) 客户汇报框架四层落产线：基数异常检测 + 非品牌口径 + 坏消息琥珀 + 报告审核官
+
+- 干了什么：Alvin 定「报告要能避重就轻但不许造假，且走流程不走人手」。①数据层 factspack：GA4 日级基数异常检测（渠道日值超 max(4 倍中位数, 中位数+80) 记异常日，渠道异常量不足 max(15%,300) 不标），pack 落 ga4.anomaly 含剔除后全渠道环比；gsc.brand 补 nonbrand_* 与 brand_clicks_delta（铁律禁模型做算术，数字必须先进 pack）。②叙事层 prompt 增「客户汇报框架」条款：坏指标单点出现（lintRepeatedDecline 阈 2 进 validateNarrative 回喂）、hero 至多一个负向、大盘波动不背锅、异常期必须用剔除口径、非品牌先行、CTR 稀释结构效应解释。③渲染层：负向环比全量 RED 改 AMBER（落实「坏消息琥珀不用红」既有规矩），模板 --red 变量值改琥珀；词表好到差排进 buildKeywordRows（既有规矩落码）；lint 新增 red_delta（成品禁 #dc2626）。④审核位 lib/reportreview.js：渲染后 opus 按 specs/report/client_reporting_frame.md 审成品取景与立场，意见回喂叙事层重出至多一轮，审核失败不挡交付；config 加 reportReviewModel。tests 118 过全绿（含 1 处颜色断言同步）。
+- 坑：①narrative_status 是 DB ENUM('ok','fallback')，审核痕迹只能进 note，写新枚举值会被 MariaDB 静默截空（CLAUDE.md ENUM 坑第三例）；②red_delta lint 会命中模板 CSS 变量定义，禁色要连模板变量一起改，光改渲染函数过不了自己的 lint；③repeated_decline 只能查叙事层，纯数据渲染的数字块与对比表结构性重复是合法的，整页计数会把 fallback 版打死。
+- 下一步/认领：待部署（worker）。sungait 2026-09 v2 作为流程首跑验证。
 ### 2026-10-04 AIRA (s) chat /resume 修通 + /stop 双语义撞车收口（midea 死锁实证）
 
 - 干了什么：midea 频道死锁定位：monica 手滑消息想停本轮回复发 /stop，吃到的是全客户止损闩，而前端输入框只放行 /reset 与 /stop，/resume 根本发不到服务端（服务端 /resume 一直是好的），闩落了没人解得开。三处修：①前端 /resume 直通服务端并更新命令提示与 /stop 的 toast 文案；②服务端止损闩 /stop 分支并入轻刹车：在跑 job 打 cancel_requested（listener 约 15 秒杀子进程），不再「只能等跑完」；③删掉 ticket #10 的独立 /stop 分支：止损闩正则在前先吞一切 /stop，该分支从上线起是死代码，其 cancel_requested 链路借此复活。node tests 全绿；php -l 走 deploy 远端闸。
