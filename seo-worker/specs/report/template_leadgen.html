@@ -214,7 +214,7 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 <section id="channels">
 <div class="wrap">
   <div class="stag">Section {{sec_channels_num}}</div>
-  <div class="sec-head"><span class="sec-num">{{sec_channels_num}}</span><h2 class="stitle">全渠道流量与询盘（SEO 效果对照）</h2></div>
+  <div class="sec-head"><span class="sec-num">{{sec_channels_num}}</span><h2 class="stitle">全渠道流量与{{lead_word}}（SEO 效果对照）</h2></div>
   <p class="sdesc">{{{channels_sdesc}}}</p>
 
   <div class="g3">
@@ -225,7 +225,7 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 
   <div class="card" style="padding:0;overflow:hidden;margin-top:16px">
     <table class="tbl">
-      <thead><tr><th>渠道</th><th style="text-align:right">{{period_short}}访问</th><th style="text-align:right">{{period_short}}询盘</th><th style="text-align:right">询盘占比</th></tr></thead>
+      <thead><tr><th>渠道</th><th style="text-align:right">{{period_short}}访问</th><th style="text-align:right">{{period_short}}{{lead_word}}</th><th style="text-align:right">{{lead_word}}占比</th></tr></thead>
       <tbody>
         <!-- row:channel_row（按本期访问降序；organic 行 is_organic=true 高亮紫底；末行 is_muted=true 灰化聚合「其他」） -->
         {{#channel_rows}}
@@ -251,7 +251,7 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 <section id="funnel">
 <div class="wrap">
   <div class="stag">Section {{sec_funnel_num}}</div>
-  <div class="sec-head"><span class="sec-num">{{sec_funnel_num}}</span><h2 class="stitle">询盘转化漏斗</h2></div>
+  <div class="sec-head"><span class="sec-num">{{sec_funnel_num}}</span><h2 class="stitle">{{funnel_title}}</h2></div>
   <p class="sdesc">{{{funnel_sdesc}}}</p>
 
   <div class="funnel-wrap">
@@ -516,7 +516,7 @@ function linearRegression(data) {
   return data.map((_, x) => Math.round(intercept + slope * x));
 }
 
-const trendData = linearRegression(sessionsGG);
+const trendData = linearRegression(sessionsGG).map((v) => Math.max(0, v)); // 趋势线不穿零轴（2026-10-05 客户汇报框架）
 
 new Chart(document.getElementById('sessionsChart'),{
   type:'bar',

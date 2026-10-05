@@ -38,6 +38,7 @@ const KPI_DEFS = {
   leads: { label: '自然搜索询盘', dir: 'up', kind: 'int' },
   lead_rate: { label: '访问到询盘转化率', dir: 'up', kind: 'pct' },
   channels_sessions: { label: '全渠道访问', dir: 'up', kind: 'int' },
+  organic_purchases: { label: '自然渠道订单', dir: 'up', kind: 'int' },
 };
 const DEFAULT_KPI_KEYS = ['gsc_clicks', 'ga4_sessions_organic', 'leads', 'gsc_position'];
 
@@ -254,6 +255,11 @@ function kpiValues(pack, key) {
       };
     case 'channels_sessions':
       return tot ? { cur: tot.sessions, prev: tot.prev_sessions } : null;
+    case 'organic_purchases': {
+      const ec = pack.ga4 && pack.ga4.ecommerce;
+      if (!ec || !ec.cur || !ec.prev) return null;
+      return { cur: ec.cur.purchases, prev: ec.prev.purchases };
+    }
     default:
       return null;
   }
@@ -450,10 +456,13 @@ function buildHeroKpis(pack, narrative) {
 }
 
 function buildGa4Cards(pack) {
+  // 电商客户的第三张卡放订单不放询盘（2026-10-05 客户汇报框架：电商不考核询盘）。
+  // 对比期电商数缺失时 organic_purchases 回 null，卡位自动退回询盘。
+  const isEcom = pack.meta && pack.meta.biz_type === 'ecommerce' && kpiValues(pack, 'organic_purchases');
   const order = [
     'ga4_sessions_organic',
     'ga4_new_users',
-    'leads',
+    isEcom ? 'organic_purchases' : 'leads',
     'gsc_clicks',
     'gsc_impressions',
     'gsc_position',
@@ -620,7 +629,7 @@ function buildFunnel(pack) {
     const prevRate = basePrev > 0 ? Number(last.prev) / basePrev : null;
     const d = deltaPp(curRate, prevRate);
     rows.push({
-      metric: '访问到询盘转化率',
+      metric: '访问到' + String(last.label || '询盘') + '转化率',
       prev_value: prevRate === null ? '待更新' : fmtPct(prevRate, 2),
       value: curRate === null ? '待更新' : fmtPct(curRate, 2),
       delta: d.text,
@@ -814,6 +823,26 @@ function collapseLoneGrids(html) {
   return out;
 }
 
+/** 电商客户的订单与客单价 callout，确定性生成不经模型。对比期缺数就不出。 */
+function buildAovCallout(pack, isEcom) {
+  if (!isEcom) return null;
+  const ec = pack.ga4 && pack.ga4.ecommerce;
+  if (!ec || !ec.cur || !ec.prev) return null;
+  const cur = ec.cur;
+  const prev = ec.prev;
+  const all = ec.all || {};
+  const aov = cur.purchases > 0 ? cur.revenue / cur.purchases : null;
+  const d = deltaCount(cur.purchases, prev.purchases);
+  const parts = [
+    '本期自然搜索带来订单 ' + fmtInt(cur.purchases) + ' 笔（上期 ' + fmtInt(prev.purchases) + ' 笔，' + d.text + '），订单金额 ' + Number(cur.revenue || 0).toFixed(2) + '。',
+  ];
+  if (aov !== null) parts.push('自然渠道客单价 ' + aov.toFixed(2) + '。');
+  if (all.purchases) {
+    parts.push('同期全站订单 ' + fmtInt(all.purchases) + ' 笔，金额 ' + Number(all.revenue || 0).toFixed(2) + '，自然渠道占订单数的 ' + ((cur.purchases / all.purchases) * 100).toFixed(1) + '%。');
+  }
+  return { title: '自然渠道订单与客单价', body_html: '<p>' + parts.join('') + '</p>' };
+}
+
 // ---------------------------------------------------------------------------
 // 主入口
 // ---------------------------------------------------------------------------
@@ -837,6 +866,9 @@ function renderReport(pack, narrative, opts = {}) {
   if (!pack || !pack.meta) throw new Error('renderReport 拿到的 pack 没有 meta，数据层没跑通');
   const n = narrative || null;
   const meta = pack.meta;
+  // 电商客户全篇不说「询盘」（2026-10-05 客户汇报框架：报告语言匹配生意形态）。
+  const isEcom = meta.biz_type === 'ecommerce' && pack.ga4 && pack.ga4.funnel && pack.ga4.funnel.kind === 'ecommerce';
+  const leadWord = isEcom ? '转化' : '询盘';
   const ga4Cards = buildGa4Cards(pack);
   const channels = buildChannelRows(pack);
   const funnel = buildFunnel(pack);
@@ -892,12 +924,14 @@ function renderReport(pack, narrative, opts = {}) {
     nav_items: [
       { anchor: 'ga4', label: '流量概览' },
       { anchor: 'channels', label: '全渠道' },
-      { anchor: 'funnel', label: '询盘漏斗' },
+      { anchor: 'funnel', label: isEcom ? '转化漏斗' : '询盘漏斗' },
       { anchor: 'rankings', label: '关键词排名' },
       { anchor: 'pages', label: '重点页面' },
       { anchor: 'work', label: '本期工作' },
       { anchor: 'next', label: '下期计划' },
     ],
+    lead_word: leadWord,
+    funnel_title: isEcom ? '转化漏斗（访问到下单）' : '询盘转化漏斗',
     sec_ga4_num: 1,
     sec_channels_num: 2,
     sec_funnel_num: 3,
@@ -912,11 +946,13 @@ function renderReport(pack, narrative, opts = {}) {
     ga4_callouts: calloutList(n && n.ga4_callouts, ['green', 'yellow']),
     trend_range_label: hasTrend ? trend.months[0] + ' 至 ' + trend.months[trend.months.length - 1] : '待更新',
     trend_subtitle: hasTrend
-      ? '按自然月汇总' + (trend.last_partial ? '，最后一个月为本月未结束的实际值' : '')
+      ? '按自然月汇总' +
+        (trend.data_from ? '，数据自 ' + trend.data_from + ' 起有记录' : '') +
+        (trend.last_partial ? '，最后一个月为本月未结束的实际值' : '')
       : '历史趋势数据待更新',
 
     channels_sdesc: paragraphs(
-      sdesc('channels_sdesc', '本节按 GA4 默认渠道分组统计全渠道访问与询盘，对比 ' + meta.compare.label + '。')
+      sdesc('channels_sdesc', '本节按 GA4 默认渠道分组统计全渠道访问与' + leadWord + '，对比 ' + meta.compare.label + '。')
     ),
     channel_kpis: buildChannelKpis(pack),
     channel_rows: channels.rows,
@@ -931,16 +967,18 @@ function renderReport(pack, narrative, opts = {}) {
     funnel_sdesc: paragraphs(
       sdesc(
         'funnel_sdesc',
-        '漏斗按自然搜索访问、开始填写表单、询盘三步统计，询盘按 ' + meta.leads_source + ' 计入。' +
-          (meta.leads_override !== null && meta.leads_override !== undefined
-            ? '本期询盘总数按后台实收计入。'
-            : '')
+        isEcom
+          ? '漏斗按自然搜索访问、加入购物车、发起结账、完成订单四步统计，数据来自网站分析的电商事件。'
+          : '漏斗按自然搜索访问、开始填写表单、询盘三步统计，询盘按 ' + meta.leads_source + ' 计入。' +
+            (meta.leads_override !== null && meta.leads_override !== undefined
+              ? '本期询盘总数按后台实收计入。'
+              : '')
       )
     ),
     funnel_steps: funnel.steps,
     funnel_callouts: calloutList(n && n.funnel_callouts, ['green', 'yellow']),
     funnel_compare_rows: funnel.rows,
-    aov_callout: null,
+    aov_callout: buildAovCallout(pack, isEcom),
 
     rankings_sdesc: paragraphs(
       sdesc(

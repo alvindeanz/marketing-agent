@@ -478,11 +478,18 @@ t('monthlySum 按自然月求和且忽略坏日期', () => {
   assert.strictEqual(m.get('2026-07'), 15);
   assert.strictEqual(m.get('2026-08'), 2);
 });
-t('buildTrend 缺的月补 0 保持等长', () => {
-  const tr = F.buildTrend({ gsc_clicks: [{ d: '2026-07-05', v: 7 }] }, ['2026-06', '2026-07'], true);
-  assert.deepStrictEqual(tr.gsc_clicks, [0, 7]);
-  assert.deepStrictEqual(tr.ga4_sessions_organic, [0, 0]);
+t('buildTrend 中间缺的月补 0，开头全 0 的空月裁掉并记 data_from', () => {
+  const tr = F.buildTrend(
+    { gsc_clicks: [{ d: '2026-07-05', v: 7 }, { d: '2026-09-02', v: 3 }] },
+    ['2026-06', '2026-07', '2026-08', '2026-09'],
+    true
+  );
+  assert.deepStrictEqual(tr.months, ['2026-07', '2026-08', '2026-09']);
+  assert.deepStrictEqual(tr.gsc_clicks, [7, 0, 3]);
+  assert.strictEqual(tr.data_from, '2026-07');
   assert.strictEqual(tr.last_partial, true);
+  const full = F.buildTrend({ gsc_clicks: [{ d: '2026-06-05', v: 2 }] }, ['2026-06', '2026-07'], false);
+  assert.strictEqual(full.data_from, null, '开头就有数据时不标 data_from');
 });
 
 /* ---------- facts 过滤 ---------- */

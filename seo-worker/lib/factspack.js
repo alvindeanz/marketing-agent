@@ -598,11 +598,25 @@ function buildTrend(metrics, months, lastPartial) {
   const m = metrics || {};
   const clicks = monthlySum(m.gsc_clicks);
   const sessions = monthlySum(m.ga4_sessions_organic);
+  let keep = months.slice();
+  let clickVals = keep.map((k) => clicks.get(k) || 0);
+  let sessVals = keep.map((k) => sessions.get(k) || 0);
+  // 裁掉开头两个口径都为 0 的月份（2026-10-05 客户汇报框架）：数据源接入前的
+  // 空月画出来是九根空柱加一条穿零轴的趋势线，客户只会觉得图坏了。
+  let from = 0;
+  while (from < keep.length - 1 && clickVals[from] === 0 && sessVals[from] === 0) from += 1;
+  const trimmed = from > 0;
+  if (trimmed) {
+    keep = keep.slice(from);
+    clickVals = clickVals.slice(from);
+    sessVals = sessVals.slice(from);
+  }
   return {
-    months: months.slice(),
-    gsc_clicks: months.map((k) => clicks.get(k) || 0),
-    ga4_sessions_organic: months.map((k) => sessions.get(k) || 0),
+    months: keep,
+    gsc_clicks: clickVals,
+    ga4_sessions_organic: sessVals,
     last_partial: !!lastPartial,
+    data_from: trimmed ? keep[0] : null,
   };
 }
 
@@ -1297,6 +1311,9 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
 
     ecom = await ga4Ecommerce(ctx, ga4Property, per, say);
     if (ecom) inputs.ga4_calls += 1;
+    // 电商客户的漏斗与订单卡要环比，对比期的电商数也拉一份（属性没开电商时同样回 null）。
+    const ecomPrev = ecom ? await ga4Ecommerce(ctx, ga4Property, per.compare, say) : null;
+    if (ecomPrev) inputs.ga4_calls += 1;
     inputs.ga4_calls += 2;
 
     // 基数异常：本期与对比期分别检测。对比期有异常时给出剔除后的全渠道环比，
@@ -1383,6 +1400,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       ga4.ecommerce = {
         cur: ecom.organic,
         all: ecom.all,
+        prev: ecomPrev ? ecomPrev.organic : null,
+        prev_all: ecomPrev ? ecomPrev.all : null,
       };
     } else {
       ga4.ecommerce = null;
@@ -1536,6 +1555,24 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   // ---- facts 与客户类型 ----
   const facts = factsForPrompt(context);
   const bizType = inferBizType(facts, ecom && ecom.all ? ecom.all.purchases : 0);
+  // 电商客户的漏斗按订单链路（2026-10-05 客户汇报框架：报告语言匹配生意形态，
+  // 电商客户不考核询盘）。表单型三步漏斗只留给 leadgen；对比期电商数缺失时
+  // 保持 leadgen 漏斗，等下期两头都有再切，避免整列「待更新」。
+  if (bizType === 'ecommerce' && ga4.ecommerce && ga4.ecommerce.prev) {
+    const ec = ga4.ecommerce.cur || {};
+    const ep = ga4.ecommerce.prev || {};
+    const orgNode = ga4.organic || {};
+    ga4.funnel = {
+      kind: 'ecommerce',
+      steps: [
+        { key: 'sessions', label: '自然搜索访问', cur: (orgNode.cur && orgNode.cur.sessions) || 0, prev: (orgNode.prev && orgNode.prev.sessions) || 0 },
+        { key: 'add_to_carts', label: '加入购物车', cur: ec.add_to_carts || 0, prev: ep.add_to_carts || 0 },
+        { key: 'checkouts', label: '发起结账', cur: ec.checkouts || 0, prev: ep.checkouts || 0 },
+        { key: 'purchases', label: '完成订单', cur: ec.purchases || 0, prev: ep.purchases || 0 },
+      ],
+      rates: [],
+    };
+  }
   const leadsOverride = parseLeadsOverride(opts.instructions);
   if (leadsOverride !== null) {
     say('instructions 指定询盘总数按后台实收 ' + leadsOverride + '，pack 记录覆盖值');

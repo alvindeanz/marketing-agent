@@ -20,6 +20,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-05 AIRA (u) 报告电商形态分叉 + 趋势图空月裁剪（sungait 续约视角复盘，Alvin 圈图实证）
+
+- 干了什么：Alvin 拿 sungait v2 当客户看后圈出两处硬伤：电商客户整篇在考核「询盘」（leadgen 模板套电商），趋势图九根空柱加穿零轴趋势线像坏图。修：①factspack 电商漏斗四步（访问、加购、结账、下单，biz_type=ecommerce 且对比期电商数在手才切，缺数留 leadgen 漏斗防整列待更新）；电商对比期取数补拉；buildTrend 裁开头全零空月并记 data_from。②渲染层 lead_word/funnel_title 参数化（电商全篇「转化/订单」零「询盘」），第三卡电商放自然渠道订单（organic_purchases KPI），AOV callout 确定性生成（订单、金额、客单价、自然占比），趋势副标题标「数据自 X 起有记录」，趋势线 clamp 零轴。③叙事铁律 9 电商版（禁「询盘」「线索」二词）加框架条款（订单链路为核心口径）。④审核清单补第 9 条：报告语言必须匹配生意形态，图表不得有空数据段或穿零轴线。tests 全绿（buildTrend 断言改为裁剪语义）。
+- 坑：①biz_type 在 GA4 块之后才算出，电商漏斗重建要放 bizType 之后覆写 ga4.funnel，别试图在 GA4 块内判断；②模板 if:ecommerce 注释块是摆设，真正的开关是渲染层喂不喂数据（aov_callout 为 null 整块不出）；③narrative numbersFromPack 自动收录 pack 新字段，电商数字进 pack 后叙事即可引用，不用动校验。
+- 下一步/认领：待部署（worker），sungait 出 v3 验证。
 ### 2026-10-05 AIRA (t) 客户汇报框架四层落产线：基数异常检测 + 非品牌口径 + 坏消息琥珀 + 报告审核官
 
 - 干了什么：Alvin 定「报告要能避重就轻但不许造假，且走流程不走人手」。①数据层 factspack：GA4 日级基数异常检测（渠道日值超 max(4 倍中位数, 中位数+80) 记异常日，渠道异常量不足 max(15%,300) 不标），pack 落 ga4.anomaly 含剔除后全渠道环比；gsc.brand 补 nonbrand_* 与 brand_clicks_delta（铁律禁模型做算术，数字必须先进 pack）。②叙事层 prompt 增「客户汇报框架」条款：坏指标单点出现（lintRepeatedDecline 阈 2 进 validateNarrative 回喂）、hero 至多一个负向、大盘波动不背锅、异常期必须用剔除口径、非品牌先行、CTR 稀释结构效应解释。③渲染层：负向环比全量 RED 改 AMBER（落实「坏消息琥珀不用红」既有规矩），模板 --red 变量值改琥珀；词表好到差排进 buildKeywordRows（既有规矩落码）；lint 新增 red_delta（成品禁 #dc2626）。④审核位 lib/reportreview.js：渲染后 opus 按 specs/report/client_reporting_frame.md 审成品取景与立场，意见回喂叙事层重出至多一轮，审核失败不挡交付；config 加 reportReviewModel。tests 118 过全绿（含 1 处颜色断言同步）。

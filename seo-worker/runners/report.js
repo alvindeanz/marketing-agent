@@ -53,7 +53,11 @@ function headerBlock(pack) {
     '6. 不写绝对化（永远、唯一、只有、没人）、不承诺具体排名或数值结果、建议必须是我方可执行的。',
     '7. 反向指标不藏、不淡化、不甩外因，每个坏消息紧跟一条下月可执行的抓手。',
     '8. 工作内容写成果不写过程：写「优化了 N 个页面」，不写任务编号、脚本、模型。',
-    '9. 统一用「询盘」不用「线索」；语言按 ' + meta.report_lang + '（zh 写中文，en 写英文）。',
+    '9. ' +
+      (pack.meta.biz_type === 'ecommerce'
+        ? '这是电商客户：全篇统一用「订单」「转化」，一次都不出现「询盘」「线索」二词。'
+        : '统一用「询盘」不用「线索」。') +
+      '语言按 ' + meta.report_lang + '（zh 写中文，en 写英文）。',
     '10. 这份报告是向客户汇报工作的：本月做了什么要写足写具体，数据变化要与我方动作对应起来说，让客户看到投入和成果。',
   ];
   if (meta.period.rolling) {
@@ -77,6 +81,9 @@ function headerBlock(pack) {
   // 但叙事取景以我方工作盘为主、坏消息带台阶，不替别的渠道背锅，不重复渲染同一个坏数。
   const frame = [
     '坏指标单点出现：同一个下跌的数字全文只写一次，写它的那一处必须紧跟原因与下月抓手；其他小节再涉及该指标只写方向，不再重复数字。',
+    pack.meta.biz_type === 'ecommerce'
+      ? '报告语言匹配生意形态：这是电商客户，漏斗按访问、加购、结账、下单的订单链路解读，funnel 两条 callout 都围绕下单转化写，订单与金额是本报告的核心成果口径。'
+      : null,
     'hero_kpi_keys 四个里至多一个负向指标，招牌位优先放我方可控且向好的指标；hero_headline 永远是正向信号。',
     '非自然渠道的大盘波动（如直接访问、付费渠道的涨跌）只进统计说明，不作招牌结论：那不是 SEO 工作的盘，既不邀功也不背锅。',
   ];
@@ -100,7 +107,7 @@ function headerBlock(pack) {
   let no = 13;
   lines.push('');
   lines.push('客户汇报框架（与铁律同级，逐条遵守）：');
-  for (const f of frame) lines.push(no++ + '. ' + f);
+  for (const f of frame.filter(Boolean)) lines.push(no++ + '. ' + f);
   return lines.join('\n');
 }
 
