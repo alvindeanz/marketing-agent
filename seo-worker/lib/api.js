@@ -272,6 +272,17 @@ class Api {
   }
 
   /**
+   * POST /tasks/{id}/premise_revision -> { ok, job_id }
+   * 前提冲突自愈（2026-10-05 ticket #16）：execute 核验发现任务书前提被平台真值推翻、
+   * 且目标在修订后前提下仍可达时，由服务端把修订块写进任务书并重排一轮 prepare。
+   * 一单只许自愈一次（服务端按 [前提修订] 标记闸），二次冲突 409，调用方走老路停人。
+   * body: { revised, reason, fact_key?, job_id }，job_id 用于排重时排除本 job 自己。
+   */
+  async premiseRevision(taskId, body) {
+    return this.req('POST', '/tasks/' + encodeURIComponent(taskId) + '/premise_revision', body || {});
+  }
+
+  /**
    * GET /inbox/{id} -> { item, replies, ref_tasks }
    * One decision inbox row plus the task rows its refs point at. This is the
    * only read the ruling runner needs: it never enumerates the board.

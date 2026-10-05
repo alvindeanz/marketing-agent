@@ -317,6 +317,43 @@ t('readTargetUrls 解析不出来给空数组，不打回方案', () => {
   assert.deepStrictEqual(E.readTargetUrls('```json\n{不是合法 json}\n```'), []);
   assert.deepStrictEqual(E.readTargetUrls('```json\n{"target_urls":"https://a.co/x/"}\n```'), ['https://a.co/x/']);
 });
+/* ---------- 前提冲突自愈（2026-10-05 ticket #16） ---------- */
+section('前提冲突自愈 premise_revision');
+t('readPremiseRevision 取全字段并裁剪', () => {
+  const plan = '# 方案\n\n核验证据\n\n```json\n' +
+    JSON.stringify({ items: [], premise_revision: {
+      revised: '接受最终网址扩展漂移，新素材组照建',
+      reason: 'final URL expansion 是 campaign 级开关，无法按 asset group 排除（本次 GAQL 实测）',
+      fact_key: 'platform.googleads.final_url_expansion_scope',
+      fact_value: 'campaign 级开关，不能按 asset group 关闭',
+    } }) + '\n```';
+  const pr = E.readPremiseRevision(plan);
+  assert.ok(pr, '该解析出来');
+  assert.strictEqual(pr.revised, '接受最终网址扩展漂移，新素材组照建');
+  assert.strictEqual(pr.factKey, 'platform.googleads.final_url_expansion_scope');
+});
+t('readPremiseRevision 字段缺失、超长或类型不对一律 null（自愈是捷径不是义务）', () => {
+  assert.strictEqual(E.readPremiseRevision('# 方案\n```json\n{"items":[]}\n```'), null, '没有字段');
+  assert.strictEqual(E.readPremiseRevision('```json\n{"premise_revision":"选B"}\n```'), null, '不是对象');
+  assert.strictEqual(E.readPremiseRevision('```json\n{"premise_revision":{"revised":"只有修订没有理由"}}\n```'), null, '缺 reason');
+  const long = '```json\n' + JSON.stringify({ premise_revision: { revised: 'x'.repeat(401), reason: 'y' } }) + '\n```';
+  assert.strictEqual(E.readPremiseRevision(long), null, '超长拒收');
+  assert.strictEqual(E.readPremiseRevision('```json\n{"premise_revision":[{"revised":"a","reason":"b"}]}\n```'), null, '数组不收');
+});
+t('prepare prompt 带前提自愈契约与一单一次的闸', () => {
+  const p = E.buildPreparePrompt({
+    task: { id: 61, title: 't', detail: 'd', ops: 'final-url-change' },
+    brief: 'brief',
+    workspace: '/tmp/ws',
+    platform: 'googleads',
+    ops: ['final-url-change'],
+    credPath: '/tmp/none.md',
+    planFile: '/tmp/change-plan-task-61.md',
+  });
+  assert.ok(p.indexOf('premise_revision') > -1, '契约要进 prompt');
+  assert.ok(p.indexOf('[前提修订]') > -1, '一单一次的闸要写明');
+});
+
 t('buildTargetHeader 一行加分隔符，与 apply 头部同款', () => {
   assert.strictEqual(
     E.buildTargetHeader(['https://a.co/x/', 'https://b.co/y/']),

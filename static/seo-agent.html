@@ -503,7 +503,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           </div>
         </div>
         <div class="plan-meta" style="margin-bottom:10px">
-          直接打字聊这个客户的事：问数据、聊规划、贴截图。它只读，改不了看板任何一格；聊到能派的活它会附任务草案，你点「开工」才建任务并直接排产。急停发 <b>/stop</b>：立即撤光本客户排队任务、请求中断在跑任务（约 15 秒）并暂停一切自动落地与放行（不经模型，秒生效），恢复发 <b>/resume</b>。
+          直接打字聊这个客户的事：问数据、聊规划、贴截图。它只读，改不了看板任何一格。聊到能派的活分三层：只读核查当场答（不建任务）；产出类（报告、文档、博客草稿）指令即确认，自动排产不用点；动账户动线上的会附委托单卡，你点「开工」或回一句确认才启动。急停发 <b>/stop</b>：立即撤光本客户排队任务、请求中断在跑任务（约 15 秒）并暂停一切自动落地与放行（不经模型，秒生效），恢复发 <b>/resume</b>。
           你说到的客户事实（门店、政策、价格、联系人这类）会被自动抽取进该客户的档案，说话按可入档的标准来。
         </div>
         <div class="ch-hist hidden" id="chHist"></div>
@@ -2926,8 +2926,13 @@ function chSpawnedTitles(){
      开工按钮照常出现（2026-09-08 Ctomi #638 重建死循环的教训）。 */
   const map={};
   chatMsgs.forEach(m=>{
-    if(m.kind!=='chat_agent'||m.created_by==='seo-worker')return;
-    const mm=String(m.body||'').match(/^已(?:立项|开工) #(\d+)「([\s\S]+?)」/);
+    if(m.kind!=='chat_agent')return;
+    const s=String(m.body||'');
+    /* 人点按钮的回执由 admin 名义写（已开工/已立项）；快路直启的回执由 seo-worker 写
+       （已执行频道指令：已启动委托单 #N「标题」）。两种都认，否则直启过的卡
+       按钮还在，点了就是重复任务（2026-10-05 ticket #20）。 */
+    const mm=(m.created_by!=='seo-worker'?s.match(/^已(?:立项|开工) #(\d+)「([\s\S]+?)」/):null)
+      ||s.match(/^已执行频道指令：已启动委托单 #(\d+)「([\s\S]+?)」/);
     if(!mm)return;
     if(!map[mm[2]])map[mm[2]]=[];
     map[mm[2]].push({id:parseInt(mm[1],10),at:m.id});
@@ -2947,11 +2952,16 @@ function chDraftCard(msgId,idx,d,doneId){
   if(d.ops)rows.push('ops '+esc(d.ops));
   if(d.kind)rows.push('kind '+esc(d.kind));
   if(d.backing_fact)rows.push('批文 '+esc(d.backing_fact));
+  /* 三层口径（2026-10-05 ticket #20）：产出类（kind 非 change）免确认自动排产，按钮只是
+     没自动排上时的补排口；改动类的开工才是契约闸的确认动作本体。卡面照实说，别让按钮撒谎。 */
+  const isChange=(d.kind||'')==='change';
   const act=doneId
-    ? '<span class="badge done">已开工 #'+doneId+'</span>'+
+    ? '<span class="badge done">'+(isChange?'已开工':'已排产')+' #'+doneId+'</span>'+
       '<span class="sb-act" onclick="navTo('+curId+',\'tasks\')">去任务看板</span>'
-    : '<button class="btn tiny" id="ch_sp_'+key.replace(':','_')+'" onclick="spawnTask('+msgId+','+idx+')">开工</button>'+
-      '<span class="plan-meta">开工即排产：建任务并直接进执行队列（客户侧任务只挂看板），detail 末尾会带上来源行。</span>';
+    : '<button class="btn tiny" id="ch_sp_'+key.replace(':','_')+'" onclick="spawnTask('+msgId+','+idx+')">'+(isChange?'开工':'补排')+'</button>'+
+      '<span class="plan-meta">'+(isChange
+        ?'改动类契约闸：点开工=你确认启动，方案出来后按风险档自动落地或停放行卡。'
+        :'产出类免确认，正常由快路自动排产（不用点）；这个按钮只在没自动排上时补排，服务端防重不会建重复单。')+'</span>';
   return '<div class="ch-draft">'+
     '<div class="dt">委托单：'+esc(d.title||'')+'</div>'+
     (d.detail?'<div class="dd">'+esc(d.detail)+'</div>':'')+
@@ -3141,6 +3151,13 @@ async function spawnTask(msgId,idx){
     kind:d0.kind||'',backing_fact:d0.backing_fact||''
   });
   if(btn)btn.disabled=false;
+  /* 409 = 这张单已经启动过（多半是快路直启或别人先点了）。不是错误：把卡标回已排产即可。 */
+  if(d&&d._status===409&&d.task_id){
+    chatSpawned[msgId+':'+idx]=d.task_id;
+    toast('这张委托单已经启动过（#'+d.task_id+'），没有重复建');
+    await loadChatThread(false);
+    return;
+  }
   if(fail(d,'开工失败'))return;
   chatSpawned[msgId+':'+idx]=d.task_id;
   toast('已开工 #'+d.task_id+(d.job_id?'，已排产 job #'+d.job_id:'，已挂看板等客户动作'));

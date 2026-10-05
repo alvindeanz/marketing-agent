@@ -2944,6 +2944,51 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/revise$#',$ROUTE,$mm)){
     res(200,['ok'=>true,'job_id'=>$jid]);
 }
 
+/* POST /tasks/{id}/premise_revision -> 前提冲突自愈（2026-10-05 ticket #16）。
+   execute 核验发现任务书前提被平台真值推翻、但目标在修订后前提下仍可达时，不再交一份
+   干等人的无变更方案：服务端把修订块写进任务书 detail 并重排一轮 execute_task。
+   窄权设计与 /revise 同族：worker 不能随便建 job，只能请求这一种定式动作。
+   闸：一单只许自愈一次（detail 里的 [前提修订] 标记即计数器，DB 单行状态多 worker 安全）；
+   任务必须在 approved/review（执行链路内），终态与人工位不收。修订版方案照旧走放行官。 */
+if($m==='POST'&&preg_match('#^/tasks/(\d+)/premise_revision$#',$ROUTE,$mm)){
+    auth_worker();
+    $tid=(int)$mm[1];
+    $i=input();
+    $g=db()->prepare("SELECT id,client_id,status,detail,owner_type FROM seo_tasks WHERE id=?");
+    $g->execute([$tid]);
+    $task=$g->fetch();
+    if(!$task)res(404,['error'=>'Task not found']);
+    if(!in_array($task['status'],['approved','review'],true))res(400,['error'=>'Task is not in approved/review, premise revision only applies inside the execute lane']);
+    if($task['owner_type']==='client')res(400,['error'=>'Client-owned task, nothing to re-run']);
+    if(strpos((string)$task['detail'],'[前提修订')!==false)res(409,['error'=>'已自愈过一次，第二次前提冲突停人（任务书里已有 [前提修订] 标记）']);
+    $revised=mb_substr(trim((string)($i['revised']??'')),0,400,'UTF-8');
+    $reason=mb_substr(trim((string)($i['reason']??'')),0,400,'UTF-8');
+    $factKey=mb_substr(trim((string)($i['fact_key']??'')),0,120,'UTF-8');
+    $srcJob=(int)($i['job_id']??0);
+    if($revised===''||$reason==='')res(400,['error'=>'revised 与 reason 必填']);
+    $cid=(int)$task['client_id'];
+    /* 排重先于写入（写了标记再 409 会把这单永久锁死）：同客户已有 execute 在排/在跑就 409，
+       但要排除发起本次自愈的那个 job（它此刻还是 running，不排除就永远 409）。 */
+    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type='execute_task' AND status IN('queued','running') AND id<>? LIMIT 1");
+    $dup->execute([$cid,$srcJob]);
+    $d=$dup->fetch();
+    if($d)res(409,['error'=>'execute_task already queued or running','job_id'=>(int)$d['id']]);
+    $block="\n\n[前提修订 ·auto ".gmdate('Y-m-d')."] 原前提被平台真值推翻：".$reason
+        ."。修订后前提：".$revised
+        .($factKey!==''?"。平台真值已记 fact ".$factKey:'')
+        ."。来源 job #".$srcJob."，由前提冲突自愈流写入，修订版方案照旧走放行官。";
+    $updP=db()->prepare("UPDATE seo_tasks SET detail=CONCAT(detail,?) WHERE id=? AND detail NOT LIKE '%[前提修订%'");
+    $updP->execute([$block,$tid]);
+    if($updP->rowCount()<1)res(409,['error'=>'另一个 worker 刚写过修订（标记已在），本次不重复']);
+    $payload=json_encode(['task_ids'=>[$tid],'reason'=>'premise_revision 自愈重排'],JSON_UNESCAPED_UNICODE);
+    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'execute_task',?,'queued','seo-worker')")
+        ->execute([$cid,$payload]);
+    $jid=(int)db()->lastInsertId();
+    audit('seo-worker','seo_premise_revision',(string)$tid,['client_id'=>$cid,'job_id'=>$jid,'src_job'=>$srcJob,'revised'=>$revised,'reason'=>$reason,'fact_key'=>$factKey]);
+    fire_wake($jid);
+    res(200,['ok'=>true,'job_id'=>$jid]);
+}
+
 // POST /snapshots -> store a raw metrics pull
 if($m==='POST'&&$ROUTE==='/snapshots'){
     auth_worker();
@@ -4747,6 +4792,14 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
     $t['detail']=trim($t['detail']);
     $t['detail']=($t['detail']===''?$src:($t['detail']."\n\n".$src));
     $cid=(int)$root['client_id'];
+    /* 防重（2026-10-05 ticket #20）：产出类快路直启后，卡上的开工按钮曾照常可点，点了就建出
+       重复任务。与 commission_start 同一套 title+origin 排重，撞上回 409 带任务号，
+       前端据此把卡标回已排产而不是报错。 */
+    $dqS=db()->prepare("SELECT id FROM seo_tasks WHERE client_id=? AND title=? AND origin IN(?,?,?) LIMIT 1");
+    $dqS->execute([$cid,(string)$t['title'],'chatw:'.$rootId,'report:'.$rootId,'spawn:'.$rootId]);
+    $drS=$dqS->fetch();
+    $dqS->closeCursor();
+    if($drS)res(409,['error'=>'这张委托单已经启动过（任务 #'.(int)$drS['id'].'），不重复建','task_id'=>(int)$drS['id']]);
     /* 当期 sprint 章（2026-09-29 ticket #12）：chat 生的任务历来不带 sprint 标签，而 harness
        本期口径只认 S 号，空标签任务失败后对失败重排彻底隐身（Sunseeker #881 实证：TLS 断连
        后没人重排）。有日历锚盖当期章（与 split 工单 2026-09-24 同口径），无锚留空。 */

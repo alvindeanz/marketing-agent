@@ -294,6 +294,13 @@ function buildPreparePrompt(opts) {
     '  说坏的东西好着、要改的对象不存在）就走「无变更方案」：第 1 节写清核验证据与结论，items 空数组，',
     '  不许为了让方案看起来有产出而硬凑低价值或平台做不成的变更项（favicon 单教训：图标明明在线，',
     '  硬凑了两条平台不支持的根路径 301 还拆给了人工）。',
+    '- **前提冲突自愈（2026-10-05 ticket #16）**：前提被推翻但任务目标在修订后的前提下仍然成立，且修订',
+    '  不扩大范围、不加预算、不新增花钱或不可逆动作时，不要交一份干等人的无变更方案，在末尾 json 块里',
+    '  加 "premise_revision" 字段：{"revised":"修订后的前提一句话","reason":"推翻原前提的平台真值，必须本次实测",',
+    '  "fact_key":"可选，platform. 开头的 fact 键","fact_value":"配合 fact_key 的真值一句话"}。',
+    '  runner 会把修订写进任务书并自动重排一轮 prepare，修订版方案照旧走放行官，你不用管后续；',
+    '  方案正文照常按无变更方案写满核验证据。任务书里已经有 [前提修订] 标记的不许再出这个字段',
+    '  （一单只自愈一次），照旧交无变更方案并在第 1 节写明需要人定什么。',
     '- **长任务不留尾巴（2026-09-21 #339 教训）**：任何验证或取数在本次会话里跑不完（如全量爬取上千 URL），',
     '  不许丢到后台然后交一句「跑完再补」的占位稿，占位稿会被机械校验打回等于白跑。两条合法出路：',
     '  一是缩小验证面：抽样核对能证明安全性的最小集合（如每组 redirect 抽 10 条验目标零跳转），',
@@ -515,6 +522,25 @@ function readTargetUrls(output) {
     if (out.length >= 20) break;
   }
   return out;
+}
+
+/**
+ * 方案末尾 json 块里的 premise_revision（2026-10-05 前提冲突自愈）。
+ * 字段不全或超长就当没有：自愈是捷径不是义务，解析不出来走老路（无变更方案停 review）。
+ */
+function readPremiseRevision(output) {
+  const json = extractTrailingJsonSafe(output);
+  const raw = json && json.premise_revision;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const revised = String(raw.revised || '').trim();
+  const reason = String(raw.reason || '').trim();
+  if (!revised || !reason || revised.length > 400 || reason.length > 400) return null;
+  return {
+    revised,
+    reason,
+    factKey: String(raw.fact_key || '').trim().slice(0, 120),
+    factValue: String(raw.fact_value || '').trim().slice(0, 400),
+  };
 }
 
 /**
@@ -2108,6 +2134,37 @@ async function runOne(ctx, context, workspace, taskId) {
     }
   }
 
+  /* 前提冲突自愈（2026-10-05 ticket #16）：前提被平台真值推翻但目标仍可达时，agent 在 json 里给
+     premise_revision。这里不把无变更方案推进待放行（那是一张干等人的卡），改为：平台真值落 fact、
+     修订经服务端端点写进任务书（端点统一管一单一次的闸、排重与重排），自动再跑一轮 prepare。
+     修订版方案照旧走放行官与静默期，判定权没有前移。端点拒绝或打不通就走老路，交付照旧停 review 等人。 */
+  if (prepare) {
+    const pr = readPremiseRevision(output);
+    if (pr) {
+      if (String(task.detail || '').indexOf('[前提修订') !== -1) {
+        log('task ' + taskId + ': 第二次前提冲突（任务书已有 [前提修订]），自愈闸不放，照常交无变更方案停人');
+      } else {
+        if (pr.factKey && pr.factValue) {
+          try {
+            await api.postFact(job.client_id, pr.factKey, pr.factValue);
+            log('task ' + taskId + ': 平台真值已落 fact ' + pr.factKey);
+          } catch (e) {
+            log('task ' + taskId + ': 平台真值 fact 写入失败（自愈照走，真值在任务书修订块里）:: ' + e.message);
+          }
+        }
+        try {
+          const r = await api.premiseRevision(taskId, {
+            revised: pr.revised, reason: pr.reason, fact_key: pr.factKey, job_id: job.id,
+          });
+          log('task ' + taskId + ': 前提冲突自愈，修订已写进任务书，重排 prepare job #' + (r && r.job_id || '?') + '，本轮不出放行卡');
+          return file;
+        } catch (e) {
+          log('task ' + taskId + ': 前提自愈端点未接受（' + e.message + '），走老路交无变更方案停 review');
+        }
+      }
+    }
+  }
+
   const isChatTask = String(task.origin || '').indexOf('chat:') === 0;
   // 预览页停发（2026-09-10 Alvin 定）：变更方案 / 分析 / 验证类产出是 reasoning，
   // 不再默认渲染预览页上 agencyreport。放行看卡上的放行卡，全文在任务附件（.md）与
@@ -2276,6 +2333,7 @@ module.exports = {
   taskOps,
   credentialsPath,
   readTargetUrls,
+  readPremiseRevision,
   buildTargetHeader,
   extractFacts,
   recordFacts,

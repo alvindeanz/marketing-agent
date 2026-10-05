@@ -88,5 +88,28 @@ t('queue strip and pick hint render', () => {
   assert.ok(el('queueStrip').textContent.indexOf('运行中 L · 任务 #' + fixture.tasks[0].id) > -1, '队列条编号用任务号');
 });
 
+console.log('chat 委托单卡（ticket #20）');
+t('chSpawnedTitles 同时认人点回执与快路直启回执', () => {
+  vm.runInContext(
+    'chatMsgs=[' +
+    '{id:10,kind:"chat_agent",created_by:"seo-worker",body:"正文",refs:{drafts:[{title:"Midea 9 月广告月报草稿",kind:"report",module:"paid"}]}},' +
+    '{id:11,kind:"chat_agent",created_by:"seo-worker",body:"已执行频道指令：已启动委托单 #501「Midea 9 月广告月报草稿」（报告草稿）（确认人 monica），进展会回频道。"},' +
+    '{id:12,kind:"chat_agent",created_by:"monica",body:"已开工 #502「另一张卡」，已排产"}' +
+    '];spawnedTest=chSpawnedTitles();', ctx);
+  const got = vm.runInContext('JSON.stringify([chSpawnedFor(spawnedTest,"Midea 9 月广告月报草稿",10),chSpawnedFor(spawnedTest,"另一张卡",10)])', ctx);
+  assert.strictEqual(got, '[501,502]', '两种回执都要把卡标成已排产，拿到 ' + got);
+});
+t('chDraftCard 产出类与改动类分层：标签、按钮、说明各按层走', () => {
+  const report = vm.runInContext('chDraftCard(10,0,{title:"T1",kind:"report",module:"paid"},0)', ctx);
+  assert.ok(report.indexOf('补排') > -1 && report.indexOf('产出类免确认') > -1, '产出类未排产卡该是补排口径');
+  assert.ok(report.indexOf('>开工<') === -1, '产出类不该再有开工按钮');
+  const change = vm.runInContext('chDraftCard(10,0,{title:"T2",kind:"change",module:"paid",ops:"final-url-change"},0)', ctx);
+  assert.ok(change.indexOf('>开工<') > -1 && change.indexOf('契约闸') > -1, '改动类保留开工=确认');
+  const started = vm.runInContext('chDraftCard(10,0,{title:"T1",kind:"report",module:"paid"},501)', ctx);
+  assert.ok(started.indexOf('已排产 #501') > -1, '已启动的产出类卡标已排产');
+  const startedC = vm.runInContext('chDraftCard(10,0,{title:"T2",kind:"change",module:"paid"},502)', ctx);
+  assert.ok(startedC.indexOf('已开工 #502') > -1, '已启动的改动类卡标已开工');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
