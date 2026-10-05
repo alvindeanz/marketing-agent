@@ -478,6 +478,22 @@ t('monthlySum 按自然月求和且忽略坏日期', () => {
   assert.strictEqual(m.get('2026-07'), 15);
   assert.strictEqual(m.get('2026-08'), 2);
 });
+t('buildWork 砍掉与并掉的任务不算完成工作（closed_kind 从备注推）', () => {
+  const period = { start: '2026-09-01', end: '2026-09-30' };
+  const tasks = [
+    { id: 1, status: 'done', updated_at: '2026-09-10', title: '真做完的活', result_note: '收口', module: 'onpage' },
+    { id: 2, status: 'done', updated_at: '2026-09-11', title: '被砍的活', result_note: '前情\n[dropped] 2026-09-11 不做了', module: 'onpage' },
+    { id: 3, status: 'done', updated_at: '2026-09-12', title: '被并的活', result_note: '[merged] 并入 v2', module: 'onpage' },
+    { id: 4, status: 'done', updated_at: '2026-09-13', title: '人工认定完成', result_note: '[accepted] 验收', module: 'onpage' },
+  ];
+  const w = F.buildWork({ tasks, events: [], period, outputs: new Map() });
+  const srcs = w.items.map((i) => i.source);
+  assert.ok(srcs.indexOf('task:1') >= 0, '正常完成要在');
+  assert.ok(srcs.indexOf('task:4') >= 0, 'accepted 算完成');
+  assert.ok(srcs.indexOf('task:2') === -1, 'dropped 不算完成工作');
+  assert.ok(srcs.indexOf('task:3') === -1, 'merged 不算完成工作');
+});
+
 t('buildTrend 中间缺的月补 0，开头全 0 的空月裁掉并记 data_from', () => {
   const tr = F.buildTrend(
     { gsc_clicks: [{ d: '2026-07-05', v: 7 }, { d: '2026-09-02', v: 3 }] },

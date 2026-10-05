@@ -985,6 +985,15 @@ async function ga4Ecommerce(ctx, propertyId, range, log) {
 // ---------------------------------------------------------------------------
 
 /** 一条任务的完成时间，尽量取能拿到的最准的那个。 */
+/** 从结果备注推收口形态，与 seo-api 的 closed_kind 推断同口径。推不出回 null。 */
+function closedKindFromNote(note) {
+  const s = String(note || '');
+  if (!s) return null;
+  let m = s.match(/\[(dropped|merged|killed|accepted)\][^\n]*$/s);
+  if (!m) m = s.match(/\[(dropped|merged|killed|accepted)\]/);
+  return m ? m[1] : null;
+}
+
 function taskDoneDate(task) {
   const raw = (task && (task.completed_at || task.updated_at || task.created_at)) || '';
   const s = String(raw).slice(0, 10);
@@ -1041,8 +1050,10 @@ function buildWork(opts) {
     if (String(t.status || '').toLowerCase() !== 'done') continue;
     /* 被砍与被并的任务不是完成的工作（2026-10-05 sungait 实证：#618 砍单后
        「移除 sitemap 文件」仍被写进报告成虚报，9-03 merged 的 12 张旧单还造成
-       重复计数）。status=done 只是收口，closed_kind 才说明这活到底做没做。 */
-    const ck = String(t.closed_kind || '').toLowerCase();
+       重复计数）。status=done 只是收口，closed_kind 才说明这活到底做没做。
+       /context 的任务行不带 closed_kind，照服务端口径从 result_note 标签推
+       （seo-api task 流水线同款两段正则，末行标签优先）。 */
+    const ck = String(t.closed_kind || closedKindFromNote(t.result_note) || '').toLowerCase();
     if (ck === 'dropped' || ck === 'killed' || ck === 'merged') continue;
     const d = taskDoneDate(t);
     if (!inRange(d, period)) continue;
