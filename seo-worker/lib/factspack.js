@@ -1039,6 +1039,11 @@ function buildWork(opts) {
 
   for (const t of tasks || []) {
     if (String(t.status || '').toLowerCase() !== 'done') continue;
+    /* 被砍与被并的任务不是完成的工作（2026-10-05 sungait 实证：#618 砍单后
+       「移除 sitemap 文件」仍被写进报告成虚报，9-03 merged 的 12 张旧单还造成
+       重复计数）。status=done 只是收口，closed_kind 才说明这活到底做没做。 */
+    const ck = String(t.closed_kind || '').toLowerCase();
+    if (ck === 'dropped' || ck === 'killed' || ck === 'merged') continue;
     const d = taskDoneDate(t);
     if (!inRange(d, period)) continue;
     doneIds.add(Number(t.id));

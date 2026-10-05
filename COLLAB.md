@@ -20,6 +20,11 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-05 AIRA (w) 工作节数据污染修复 + 审核官漏项核对（sungait v4 校对实证，Alvin 定十月起生效不返工九月）
+
+- 干了什么：对着任务台账逐条校对 sungait v4「本月工作」发现三类问题并修两类：①buildWork 把 status=done 但 closed_kind=dropped/killed/merged 的任务全算完成工作，导致被砍的 #618「sitemap 移除文件」写进报告成虚报、9-03 merged 的 12 张旧单重复计数，已加 closed_kind 过滤；②54 条工作项压缩成 8 组时丢了 #938/942 客户自写博文（已完成却被写进 10 月计划当未来事），审核官 hints 现在附 work.items 原始清单逐条核对，checklist 第 8 条升级为「漏项点名打回、已完成写成未来事同样打回」；③外链口径矛盾（9-24 Alvin 定移出 MA，报告却承诺筹备中）由①的过滤自然消除，对客默认只字不提。手工月报线同步补抓手：deliverable_lint _default 禁 #dc2626（坏消息琥珀），记忆新增 feedback_client_reporting_frame（手写月报八条清单，指向 specs 权威版）。范围决定（Alvin）：九月存量报告不返工，十月起全部报告带此口径，手工线人工执行。
+- 坑：status=done 在本系统是「收口」不是「做成」，closed_kind 才是语义，任何从任务表统计「做了什么」的代码都要过这层滤网（搜了一圈 blogcadence/backfill_card_outcomes 等用 /blog-draft/ 正则不受影响）。
+- 下一步/认领：待部署（worker），sungait 以 v5 复验后对客发 v5，v1 至 v4 作废。
 ### 2026-10-05 AIRA (v) 渠道卡收尾 + sungait v4 全绿验收
 
 - 干了什么：v3 审核官指出渲染层卡面它改不了的两处，根治进 buildChannelKpis：电商标签「全渠道转化事件」、基数异常时卡面环比直接用剔除后口径并标「已剔除异常天」。sungait v4 终验：询盘 0 处、红色 0 处、-42.4% 原始环比 0 处（卡面 -13.3% 已剔除口径），审核官本轮还抓了「占比 +7.9pp 是异常分母的假涨」让叙事标注不作为成果。四层框架自洽闭环：审核官每轮提的意见都在收敛，渲染层能根治的不留给叙事打补丁。

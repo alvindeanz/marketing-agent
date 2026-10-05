@@ -40,6 +40,14 @@ function buildReviewPrompt(reportText, pack) {
     hints.push('非品牌点击 本期 ' + br.nonbrand_cur_clicks + '、上期 ' + br.nonbrand_prev_clicks +
       '；品牌点击 本期 ' + br.cur_clicks + '、上期 ' + br.prev_clicks);
   }
+  // 本期工作原始清单（2026-10-05 sungait 实证：54 条压成 8 组时丢了客户自写博文
+  // 两条，prompt 的「每条都要有归宿」没人在查）。审核官逐条对照报告工作节，
+  // 漏项点名打回。
+  const workItems = (pack && pack.work && pack.work.items) || [];
+  if (workItems.length) {
+    const lines = workItems.slice(0, 60).map((w) => (w.date || '') + ' ' + String(w.title_raw || '').slice(0, 60));
+    hints.push('本期工作原始清单（共 ' + workItems.length + ' 条，逐条核对报告「本月工作」是否都有归宿，实质性漏项要打回）：\n  - ' + lines.join('\n  - '));
+  }
   return [
     '你是这家 agency 的客户报告审核官。下面是一份即将交付客户的 SEO 报告成品的全文（纯文本），',
     '按审核清单过一遍，判断能不能交。',
