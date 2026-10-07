@@ -46,12 +46,45 @@ function killAll(signal) {
 }
 
 /**
+ * 瞬时启动失败判定（2026-10-07 ticket #23/#24）：CLI spawn 后几秒内退出、一个字没产出、
+ * stderr 也是空的，说明模型根本没开始跑（当时是 CLI 自身的瞬时故障，10-06 三分钟窗口里
+ * 连死两个 job）。这类不是 LLM 工作的失败，是 runner 环境抖动，原地重试一次。
+ * 纯函数，单测在 tests/llm.test.js。
+ */
+const SPAWN_FLAKE_MAX_MS = 30000;
+function isSpawnFlake(code, stdout, stderr, durationMs, timedOut) {
+  if (timedOut || code === 0) return false;
+  if (durationMs >= SPAWN_FLAKE_MAX_MS) return false;
+  return !String(stdout || '').trim() && !String(stderr || '').trim();
+}
+
+/**
  * Run `claude -p <prompt>` headless and capture stdout.
  * opts: { prompt, cwd, log, model, allowedTools, timeoutMs, label }
  * Resolves { stdout, stderr, durationMs }. Rejects on non zero exit or timeout.
- * No retries anywhere. A failure is a failure.
+ * No retries at the job level. A failure is a failure. The one exception is a
+ * spawn flake (see isSpawnFlake): the model never started, so one in-place
+ * retry masks nothing; a second flake rejects like before.
  */
-function runClaude(cfg, opts) {
+async function runClaude(cfg, opts) {
+  const log = opts.log || function () {};
+  const label = opts.label || 'claude';
+  try {
+    return await runClaudeOnce(cfg, opts);
+  } catch (e) {
+    if (!e || !e.spawnFlake) throw e;
+    log(label + ': CLI 启动即退且零输出，按瞬时环境故障原地重试一次（5 秒后）');
+    await new Promise((r) => setTimeout(r, 5000));
+    try {
+      return await runClaudeOnce(cfg, opts);
+    } catch (e2) {
+      if (e2 && e2.spawnFlake) e2.message += '（原地重试一次仍启动即退）';
+      throw e2;
+    }
+  }
+}
+
+function runClaudeOnce(cfg, opts) {
   const prompt = String(opts.prompt || '');
   if (!prompt.trim()) return Promise.reject(new Error('runClaude called with an empty prompt'));
 
@@ -138,17 +171,16 @@ function runClaude(cfg, opts) {
         return;
       }
       if (code !== 0) {
-        finish(
-          reject,
-          new Error(
-            label +
-              ': claude exited with code ' +
-              code +
-              (signal ? ' signal ' + signal : '') +
-              ' :: stderr ' +
-              stderr.replace(/\s+/g, ' ').slice(0, 800)
-          )
+        const err = new Error(
+          label +
+            ': claude exited with code ' +
+            code +
+            (signal ? ' signal ' + signal : '') +
+            ' :: stderr ' +
+            stderr.replace(/\s+/g, ' ').slice(0, 800)
         );
+        err.spawnFlake = isSpawnFlake(code, stdout, stderr, durationMs, timedOut);
+        finish(reject, err);
         return;
       }
       log(
@@ -164,4 +196,4 @@ function runClaude(cfg, opts) {
   });
 }
 
-module.exports = { runClaude, killAll, DEFAULT_ALLOWED_TOOLS };
+module.exports = { runClaude, killAll, isSpawnFlake, DEFAULT_ALLOWED_TOOLS };
