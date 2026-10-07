@@ -880,7 +880,10 @@ function attach_human_state($tasks,$cid){
             if(preg_match('/\[later\][^\n]*/',$note,$mm))$why=trim(preg_replace('/^\[later\]\s*/','',$mm[0]));
             else $why='延后';
         }elseif($st==='in_progress'){
-            $hs='running';$run='执行中';
+            /* 人工位的 in_progress 不是机器在跑（2026-10-07 僵尸根因：Goodie #410 标「执行中」
+               16 天无 job 无人管）。owner 非 agent 一律算等人，别再冒充 running。 */
+            if((string)($t['owner_type']??'')!=='agent'){$hs='wait_me';$why='人工执行中（人工位，机器不推进）';}
+            else{$hs='running';$run='执行中';}
         }elseif(!empty($t['review_pending'])){
             /* 判定中：fable/opus 正在判，机器在推进，不是等人（2026-09-18 收口：机器待处理态不冒充等我）。 */
             $hs='running';$run='判定中';
@@ -894,15 +897,24 @@ function attach_human_state($tasks,$cid){
         }elseif($st==='review'){
             /* 待放行：只读卡已在交付处自动收货，走到这里的是花钱/不可逆/越权类硬闸（授权=权限类，该等人），
                或 reversible 待 L0 自动放行的短暂过渡（harness/L0 会推进，非等人）。用 review_effective+risk 粗分：
-               有 do 判决且非硬闸的算机器待推进，其余才等人。简化口径：analysis 已不到这（源头收货）。 */
-            $hs='wait_me';$why='待放行';
+               有 do 判决且非硬闸的算机器待推进，其余才等人。简化口径：analysis 已不到这（源头收货）。
+               attention=1 的单列「停人」（hold-human/熔断/harness 阻塞都打这个标），和普通待放行分开，
+               普通待放行下一轮放行官会推进，停人的不会（2026-10-07 僵尸根因：Louvresky #752 hold 后 9 天没人裁）。 */
+            $hs='wait_me';$why=!empty($t['attention'])?'停人：需人裁决（note 有 hold 判语）':'待放行';
         }elseif(strpos((string)($t['origin']??''),'split:')===0){
             /* 拆条人工工单（2026-09-21）：母判决已继承，没有排期概念，就是等人上手。 */
             $hs='wait_me';$why='待人工执行（母任务已判 do）';
         }else{
             /* 待判（无判决，等闸A）/ 待拍板（有判决，等 harness apply_verdicts）是机器待办 backlog，
-               不是在跑也不是等人（2026-09-18：改回 queued「排期」，之前塞 running 让下期任务错标在跑）。 */
-            $hs='queued';$run=empty($t['review_effective'])?'排期（待判定）':'排期（下轮自动拍板）';
+               不是在跑也不是等人（2026-09-18：改回 queued「排期」，之前塞 running 让下期任务错标在跑）。
+               例外：approved 且 owner 非 agent 是人工位，harness 拍板永远跳过它（harness.js 的
+               approved+非agent 过滤），写「下轮自动拍板」是撒谎（2026-10-07 僵尸根因：4 客户 5 条
+               就是这么烂了 1 到 2 个 sprint）。人工位一律标等人，让 wait_me 计数和 attention 面兜住。 */
+            if($st==='approved'&&(string)($t['owner_type']??'')!=='agent'){
+                $hs='wait_me';$why='人工位待认领（机器不拍人工位）';
+            }else{
+                $hs='queued';$run=empty($t['review_effective'])?'排期（待判定）':'排期（下轮自动拍板）';
+            }
         }
         $mc=manual_checks_of($t);
         $t['manual_checks']=$mc['items'];
@@ -2073,6 +2085,11 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     }
     if(isset($i['attention'])){
         db()->prepare("UPDATE seo_tasks SET attention=? WHERE id=?")->execute([$i['attention']?1:0,$tid]);
+    }else{
+        /* 新结果落地默认清旧停人标（2026-10-07）：redo/premise_revision 重出的方案如果还背着
+           上一版的 attention=1，会被错标成「停人」卡住，实际它该走正常放行。worker 要保留标记
+           就显式传 attention。 */
+        db()->prepare("UPDATE seo_tasks SET attention=0 WHERE id=? AND attention=1")->execute([$tid]);
     }
     audit('seo-worker','seo_task_result',(string)$tid,['output_url'=>$i['output_url']??'','attention'=>isset($i['attention'])?($i['attention']?1:0):null]);
     /* 只读交付默认放行（2026-09-18 Alvin 第一性原理：可逆的直接放行不卡流程，错靠事后抽查+原地还原）。
@@ -6249,11 +6266,31 @@ if($m==='GET'&&$ROUTE==='/attention'){
         if(!$mc['pending'])continue;
         $manual[]=['id'=>(int)$r['id'],'title'=>$r['title'],'priority'=>$r['priority'],'status'=>$r['status'],'sprint'=>$r['sprint'],'items'=>$mc['items']];
     }
+    /* 人工位台账（2026-10-07 僵尸根因修正）：owner=agency 的 approved/in_progress 没有任何机器
+       会推进，必须有一个常设出口对人可见，带滞留天数。hold 停人的 review 同理（attention=1）。 */
+    $hl=db()->prepare("SELECT id,title,priority,status,sprint,owner_type,updated_at FROM seo_tasks WHERE client_id=? AND owner_type='agency' AND status IN('approved','in_progress') ORDER BY updated_at");
+    $hl->execute([$cid]);
+    $humanLane=[];
+    foreach($hl->fetchAll() as $r){
+        $r['id']=(int)$r['id'];
+        $r['stale_days']=$r['updated_at']?max(0,(int)floor((time()-strtotime((string)$r['updated_at']))/86400)):null;
+        $humanLane[]=$r;
+    }
+    $hr=db()->prepare("SELECT id,title,priority,sprint,updated_at FROM seo_tasks WHERE client_id=? AND status='review' AND attention=1 ORDER BY updated_at");
+    $hr->execute([$cid]);
+    $heldReview=[];
+    foreach($hr->fetchAll() as $r){
+        $r['id']=(int)$r['id'];
+        $r['stale_days']=$r['updated_at']?max(0,(int)floor((time()-strtotime((string)$r['updated_at']))/86400)):null;
+        $heldReview[]=$r;
+    }
     res(200,[
         'flagged_tasks'=>$ft->fetchAll(),
         'client_open'=>$co->fetchAll(),
         'failed_jobs'=>$jobs,
         'manual_checks'=>$manual,
+        'human_lane'=>$humanLane,
+        'held_review'=>$heldReview,
         'pending_facts_count'=>(int)$pf->fetch()['n']
     ]);
 }

@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-07 AIRA (z) 僵尸任务根因修正批一：人工位与停人态真话化（seo-api.php 四处）
+
+- 背景：paid 僵尸摸底抓到 4 客户 6 条任务烂 1 到 2 个 sprint（LuxeLink #577/#579、Haakaa #345、Goodie #417/#410、Louvresky #752），已全部人工清掉。根因不是个案是流程：人工位（owner=agency）任务 harness 拍板永远跳过，attach_human_state 却给它标「排期（下轮自动拍板）」，两边口径打架，没有任何面把它顶到人前；hold_human 判后与普通待放行无区分，9 天没人裁。
+- 干了什么（本 commit）：①attach_human_state：approved+非agent 不再标「排期（下轮自动拍板）」，改 wait_me「人工位待认领（机器不拍人工位）」；in_progress+非agent 不再冒充「执行中」，改 wait_me「人工执行中（人工位，机器不推进）」；review+attention=1 单列「停人：需人裁决」与普通待放行分开。②GET /attention 加 human_lane（agency 位 approved/in_progress 带 stale_days）与 held_review（review+attention=1 带 stale_days）两区。③POST /tasks/{id}/result 不显式传 attention 时默认清旧停人标，防 redo/premise_revision 重出的新方案背着上一版的停人标被卡。
+- 测试：tests/*.test.js 23 件全绿；php -l 与 tests/chatapi.test.php（24 过）在 250 远端跑通（本机无 php）。
+- 坑：人工位错派的源头是 9/14 双泳道之前的老 plan（当时 ads op 只能派人），新 plan 已派 agent，存量靠本批的 wait_me 兜出来逐个转位。
+- 下一步（批二，10/15 前）：execute/redo/premise_revision 完成后自动排 release_review 的链路续接（今天人工补排三次：#752/#143/#1076），要带按任务去重防双判双落；三桶扫描并入 weekly_digest。认领 AIRA。
+
 ### 2026-10-07 AIRA (z) 工单批五：CLI 瞬时启动失败自愈 + WP 建稿通路打通（ticket #23/#24）
 
 - 干了什么：①10-06 ros 上 claude CLI 三分钟窗口连死两个 job（4 秒退出码 1、stdout/stderr 全空），llm.js 加 isSpawnFlake 判定（30 秒内退出且零输出）原地重试一次，二次仍抖照旧判红，job 级不自动重试硬规矩不动，单测 tests/llm.test.js 5 条。②kiaorakids wf-agent 由 Aiden 代升 1.3.1（我漏看他 9/25 两份发版通知，1.3.1 其实当天已上 R2），回测 status 验版通过；wp-tools 仓修掉 CLI cmd_seo_set 的 log_op 串入字符串崩溃（写成功后崩且 ops-log 漏记，ca6b48f）并给 Content 模块补 require_cap（随 1.3.2 生效）。③wordpress.md 能力表加写前验版：wp-content-edit/wp-draft-create 需站上 >= 1.3.1，插件滞后类 gap 路由到 wp-tools 升级，不许判人工建稿（#1097 误判实证）。rev baefb24 两机同版。④端到端首例：#1098 apply 走插件通路自动建草稿 15672 回读通过，停在设计内人工闸（#1145 三格），#1097 待放行。工单 #23/#24 已 resolved。
