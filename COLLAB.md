@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-08 AIRA (z) sprint 档期改半月制 + Merii（54）开户
+
+- sprint 档期（Alvin 2026-10-08 定）：两周制换成日历半月制，每月 1 到 14 日一档、15 日到月末一档，S1 = plan 锚点所在档，与双月轮（每月 1 号、15 号起轮）节拍对齐。改动：seo-api.php 加 semimonth_index()，/board 的 current_sprint 与逾期口径、/tasks 响应（sprint_days 字段撤下，改 sprint_mode=semimonth）、前端 sprintRange/currentSprint 同步半月口径。存量客户档号整体不重排，只有换算口径变化（半月平均 15.2 天略长于 14 天，逾期判定只松不紧）。
+- Merii 开户（ops ticket #25，Monica）：client 54，paid-only（只做 Google Ads，不进 SEO sprint，与 Playmate 相反例）。profile、12 条 facts（含批文 fact ops.mandate.campaign_plan_2026_10：客户已审核 campaign detail plan 与预算阶梯，可作放行 backing）、3 条大事记、工作区 clients/merii/CLAUDE.md（文案铁律 Possum=Made in NZ / Cashmere=Designed in NZ only、禁重关 GBP、内部口径 internal.* 前缀）。tracker sem 模块已挂。
+- 测试：tests 23 件全绿，php -l 250 远端通过。
+- 下一步：Merii S1 两任务（①Knitwear ②Merii&Gift 到店搜索系列，PAUSED 先建走放行，campaign-create=spend 档引批文）走 plan 导入 + harness 首轮。
+
 ### 2026-10-07 AIRA (z) 僵尸任务根因修正批一：人工位与停人态真话化（seo-api.php 四处）
 
 - 背景：paid 僵尸摸底抓到 4 客户 6 条任务烂 1 到 2 个 sprint（LuxeLink #577/#579、Haakaa #345、Goodie #417/#410、Louvresky #752），已全部人工清掉。根因不是个案是流程：人工位（owner=agency）任务 harness 拍板永远跳过，attach_human_state 却给它标「排期（下轮自动拍板）」，两边口径打架，没有任何面把它顶到人前；hold_human 判后与普通待放行无区分，9 天没人裁。

@@ -6320,10 +6320,18 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/manual_done$#',$ROUTE,$mm)){
 /* GET /board -> 跨客户总览（/overview 已被单客户 Dashboard 占用），worker token 或 admin 都能读。2026-08-29 W1：看板是任务状态唯一真相，
    PJ 从这里派生待办，不再自己记一份。每客户：sprint 锚点与本期档号、任务（带 human_state、
    manual_checks、预览链接、结束态证据），以及 attention 三类计数。只读，一次拉全。 */
+/* sprint 档期改半月制（2026-10-08 Alvin 定，取代 2026-08-27 的两周制）：每月 1 到 14 日一档、
+   15 日到月末一档，S1 = 方案锚点所在半月档，本期 = 今天所在档的序号。配合每月 1 号与 15 号
+   的双月轮节拍，sprint 边界与轮次天然对齐。前端 seo-agent.html 的 sprintRange/currentSprint
+   同步此口径，改一边必改另一边。 */
+function semimonth_index($ymd){
+    $y=(int)substr($ymd,0,4);$mo=(int)substr($ymd,5,2);$d=(int)substr($ymd,8,2);
+    if(!$y||!$mo)return null;
+    return $y*24+($mo-1)*2+($d>=15?1:0);
+}
 if($m==='GET'&&$ROUTE==='/board'){
     auth_any();
     ensure_review_schema();
-    $days=14;
     $today=new DateTime('today');
     $out=[];
     $cs=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id WHERE p.status='active' ORDER BY c.name");
@@ -6336,9 +6344,7 @@ if($m==='GET'&&$ROUTE==='/board'){
         $anchor=($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null;
         $cur=null;
         if($anchor){
-            $a=new DateTime($anchor);
-            $n=(int)floor($today->diff($a)->days/$days)+1;
-            if($a>$today)$n=1;
+            $n=semimonth_index($today->format('Y-m-d'))-semimonth_index($anchor)+1;
             $cur=max(1,min($n,6));
         }
         $tq=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
@@ -6394,7 +6400,7 @@ if($m==='GET'&&$ROUTE==='/board'){
         $fj->execute([$cid]);
         $out[]=[
             'client_id'=>$cid,'name'=>$c['name'],'domain'=>$c['domain'],'platform'=>$c['platform'],
-            'plan_id'=>$pr?(int)$pr['id']:null,'sprint_anchor'=>$anchor,'sprint_days'=>$days,'current_sprint'=>$cur,
+            'plan_id'=>$pr?(int)$pr['id']:null,'sprint_anchor'=>$anchor,'sprint_mode'=>'semimonth','current_sprint'=>$cur,
             'counts'=>['tasks'=>count($tasks),'wait_me'=>$nWaitMe,'running'=>$nRunning,'manual_pending'=>$nManual,'failed_jobs_7d'=>(int)$fj->fetch()['n'],'hidden_closed'=>$hiddenClosed],
             'pending_plans'=>array_values($pendingPlans),
             'tasks'=>$tasks,
@@ -6451,7 +6457,7 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     $pq->execute([$cid]);
     $pr=$pq->fetch();
     $pq->closeCursor();
-    res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid),'sprint_anchor'=>($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null,'sprint_days'=>14]);
+    res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid),'sprint_anchor'=>($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null,'sprint_mode'=>'semimonth']);
 }
 
 // POST /tasks

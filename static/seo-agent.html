@@ -3367,13 +3367,12 @@ async function addTask(){
   loadTasks();loadClients(true);
 }
 
-var sprintAnchor=null,sprintDays=14;
+var sprintAnchor=null;
 async function loadTasks(){
   const d=await api('/tasks?client_id='+curId);
   if(fail(d,'任务载入失败'))return;
   tasksData=d.tasks||[];
   sprintAnchor=d.sprint_anchor||null;
-  sprintDays=Number(d.sprint_days)||14;
   renderLanes();
 }
 
@@ -3503,22 +3502,26 @@ function sprintNum(t){
   const m=String((t&&t.sprint)||'').trim().toUpperCase().match(/^S(\d+)$/);
   return m?parseInt(m[1],10):null;
 }
-/* 日历口径（2026-08-27 Alvin 定）：S1 从 plan 生成日起两周，S2 接着两周，以此类推。
-   本期 = 今天落在哪一档。欠着的往期任务照显示并标逾期，本期做完了就等下一期，不自动把下期拉上来。
-   没有锚点（老数据）时退回「最小未完成 S 号」。 */
+/* 日历口径（2026-10-08 Alvin 定，半月制取代 2026-08-27 的两周制）：每月 1 到 14 日一档、
+   15 日到月末一档，S1 = plan 生成日所在半月档，本期 = 今天落在哪一档。欠着的往期任务照显示
+   并标逾期，本期做完了就等下一期，不自动把下期拉上来。没有锚点（老数据）时退回「最小未完成 S 号」。
+   服务端 seo-api.php 的 semimonth_index 同口径，改一边必改另一边。 */
+function smIdx(d){return d.getFullYear()*24+d.getMonth()*2+(d.getDate()>=15?1:0)}
+function smStart(i){const y=Math.floor(i/24),r=i%24;return new Date(y,Math.floor(r/2),(r%2)?15:1)}
 function sprintRange(n){
   if(!sprintAnchor)return null;
-  const a=Date.parse(sprintAnchor+'T00:00:00');
-  if(isNaN(a))return null;
-  const from=new Date(a+(n-1)*sprintDays*86400000),to=new Date(a+n*sprintDays*86400000-1);
+  const a=new Date(sprintAnchor+'T00:00:00');
+  if(isNaN(a.getTime()))return null;
+  const i=smIdx(a)+(n-1);
+  const from=smStart(i),to=new Date(smStart(i+1).getTime()-1);
   const f=d=>(d.getMonth()+1)+'/'+d.getDate();
   return {from,to,label:f(from)+' 至 '+f(to)};
 }
 function currentSprint(tasks){
   if(sprintAnchor){
-    const a=Date.parse(sprintAnchor+'T00:00:00');
-    if(!isNaN(a)){
-      const n=Math.floor((Date.now()-a)/(sprintDays*86400000))+1;
+    const a=new Date(sprintAnchor+'T00:00:00');
+    if(!isNaN(a.getTime())){
+      const n=smIdx(new Date())-smIdx(a)+1;
       return Math.max(1,Math.min(n,6));
     }
   }
