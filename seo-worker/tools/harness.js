@@ -202,7 +202,19 @@ async function main() {
   // 连 paid 卡一起挡，是 bug）。改法：闸不再硬 throw，只置 seoGateOk；inScope 里 paid 任务照过，
   // SEO 任务在闸未过时被 held。--skip-gates 仍强制全过。
   let seoGateOk = true;
-  if (!argv.includes('--skip-gates')) {
+  /* paid-only 客户跳 SEO 闸（2026-10-09 批二 E，Merii 实证）：services=paid/sem 的客户没有
+     SEO 泳道，词表/mapping 闸不适用，更不该起产钥匙任务（#1175 被 killed 后靠两条「不适用」
+     facts 手工关闸，这里是结构化修复）。services 空或 seo/both 照旧走闸。 */
+  let svcPaidOnly = false;
+  try {
+    const profR = await call('GET', '/profile?client_id=' + cid);
+    const svc = String((profR.profile && profR.profile.services) || '').toLowerCase();
+    svcPaidOnly = (svc === 'paid' || svc === 'sem');
+    if (svcPaidOnly) log('paid-only 客户（services=' + svc + '），SEO 闸不适用，不起钥匙任务');
+  } catch (e) { log('profile 读取失败（' + e.message + '），按非 paid-only 走闸'); }
+  if (svcPaidOnly) {
+    seoGateOk = true;
+  } else if (!argv.includes('--skip-gates')) {
     const fr = await call('GET', '/facts?client_id=' + cid);
     const facts = (fr.facts || []).filter((f) => String(f.status || '') === 'confirmed');
     // 闸门 false-positive 修复（2026-09-17，playmate/luxelink/sunseeker 实证）：旧正则只要
@@ -600,36 +612,59 @@ async function report(all, sprint, retried) {
     const caps = require('../lib/capabilities');
     const bcNow = await boardClient();
     const manifest = caps.loadManifest(String((bcNow && bcNow.platform) || ''));
-    if (manifest.found) {
-      const HUMANISH = /客户拍板|客户审阅|客户提供|客户确认|客户回传|素材|拍照|GBP|发帖|电话|会议|人工落地|培训/;
-      const cands = all.filter((t) => ['proposed', 'approved', 'blocked'].includes(t.status)
-        && String(t.owner_type || '') === 'agency');
-      const curN = (() => { const m = /^S(\d+)/.exec(String(sprint || '')); return m ? parseInt(m[1], 10) : 1; })();
-      const sprintN = (t) => { const m = /^S(\d+)/.exec(String(t.sprint || '')); return m ? parseInt(m[1], 10) : null; };
-      const autoable = cands.filter((t) => ['proposed', 'approved'].includes(t.status)
-        && ['technical', 'onpage', 'content'].includes(String(t.module || ''))
-        && sprintN(t) !== null && sprintN(t) <= curN
-        && String(t.origin || '').indexOf('split:') !== 0
-        && !HUMANISH.test(String(t.title || '') + String(t.detail || '').slice(0, 200))
-        && String(t.result_note || '').indexOf('[auto-machine-run]') === -1);
-      const doNow = autoable.slice(0, 10);
-      const rest = cands.filter((t) => !doNow.includes(t));
-      for (const t of doNow) {
-        if (DRY) { console.log('[dry] 转位 #' + t.id + ' ' + t.title.slice(0, 40)); continue; }
-        await call('PATCH', '/tasks/' + t.id, { owner_type: 'agent',
-          result_note: String(t.result_note || '') + '\n[auto-machine-run] ' + stamp() + ' 车道 ' + manifest.platform + ' 已接通，当期人工位自动转机器（自愈，可 PATCH 回 agency 翻案），照走判定与放行分级。' });
-      }
-      if (doNow.length && !DRY) {
-        await call('POST', '/tasks/review', { client_id: cid, task_ids: doNow.map((t) => t.id) });
-        console.log('\n## 转位自愈（' + doNow.length + ' 条已转机器位并重排判定）');
-        for (const t of doNow) console.log('- #' + t.id + ' [' + (t.sprint || '') + '] ' + t.title);
-      }
-      if (rest.length) {
-        console.log('\n## 转位候选（' + rest.length + '，未来期/特征存疑，人工逐条决定）');
-        for (const t of rest.slice(0, 15)) console.log('- #' + t.id + ' [' + (t.sprint || '无期') + '/' + (t.module || '') + '] ' + t.title);
-        if (rest.length > 15) console.log('- …另有 ' + (rest.length - 15) + ' 条');
-        console.log('  转位：node tools/machine_run.js ' + cid + ' <id[:ops[:module]],...> --reason "..."');
-      }
+    const HUMANISH = /客户拍板|客户审阅|客户提供|客户确认|客户回传|素材|拍照|GBP|发帖|电话|会议|人工落地|培训/;
+    /* 政策表 op 全集（批二 D）：risk_class_by_op 登记过的加 readonly_ops，机器能力边界的唯一事实源。 */
+    const knownOps = (() => {
+      try {
+        const pol = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'specs', 'release_policy.json'), 'utf8'));
+        const a = Object.keys((pol && pol.risk_class_by_op) || {});
+        const b = (pol && pol.readonly_ops && pol.readonly_ops.ops) || [];
+        return new Set(a.concat(b));
+      } catch (e) { return new Set(); }
+    })();
+    const ageDays = (t) => { const d = Date.parse(String(t.updated_at || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : (Date.now() - d) / 86400000; };
+    const cands = all.filter((t) => ['proposed', 'approved', 'blocked'].includes(t.status)
+      && String(t.owner_type || '') === 'agency');
+    const curN = (() => { const m = /^S(\d+)/.exec(String(sprint || '')); return m ? parseInt(m[1], 10) : 1; })();
+    const sprintN = (t) => { const m = /^S(\d+)/.exec(String(t.sprint || '')); return m ? parseInt(m[1], 10) : null; };
+    const baseOk = (t) => ['proposed', 'approved'].includes(t.status)
+      && sprintN(t) !== null && sprintN(t) <= curN
+      && String(t.origin || '').indexOf('split:') !== 0
+      && !HUMANISH.test(String(t.title || '') + String(t.detail || '').slice(0, 200))
+      && String(t.result_note || '').indexOf('[auto-machine-run]') === -1;
+    /* 两条转位路：
+       路一（2026-09-21 原版）：站内三类 module 且平台能力清单接通，当期即转。
+       路二（2026-10-09 批二 D）：人工位挂满 7 天没人认领，且任务 ops 全部在政策表内
+       （机器有能力做、放行分级有档可查），任何 module 都转。SEO 扫描里 Citymed/Dareu 等
+       11 条 20 到 35 天的存量就是这类：owner 位是建 plan 时的快照，没人去认领也没人翻案，
+       转机器位走判定与放行，错了 PATCH 回 agency 一条就翻案。 */
+    const laneOk = manifest.found && ((t) => ['technical', 'onpage', 'content'].includes(String(t.module || '')));
+    const opsOk = (t) => {
+      const ops = String(t.ops || '').split(',').map((s) => s.trim()).filter(Boolean);
+      return ops.length > 0 && ops.every((op) => knownOps.has(op));
+    };
+    const autoable = cands.filter((t) => baseOk(t)
+      && ((laneOk && laneOk(t)) || (ageDays(t) >= 7 && opsOk(t))));
+    const doNow = autoable.slice(0, 10);
+    const rest = cands.filter((t) => !doNow.includes(t));
+    for (const t of doNow) {
+      if (DRY) { console.log('[dry] 转位 #' + t.id + ' ' + t.title.slice(0, 40)); continue; }
+      const why = (laneOk && laneOk(t))
+        ? '车道 ' + manifest.platform + ' 已接通，当期人工位自动转机器'
+        : '人工位挂 ' + Math.floor(ageDays(t)) + ' 天无人认领且 ops 全在政策表（' + String(t.ops || '') + '），自动转机器位';
+      await call('PATCH', '/tasks/' + t.id, { owner_type: 'agent',
+        result_note: String(t.result_note || '') + '\n[auto-machine-run] ' + stamp() + ' ' + why + '（自愈，可 PATCH 回 agency 翻案），照走判定与放行分级。' });
+    }
+    if (doNow.length && !DRY) {
+      await call('POST', '/tasks/review', { client_id: cid, task_ids: doNow.map((t) => t.id) });
+      console.log('\n## 转位自愈（' + doNow.length + ' 条已转机器位并重排判定）');
+      for (const t of doNow) console.log('- #' + t.id + ' [' + (t.sprint || '') + '] ' + t.title);
+    }
+    if (rest.length) {
+      console.log('\n## 转位候选（' + rest.length + '，未来期/特征存疑/未满 7 天，人工逐条决定）');
+      for (const t of rest.slice(0, 15)) console.log('- #' + t.id + ' [' + (t.sprint || '无期') + '/' + (t.module || '') + '/' + Math.floor(ageDays(t)) + '天] ' + t.title);
+      if (rest.length > 15) console.log('- …另有 ' + (rest.length - 15) + ' 条');
+      console.log('  转位：node tools/machine_run.js ' + cid + ' <id[:ops[:module]],...> --reason "..."');
     }
   } catch (e) { log('转位自愈段跳过：' + e.message); }
 

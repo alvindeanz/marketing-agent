@@ -40,6 +40,17 @@ function isPendingCard(t) {
 (async () => {
   const clients = (await call('/clients')).clients.filter((c) => c.status === 'active');
   const wait = [], running = [], broken = [], applied = [], healed = [];
+  /* 三桶（2026-10-07 Alvin 定口径，批二 F 并入 digest）：
+     桶一 机器债，轮内应清零，每条都是流程洞：无判决超时 / 方案在手未排放行官 / 人工位挂超
+       7 天（harness D 路会转，这里是漏网之鱼）/ 非法 sprint 标签（C 已封入口，这里兜存量）。
+     桶二 等人等客户，不算僵尸，但要带「等什么 / 几天 / 该谁动」。
+     桶三 到期重判，later 挪期到了当期的，下一轮自然吃掉，这里点名。 */
+  const debt = [], waiting = [], rejudge = [];
+  let board = { clients: [] };
+  try { board = await call('/board'); } catch (e) { /* 端点坏了三桶少 current_sprint 口径，容忍 */ }
+  const curOf = {};
+  for (const b of (board.clients || [])) curOf[Number(b.client_id)] = parseInt(String(b.current_sprint || '').replace(/^S/i, ''), 10) || null;
+  const sprintN = (s) => { const m = /^S(\d+)$/i.exec(String(s || '')); return m ? parseInt(m[1], 10) : null; };
   for (const c of clients) {
     const ts = (await call('/tasks?client_id=' + c.client_id)).tasks || [];
     for (const t of ts) {
@@ -85,6 +96,38 @@ function isPendingCard(t) {
         broken.push({ c: c.name, id: 'job ' + j.id, key, what: j.type + ' 失败' + (tid ? '（任务 #' + tid + '）' : '') });
       }
     }
+    /* 三桶分类（批二 F）。卡类等确认在上面有自己的节，不重复入桶；失败 job 在报错节，不重复。 */
+    const curN = curOf[Number(c.client_id)] || null;
+    const rrCover = new Set();
+    for (const j of jobs) {
+      if (j.type !== 'release_review' || ['queued', 'running'].indexOf(j.status) === -1) continue;
+      try { const p = typeof j.payload === 'string' ? JSON.parse(j.payload) : j.payload; ((p && p.task_ids) || []).forEach((x) => rrCover.add(Number(x))); } catch (e) { /* payload 坏容忍 */ }
+    }
+    for (const t of ts) {
+      if (t.status === 'done' || isPendingCard(t)) continue;
+      const d = Math.floor(daysAgo(t.updated_at || t.created_at));
+      const note = String(t.result_note || '');
+      const head = c.name + ' #' + t.id + ' ' + String(t.title).slice(0, 40);
+      if (t.sprint && !/^S\d{1,2}$/i.test(String(t.sprint))) { debt.push(head + '：非法 sprint 标签 ' + t.sprint + '，不在任何轮次口径（改成 S 号）'); continue; }
+      const why = String(t.wait_reason || '');
+      if (t.human_state === 'queued' && d >= 3) { debt.push(head + '：' + String(t.run_note || '排期') + ' 挂 ' + d + ' 天，判定链没续上'); continue; }
+      if (t.status === 'review' && t.human_state === 'wait_me' && why === '待放行') {
+        const pend = note.match(/\[pending-release [^\]]*until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})Z\]/g);
+        const inWindow = pend && (() => { const m = pend[pend.length - 1].match(/until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})Z/); return m && Date.now() < Date.parse(m[1].replace(' ', 'T') + ':00Z'); })();
+        if (inWindow) { waiting.push(head + '：静默期中，到点 harness 自动落地'); continue; }
+        if (!rrCover.has(Number(t.id)) && d >= 2) { debt.push(head + '：方案在手 ' + d + ' 天没排放行官（续接链漏网）'); continue; }
+        waiting.push(head + '：待放行 ' + d + ' 天，放行官在途'); continue;
+      }
+      if (/停人/.test(why)) { waiting.push(head + '：停人待裁决 ' + d + ' 天，该人裁（判语在卡 note）'); continue; }
+      if (/人工位待认领/.test(why)) { (d >= 7 ? debt : waiting).push(head + '：人工位待认领 ' + d + ' 天' + (d >= 7 ? '（超 7 天，harness 转位路该吃掉，还在就是洞）' : '，该运营认领')); continue; }
+      if (/人工执行中/.test(why)) { waiting.push(head + '：人工执行中 ' + d + ' 天，该认领人收尾'); continue; }
+      if (/待人工执行/.test(why)) { waiting.push(head + '：拆条人工工单 ' + d + ' 天，该运营啃'); continue; }
+      if (String(t.owner_type) === 'client' && ['proposed', 'approved', 'blocked', 'in_progress'].indexOf(t.status) !== -1) { waiting.push(head + '：等客户 ' + d + ' 天'); continue; }
+      if (String(t.review_effective || '') === 'later') {
+        const n = sprintN(t.sprint);
+        if (n !== null && curN !== null && n <= curN) rejudge.push(head + '：later 到期（' + t.sprint + ' 已当期），下一轮自动重判');
+      }
+    }
   }
   wait.sort((a, b) => a.left - b.left);
   const L = [];
@@ -109,5 +152,17 @@ function isPendingCard(t) {
   L.push('## 自愈账（近 ' + DAYS + ' 天，看不顺眼的 PATCH 回原值即翻案，熔断保证不反复）');
   for (const h of healed) L.push('- ' + h.c + ' #' + h.id + ' [' + h.kind + '] ' + h.what);
   if (!healed.length) L.push('- 无');
+  L.push('');
+  L.push('## 桶一 机器债（' + debt.length + '，应为零，每条都是流程洞，轮内清）');
+  for (const x of debt) L.push('- ' + x);
+  if (!debt.length) L.push('- 无，链路自己转得动');
+  L.push('');
+  L.push('## 桶二 等人等客户（' + waiting.length + '，不算僵尸，带天数追）');
+  for (const x of waiting) L.push('- ' + x);
+  if (!waiting.length) L.push('- 无');
+  L.push('');
+  L.push('## 桶三 到期重判（' + rejudge.length + '，下一轮自动吃掉，点名确认）');
+  for (const x of rejudge) L.push('- ' + x);
+  if (!rejudge.length) L.push('- 无');
   console.log(L.join('\n'));
 })().catch((e) => { console.error('fleet_digest 失败：' + e.message); process.exit(1); });
