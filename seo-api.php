@@ -772,6 +772,24 @@ function no_change_plan($t){
     $q->execute([(int)$t['id']]);
     return (int)((($q->fetch())['c'])??0)===0;
 }
+/* 确认卡已出、客户尚未表态的博客任务是「等客户」不是「待放行」（2026-10-09 批三热修）：
+   blog_outline_stage 靠 output_url 不含 /blog/ 判大纲段，而卡机制上线后成稿任务的 output_url
+   是卡链接，同样不含 /blog/，放行官一判 release 就被 blog_release_as_write 当大纲重写。
+   批二 A 起 result 落地自动召唤放行官，Apollo #825 / Ben's NZ #831 由此进了
+   「成稿→判定→放行→重写」死循环（5 分钟一圈烧 opus 两小时）。有卡无表态的任务
+   放行官不该被召唤，误召唤也必须整行跳过。表态过的不算干等，走各自路由（agree
+   直通 apply、修改意见走卡反馈落地）。 */
+function blog_card_waiting($t){
+    if(strpos(strtolower((string)($t['ops']??'')),'blog-draft')===false)return false;
+    $sig=(string)($t['output_url']??'').' '.(string)($t['result_note']??'');
+    if(strpos($sig,'blog_confirmation')===false)return false;
+    try{
+        $fb=db()->prepare("SELECT id FROM seo_card_feedback WHERE task_id=? AND item='publish_blog' ORDER BY id DESC LIMIT 1");
+        $fb->execute([(int)$t['id']]);
+        if($fb->fetch())return false;
+    }catch(Exception $e){/* 表未建 = 无表态，按等客户处理 */}
+    return true;
+}
 function blog_outline_stage($t){
     $ops=strtolower((string)($t['ops']??''));
     if(strpos($ops,'blog-draft')===false)return false;
@@ -5836,11 +5854,14 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
             if(!is_array($v)||(string)($v['verdict']??'')!=='do')continue;
             $tid=(int)($v['task_id']??0);
             if(!$tid||isset($autoIds[$tid]))continue;
-            $sq=db()->prepare("SELECT status FROM seo_tasks WHERE id=? AND client_id=?");
+            $sq=db()->prepare("SELECT id,status,ops,output_url,result_note FROM seo_tasks WHERE id=? AND client_id=?");
             $sq->execute([$tid,$cid]);
-            $st0=(string)($sq->fetchColumn()?:'');
+            $t0=$sq->fetch();
             $sq->closeCursor();
-            if($st0==='review')$chain[]=$tid;
+            if(!$t0||(string)$t0['status']!=='review')continue;
+            /* 确认卡已出等客户的不召唤放行官（死循环热修，见 blog_card_waiting 注释） */
+            if(blog_card_waiting($t0))continue;
+            $chain[]=$tid;
         }
     }
     $rrjid=0;
@@ -5877,6 +5898,14 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
         if(!$tid||!in_array($verdict,['release','hold_human','redo'],true)){if($tid)$act['skipped'][]=$tid;continue;}
         $q=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
         if(!$t||(int)$t['client_id']!==$cid||$t['status']!=='review'){$act['skipped'][]=$tid;continue;}
+        /* 等客户表态的卡任务整行跳过：release 会被 blog_outline_stage 误路由成重写（死循环），
+           hold/redo 也是对着「等客户」状态空判。谁召唤的都一样跳（见 blog_card_waiting 注释）。 */
+        if(blog_card_waiting($t)){
+            if(strpos((string)$t['result_note'],'[card-waiting-skip]')===false)
+                task_append_note($tid,'[card-waiting-skip] 确认卡已出等客户表态，放行判定不适用，跳过（放行官判语未落）');
+            audit('opus-release','seo_release_card_waiting_skip',(string)$tid,[]);
+            $act['skipped'][]=$tid;continue;
+        }
         $note=(string)$t['result_note'];
         if($verdict==='hold_human'){
             $cf=isset($r['conflicts'])&&is_array($r['conflicts'])?implode(',',array_map('strval',array_slice($r['conflicts'],0,6))):'';

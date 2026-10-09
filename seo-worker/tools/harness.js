@@ -580,6 +580,9 @@ async function report(all, sprint, retried) {
     }
     if (note.includes('[hold-human opus')) continue; // opus 已停人，人动过才再判
     if (note.includes('[auto-release L2-opus')) continue; // 已放行在落，别再判出熔断噪音
+    // 确认卡已出等客户表态的不召唤放行官（2026-10-09 批三热修：release 会被误路由成重写草稿，
+    // Apollo #825 / Ben's NZ #831 死循环教训；服务端 blog_card_waiting 同口径兜底）
+    if (note.includes('blog_confirmation') && !t.card_feedback_at) continue;
     if (t.review_pending) continue;
     judgeIds.push(r.id);
   }
