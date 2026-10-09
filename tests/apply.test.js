@@ -493,6 +493,24 @@ t('OPS_CHECK 声明解析：readonly / needs / capability-gap / 缺失 / 花名'
   assert.strictEqual(E.parseOpsCheck('OPS_CHECK: needs ').kind, 'gap', 'needs 空列表按 gap');
 });
 
+t('planItems：显式空数组是无变更声明，不走 ops 兜底（批二 B，Merii #1171）', () => {
+  const task = { ops: 'campaign-create,ad-create' };
+  const noChange = '方案正文\n```json\n{"target_urls":[],"files":[],"items":[]}\n```';
+  assert.deepStrictEqual(E.planItems(noChange, task), [], '空数组必须原样保留，伪造条目会抹掉零写入信号');
+  assert.strictEqual(E.planDeclaresNoChange(noChange), true);
+  const noJson = '方案正文没有末尾 json';
+  const fb = E.planItems(noJson, task);
+  assert.strictEqual(fb.length, 2, 'json 缺失仍走 ops 兜底，账本可以粗不许空');
+  assert.ok(fb[0].entity.indexOf('方案未拆条') > -1);
+  assert.strictEqual(E.planDeclaresNoChange(noJson), false, '忘了记账不等于没有变更');
+  const withItems = '正文\n```json\n{"items":[{"op":"ad-create","entity":"ad 123","target":"x"}]}\n```';
+  assert.strictEqual(E.planItems(withItems, task).length, 1);
+  assert.strictEqual(E.planDeclaresNoChange(withItems), false);
+  const malformed = '正文\n```json\n{"items":[{"op":"ad-create"}]}\n```';
+  assert.strictEqual(E.planItems(malformed, task).length, 2, '条目全部缺 entity 按忘了记账走兜底');
+  assert.strictEqual(E.planDeclaresNoChange(malformed), false, '有条目但全坏不算无变更声明');
+});
+
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

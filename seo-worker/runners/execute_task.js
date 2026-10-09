@@ -484,9 +484,13 @@ function extractTrailingJsonSafe(text) {
  */
 function planItems(output, task) {
   const json = extractTrailingJsonSafe(output);
-  const raw = json && Array.isArray(json.items) ? json.items : [];
+  const raw = json && Array.isArray(json.items) ? json.items : null;
+  /* 显式空数组 = 无变更方案（prompt 明文：无变更方案写空数组）。这时不许走 ops 兜底，
+     兜底会按任务 ops 伪造出机器条目，把「零写入」信号在产线上抹掉，放行后 apply 必撞
+     「零行可硬审」死路（2026-10-08 Merii #1171/#1172 实证，批二 B）。 */
+  if (raw !== null && raw.length === 0) return [];
   const items = [];
-  for (const it of raw.slice(0, 80)) {
+  for (const it of (raw || []).slice(0, 80)) {
     if (!it || typeof it !== 'object') continue;
     const entity = String(it.entity || '').trim().slice(0, 255);
     if (!entity) continue;
@@ -504,6 +508,13 @@ function planItems(output, task) {
     }
   }
   return items;
+}
+
+/* 方案是否显式声明零写入（items 是有意的空数组，批二 B）。只认显式声明：
+   json 缺失或 items 键缺失都不算，那是「忘了记账」不是「没有变更」。 */
+function planDeclaresNoChange(output) {
+  const json = extractTrailingJsonSafe(output);
+  return !!(json && Array.isArray(json.items) && json.items.length === 0);
 }
 
 /**
@@ -2238,6 +2249,12 @@ async function runOne(ctx, context, workspace, taskId) {
       const r = await api.postTaskItems(taskId, { mode: 'plan', items: planItems(output, task) });
       log('task ' + taskId + ': 条目账本 ' + (r.items || 0) + ' 条' + (r.blocked ? ('，人工 ' + r.blocked + ' 条，split 工单 #' + (r.split_task || '?')) : '') + (r.merged ? '，母任务已收敛' : ''));
       if (r.merged) noteFinal = '方案全文在任务附件与 change-plan 文件。拆条后全部条目需人工，母任务已并入人工工单 #' + (r.split_task || '?') + '，不出放行卡。';
+      /* 无变更方案标记（批二 B）：items 是有意的空数组时给服务端递信号，放行路由改走
+         验收收单（放行 = 验收，不排 apply）。服务端还会硬查条目账本为空才认。 */
+      if (planDeclaresNoChange(output)) {
+        noteFinal = '[无变更方案] 实读核验结论为零写入，条目账本为空，放行即验收，不排 apply。\n' + noteFinal;
+        log('task ' + taskId + ': 方案声明零写入（items 空数组），已打 [无变更方案] 标记');
+      }
     } catch (e) {
       log('task ' + taskId + ': 条目账本写入失败（方案照常待放行，账本缺行需人工补）:: ' + e.message);
     }
@@ -2334,6 +2351,8 @@ module.exports = {
   credentialsPath,
   readTargetUrls,
   readPremiseRevision,
+  planItems,
+  planDeclaresNoChange,
   buildTargetHeader,
   extractFacts,
   recordFacts,

@@ -624,6 +624,57 @@ function queue_review_job($cid,$ids,$by,$auditAction){
     return [$jids[0],false];
 }
 
+/* 放行官排队（2026-10-09 批二 A：链路自动续接）。execute/redo/premise_revision 的方案一落地
+   （POST /tasks/{id}/result）就在这里续上 release_review，不再等 harness 轮（半月轮间隔里
+   方案干等两周，10/7 轮 #752/#143/#1076 三次手工补排的结构化修复）。
+   去重防双判双落，三层：
+   1. 任务已被某个 queued/running 的 release_review payload 点名 → 剔除（防两个放行官判同一单，
+      判决各自落地就是双 apply）；
+   2. 剩下的并进现有 queued job（<=20，条件 UPDATE 防 worker 刚 claim 走）；
+   3. 都没有才新建。harness 的 POST /jobs type=release_review 也走本函数，两个入口一套去重。
+   返回 [job_id, merged]；全被剔除时 [0,true]（有在飞判定覆盖，调用方不用再排）。 */
+function queue_release_review_job($cid,$ids,$by,$auditAction){
+    ensure_job_types();
+    $ids=array_values(array_unique(array_filter(array_map('intval',(array)$ids))));
+    if(!$ids)return [0,false];
+    $q=db()->prepare("SELECT id,status,payload FROM agent_jobs WHERE client_id=? AND type='release_review' AND status IN('queued','running') ORDER BY id DESC");
+    $q->execute([$cid]);
+    $inflight=$q->fetchAll();
+    $q->closeCursor();
+    $covered=[];
+    foreach($inflight as $j){
+        $p=jdec($j['payload']);
+        $tids=(is_array($p)&&isset($p['task_ids'])&&is_array($p['task_ids']))?$p['task_ids']:[];
+        foreach($tids as $x)$covered[(int)$x]=true;
+    }
+    $ids=array_values(array_filter($ids,function($x)use($covered){return !isset($covered[$x]);}));
+    if(!$ids)return [0,true];
+    foreach($inflight as $j){
+        if((string)$j['status']!=='queued')continue;
+        $p=jdec($j['payload']);
+        $have=(is_array($p)&&isset($p['task_ids'])&&is_array($p['task_ids']))?array_map('intval',$p['task_ids']):[];
+        $merged=array_values(array_unique(array_merge($have,$ids)));
+        if(count($merged)>20)break;
+        $up=db()->prepare("UPDATE agent_jobs SET payload=? WHERE id=? AND status='queued'");
+        $up->execute([json_encode(['task_ids'=>$merged],JSON_UNESCAPED_UNICODE),(int)$j['id']]);
+        if($up->rowCount()>0){
+            audit($by,$auditAction,(string)$j['id'],['client_id'=>$cid,'task_ids'=>$ids,'merged_into_queued'=>true]);
+            return [(int)$j['id'],true];
+        }
+        break;
+    }
+    $jids=[];
+    foreach(array_chunk($ids,20) as $chunk){
+        db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'release_review',?,'queued',?)")
+            ->execute([$cid,json_encode(['task_ids'=>$chunk],JSON_UNESCAPED_UNICODE),$by]);
+        $jid=(int)db()->lastInsertId();
+        $jids[]=$jid;
+        audit($by,$auditAction,(string)$jid,['client_id'=>$cid,'task_ids'=>$chunk]);
+    }
+    fire_wake($jids[0]);
+    return [$jids[0],false];
+}
+
 /* 方案层过闸（plan_review job，light 道，fable 一次）。plan job 刚落的草稿先过这一道：
    按跨客户经验改成 v2 并出方向确认卡，人确认方向后 v2 的任务才进任务层判定（review_plan）。
    同一 plan 已有 queued/running 的就不重复排。回 job_id。 */
@@ -675,7 +726,11 @@ function tasks_bulk_insert($p,$clean){
     ensure_task_module();
     $ids=[];
     $ins=$p->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,'proposed','seo-worker')");
-    foreach($clean as $row){$ins->execute($row);$ids[]=(int)$p->lastInsertId();}
+    foreach($clean as $row){
+        $row[2]=sprint_label_norm((int)$row[0],$row[2]); /* 批二 C：非法 sprint 标签入口折算（行形状见 tasks_bulk_clean） */
+        $ins->execute($row);
+        $ids[]=(int)$p->lastInsertId();
+    }
     return $ids;
 }
 
@@ -705,6 +760,17 @@ function analysis_task($t){
     if(!$ops)return !empty($t['card_kind']);
     foreach($ops as $op){if(!in_array($op,$READONLY_OPS,true))return false;}
     return true;
+}
+/* 无变更方案（2026-10-09 批二 B，Merii #1171 实证）：执行侧实读后结论为零写入（现状已满足 /
+   认领既有资产），方案 note 带 [无变更方案] 标记。这种单排 apply 必撞「零行可硬审」死路，
+   放行 = 验收。两道验：标记是执行侧 runner 写的（worker 信道），且条目账本确实没有待办机器
+   条目（服务端硬查，防标记写了账本却有活）。老方案没有标记的照旧走 apply，不猜。 */
+function no_change_plan($t){
+    if(strpos((string)($t['result_note']??''),'[无变更方案]')===false)return false;
+    ensure_change_items();
+    $q=db()->prepare("SELECT COUNT(*) c FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized')");
+    $q->execute([(int)$t['id']]);
+    return (int)((($q->fetch())['c'])??0)===0;
 }
 function blog_outline_stage($t){
     $ops=strtolower((string)($t['ops']??''));
@@ -1111,6 +1177,28 @@ function ensure_task_origin(){
     if(!$col)db()->exec("ALTER TABLE seo_tasks ADD COLUMN origin VARCHAR(40) NOT NULL DEFAULT 'sprint'");
 }
 
+/* sprint 标签白名单（2026-10-09 批二 C，Oak #626 实证：W37 这类非法标签解析不进任何轮次
+   口径，任务永久隐身，31 天连闸 A 都没排，连报错都没有）。合法：空 或 S1..S99。
+   非法的折算成客户当期标签（半月制指针），客户无锚折不出就空。写入口统一过这里：
+   task_insert（单条）、tasks_bulk_insert（plan 批量）、PATCH /tasks/{id}（改期）。 */
+function client_current_sprint_label($cid){
+    $pq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC,id DESC LIMIT 1");
+    $pq->execute([(int)$cid]);
+    $pr=$pq->fetch();
+    $pq->closeCursor();
+    $anchor=($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null;
+    if(!$anchor)return '';
+    $n=semimonth_index((new DateTime('today'))->format('Y-m-d'))-semimonth_index($anchor)+1;
+    return 'S'.max(1,min($n,6));
+}
+function sprint_label_norm($cid,$s){
+    $s=strtoupper(trim((string)$s));
+    if($s===''||preg_match('/^S[1-9][0-9]?$/',$s))return $s;
+    $cur=client_current_sprint_label($cid);
+    audit('system','seo_sprint_norm','',['client_id'=>(int)$cid,'bad'=>$s,'to'=>$cur]);
+    return $cur;
+}
+
 /* 一行任务落库，入参是 task_fields_clean() 出来的干净数组。
    POST /tasks 和 POST /inbox/{root}/spawn_task 共用，写的列必须一致：
    立项出来的任务和人工建的任务在看板上不该有任何区别。 */
@@ -1126,6 +1214,7 @@ function card_kind_of($ops){
 function task_insert($cid,$t,$by,$origin='sprint'){
     ensure_task_origin();
     ensure_review_schema();
+    $t['sprint']=sprint_label_norm($cid,$t['sprint']??'');
     db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin,card_kind)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             (int)$cid,$t['plan_id'],$t['sprint'],$t['module'],$t['title'],$t['detail'],
@@ -2239,7 +2328,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     }
     /* 方案一出就自动判「该不该落地」，待放行面板上人看到的是判决不是 30KB 方案。 */
     list($rjid,$rmerged)=queue_review_job((int)($cr['client_id']??0),[$tid],'seo-worker','seo_tasks_review_auto');
-    res(200,['ok'=>true,'review_job_id'=>$rjid]);
+    /* 链路自动续接（2026-10-09 批二 A）：方案落地即排放行官，redo/premise_revision 在轮外
+       重出的方案不再干等下一个半月轮。止损闩生效时不排（解闩后 harness 轮会接上）。 */
+    $rrjid=0;
+    if(!ops_halted((int)($cr['client_id']??0))){
+        list($rrjid,)=queue_release_review_job((int)($cr['client_id']??0),[$tid],'seo-worker','seo_release_review_auto');
+    }
+    res(200,['ok'=>true,'review_job_id'=>$rjid,'release_review_job_id'=>$rrjid]);
 }
 
 // POST /tasks/{id}/output_url body { output_url } -> worker 只改卡片产物链接，不动状态。
@@ -5487,10 +5582,12 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
     /* 博客大纲阶段的任务，放行 = 写正文，不进 apply。 */
     $writeIds=[];$applyIds=[];
     $acceptIds=[];
+    $noChangeIds=[];
     foreach($found as $t){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([(int)$t['id']]);$row=$full->fetch();
         if(analysis_task($row))$acceptIds[]=(int)$t['id'];
         elseif(blog_outline_stage($row))$writeIds[]=(int)$t['id'];
+        elseif(no_change_plan($row))$noChangeIds[]=(int)$t['id'];
         else{
             /* 空 ops 护栏（与频道放行同口径）：执行走的是分析模式没有 change plan，排 apply 必失败 */
             $opsR=array_values(array_filter(array_map('trim',explode(',',(string)$row['ops']))));
@@ -5504,13 +5601,21 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
         $err=task_close($aid,'accepted','分析报告已验收',$u['username']);
         if($err)res(400,['error'=>'任务 '.$aid.'：'.$err]);
     }
+    /* 无变更方案（批二 B）：放行 = 验收，不排 apply（排了必撞「零行可硬审」）。方案全文在交付附件。 */
+    foreach($noChangeIds as $nid){
+        $err=task_close($nid,'accepted','无变更方案（实读对账零写入），放行即验收，不排 apply',$u['username']);
+        if($err)res(400,['error'=>'任务 '.$nid.'：'.$err]);
+        audit($u['username'],'seo_task_release_nochange',(string)$nid,[]);
+    }
     $jids=[];$skipped=[];
     foreach($writeIds as $wid){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([$wid]);$row=$full->fetch();
         list($wj,$ws)=blog_release_as_write($cid,$row,$u['username']);$jids=array_merge($jids,$wj);$skipped=array_merge($skipped,$ws);
     }
     if($applyIds){list($aj,$as)=queue_task_jobs($cid,'apply_task',$applyIds,$u['username'],'seo_tasks_release');$jids=array_merge($jids,$aj);$skipped=array_merge($skipped,$as);}
-    /* 一条都没新建说明放行的任务全在飞，旧前端认 409 加 job_id 那套提示。 */
+    /* 一条都没新建说明放行的任务全在飞，旧前端认 409 加 job_id 那套提示。
+       例外：本批有验收收口（分析/无变更方案）就不是「全在飞」，照常回 200（批二 B 补）。 */
+    if(!$jids&&($acceptIds||$noChangeIds))res(200,['ok'=>true,'job_ids'=>[],'job_id'=>0,'count'=>0,'accepted'=>array_merge($acceptIds,$noChangeIds),'skipped'=>$skipped]);
     if(!$jids)res(409,['error'=>'Apply job already queued or running','job_id'=>$skipped?$skipped[0]['job_id']:0,'job_ids'=>[],'count'=>0,'skipped'=>$skipped]);
     /* job_id 保留成第一个新建 job，旧前端的「job #」提示不至于变成 undefined。 */
     res(200,['ok'=>true,'job_ids'=>$jids,'job_id'=>$jids[0],'count'=>count($jids),'skipped'=>$skipped]);
@@ -5767,6 +5872,14 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             list($jr,)=queue_task_jobs($cid,'execute_task',[$tid],'opus-release','seo_release_redo');
             audit('opus-release','seo_release_redo',(string)$tid,['reason'=>$reason,'job'=>$jr?$jr[0]:0]);
             $act['redo'][]=$tid;continue;
+        }
+        /* release 的无变更方案捷径（批二 B）：零写入方案没有熔断与静默期可言（没有要落地的东西），
+           放行 = 验收收单。放在熔断与 spend 闸之前，顺序即语义：先问有没有活，再问活危不危险。 */
+        if(no_change_plan($t)){
+            $err=task_close($tid,'accepted','无变更方案（实读对账零写入），放行官判 release 即验收：'.$reason,'opus-release');
+            if($err){$act['skipped'][]=$tid;continue;}
+            audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'no_change_accept']);
+            $act['released'][]=$tid;continue;
         }
         /* release。熔断先行，但按方案版本计不按任务终身计（2026-09-27 Alvin 上帝视角修正）：
            bm 事故防的是同一份方案盲目重放；方案重出过（execute done 晚于上次 apply）旧失败就是
@@ -6484,9 +6597,10 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     ensure_review_schema(); /* card_kind 随 ops 重算要列在（2026-09-21） */
     $tid=(int)$mm[1];
     $i=input();
-    $chk=db()->prepare("SELECT id FROM seo_tasks WHERE id=?");
+    $chk=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
     $chk->execute([$tid]);
-    if(!$chk->fetch())res(404,['error'=>'Task not found']);
+    $trowP=$chk->fetch();
+    if(!$trowP)res(404,['error'=>'Task not found']);
     $sets=[];$args=[];
     if(isset($i['status'])){
         if(!in_array($i['status'],['proposed','approved','in_progress','review','done','blocked'],true))res(400,['error'=>'bad status']);
@@ -6506,7 +6620,7 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     }
     if(isset($i['title'])){$sets[]='title=?';$args[]=(string)$i['title'];}
     if(isset($i['detail'])){$sets[]='detail=?';$args[]=(string)$i['detail'];}
-    if(isset($i['sprint'])){$sets[]='sprint=?';$args[]=(string)$i['sprint'];}
+    if(isset($i['sprint'])){$sets[]='sprint=?';$args[]=sprint_label_norm((int)$trowP['client_id'],(string)$i['sprint']);} /* 批二 C */
     if(isset($i['output_url'])){$sets[]='output_url=?';$args[]=(string)$i['output_url'];}
     if(isset($i['ops'])){$sets[]='ops=?';$args[]=(string)$i['ops'];$sets[]='card_kind=?';$args[]=card_kind_of((string)$i['ops']);}
     if(isset($i['result_note'])){$sets[]='result_note=?';$args[]=(string)$i['result_note'];}
@@ -6587,6 +6701,16 @@ if($m==='POST'&&$ROUTE==='/jobs'){
         if(!$jids)res(409,['error'=>'Job already queued or running','job_id'=>$skipped?$skipped[0]['job_id']:0,'ids'=>[],'skipped'=>$skipped]);
         /* id 保留成第一个新建 job，旧前端的「已排队 job #」提示不至于变成 undefined。 */
         res(200,['ok'=>true,'ids'=>$jids,'id'=>$jids[0],'skipped'=>$skipped]);
+    }
+    /* release_review 走按任务去重（2026-10-09 批二 A）：result 端点已自动续排放行官，harness
+       再排同一批任务时这里剔重/并批，不再按「同客户同类型 409」整批弹回炸掉 harness 轮。 */
+    if($type==='release_review'&&is_array($payloadIn)&&isset($payloadIn['task_ids'])&&is_array($payloadIn['task_ids'])){
+        $ids=[];
+        foreach($payloadIn['task_ids'] as $x){$x=(int)$x;if($x&&!in_array($x,$ids,true))$ids[]=$x;}
+        if(!$ids)res(400,['error'=>'task_ids required']);
+        if(count($ids)>50)res(400,['error'=>'batch too large, max 50 tasks']);
+        list($jid,$merged)=queue_release_review_job($cid,$ids,$u['username'],'seo_job_create');
+        res(200,['ok'=>true,'id'=>$jid,'merged'=>$merged]);
     }
     $dup=db()->prepare("SELECT id FROM agent_jobs WHERE client_id=? AND type=? AND status IN('queued','running') LIMIT 1");
     $dup->execute([$cid,$type]);
