@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-09 AIRA (z2) 批三：判放链串行化 + chatw 失败回炉 + 内链白名单剔 draft（rev 222098e）
+
+- 背景：批二上线当天 WF 端 10 客户全量轮（weekly_run，收口 6 / 放行官自动放行 10 / 零人工干预），轮后复盘兜出四个结构洞，Alvin 定按第一性原理修：1) 批二 A 的并行双排让判定官与放行官同场矛盾（Louvresky #752 判定 drop 与放行官 hold_human 同分钟落库，任务卡中间没人知道听谁的）；2) chatw 来源任务失败撞熔断分支早退，闸A续接走不到（#757 fail_reason 写明「方案两步对调重来即可落地」也只能烂在人工清单，而放行官 spec 本就有「步骤在平台侧走不通判 redo」整条路）；3) WF listPosts 把 draft 混在列表里全收进内链白名单，#835 博文链向未发布姊妹篇线上 404，烧一轮 opus 放行官才拦住；4) weekly_digest 人工修复清单连续两轮零进展的任务双进组重复计数。
+- 干了什么：seo-api.php 两处（result 端点只排闸A、放行官挪到 /tasks/review_result 判决落库后按 do 续排且剔 L0 直落；chatw 熔断分支语义收窄为「不自动重排 apply」，失败照进闸A重判）；execute_task.js 内链白名单只认 published（无 status 字段旧形状按已发布处理），顺手生成 prompt 词数上限留 200 词余量（#841 两次 3011 词压线超限，校验口径不变）；weekly_digest.py 去重（零进展只进优先组带原因桶注记）。
+- 测试：tests 23 件全绿（blog.test.js 新增 draft 过滤组），php -l 与 chatapi.test.php 24 过（250 远端）。
+- 坑：串行后放行官的常规入口只剩两个（review_result 的 do 续排、harness 对 review_pending 的漏网补排），drop/later/merge 不再烧放行官；chatw 回炉只排闸A不排 apply，熔断防盲目重放的性质不变（重试必须夹一次判定，每版方案额度照旧）。harness 自己的放行官补排有 review_pending 过滤，不会绕回并行。
+- 下一步/认领：api 已部（rev 222098e），worker 等在飞 job 清零后部署；部署完用 Louvresky #757 单点验证新链（排闸A重判，预期判 do 续放行官判 redo 重出方案）。认领 AIRA。
+
 ### 2026-10-09 AIRA (z) 僵尸根因修正批二：链路自愈四件 + digest 三桶（rev 8276b36 + b93ac5e）
 
 - 背景：10/7 批一把人工位与停人态真话化之后，SEO 线扫描又兜出两类新洞（Oak #626 的 W37 非法 sprint 标签隐身 31 天、Merii #1171 零写入方案撞 apply「零行可硬审」死路），加上 10/7 轮三次手工补排放行官（#752/#143/#1076），Alvin 定按第一性原理修：板上每条 open 任务任何时刻都必须答得出「下一步由谁在什么时刻推进」且默认是机器，答案会变空的生成路径逐条封死。
