@@ -6162,6 +6162,8 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
                     if($err){$skipped[]=['task_id'=>$tid,'why'=>$err];continue;}
                     $done['do']++;continue;
                 }
+                /* 等客户表态的卡任务不在这重写（成稿重写死循环家族第四入口，见 blog_card_waiting） */
+                if(blog_card_waiting($t)){$skipped[]=['task_id'=>$tid,'why'=>'确认卡已出等客户表态，放行不适用：等卡反馈或到期视同同意自动落地'];continue;}
                 if(blog_outline_stage($t)){list($wj,$ws)=blog_release_as_write($cid,$t,$u['username']);$jids=array_merge($jids??[],$wj);$done['do']++;continue;}
                 /* 空 ops 护栏：批量按推荐不代人验收成稿，留人逐条 decide */
                 if(!array_filter(array_map('trim',explode(',',(string)$t['ops'])))){$skipped[]=['task_id'=>$tid,'why'=>'没有 ops，机器落不了地：人工逐条验收，或补 ops 重跑出方案'];continue;}
