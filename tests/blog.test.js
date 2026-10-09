@@ -55,6 +55,21 @@ t('禁用词、绝对化、禁用开头各报一次；规则文件读不到回�
   assert.ok(Object.keys(real.banned_terms || {}).length > 0, '真实规则文件应读到 _default 禁用词');
 });
 
+console.log('内链白名单');
+t('draft 博文不进白名单，published 与无 status 字段的旧形状照收', () => {
+  const pages = [{ path: '/pergolas' }];
+  const posts = [
+    { slug: 'live-one', status: 'published' },
+    { slug: 'draft-one', status: 'draft' },
+    { slug: 'legacy-no-status' },
+  ];
+  const got = E.allowedPathsFrom(pages, posts);
+  assert.ok(got.indexOf('/blog/live-one') > -1);
+  assert.ok(got.indexOf('/blog/legacy-no-status') > -1, '无 status 的旧平台形状按已发布处理');
+  assert.strictEqual(got.indexOf('/blog/draft-one'), -1, 'draft 进了白名单就是 #835 的 404 内链根因');
+  assert.ok(got.indexOf('/pergolas') > -1);
+});
+
 console.log('发布门');
 t('缺封面、待人工配图标记、管道表、缺 FAQ 各拦一条', () => {
   const okPost = { meta: { ogImage: '/assets/x.jpg' }, body: '## A\n<table><tr><td>1</td></tr></table>\n<script type="application/ld+json">{}</script>' };

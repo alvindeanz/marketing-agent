@@ -662,7 +662,12 @@ function allowedPathsFrom(pages, posts) {
     out.add(blogcheck.normPath(s));
   }
   for (const post of posts || []) {
-    if (post && post.slug) out.add(blogcheck.normPath('/blog/' + post.slug));
+    if (!post || !post.slug) continue;
+    // 平台把 draft 和 published 混在同一张列表里（Louvresky #835 的内链 404 根因：
+    // 链向了还没发布的姊妹篇草稿）。白名单只认线上可达的；没有 status 字段的旧形状按已发布处理。
+    const st = String(post.status || '').toLowerCase();
+    if (st && st !== 'published') continue;
+    out.add(blogcheck.normPath('/blog/' + post.slug));
   }
   return Array.from(out);
 }
@@ -976,7 +981,9 @@ function blogHardRules(opts) {
     '5. 正文里不许出现 emoji，不许出现破折号，用逗号句号或分号。',
     '6. FAQ 部分的 FAQPage JSON-LD 直接用 <script type="application/ld+json">{...}</script> 写在正文末尾。',
     '   Article 和 BreadcrumbList schema 由平台自动注入，不要自己写。',
-    '7. 字数 ' + blogcheck.WORD_MIN + ' 到 ' + blogcheck.WORD_MAX + ' 词之间，这是硬性区间。',
+    // 给模型报的上限留 200 词余量：模型压线常超出几十词（#841 两次 3011 词被打回），
+    // 校验口径仍是 blogcheck 的 WORD_MAX，prompt 收紧不影响既有稿判定。
+    '7. 字数 ' + blogcheck.WORD_MIN + ' 到 ' + (blogcheck.WORD_MAX - 200) + ' 词之间，这是硬性区间。',
     '8. 不要在正文里写 meta 信息，不要写 "In this article"、"Let\'s dive in"、"In conclusion" 这类废话。',
   ].join('\n');
 }

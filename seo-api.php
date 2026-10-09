@@ -624,9 +624,9 @@ function queue_review_job($cid,$ids,$by,$auditAction){
     return [$jids[0],false];
 }
 
-/* 放行官排队（2026-10-09 批二 A：链路自动续接）。execute/redo/premise_revision 的方案一落地
-   （POST /tasks/{id}/result）就在这里续上 release_review，不再等 harness 轮（半月轮间隔里
-   方案干等两周，10/7 轮 #752/#143/#1076 三次手工补排的结构化修复）。
+/* 放行官排队（2026-10-09 批二 A 链路自动续接；同日批三改串行：入口从 result 落地挪到
+   /tasks/review_result 判决落库之后，判定官与放行官不再并行互相矛盾）。不等 harness 轮的
+   性质不变（半月轮间隔里方案干等两周，10/7 轮 #752/#143/#1076 三次手工补排的结构化修复）。
    去重防双判双落，三层：
    1. 任务已被某个 queued/running 的 release_review payload 点名 → 剔除（防两个放行官判同一单，
       判决各自落地就是双 apply）；
@@ -2229,8 +2229,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         $seenW->execute([$cidW,json_encode(['task_ids'=>[$tid]],JSON_UNESCAPED_UNICODE)]);
         $rw=$seenW->fetch();
         if($rw&&(int)$rw['c']>0){
-            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」落地未完成，按熔断规矩不自动重试，转人工：细节在任务卡结果备注里。','seo-worker');
-            res(200,['ok'=>true,'dispatch_grade'=>'halted']);
+            /* 熔断只拦「不自动重排 apply」，不把任务丢出机器管辖（2026-10-09 批三，#757 教训：
+               chatw 来源的失败在这里早退，闸A续接走不到，fail_reason 把修法写得明明白白也只能
+               在人工清单上烂着）。失败结果照样进闸A重判：判 drop 自动收口，判 do 续放行官
+               （方案本身有错放行官判 redo 打回重出，额度一次，与非 chatw 来源同一条链）。 */
+            list($rjW,)=queue_review_job($cidW,[$tid],'seo-worker','seo_tasks_review_auto');
+            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」有过落地史，按熔断规矩不自动重排 apply；结果已交闸A重判（判 do 走放行官裁决，判 drop 自动收口），细节在任务卡结果备注里。','seo-worker');
+            res(200,['ok'=>true,'dispatch_grade'=>'halted','review_job_id'=>$rjW]);
         }
         if(ops_halted($cidW)){
             if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，但止损闩生效中（/stop），不自动落地。解闩发 /resume 后人工放行。','seo-worker');
@@ -2326,15 +2331,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         }
         res(200,['ok'=>true,'auto_accepted'=>true]);
     }
-    /* 方案一出就自动判「该不该落地」，待放行面板上人看到的是判决不是 30KB 方案。 */
+    /* 方案一出就自动判「该不该落地」，待放行面板上人看到的是判决不是 30KB 方案。
+       链路续接改串行（2026-10-09 批三）：这里只排闸A，放行官由 /tasks/review_result 在判决
+       落库后按 do 续排。批二 A 的并行双排曾让两官同场互相矛盾（#752 判定 drop 与放行官
+       hold_human 同时落库，任务卡在中间），串行后放行官只在 do 判决之后出场，矛盾结构性消失。
+       轮外不干等的性质不变：续接只是晚一跳闸A，不再等半月轮。 */
     list($rjid,$rmerged)=queue_review_job((int)($cr['client_id']??0),[$tid],'seo-worker','seo_tasks_review_auto');
-    /* 链路自动续接（2026-10-09 批二 A）：方案落地即排放行官，redo/premise_revision 在轮外
-       重出的方案不再干等下一个半月轮。止损闩生效时不排（解闩后 harness 轮会接上）。 */
-    $rrjid=0;
-    if(!ops_halted((int)($cr['client_id']??0))){
-        list($rrjid,)=queue_release_review_job((int)($cr['client_id']??0),[$tid],'seo-worker','seo_release_review_auto');
-    }
-    res(200,['ok'=>true,'review_job_id'=>$rjid,'release_review_job_id'=>$rrjid]);
+    res(200,['ok'=>true,'review_job_id'=>$rjid]);
 }
 
 // POST /tasks/{id}/output_url body { output_url } -> worker 只改卡片产物链接，不动状态。
@@ -5821,8 +5824,29 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $err=task_close($tid,'dropped','[auto-drop] fable 判不做自动归档：'.mb_substr(trim((string)($v['reason']??'')),0,200,'UTF-8'),'seo-worker');
         if(!$err)$autoDrop[]=$tid;
     }
-    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'reclassed'=>$reclassed,'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
-    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'reclassed'=>$reclassed]);
+    /* 放行官串行续排（2026-10-09 批三）：result 落地不再并行双排两官，放行官在这里、判决落库之后
+       才出场。只接 review 态（待放行/失败回炉）判 do、且本轮没被 L0 直落的任务：drop 由 auto-drop
+       或 harness 收口，later/merge 各有去处，都不烧放行官。失败回炉的任务放行官看得到失败备注，
+       方案本身有错（步骤顺序/引用缺失/平台走不通）按 spec 判 redo 打回重出，一次为限。 */
+    $chain=[];
+    if(!ops_halted($cid)){
+        $autoIds=[];
+        foreach($auto as $a0)$autoIds[(int)$a0['task_id']]=true;
+        foreach($rows as $v){
+            if(!is_array($v)||(string)($v['verdict']??'')!=='do')continue;
+            $tid=(int)($v['task_id']??0);
+            if(!$tid||isset($autoIds[$tid]))continue;
+            $sq=db()->prepare("SELECT status FROM seo_tasks WHERE id=? AND client_id=?");
+            $sq->execute([$tid,$cid]);
+            $st0=(string)($sq->fetchColumn()?:'');
+            $sq->closeCursor();
+            if($st0==='review')$chain[]=$tid;
+        }
+    }
+    $rrjid=0;
+    if($chain)list($rrjid,)=queue_release_review_job($cid,$chain,'seo-worker','seo_release_review_auto');
+    audit('seo-worker','seo_tasks_review_result',(string)$jid,['client_id'=>$cid,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'reclassed'=>$reclassed,'release_chain'=>['job_id'=>$rrjid,'task_ids'=>$chain],'summary'=>mb_substr((string)($i['summary']??''),0,300,'UTF-8')]);
+    res(200,['ok'=>true,'written'=>$written,'refused'=>$refused,'auto_release'=>$auto,'auto_drop'=>$autoDrop,'reclassed'=>$reclassed,'release_chain_job_id'=>$rrjid,'release_chain'=>$chain]);
 }
 
 /* POST /tasks/release_review_result -> opus 放行官判决执行（2026-09-27 Alvin 定方案 B）。

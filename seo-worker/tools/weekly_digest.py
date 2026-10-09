@@ -103,9 +103,11 @@ def digest(before_f, after_f, prev_f=None):
         for t, (bucket, fix) in stuck:
             stale2 = bool(pst) and t['id'] in pst and sig(pst[t['id']]) == sig(t)
             lines.append('- 卡壳 #%s [%s]%s %s' % (t['id'], bucket, '【连续两轮零进展】' if stale2 else '', str(t['title'])[:40]))
-            stuck_all.setdefault(bucket, []).append((a['name'], t['id'], fix))
+            # 一条活只进一个组：连续两轮零进展的只进优先组（带原因桶注记），避免清单重复计数
             if stale2:
-                stuck_all.setdefault('!连续两轮零进展（优先处理）', []).append((a['name'], t['id'], '两轮 harness 都没能推进一步，机制失效点，需要人拆'))
+                stuck_all.setdefault('!连续两轮零进展（优先处理）', []).append((a['name'], '%s（%s）' % (t['id'], bucket), '两轮 harness 都没能推进一步，机制失效点，需要人拆'))
+            else:
+                stuck_all.setdefault(bucket, []).append((a['name'], t['id'], fix))
         lines.append('')
         (stuck_clients if stuck else smooth).append(a['name'])
     lines.insert(2, '**总结：顺利跑完 %d 家（%s），卡壳 %d 家，本轮共收口任务 %d 条。**' % (
