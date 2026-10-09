@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-09 AIRA (z) 僵尸根因修正批二：链路自愈四件 + digest 三桶（rev 8276b36 + b93ac5e）
+
+- 背景：10/7 批一把人工位与停人态真话化之后，SEO 线扫描又兜出两类新洞（Oak #626 的 W37 非法 sprint 标签隐身 31 天、Merii #1171 零写入方案撞 apply「零行可硬审」死路），加上 10/7 轮三次手工补排放行官（#752/#143/#1076），Alvin 定按第一性原理修：板上每条 open 任务任何时刻都必须答得出「下一步由谁在什么时刻推进」且默认是机器，答案会变空的生成路径逐条封死。
+- 干了什么（A 到 F 六件）：A 方案落地即自动排放行官（result 端点 + queue_release_review_job 按任务三层去重，POST /jobs 同函数防 409 炸轮）；B 无变更方案分流（execute 侧保住空 items 信号打 [无变更方案] 标，服务端双验后两条放行路由改走验收收单）；C sprint 标签白名单（写入口只认空或 S1..S99，非法折算当期半月档留 audit）；D 转位自愈第二条路（人工位挂 7 天 + ops 全在政策表即转机器位，任何 module）；E paid-only（services=paid/sem）跳 SEO 闸不起钥匙任务；F fleet_digest 挂三桶（机器债应为零 / 等人等客户带天数与该谁动 / later 到期重判）。
+- 测试：tests 23 件全绿（apply.test.js 新增 planItems 无变更声明组），php -l 与 chatapi.test.php 24 过在 250 远端跑通。
+- 坑：planItems 的 ops 兜底只对「json 或 items 键缺失」生效，显式空数组是契约信号不许覆盖，两者边界有单测钉住；queue_release_review_job 的去重只认 queued/running，判完落地的任务靠 note 标记（[auto-release]/[pending-release]/[hold-human]）挡重判，harness 原有过滤不动。
+- 下一步/认领：api 与 worker 两端部署（本条目后执行）；存量擦屁股一次性做掉（W 标签折算、Playmate 三条定点轮）；10/15 全量轮验证六件套在真轮次里闭环。认领 AIRA。
+
 ### 2026-10-08 AIRA (z) sprint 档期改半月制 + Merii（54）开户
 
 - sprint 档期（Alvin 2026-10-08 定）：两周制换成日历半月制，每月 1 到 14 日一档、15 日到月末一档，S1 = plan 锚点所在档，与双月轮（每月 1 号、15 号起轮）节拍对齐。改动：seo-api.php 加 semimonth_index()，/board 的 current_sprint 与逾期口径、/tasks 响应（sprint_days 字段撤下，改 sprint_mode=semimonth）、前端 sprintRange/currentSprint 同步半月口径。存量客户档号整体不重排，只有换算口径变化（半月平均 15.2 天略长于 14 天，逾期判定只松不紧）。
