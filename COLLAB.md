@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-09 AIRA (z3) 热修：确认卡等客户的博客任务不得召唤放行官（成稿重写死循环，rev cc2ebbb）
+
+- 事故：WF 轮结束起，确认卡已出等客户的配额博客进「result 自动召唤放行官（批二 A）→判 release→blog_release_as_write 当大纲重写→新 result 再召唤」死循环，Apollo #825 / Ben's NZ #831 各 67 次重写、Kuddles #79 28 次、Louvresky #835/#837 各 6 次，烧约一整天 opus。根因：blog_outline_stage 靠 output_url 不含 /blog/ 判大纲段，卡机制上线后成稿任务的 output_url 是卡链接同样不含 /blog/，「只有大纲」与「成稿等客户」不可分；批二 A 给了自动召唤入口后闭环成形。卡页面反复重渲染但未对外推送，客户无感知。
+- 修法：新谓词 blog_card_waiting（blog-draft 任务、卡链接在 output_url/note、publish_blog 无表态 = 等客户不是待放行）；review_result 串行续排钩子跳过；release_review_result 整行跳过并留痕（防未来新入口复发）；harness judgeIds 同口径过滤。php -l 与 chatapi 24 过，api 已部（rev cc2ebbb）。
+- 坑：任何「状态靠 URL 形状推断」的谓词，引入新 URL 形状时必须全库重审调用点；新自动入口上线前把可能喂进的任务状态逐态过一遍。DEFECTS.md 当日两行。
+- 下一步/认领：受害任务最后一版草稿与卡均有效无需返工；loop 期间的卡时效按最后一轮计。认领 AIRA。
+
 ### 2026-10-09 AIRA (z2) 批三：判放链串行化 + chatw 失败回炉 + 内链白名单剔 draft（rev 222098e）
 
 - 背景：批二上线当天 WF 端 10 客户全量轮（weekly_run，收口 6 / 放行官自动放行 10 / 零人工干预），轮后复盘兜出四个结构洞，Alvin 定按第一性原理修：1) 批二 A 的并行双排让判定官与放行官同场矛盾（Louvresky #752 判定 drop 与放行官 hold_human 同分钟落库，任务卡中间没人知道听谁的）；2) chatw 来源任务失败撞熔断分支早退，闸A续接走不到（#757 fail_reason 写明「方案两步对调重来即可落地」也只能烂在人工清单，而放行官 spec 本就有「步骤在平台侧走不通判 redo」整条路）；3) WF listPosts 把 draft 混在列表里全收进内链白名单，#835 博文链向未发布姊妹篇线上 404，烧一轮 opus 放行官才拦住；4) weekly_digest 人工修复清单连续两轮零进展的任务双进组重复计数。
