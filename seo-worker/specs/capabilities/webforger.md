@@ -41,6 +41,8 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 ## risk_class（放行分级）
 
 - page-meta-update: reversible
+- page-create: reversible（2026-10-10 登记：强制 placeholder 空壳 + 建后即挂 seo.noindex 不进导航，外露由后续内容 op 与放行把门，删页即回滚；此前被误标 capability-gap 拆人工工单，#813/#815 教训）
+- page-advanced-update: reversible（2026-10-10 登记：merge 语义，平台每次写自动归档 history/{ts}-config-advanced-{slug}.json，反向 PATCH 即回滚）
 - content-edit: reversible
 - page-rewrite: reversible（L0 排除：整页覆盖影响面大）
 - page-rebuild: reversible（L0 排除）
@@ -174,6 +176,23 @@ POST /api/auth/login  {"email":"...","password":"..."}
 - 可写字段仅限注册表：`title`、`inNav`、`type`、`parent`、`collectionLayout`、`landingPage`。正文改不了，正文走 content-edit 或 page-rewrite。
 - 语言前缀 slug 用 `%2F` 编码。
 - 回滚：记下原值，反向 PATCH 回去。
+
+## page-create
+
+- 端点：`POST /api/pages/{siteId}`，body `{ title, type, slug?, lang?, inNav, placeholder, template?, description? }`
+- **本泳道一律 `placeholder: true`**：平台只落最小 `<h1>+<p>` 空壳，零 AI 调用零成本。省略该旗平台会 AI 生成正文，那是平台侧付费路径，方案里出现即 lint 打回。
+- **建页后必须紧跟一步 `PATCH …/{slug}/advanced` 挂 `seo.noindex: true`**（平台不自动挂），正文由后续 content-edit 填，解除 noindex 必须是方案里明示的独立步骤。默认 `inNav: false`。
+- `type` ∈ static | blog | collection | collection-item。语言前缀页传 `lang` 或直接 `slug:"zh/xxx"`，后续路由 slug 里的 `/` 编码为 `%2F`。
+- shadow 账号豁免套餐闸（plan gate），客户站可直接建。
+- 回滚：新建空壳未填内容前 `DELETE /api/pages/{siteId}/{slug}`（HTML 进 KV 回收站）；已填内容的页不删，挂回 noindex 并去导航。
+
+## page-advanced-update
+
+- 端点：`PATCH /api/pages/{siteId}/{slug}/advanced`，body `{ seo?, advanced?, replace? }`（GET 同路由读现值）
+- `seo`：title / description / ogImage / noindex。`advanced`：customJsonLd / customHead / customCss。**customScripts 影子账号 403，方案里不许出现。**
+- customJsonLd 硬规则：key 匹配 `/^[a-z][a-z0-9_-]{0,63}$/i` 页内唯一，data 必须带 `@type`，单条 ≤50KB 最多 20 条。Organization / WebSite / BlogPosting / BreadcrumbList 平台自动注入，customJsonLd 里出现即重复，lint 打回；页级该走这里的类型：Service、FAQPage、Product、HowTo、LocalBusiness（/contact/）、ProfessionalService、AboutPage、ItemList。
+- 默认 `replace: false` 按字段 merge，字段置 `null` 删除；每次写平台归档 `history/{ts}-config-advanced-{slug}.json`，失败重试安全。
+- 方案里必须带写前 GET 的现值留档步骤；回滚 = 按留档反向 PATCH。
 
 ## page-rewrite
 
