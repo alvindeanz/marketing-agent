@@ -185,6 +185,19 @@ function buildPreparePrompt(opts) {
     .map((op) => '- ' + op + '（' + (capabilities.autonomyOf(platform, op) || '未知等级') + '）')
     .join('\n');
 
+  // 打回重出的改法必须进 prompt（2026-10-10 redo 扩门时发现：taskDetail 不带 result_note，
+  // [redo opus] 判语和判定官 adjust 从来没进过重出轮，redo 一直在盲重出）。
+  const noteStr = String(task.result_note || '');
+  const redoLines = noteStr.match(/\[redo opus [^\n]*/g) || [];
+  const lastRedo = redoLines.length ? redoLines[redoLines.length - 1] : '';
+  const adjust = String(task.review_adjust || '').trim();
+  const reworkBlock = (lastRedo || adjust) ? [
+    '',
+    '上一版方案被打回或带前提修正。这一版的全部使命就是逐条落实下面的改法，其余照旧：',
+    lastRedo ? '- ' + lastRedo : '',
+    adjust ? '- 判定官前提修正：' + adjust : '',
+  ].filter(Boolean).join('\n') : '';
+
   return [
     '你是一家新西兰数字营销公司的 SEO 执行 agent，现在处于 prepare 阶段。',
     '你的产出是一份"待放行的变更方案"，不是变更本身。这个阶段你没有任何写权限，',
@@ -192,6 +205,7 @@ function buildPreparePrompt(opts) {
     '',
     '任务',
     taskDetail(task),
+    reworkBlock,
     '',
     '本任务涉及的平台操作',
     opLines,

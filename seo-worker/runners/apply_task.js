@@ -50,6 +50,81 @@ function changePlanPath(workspace, taskId) {
   return path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + taskId + '.md');
 }
 
+/* 落地页确认卡产线（2026-10-10 Alvin 批）：结构类改动缺 onsite_confirm=agree 时，apply 不再
+   抛错甩人，而是把已过判定与放行的方案翻成客户话出卡。客户点同意 -> harness 折叠排 apply ->
+   本闸复核凭证放行；hold 保持现状；写意见转人工。结构类不走到期视同同意。 */
+const STRUCTURAL_OP_COPY = {
+  'page-create': { term: '新建页面', intent: '在您站上新增一个页面；先以不被搜索引擎收录的空壳创建，内容填好并经您过目后才开放收录' },
+  'redirect-batch': { term: '地址跳转', intent: '把旧地址批量跳转到新地址，访客和搜索引擎都会被带到对应的新页面' },
+  'page-rebuild': { term: '整页重建', intent: '按新版式重新生成页面，原版内容有留档，随时可以还原' },
+  'nav-edit': { term: '导航调整', intent: '调整站点菜单里的条目或顺序' },
+  'page-delete': { term: '下线页面', intent: '把页面从站上移除，原内容有留档' },
+};
+
+async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops, lastOc) {
+  const { cfg, api, log } = ctx;
+  const note = String(task.result_note || '');
+  if (note.indexOf('[落地页确认卡]') !== -1) {
+    log('task ' + taskId + '：落地页确认卡已出，等客户表态' + (lastOc ? '（最后表态 ' + lastOc.choice + '）' : '') + '，本轮不落地不重发卡');
+    return { taskId, status: 'carded', logFile: '' };
+  }
+  const structOps = ops.filter((op) => STRUCTURAL_OP_COPY[op]);
+  const rows = structOps.map((op) => ({ term: STRUCTURAL_OP_COPY[op].term, intent: STRUCTURAL_OP_COPY[op].intent }));
+  // 方案里的站内链接给客户看个明细：这次会碰哪些地址。方案已过判定与放行，链接可信。
+  const linksOut = [];
+  try {
+    const planTxt = fs.readFileSync(changePlanPath(workspace, taskId), 'utf8');
+    const dom = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const seen = {};
+    for (const m of planTxt.match(/https?:\/\/[^\s)）、\]」]+/g) || []) {
+      if (dom && m.indexOf(dom) === -1) continue;
+      const clean = m.replace(/[.,;:!?]+$/, '');
+      if (seen[clean]) continue;
+      seen[clean] = 1;
+      linksOut.push({ page: clean });
+      if (linksOut.length >= 6) break;
+    }
+  } catch (e) { /* 方案读不到就不列明细，卡照出 */ }
+  const cleanTitle = String(task.title || '').replace(/^(\[[^\]]*\]\s*)+/, '').replace(/^人工落地：\s*/, '').replace(/#\d+\s*/g, '').trim().slice(0, 60);
+  const render = require('../specs/report/render_onsite_confirm.js');
+  const cardData = {
+    title: '站点调整确认：' + cleanTitle,
+    period_label: '站点调整待您确认 · ' + new Date().toISOString().slice(0, 7),
+    oneline: '本次共 ' + rows.length + ' 类动作，逐项见下方清单；每一步都有改前留档，随时可以还原。',
+    draft_url: '',
+    draft_hint: '这次调整先没有可预览的页面；涉及新页面的，内容做好后我们会再请您过目。',
+    keywords: rows,
+    links_out: linksOut,
+    images_line: '方案之外的内容一律不碰：现有页面的正文、价格、联系方式都保持原样。',
+    decision: {
+      q: '可以按这份方案调整您的网站吗？',
+      situation: cleanTitle,
+      recommendation: '同意后我们按方案执行，每一步都有改前留档；新页面的内容上线前还会再请您确认',
+      no_reply: '不回复我们就先不动您的网站，一直保持现状',
+      item: 'onsite_confirm',
+      textarea_hint: '有任何顾虑直接写：哪个页面、哪里不想动，都可以。',
+    },
+    window_line: '同意后自动进入执行；不回复则保持现状。',
+    attach_line: '技术执行细节我们这边留档备查。',
+  };
+  const cardHtml = render.renderCard(cardData);
+  const rdir = path.join(workspace, 'reports');
+  fs.mkdirSync(rdir, { recursive: true });
+  const cardName = 'onsite_confirm_task-' + taskId + '.html';
+  fs.writeFileSync(path.join(rdir, cardName), cardHtml, 'utf8');
+  const { injectCardToken } = require('../lib/publish');
+  const fbTok = injectCardToken(path.join(rdir, cardName), taskId, cfg.serviceToken);
+  const res = await publishFile(cfg, path.basename(workspace), '', cardName, path.join(rdir, cardName), log);
+  const cardUrl = res && res.url ? res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '') : '';
+  if (!cardUrl) throw new Error('task ' + taskId + '：落地页确认卡发布失败，结构类改动保持不落地');
+  await api.postTaskResult(taskId, {
+    output_url: cardUrl,
+    note: '[落地页确认卡] 结构类调整（' + structOps.join(',') + '）需客户确认。卡（发给客户，客户点同意后自动落地，不回复保持现状）: ' + cardUrl,
+  });
+  log('task ' + taskId + '：落地页确认卡已出 ' + cardUrl + '，任务进卡待发流，客户同意后自动落地');
+  return { taskId, status: 'carded', logFile: '' };
+}
+
 /** 无变更方案：execute 前提核验推翻原设后合法交付的空方案（第 2 节写「本方案无 API 调用」）。
  *  apply 对它的职责只剩验收，affected 为空是预期不是失败。判据读磁盘上已批的方案原文，
  *  apply 阶段的模型改不了它，报 success 也绕不过真方案的形状（2026-09-21 #339 实测补口）。 */
@@ -1320,9 +1395,13 @@ async function runOne(ctx, context, workspace, taskId) {
     const oc = (fbS.rows || []).filter((r) => String(r.item) === 'onsite_confirm');
     const lastOc = oc.length ? oc[oc.length - 1] : null;
     if (!lastOc || String(lastOc.choice) !== 'agree') {
-      throw new Error('task ' + taskId + '：结构类改动（' + ops.filter((op) => STRUCTURAL_CONFIRM_OPS.indexOf(op) !== -1).join(',') + '）缺客户确认凭证（onsite_confirm=agree'
-        + (lastOc ? '，当前最后表态是 ' + lastOc.choice : '，卡上没有任何表态') + '）。'
-        + '不落地。请出落地页确认卡发客户，客户同意后下一轮自动落地。');
+      /* 卡产线（2026-10-10 Alvin 批）：此前这里直接抛错让人「出卡」，但系统里没有任何工具
+         出这张卡，结构类任务全部烂成人工债（#813/#815 一族）。现在闸自己出卡：方案翻成
+         客户话渲染落地页确认卡发布到 agencyreport，任务回 review 进「卡待发」流；客户点
+         「同意，按方案调整」落 onsite_confirm=agree，harness 折叠排 apply，本闸复核凭证
+         后放行。客户 hold 或写意见照各自路由。结构类不走到期视同同意（终局裁决权在客户，
+         硬闸语义即如此）。 */
+      return issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops, lastOc);
     }
     log('task ' + taskId + '：结构类改动已有客户确认凭证（onsite_confirm=agree），放行落地');
   }
@@ -1481,7 +1560,9 @@ async function run(ctx) {
   for (const taskId of taskIds) {
     try {
       const res = await runOne(ctx, context, workspace, taskId);
-      if (res.status !== 'success') problems.push(taskId + ': ' + res.status);
+      if (res.status === 'carded') {
+        /* 落地页确认卡已出或已在等客户表态：不是失败，job 不挂红，冷却台账不记（零写入） */
+      } else if (res.status !== 'success') problems.push(taskId + ': ' + res.status);
       else {
         /* 冷却台账：成功落地的批次记 URL 集与 op（NFS 共享，双 worker 同源）。
            无变更方案与空 URL 的博客发布不进账（没有触碰既有页面）。 */

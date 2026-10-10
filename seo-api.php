@@ -780,12 +780,14 @@ function no_change_plan($t){
    放行官不该被召唤，误召唤也必须整行跳过。表态过的不算干等，走各自路由（agree
    直通 apply、修改意见走卡反馈落地）。 */
 function blog_card_waiting($t){
-    if(strpos(strtolower((string)($t['ops']??'')),'blog-draft')===false)return false;
     $sig=(string)($t['output_url']??'').' '.(string)($t['result_note']??'');
-    if(strpos($sig,'blog_confirmation')===false)return false;
+    $item='';
+    if(strpos(strtolower((string)($t['ops']??'')),'blog-draft')!==false&&strpos($sig,'blog_confirmation')!==false)$item='publish_blog';
+    elseif(strpos($sig,'[落地页确认卡]')!==false)$item='onsite_confirm'; /* 结构类卡产线 2026-10-10，同族等客户态 */
+    if($item==='')return false;
     try{
-        $fb=db()->prepare("SELECT id FROM seo_card_feedback WHERE task_id=? AND item='publish_blog' ORDER BY id DESC LIMIT 1");
-        $fb->execute([(int)$t['id']]);
+        $fb=db()->prepare("SELECT id FROM seo_card_feedback WHERE task_id=? AND item=? ORDER BY id DESC LIMIT 1");
+        $fb->execute([(int)$t['id'],$item]);
         if($fb->fetch())return false;
     }catch(Exception $e){/* 表未建 = 无表态，按等客户处理 */}
     return true;

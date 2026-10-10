@@ -112,6 +112,30 @@ async function foldCards(sprint) {
       await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + state, card_feedback_done: 1 });
       continue;
     }
+    // 落地页确认卡（onsite_confirm）同 publish_blog 不走泛折叠：agree 凭证必须留在
+    // seo_card_feedback 表供 apply 结构硬闸复核（2026-10-10 卡产线）。agree 即排 apply，
+    // 闸读到凭证放行落地；hold 保持现状；文本意见转人工（结构类不自动改方案）。
+    if (rows.some((r) => String(r.item) === 'onsite_confirm')) {
+      const oc = rows.filter((r) => String(r.item) === 'onsite_confirm');
+      const lastOc = oc[oc.length - 1];
+      let state;
+      if (lastOc.choice === 'agree') {
+        state = '客户同意站点调整，已排 apply 落地（结构硬闸复核凭证后放行）';
+        try {
+          if (String(card.status) === 'review') await call('POST', '/tasks/release', { client_id: cid, task_ids: [card.id] });
+          else state = '客户同意站点调整，但任务不在 review 态（' + card.status + '），未排 apply，需人工看一眼';
+        } catch (e) { state = '客户同意站点调整，排 apply 失败：' + (e && e.message ? e.message : e); }
+        log('#' + card.id + ' ' + state);
+      } else if (lastOc.choice === 'hold') {
+        state = '客户暂不调整，保持现状';
+      } else {
+        state = '客户有修改意见，转人工按反馈处理（结构类不自动改方案）';
+        if (!DRY) await call('PATCH', '/tasks/' + card.id, { attention: 1 });
+      }
+      await call('POST', '/facts', { client_id: cid, fact_key: 'cards.t' + card.id + '.outcome', value: '落地页确认卡 #' + card.id + '（' + String(card.title).slice(0, 40) + '）：' + summary, source: 'client', status: 'confirmed' });
+      await call('PATCH', '/tasks/' + card.id, { result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + state, card_feedback_done: 1 });
+      continue;
+    }
     let followId = null;
     if (f.agreed.length || f.texts.length) {
       const lines = [];
@@ -583,6 +607,7 @@ async function report(all, sprint, retried) {
     // 确认卡已出等客户表态的不召唤放行官（2026-10-09 批三热修：release 会被误路由成重写草稿，
     // Apollo #825 / Ben's NZ #831 死循环教训；服务端 blog_card_waiting 同口径兜底）
     if (note.includes('blog_confirmation') && !t.card_feedback_at) continue;
+    if (note.includes('[落地页确认卡]') && !t.card_feedback_at) continue; // 同上：等客户，不是待放行
     if (t.review_pending) continue;
     // 新鲜的非 do 判决（later/drop/merge）等 apply_verdicts 消化，不召唤放行官对着它唱反调
     // （2026-10-10 #813：判定官 later 刚落库，本处又排放行官判 release，两官打架第三入口）
