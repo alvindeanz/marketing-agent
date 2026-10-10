@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-10 AIRA (b) 落地页确认卡产线 + 放行官 redo 扩门（rev ea17f03）
+
+- 背景：两件 Alvin 当日批（「这两个都卡太久了」）。一是结构硬闸（2026-09-17）只会抛错让人「出卡」但系统没有出卡工具，结构类任务烂成人工债；二是 #1187 判语写全改法却判 hold_human，人工只剩复读机活。
+- 干了什么：onsite_confirm 卡模板与渲染器（从博客确认卡派生，反馈通路/token/发布全复用）；apply 闸拒绝分支改出卡（job 不挂红，carded 态；卡已出未表态静默等待）；harness foldCards 加 onsite_confirm 分支（agree 即排 apply，闸复核凭证双保险）；blog_card_waiting 谓词泛化三处同口径；release_review.md redo 扩门（改法能写全就 redo 不停人）；修盲重出（redo 判语与 review_adjust 此前从未进重出 prompt，DEFECTS 当日行）。
+- 测试：tests 23 件全绿，php -l 过，chatapi 24 过，样卡本地渲染冒烟过。api 与 worker 两机 rev ea17f03。
+- 坑：结构类不走到期视同同意（终局裁决权在客户，硬闸语义不变）；「A 给 B 留言、B 照办」类机制验收必须看到留言原文出现在 B 的输入里。
+- 下一步/认领：#815 卡产线全链、#1187 redo 扩门两条实弹验证在跑；通过后 #813 等 later 到期自然走同链。认领 AIRA。
+
 ### 2026-10-10 AIRA (a) WF 泳道补 page-create / page-advanced-update 两执行器 + 价格出处判准（rev 12325e7）
 
 - 背景：Alvin 追问拆条人工工单 #813/#815 的人工理由，复核发现三处 capability-gap 标签零处是平台真缺口：POST /api/pages（placeholder:true 空壳零 AI 成本，shadow 豁免套餐闸，文档原话 shadow page-add path）与 PATCH …/advanced（seo.title/description/noindex + customJsonLd，merge 语义自动归档）在线文档俱全，纯执行器白名单没登记。无需 Aiden，平台侧零改动。
