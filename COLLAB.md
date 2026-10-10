@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-10 AIRA (d) Shopify 轮跑前三件（rev 6c66bbf）
+
+- 干了什么：shopseo 能力三方对账（15 op 全对齐，1.3.x 新命令文档已按三问折进既有 op，零缺口）；行为闸 Shopify 版（方案夹带未申报的 publish/create/redirect/theme 命令零写入中止）；specs 断言 planning view 与 policy op 集合一致（#808 洞的拦法）；weekly_run 支持 RUN_TAG 双道并行。tests 23 件全绿，worker 两机 6c66bbf。
+- 坑：Shopify 博客无自动确认卡产线（卡产线在 WF 博客管线里），配额博客 DRAFT 建好后发布凭证仍靠人工发卡；先跑轮量体量再决定建不建 Shopify 卡线。
+- 下一步/认领：等 Alvin 点头起 Shopify 轮（11 家 140 open，建议双道并行）。认领 AIRA。
+
 ### 2026-10-10 AIRA (c) 自愈轮：Phase 0 铺床 33 张 + WF 十家 29 分钟轮 + 两洞热修（rev a464315/342f4b8）
 
 - 干了什么：再补 blog-edit 与 collection-item-update 两执行器（拆条族第二批，policy v22）；Phase 0 铺床（6 张转位、4 张拆条单随母收口、16 张旧 hold 重召放行官、11 张失败单重判）；WF 十家自愈轮 29 分钟跑完（10/9 同轮 2 小时 50 分）。战果：5 张 DONE（含 #76 fees 页全链上线、#866/#880/#42）、13 张从失败或 hold 转为确认卡等客户、#815 落地页卡已出；新 hold 9 张全是 redo 额度或熔断安全阀在咬且修法写到字节级（归 Aira 快修队列）；执行失败 8 张中 4 张是洞二受害已回炉。
