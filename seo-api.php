@@ -5783,6 +5783,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $t=$tq->fetch();
         if(!$t||$t['status']!=='review')continue;
         if(analysis_task($t)||blog_outline_stage($t))continue;
+        if(blog_card_waiting($t))continue; /* 确认卡已出等客户，L0 不重排 apply（2026-10-10 #815 验证时的多余一跳） */
         $ops=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
         if(!$ops)continue; /* 无 ops 的任务说不清风险，走人 */
         /* 定档统一走 dispatch_grade（2026-09-08）：全 reversible 直落；external/structural
