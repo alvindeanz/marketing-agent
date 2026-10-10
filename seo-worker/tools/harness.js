@@ -344,7 +344,9 @@ async function main() {
   log(`${bc.name}（${cid}）本期 ${sprint}（日历锚）` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
   /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id。
      SEO 闸未过时 SEO 任务 held（module 非 paid 视为 SEO 口径），paid 任务照过。--ids 点名的仍以 id 为准。 */
-  const inSprintScope = (t) => { const n = sprintNum(t.sprint); return n !== null && n <= curNum; };
+  /* S7+ 折算 S6（2026-10-10 全量扫）：期指针封顶 6，挪期却能写出 S7+（写入口白名单到 S99），
+     不折算这类任务对 harness 永久不可见，与 W 旧标签同族僵尸。 */
+  const inSprintScope = (t) => { const n = sprintNum(t.sprint); return n !== null && Math.min(n, 6) <= curNum; };
   const inScope = (t) => {
     if (IDS) return IDS.includes(t.id);
     if (!inSprintScope(t)) return false;

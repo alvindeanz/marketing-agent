@@ -5093,7 +5093,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
         if($r['status']!=='in_progress'){
             $curA=$curBy[$idA]??null;$snA=null;
             if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smA))$snA=(int)$smA[1];
-            if($curA!==null&&$snA!==null&&$snA>$curA)continue;
+            if($curA!==null&&$snA!==null&&min($snA,6)>$curA)continue; /* S7+ 折算 S6:期指针封顶 6,不折则永久隐身(2026-10-10 全量扫,Midea #504) */
         }
         $agentTasks[$idA]=($agentTasks[$idA]??0)+1;
     }
@@ -5105,7 +5105,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
         if($r['status']!=='in_progress'){
             $curB=$curBy[$idB]??null;$snB=null;
             if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smB))$snB=(int)$smB[1];
-            if($curB!==null&&$snB!==null&&$snB>$curB)continue;
+            if($curB!==null&&$snB!==null&&min($snB,6)>$curB)continue; /* S7+ 折算 S6:期指针封顶 6,不折则永久隐身(2026-10-10 全量扫,Midea #504) */
         }
         $manualTasks[$idB]=($manualTasks[$idB]??0)+1;
     }
@@ -5116,8 +5116,18 @@ if($m==='GET'&&$ROUTE==='/clients'){
         $idC=(int)$r['client_id'];
         $curC=$curBy[$idC]??null;$snC=null;
         if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smC))$snC=(int)$smC[1];
-        if($curC!==null&&$snC!==null&&$snC>$curC)continue;
+        if($curC!==null&&$snC!==null&&min($snC,6)>$curC)continue; /* S7+ 折算 S6:期指针封顶 6,不折则永久隐身(2026-10-10 全量扫,Midea #504) */
         $manualTasks[$idC]=($manualTasks[$idC]??0)+1;
+    }
+    /* 停人单计红（2026-10-10 全量扫：48 张 agent review+attention=1 的「需人裁决」单
+       红蓝两边都不算——批五把它们剔出蓝点（不是机器在跑）却没接进红点。停人就是等人，
+       一律计红；带卡的停人同样计（它们已被剔出待发卡，批五 3），本期过滤同上。 */
+    foreach(db()->query("SELECT client_id,sprint FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status='review' AND attention=1")->fetchAll() as $r){
+        $idD=(int)$r['client_id'];
+        $curD=$curBy[$idD]??null;$snD=null;
+        if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smD))$snD=(int)$smD[1];
+        if($curD!==null&&$snD!==null&&min($snD,6)>$curD)continue;
+        $manualTasks[$idD]=($manualTasks[$idD]??0)+1;
     }
     /* per-user 星标（2026-09-15）：跟登录用户绑定，同事各标各的负责客户，不共享不乱窜。 */
     ensure_stars_schema();
