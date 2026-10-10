@@ -145,9 +145,10 @@ function wfagentUndeclaredOps(plan, declaredOps) {
     // 博客产线近邻豁免：建稿/发布类任务对自家草稿写正文和 SEO 字段是份内事，
     // 真正要单独把门的是发布翻转、重定向、term 级写入。
     if ((op === 'wp-content-edit' || op === 'wp-seo-meta-update') && hasBlogish) continue;
-    // sitemap 刷新是发布动作的随身步骤（零风险、幂等、可重跑），申报了发布类 op 就不单独把门
-    // （2026-10-10 首咬 #1097/#1098：方案发布后 flush sitemap 被判未申报，半误伤）。
-    if (op === 'wp-sitemap-flush' && (declared.indexOf('blog-publish') !== -1 || declared.indexOf('article-publish') !== -1)) continue;
+    // sitemap 刷新是内容写动作的随身家务（零风险、幂等、可重跑），方案申报了任何写 op
+    // 就不单独把门；只有零申报的方案里出现 flush 才报（2026-10-10 两咬：#1097 发布后 flush、
+    // #394 改已发布页后 flush，都是半误伤）。
+    if (op === 'wp-sitemap-flush' && declared.length > 0) continue;
     if (op === 'blog-publish' && declared.indexOf('article-publish') !== -1) continue;
     if (declared.indexOf(op) === -1) hits.add(op);
   }

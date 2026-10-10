@@ -629,5 +629,7 @@ t('sitemap flush 随发布豁免,未申报发布时照报', () => {
   const A4 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
   const plan = 'wfagent content set kiaorakids 15672 --status publish\nwfagent sitemap flush kiaorakids';
   assert.deepStrictEqual(A4.wfagentUndeclaredOps(plan, ['wp-draft-create', 'blog-publish']), []);
+  // 改已发布页后 flush 同样豁免(任何已申报写 op 都算)
+  assert.deepStrictEqual(A4.wfagentUndeclaredOps('wfagent content set kiaorakids 14935 --content-file b.html\nwfagent sitemap flush kiaorakids', ['wp-content-edit', 'wp-seo-meta-update']), []);
   assert.deepStrictEqual(A4.wfagentUndeclaredOps('wfagent sitemap flush kiaorakids', []), ['wp-sitemap-flush']);
 });
