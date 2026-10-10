@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-10 AIRA (f) WP 轮前置三件 + wf-agent 1.3.2 build ready + 起轮（MA rev 7e5dcc9 / wp-tools rev ca188eb）
+
+- 摸底结论：sdalu(9) open 14 / kiaorakids(37) open 12，两站 wf-agent 均 1.3.1 实测通，工作区铺床齐。真前置三件全落：①行为闸 WordPress 版（wfagentUndeclaredOps，CLI 与裸 REST 双形态，发布翻转/重定向/term 写入未申报零写入中止，博客产线近邻豁免；apply 新增单测一组）；②specs 的 planning view 一致性断言从 WF/Shopify 扩到 wordpress/googleads 四平台；③wf-agent 1.3.2：content 模块补 slug/categories/featured_media 三格（#1097/#1098 停人工三格），快照回滚同步覆盖，content 写补 require_cap，修 1.3.0 起 snapshot_id 恒 0 老 bug，CLI 加三旗标。
+- 1.3.2 走完 SOP 第 0 步（docker 真 WP 干净装+激活+status+新端点护栏全链冒烟），build 产物与说明在 /mnt/share/wp-tools/release-1.3.2/，**R2 上传与 purge 两步按 HANDOFF 归 Aiden（keys/ 凭证仍空）**，上好后 Aira 跑 wfagent update 两站验版。
+- 发布凭证核对：kiaorakids 有常设自发 fact（自家托管直发）；sdalu 博客发布需客户点头（与 #595 一致），新稿照走确认流。
+- 轮前板面手术：#889 killed（重复月报单，若排产会出第三份）、#904 finish（随 #911 收口）；#1166/#1167/#805 转回机器位；#1001/#1002/#394/#1166/#1167/#805 六张重判进闸A（job 5510/5511）。#1144/#1145（发布上线，卡三格）留人工位等 1.3.2 上站后转位。Alvin 划界：**本轮只做本期，S4 及以后不碰**。
+- 起轮：harness 9 与 37 串行后台跑（wp_round_c9/c37.log）。认领 AIRA。
+
 ### 2026-10-10 AIRA (e) apply 无方案续接 chain=execute（rev ecd0845）
 
 - 背景：#814 放行后 apply 撞「no approved change plan」裸抛等人，而「先跑 execute」这句话只活在报错文案里；Alvin 当日批「按你的规划修复升级」。同场把四条泳道各自内联的方案加载块收成单点（14 天盖章公式 fa26285 两处内联漏改的同族预防）。
