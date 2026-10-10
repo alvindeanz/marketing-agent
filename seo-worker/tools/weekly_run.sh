@@ -8,7 +8,9 @@ cd "$(dirname "$0")/../.."
 API="${MA_API:-https://always.horntech-dev.com/seo-api.php}"
 TOKEN="${SEO_AGENT_TOKEN:-}"
 [ -z "$TOKEN" ] && { echo "缺 SEO_AGENT_TOKEN"; exit 2; }
-STAMP=$(date +%Y%m%d-%H%M)
+# RUN_TAG：并行双道支持（2026-10-10）。两个 weekly_run 进程各带一半客户同时跑时，
+# 用 RUN_TAG=a / RUN_TAG=b 区分 run 目录防撞；同客户互斥在服务端，跨客户并行安全。
+STAMP=$(date +%Y%m%d-%H%M)${RUN_TAG:+-$RUN_TAG}
 HIST="${WEEKLY_HIST:-/data/aira/projects/MA/weekly_runs}"
 WORK="$HIST/run_${STAMP}"
 mkdir -p "$WORK"

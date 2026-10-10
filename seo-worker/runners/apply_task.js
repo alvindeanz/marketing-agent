@@ -61,6 +61,30 @@ const STRUCTURAL_OP_COPY = {
   'page-delete': { term: '下线页面', intent: '把页面从站上移除，原内容有留档' },
 };
 
+/** Shopify 行为闸：方案里的 shopseo 命令形状 -> 要求申报的 op。只盯对外可见与结构类
+ *  （publish / create / redirect / 改 slug / theme），meta 与正文类小改不在此列（它们
+ *  本来就是 reversible 档，申报粒度宽松无害）。返回「命中了形状但 ops 没申报」的 op 清单。 */
+const SHOPSEO_SHAPE_TO_OP = [
+  [/shopseo\s[^\n]*\barticle\s+publish\b/, 'article-publish'],
+  [/shopseo\s[^\n]*\bcollection\s+(publish|unpublish)\b/, 'collection-publish'],
+  [/shopseo\s[^\n]*\bcollection\s+create\b/, 'collection-create'],
+  [/shopseo\s[^\n]*\bredirect\s+add\b/, 'redirect-add'],
+  [/shopseo\s[^\n]*\barticle\s+set-handle\b/, 'article-meta-update'],
+  [/shopseo\s[^\n]*\btheme\s+(set-text|copy)\b/, 'theme-text-edit'],
+  [/shopseo\s[^\n]*\bcollection\s+set-template\b/, 'collection-template-assign'],
+];
+function shopseoUndeclaredOps(plan, declaredOps) {
+  const declared = (declaredOps || []).map((o) => String(o).toLowerCase());
+  const hits = new Set();
+  for (const [re, op] of SHOPSEO_SHAPE_TO_OP) {
+    if (!re.test(String(plan))) continue;
+    // theme 族两个 op 互为近邻，任一已申报即认（copy 归 theme-template-create）
+    if (op === 'theme-text-edit' && (declared.indexOf('theme-text-edit') !== -1 || declared.indexOf('theme-template-create') !== -1)) continue;
+    if (declared.indexOf(op) === -1) hits.add(op);
+  }
+  return Array.from(hits);
+}
+
 /** 方案正文里的结构类端点调用探测（行为闸用，#76 教训：闸认行为不认申报）。
  *  只认几种形状明确的调用行，宁可漏报（漏报回到申报闸兜底）不乱误报。 */
 function planStructuralCalls(plan) {
@@ -1085,6 +1109,14 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
     throw new Error('task ' + taskId + ': no approved change plan at ' + planFile + '. Run execute_task first');
   }
   if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+  /* 行为闸 Shopify 版（2026-10-10，与 WF 版同一第一性：闸认行为不认申报，#76 教训镜像）：
+     方案正文里出现对外可见或结构类 shopseo 命令，而任务 ops 没申报对应 op 时，零写入中止。
+     Shopify 模型靠 publish 类 op 的 external 档加批文 fact 把门，绕过申报就是绕过那道门。 */
+  const undeclaredS = shopseoUndeclaredOps(plan, taskOps(task));
+  if (undeclaredS.length) {
+    await fail('执行中止：方案正文含未申报的 shopseo 命令（需 op：' + undeclaredS.join('、') + '），任务 ops 没有申报，放行分档没覆盖这些动作。零写入。修法：方案剔除这些命令，或补申报对应 op 重走判定与放行。');
+    throw new Error('task ' + taskId + ': plan contains undeclared shopseo ops: ' + undeclaredS.join(','));
+  }
   const manifest = capabilities.fullText('shopify');
   const prompt = buildShopifyPrompt({ task, plan, planFile, shopAlias, manifest });
   log('task ' + taskId + ': shopify apply, shop ' + shopAlias + ', model ' + cfg.applyModel);
@@ -1623,6 +1655,7 @@ async function run(ctx) {
 
 module.exports = {
   planStructuralCalls,
+  shopseoUndeclaredOps,
   cooldownGate,
   cooldownGateLive,
   planTargetUrls,

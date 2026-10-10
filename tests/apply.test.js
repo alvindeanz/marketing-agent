@@ -530,3 +530,19 @@ t('POST 建页命中，rebuild/branding 子段不误报，DELETE 页与 PUT nav 
   assert.deepStrictEqual(got, ['nav-edit', 'page-create', 'page-delete', 'page-rebuild'].sort());
   assert.deepStrictEqual(A.planStructuralCalls('PATCH /api/content/{siteId}/edit 改 5 处文案'), []);
 });
+
+console.log('行为闸 Shopify 版：未申报 shopseo 命令探测');
+t('publish/create/redirect/set-handle 命中，已申报的不报，meta 小改不管', () => {
+  const A = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const plan = [
+    'shopseo --shop sungait article publish best-sunglasses',
+    'shopseo --shop sungait collection create --title "Rimless" --handle rimless',
+    'shopseo --shop sungait redirect add /old /new',
+    'shopseo --shop sungait article set-meta foo --title "Bar"',
+  ].join('\n');
+  assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, ['article-meta-update']).sort(),
+    ['article-publish', 'collection-create', 'redirect-add']);
+  assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, ['article-publish', 'collection-create', 'redirect-add']), []);
+  assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme copy a b', ['theme-template-create']), []);
+  assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme set-text k --jq .a --value v', []), ['theme-text-edit']);
+});

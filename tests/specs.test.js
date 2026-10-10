@@ -113,5 +113,31 @@ try {
   console.log('  ok   readonly_ops 白名单完整且卡 op 全有风险档');
 } catch (e) { fail += 1; console.log('  FAIL readonly_ops :: ' + e.message); }
 
+
+// planning view 与 policy 的 op 集合一致性（2026-10-10 #808 教训：op 登记有四处，
+// planning view 表是 execute 模式路由的事实源，漏登会让任务静默落进分析模式不产方案。
+// agent_* 档的 op 必须在 policy risk 表有档；human_only 豁免（设计上永不机器执行）。
+try {
+  const pol = JSON.parse(fs.readFileSync(path.join(S, 'release_policy.json'), 'utf8'));
+  const miss = [];
+  for (const plat of ['webforger', 'shopify']) {
+    const txt = fs.readFileSync(path.join(S, 'capabilities', plat + '.md'), 'utf8');
+    const m = txt.match(/PLANNING_VIEW_START -->([\s\S]*?)<!-- PLANNING_VIEW_END/);
+    assert.ok(m, plat + ' 缺 planning view 标记');
+    for (const line of m[1].split('\n')) {
+      if (!line.trim().startsWith('|')) continue;
+      const cells = line.split('|').map((c) => c.trim());
+      if (cells.length < 4) continue;
+      const name = cells[1]; const auto = cells[2];
+      if (!name || name === 'operation' || /^-+$/.test(name)) continue;
+      if (auto === 'human_only' || !['agent_apply', 'agent_prepare', 'agent_readonly'].includes(auto)) continue;
+      if (auto === 'agent_readonly') continue;
+      if (typeof pol.risk_class_by_op[name] !== 'string') miss.push(plat + ':' + name);
+    }
+  }
+  assert.ok(!miss.length, 'planning view 有 agent 档 op 不在 policy risk 表: ' + miss.join(', '));
+  console.log('  ok   planning view 与 policy 的 op 集合一致（WF 与 Shopify）');
+} catch (e) { fail += 1; console.log('  FAIL planning-view/policy 一致性 :: ' + e.message); }
+
 console.log(fail ? '\n' + fail + ' failed' : '\nall ok');
 process.exit(fail ? 1 : 0);
