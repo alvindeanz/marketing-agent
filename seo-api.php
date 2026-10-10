@@ -1197,6 +1197,44 @@ function ensure_task_origin(){
     if(!$col)db()->exec("ALTER TABLE seo_tasks ADD COLUMN origin VARCHAR(40) NOT NULL DEFAULT 'sprint'");
 }
 
+/* 批五 1（2026-10-10 Alvin 定「chat 产线完成了就该直接归档」）：chat 来源任务收口即归档。
+   archived=1 不进任务视图、不进侧栏徽章、不进「已结束」计数，审计走 GET /tasks?include_archived=1。
+   sprint 任务永不归档：排期账要留着对。列刚建时跑一次性迁移：
+   一、存量已收口 chat 单直接归档；
+   二、存量未收口且空标签的 chat 单按创建日所在半月档补 sprint 章，老实变「逾期」，
+      不再赖在本期装新活（前端口径：空标签永远算本期）。无方案锚补不出就保持空。 */
+define('CHAT_ORIGIN_SQL',"(origin LIKE 'spawn:%' OR origin LIKE 'chatw:%' OR origin LIKE 'report:%' OR origin LIKE 'ruling:%')");
+function ensure_task_archived(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    $col=db()->query("SHOW COLUMNS FROM seo_tasks LIKE 'archived'")->fetch();
+    if($col)return;
+    db()->exec("ALTER TABLE seo_tasks ADD COLUMN archived TINYINT(1) NOT NULL DEFAULT 0");
+    db()->exec("UPDATE seo_tasks SET archived=1 WHERE status='done' AND ".CHAT_ORIGIN_SQL);
+    $anch=[];
+    foreach(db()->query("SELECT client_id,created_at FROM seo_plans ORDER BY FIELD(status,'active') DESC, id DESC")->fetchAll() as $p){
+        $pc=(int)$p['client_id'];
+        if(!isset($anch[$pc]))$anch[$pc]=substr((string)$p['created_at'],0,10);
+    }
+    $sel=db()->query("SELECT id,client_id,created_at FROM seo_tasks WHERE status<>'done' AND TRIM(IFNULL(sprint,''))='' AND ".CHAT_ORIGIN_SQL)->fetchAll();
+    $upd=db()->prepare("UPDATE seo_tasks SET sprint=? WHERE id=?");
+    foreach($sel as $r){
+        $a=$anch[(int)$r['client_id']]??null;
+        if(!$a)continue;
+        $n=semimonth_index(substr((string)$r['created_at'],0,10))-semimonth_index($a)+1;
+        $upd->execute(['S'.max(1,min($n,6)),(int)$r['id']]);
+    }
+}
+/* 懒归档扫帚：任务读取入口顺手把已收口的 chat 单归档。不去猎每个置 done 的写点，
+   今后新增的收口路径也逃不出读入口。幂等，通常零行更新的开销。$cid=null 全库扫（/board、/clients）。 */
+function archive_closed_chat_tasks($cid=null){
+    ensure_task_archived();
+    $sql="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND ".CHAT_ORIGIN_SQL;
+    if($cid!==null){db()->prepare($sql." AND client_id=?")->execute([(int)$cid]);}
+    else db()->exec($sql);
+}
+
 /* sprint 标签白名单（2026-10-09 批二 C，Oak #626 实证：W37 这类非法标签解析不进任何轮次
    口径，任务永久隐身，31 天连闸 A 都没排，连报错都没有）。合法：空 或 S1..S99。
    非法的折算成客户当期标签（半月制指针），客户无锚折不出就空。写入口统一过这里：
@@ -1235,6 +1273,12 @@ function task_insert($cid,$t,$by,$origin='sprint'){
     ensure_task_origin();
     ensure_review_schema();
     $t['sprint']=sprint_label_norm($cid,$t['sprint']??'');
+    /* chat 产线出生即盖当期章（2026-10-10 批五 1）：空标签在前端永远算本期，永不逾期永不翻篇，
+       本期视图被挤成没眼看（Louvresky 本期 17 张里 9 张无标签 chat 单）。与 split 工单
+       2026-09-24「出生即落当期」同口径。spawn_task 按钮路径 2026-09-29 曾各自盖章，
+       但用的是作废的 14 天公式（半月制 fa26285 漏改处之一），一并收口到这里。 */
+    if($t['sprint']===''&&preg_match('/^(spawn|chatw|report|ruling):/',(string)$origin))
+        $t['sprint']=client_current_sprint_label($cid);
     db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin,card_kind)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             (int)$cid,$t['plan_id'],$t['sprint'],$t['module'],$t['title'],$t['detail'],
@@ -3574,7 +3618,8 @@ if($m==='GET'&&$ROUTE==='/context'){
     $pl->execute([$cid]);
     $plan=$pl->fetch();
 
-    $tk=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agent','agency','client'),FIELD(priority,'P0','P1','P2','P3'),id");
+    ensure_task_archived();
+    $tk=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND archived=0 ORDER BY FIELD(owner_type,'agent','agency','client'),FIELD(priority,'P0','P1','P2','P3'),id");
     $tk->execute([$cid]);
     $tasks=$tk->fetchAll();
 
@@ -4935,21 +4980,8 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
     $drS=$dqS->fetch();
     $dqS->closeCursor();
     if($drS)res(409,['error'=>'这张委托单已经启动过（任务 #'.(int)$drS['id'].'），不重复建','task_id'=>(int)$drS['id']]);
-    /* 当期 sprint 章（2026-09-29 ticket #12）：chat 生的任务历来不带 sprint 标签，而 harness
-       本期口径只认 S 号，空标签任务失败后对失败重排彻底隐身（Sunseeker #881 实证：TLS 断连
-       后没人重排）。有日历锚盖当期章（与 split 工单 2026-09-24 同口径），无锚留空。 */
-    if(trim((string)$t['sprint'])===''){
-        $apqS=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
-        $apqS->execute([$cid]);
-        $aprS=$apqS->fetch();
-        $apqS->closeCursor();
-        if($aprS&&$aprS['created_at']){
-            $anchorS=new DateTime(substr((string)$aprS['created_at'],0,10));
-            $nowS=new DateTime('today');
-            $snS=$anchorS>$nowS?1:((int)floor($nowS->diff($anchorS)->days/14)+1);
-            $t['sprint']='S'.max(1,min($snS,6));
-        }
-    }
+    /* 当期 sprint 章（2026-09-29 ticket #12）已收口到 task_insert 统一盖（2026-10-10 批五 1），
+       这里不再各自算：此处原版用的 14 天公式是半月制 fa26285 的漏改处。 */
     /* 委托单按钮路径与频道一句话确认同权（2026-09-11 W13）：卡带 kind=change 时
        走同一套定档与 origin，方案出来后照旧自动落地或停放行卡，两条确认路不许分叉。 */
     $kindS=in_array((string)($i['kind']??''),['report','change'],true)?(string)$i['kind']:'';
@@ -5007,20 +5039,26 @@ if($m==='GET'&&$ROUTE==='/clients'){
        proposed 排期占位不进红。蓝(agent 任务)口径不变。 */
     ensure_review_schema();
     ensure_task_origin();
+    archive_closed_chat_tasks(); /* 徽章不数已归档 chat 单（批五 1） */
     $agentTasks=[];$manualTasks=[];
     /* 红点只数本期（2026-09-22 Alvin 定，取代跨期全数）：未来期的人工活到期自然亮，
        提前闹红点是注意力税。in_progress 例外（已动手的活不消失）；无 sprint 标签视同本期；
        无 active plan 的客户拿不到期指针，保守全数。origin 同时认 split: 与 verify: 工单。
-       2026-09-25 Alvin 定：同口径推广到蓝点（agent 任务）与待发卡，三处徽标全部只亮本期。 */
+       2026-09-25 Alvin 定：同口径推广到蓝点（agent 任务）与待发卡，三处徽标全部只亮本期。
+       2026-10-10 批五 3 口径修正（Louvresky 红 16 实际等人 2 的摸底）：
+       一、期指针换半月制（原 14 天公式是 fa26285 的漏改处）；
+       二、蓝点剔停人（attention=1，归运营队列不是机器待做）与带未折卡的 review 单
+          （等客户或等发卡，与红点重复计数且不是「待做」）；
+       三、待发卡剔 done 态（收口单的卡链接是历史痕迹不是待办，幽灵永不消）、剔停人单
+          （note 里引用过确认链接就被令牌正则误认成卡）。 */
     $todayB=new DateTime('today');$curBy=[];
     foreach(db()->query("SELECT client_id,created_at FROM seo_plans WHERE status='active'")->fetchAll() as $p){
-        $aB=new DateTime(substr((string)$p['created_at'],0,10));
-        $nB=(int)floor($todayB->diff($aB)->days/14)+1;
-        if($aB>$todayB)$nB=1;
+        $nB=semimonth_index($todayB->format('Y-m-d'))-semimonth_index(substr((string)$p['created_at'],0,10))+1;
         $curBy[(int)$p['client_id']]=max(1,min($nB,6));
     }
-    foreach(db()->query("SELECT client_id,sprint,status FROM seo_tasks WHERE owner_type='agent' AND status IN('proposed','in_progress','review')")->fetchAll() as $r){
+    foreach(db()->query("SELECT client_id,sprint,status,attention,(result_note LIKE '%?t=%&k=%' AND result_note NOT LIKE '%[卡反馈折叠%') AS cardish FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status IN('proposed','in_progress','review')")->fetchAll() as $r){
         $idA=(int)$r['client_id'];
+        if($r['status']==='review'&&((int)$r['attention']===1||(int)$r['cardish']===1))continue;
         if($r['status']!=='in_progress'){
             $curA=$curBy[$idA]??null;$snA=null;
             if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smA))$snA=(int)$smA[1];
@@ -5028,7 +5066,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
         }
         $agentTasks[$idA]=($agentTasks[$idA]??0)+1;
     }
-    foreach(db()->query("SELECT client_id,sprint,status FROM seo_tasks WHERE owner_type<>'agent' AND (status IN('in_progress','review') OR (status='approved' AND (origin LIKE 'split:%' OR origin LIKE 'verify:%')))")->fetchAll() as $r){
+    foreach(db()->query("SELECT client_id,sprint,status FROM seo_tasks WHERE archived=0 AND owner_type<>'agent' AND (status IN('in_progress','review') OR (status='approved' AND (origin LIKE 'split:%' OR origin LIKE 'verify:%')))")->fetchAll() as $r){
         $idB=(int)$r['client_id'];
         if($r['status']!=='in_progress'){
             $curB=$curBy[$idB]??null;$snB=null;
@@ -5038,8 +5076,9 @@ if($m==='GET'&&$ROUTE==='/clients'){
         $manualTasks[$idB]=($manualTasks[$idB]??0)+1;
     }
     /* 待发卡：出了没发（sent_at 空）也没折叠的客户卡，owner agent 与上面的人工计数天然不重。
-       判卡认 card_kind 字段或 t/k 反馈令牌（存量卡无字段靠令牌兜底）。本期过滤同上（2026-09-25）。 */
-    foreach(db()->query("SELECT client_id,sprint FROM seo_tasks WHERE owner_type='agent' AND status IN('review','done') AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE '%?t=%&k=%') AND result_note NOT LIKE '%[卡反馈折叠%'")->fetchAll() as $r){
+       判卡认 card_kind 字段或 t/k 反馈令牌（存量卡无字段靠令牌兜底）。本期过滤同上（2026-09-25）。
+       只认 review 态且非停人（批五 3：done 是幽灵，停人是误判，见上）。 */
+    foreach(db()->query("SELECT client_id,sprint FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status='review' AND attention=0 AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE '%?t=%&k=%') AND result_note NOT LIKE '%[卡反馈折叠%'")->fetchAll() as $r){
         $idC=(int)$r['client_id'];
         $curC=$curBy[$idC]??null;$snC=null;
         if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smC))$snC=(int)$smC[1];
@@ -5168,7 +5207,8 @@ if($m==='GET'&&$ROUTE==='/overview'){
     $statuses=['proposed','approved','in_progress','review','blocked','done'];
     $matrix=[];
     foreach($owners as $o){foreach($statuses as $st)$matrix[$o][$st]=0;}
-    $tm=db()->prepare("SELECT owner_type,status,COUNT(*) AS n FROM seo_tasks WHERE client_id=? GROUP BY owner_type,status");
+    ensure_task_archived();
+    $tm=db()->prepare("SELECT owner_type,status,COUNT(*) AS n FROM seo_tasks WHERE client_id=? AND archived=0 GROUP BY owner_type,status");
     $tm->execute([$cid]);
     foreach($tm->fetchAll() as $r){
         if(isset($matrix[$r['owner_type']][$r['status']]))$matrix[$r['owner_type']][$r['status']]=(int)$r['n'];
@@ -6503,6 +6543,7 @@ function semimonth_index($ymd){
 if($m==='GET'&&$ROUTE==='/board'){
     auth_any();
     ensure_review_schema();
+    archive_closed_chat_tasks(); /* 全库扫一次，循环里不再逐客户扫（批五 1） */
     $today=new DateTime('today');
     $out=[];
     $cs=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id WHERE p.status='active' ORDER BY c.name");
@@ -6518,7 +6559,7 @@ if($m==='GET'&&$ROUTE==='/board'){
             $n=semimonth_index($today->format('Y-m-d'))-semimonth_index($anchor)+1;
             $cur=max(1,min($n,6));
         }
-        $tq=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
+        $tq=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND archived=0 ORDER BY FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
         $tq->execute([$cid]);
         $rows=attach_human_state(attach_review_state(attach_job_state($tq->fetchAll(),$cid),$cid),$cid);
         /* 方案状态：草稿方案（等人批准）的任务不算本期活，单列「待确认方案」；
@@ -6620,7 +6661,10 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     auth_user();
     $cid=need_client();
     ensure_review_schema();
-    $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
+    archive_closed_chat_tasks($cid);
+    /* 归档单默认不出列表（批五 1）；审计与排查传 include_archived=1。 */
+    $wantArch=!empty($_GET['include_archived']);
+    $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=?".($wantArch?'':' AND archived=0')." ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
     $s->execute([$cid]);
     /* sprint 锚点：生效 plan 的生成日（没有生效的取最新一份）。前端按两周一档推算 S1..S6 的日历区间，
        「本期」按今天落在哪一档定，逾期的照显示，做完了就等下一档，不再按「最小未完成 S 号」跳。 */
@@ -6663,6 +6707,8 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     if(isset($i['status'])){
         if(!in_array($i['status'],['proposed','approved','in_progress','review','done','blocked'],true))res(400,['error'=>'bad status']);
         $sets[]='status=?';$args[]=$i['status'];
+        /* 重开已归档的 chat 单要回到视野（批五 1）：状态离开 done 就解除归档，置 done 的归档交给读入口扫帚。 */
+        if($i['status']!=='done'){ensure_task_archived();$sets[]='archived=0';}
     }
     if(isset($i['owner_type'])){
         if(!in_array($i['owner_type'],['agency','client','agent'],true))res(400,['error'=>'bad owner_type']);
