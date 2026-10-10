@@ -2275,6 +2275,33 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
             chat_msg_insert($rootE,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$cr['title'],0,50,'UTF-8').'」'.$whyE.' 哪些落了哪些没落看任务卡「条目」，接手安排也在那里。','seo-worker');
         }
     }
+    /* 无方案续接（2026-10-10 第一性修，#814 教训）：apply 发现没有已批方案文件时带
+       chain=execute 回来。「先跑 execute」从报错文案升级成机器动作：一次性续排 execute，
+       补出的方案照走闸A与放行官原链（execute 的 result 续排闸A是既有接线）。
+       熔断：每任务只自动续一次，第二次还无方案说明 execute 本身出不了方案
+       （如 #808 掉分析模式那族），置停人标转人。止损闩生效不排。 */
+    if((string)($i['chain']??'')==='execute'){
+        $qC=db()->prepare("SELECT client_id,note FROM seo_tasks WHERE id=?");
+        $qC->execute([$tid]);
+        $rC=$qC->fetch();
+        $cidC=(int)($rC['client_id']??0);
+        $prevC=substr_count((string)($rC['note']??''),'[auto-chain:execute]');
+        if(ops_halted($cidC)){
+            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[auto-chain:execute] apply 无已批方案，请求续排 execute，但止损闩生效中，不排，等人。');
+            res(200,['ok'=>true,'chained'=>false,'reason'=>'ops_halted']);
+        }
+        if($prevC>=1){
+            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[auto-chain:execute] 第二次无方案（上次续排的 execute 没产出方案文件），熔断转人，不再自动续排。');
+            res(200,['ok'=>true,'chained'=>false,'reason'=>'fused']);
+        }
+        list($jidsC,$skipC)=queue_task_jobs($cidC,'execute_task',[$tid],'seo-worker','seo_tasks_execute_auto');
+        db()->prepare("UPDATE seo_tasks SET status='approved' WHERE id=?")->execute([$tid]);
+        task_append_note($tid,'[auto-chain:execute] apply 无已批方案，自动续排 execute'.($jidsC?(' job #'.$jidsC[0]):'（同任务 execute 在飞，跳过新建）').'，方案出来照走闸A与放行官。');
+        audit('seo-worker','seo_task_chain_execute',(string)$tid,['job_ids'=>$jidsC,'skipped'=>$skipC]);
+        res(200,['ok'=>true,'chained'=>true,'job_ids'=>$jidsC]);
+    }
     /* Chat 分级派单的改动类（origin chatw:，2026-09-08 Alvin 定）：方案已出（本端点刚置 review），
        此刻按政策重算风险档（派单后 facts 可能变了，以此刻为准）：
        auto 直接排 apply；confirm 回频道要一句放行。

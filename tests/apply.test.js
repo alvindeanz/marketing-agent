@@ -546,3 +546,50 @@ t('publish/create/redirect/set-handle 命中，已申报的不报，meta 小改�
   assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme copy a b', ['theme-template-create']), []);
   assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme set-text k --jq .a --value v', []), ['theme-text-edit']);
 });
+
+console.log('无方案续接：chain=execute 必须真的到达服务端（#814 教训，留言必须出现在收件人输入里）');
+t('方案文件缺失：postTaskResult 收到 chain=execute 且 note 说明零改动，随后抛错', async () => {
+  const A2 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const fs2 = require('fs');
+  const os = require('os');
+  const ws = fs2.mkdtempSync(path.join(os.tmpdir(), 'applytest-'));
+  fs2.mkdirSync(path.join(ws, 'seo-agent-output'), { recursive: true });
+  const posted = [];
+  const ctx = {
+    api: { postTaskResult: async (id, body) => { posted.push({ id, body }); return { ok: true }; } },
+    log: () => {},
+  };
+  let threw = null;
+  try { await A2.loadChangePlanOrChain(ctx, ws, 777); } catch (e) { threw = e; }
+  assert.ok(threw, '缺方案必须抛错让 job fail 留痕');
+  assert.ok(/execute chained/.test(threw.message), '报错要说明已续排: ' + threw.message);
+  assert.strictEqual(posted.length, 1, '必须恰好上报一次');
+  assert.strictEqual(posted[0].id, 777);
+  assert.strictEqual(posted[0].body.chain, 'execute', 'chain 字段必须是 execute');
+  assert.ok(/零改动/.test(posted[0].body.note), 'note 要写明零改动');
+});
+t('方案文件为空：照旧抛错，不上报 chain（空文件是 execute 产出坏，续排只会复读）', async () => {
+  const A2 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const fs2 = require('fs');
+  const os = require('os');
+  const ws = fs2.mkdtempSync(path.join(os.tmpdir(), 'applytest-'));
+  fs2.mkdirSync(path.join(ws, 'seo-agent-output'), { recursive: true });
+  fs2.writeFileSync(path.join(ws, 'seo-agent-output', 'change-plan-task-778.md'), '   \n');
+  const posted = [];
+  const ctx = { api: { postTaskResult: async (id, body) => { posted.push(body); } }, log: () => {} };
+  let threw = null;
+  try { await A2.loadChangePlanOrChain(ctx, ws, 778); } catch (e) { threw = e; }
+  assert.ok(threw && /empty/.test(threw.message));
+  assert.strictEqual(posted.length, 0);
+});
+t('方案文件存在：原样返回，不碰 API', async () => {
+  const A2 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const fs2 = require('fs');
+  const os = require('os');
+  const ws = fs2.mkdtempSync(path.join(os.tmpdir(), 'applytest-'));
+  fs2.mkdirSync(path.join(ws, 'seo-agent-output'), { recursive: true });
+  fs2.writeFileSync(path.join(ws, 'seo-agent-output', 'change-plan-task-779.md'), '# plan body');
+  const ctx = { api: { postTaskResult: async () => { throw new Error('不该被调'); } }, log: () => {} };
+  const plan = await A2.loadChangePlanOrChain(ctx, ws, 779);
+  assert.strictEqual(plan, '# plan body');
+});

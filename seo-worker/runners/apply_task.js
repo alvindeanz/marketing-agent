@@ -50,6 +50,36 @@ function changePlanPath(workspace, taskId) {
   return path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + taskId + '.md');
 }
 
+/* 无方案续接（2026-10-10 第一性修，#814 教训）：apply 走到这里却没有已批方案文件，
+   不是要人裁决的事故，是链条少跑了一步，而「先跑 execute」这句话以前只活在报错文案里。
+   现在升级成机器动作：带 chain=execute 回 result 端点，服务端一次性续排 execute
+   （带每任务一次的熔断与止损闩检查），补出的方案照走闸A与放行官原链。
+   本 job 照常 fail 留痕，符合「失败 job 不自动重试」：重试的不是 apply，是补前置步骤。
+   四条泳道共用本函数，公式只许有一份实现（14 天盖章公式 fa26285 漏改教训，DEFECTS 当日行）。 */
+async function loadChangePlanOrChain(ctx, workspace, taskId) {
+  const planFile = changePlanPath(workspace, taskId);
+  let plan = null;
+  try {
+    plan = fs.readFileSync(planFile, 'utf8');
+  } catch (e) {
+    if (e && e.code !== 'ENOENT') throw e;
+  }
+  if (plan !== null) {
+    if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+    return plan;
+  }
+  try {
+    await ctx.api.postTaskResult(taskId, {
+      output_url: '',
+      note: '执行中止：无已批方案文件（' + path.basename(planFile) + '），站点与账户零改动。已请求续排 execute 补方案，后续走闸A与放行官原链。',
+      chain: 'execute',
+    });
+  } catch (e2) {
+    ctx.log('task ' + taskId + ': chain execute request failed :: ' + e2.message);
+  }
+  throw new Error('task ' + taskId + ': no approved change plan at ' + planFile + '. execute chained');
+}
+
 /* 落地页确认卡产线（2026-10-10 Alvin 批）：结构类改动缺 onsite_confirm=agree 时，apply 不再
    抛错甩人，而是把已过判定与放行的方案翻成客户话出卡。客户点同意 -> harness 折叠排 apply ->
    本闸复核凭证放行；hold 保持现状；写意见转人工。结构类不走到期视同同意。 */
@@ -917,11 +947,7 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
     throw new Error('task ' + taskId + ': ads_customer_id missing');
   }
   const planFile = changePlanPath(workspace, taskId);
-  let plan;
-  try { plan = fs.readFileSync(planFile, 'utf8'); } catch (e) {
-    throw new Error('task ' + taskId + ': no approved change plan at ' + planFile + '. Run execute_task first');
-  }
-  if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+  const plan = await loadChangePlanOrChain(ctx, workspace, taskId);
   const manifest = capabilities.fullText('googleads');
   const taskOps = String(task.ops || '').split(',').map((s) => s.trim()).filter(Boolean);
   const agentOps = adsAgentLaneOps(taskOps);
@@ -1104,11 +1130,7 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
     throw new Error('task ' + taskId + ': shop alias missing for ' + domain);
   }
   const planFile = changePlanPath(workspace, taskId);
-  let plan;
-  try { plan = fs.readFileSync(planFile, 'utf8'); } catch (e) {
-    throw new Error('task ' + taskId + ': no approved change plan at ' + planFile + '. Run execute_task first');
-  }
-  if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+  const plan = await loadChangePlanOrChain(ctx, workspace, taskId);
   /* 行为闸 Shopify 版（2026-10-10，与 WF 版同一第一性：闸认行为不认申报，#76 教训镜像）：
      方案正文里出现对外可见或结构类 shopseo 命令，而任务 ops 没申报对应 op 时，零写入中止。
      Shopify 模型靠 publish 类 op 的 external 档加批文 fact 把门，绕过申报就是绕过那道门。 */
@@ -1242,11 +1264,7 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
     throw new Error('task ' + taskId + ': missing .secrets.env for wf-agent token');
   }
   const planFile = changePlanPath(workspace, taskId);
-  let plan;
-  try { plan = fs.readFileSync(planFile, 'utf8'); } catch (e) {
-    throw new Error('task ' + taskId + ': no approved change plan at ' + planFile + '. Run execute_task first');
-  }
-  if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+  const plan = await loadChangePlanOrChain(ctx, workspace, taskId);
   const manifest = capabilities.fullText('wordpress');
   const prompt = buildWordpressPrompt({ task, plan, planFile, restBase, manifest });
   log('task ' + taskId + ': wordpress apply, ' + restBase + ', model ' + cfg.applyModel);
@@ -1456,15 +1474,7 @@ async function runOne(ctx, context, workspace, taskId) {
   }
 
   const planFile = changePlanPath(workspace, taskId);
-  let plan;
-  try {
-    plan = fs.readFileSync(planFile, 'utf8');
-  } catch (e) {
-    throw new Error(
-      'task ' + taskId + ': no approved change plan at ' + planFile + '. Run execute_task first'
-    );
-  }
-  if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
+  const plan = await loadChangePlanOrChain(ctx, workspace, taskId);
   log('task ' + taskId + ': change plan loaded, ' + Buffer.byteLength(plan, 'utf8') + ' bytes');
 
   /* 行为闸（2026-10-10 #76 教训）：上面的结构闸只认 ops 申报，#76 申报 page-rewrite 却在
@@ -1654,6 +1664,7 @@ async function run(ctx) {
 }
 
 module.exports = {
+  loadChangePlanOrChain,
   planStructuralCalls,
   shopseoUndeclaredOps,
   cooldownGate,
