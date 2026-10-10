@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-10 AIRA (a) WF 泳道补 page-create / page-advanced-update 两执行器 + 价格出处判准（rev 12325e7）
+
+- 背景：Alvin 追问拆条人工工单 #813/#815 的人工理由，复核发现三处 capability-gap 标签零处是平台真缺口：POST /api/pages（placeholder:true 空壳零 AI 成本，shadow 豁免套餐闸，文档原话 shadow page-add path）与 PATCH …/advanced（seo.title/description/noindex + customJsonLd，merge 语义自动归档）在线文档俱全，纯执行器白名单没登记。无需 Aiden，平台侧零改动。
+- 干了什么：capabilities/webforger.md risk 表加两行（均 reversible）加两节 op 契约（page-create 强制 placeholder + 建后即挂 noindex；advanced 的 customJsonLd 硬规则与平台自动注入类型黑名单照抄文档 9.1）；release_policy.json 加两 op（version 21）；价格出处判准三处落地（Alvin 定「金额只审出处不审口径」：release_review.md 冲突清单下、review_principles.md review 态一节、execute 方案 prompt 红线）。tests 23 件全绿，api 与 worker 两机已部 rev 12325e7。
+- 坑：打 capability-gap 标签必须贴「权威文档查无」证据行，单正则无命中不算查过（我自己先栽：反引号格式漏抓，差点给 Aiden 开了个平台已有端点的需求单）。DEFECTS.md 当日行。
+- 下一步/认领：#813/#815 已 machine_run 转回机器位，定点 harness 走新 op 全链验证中；通过后同族拆条工单（#807 到 #814 剩余）下轮按新能力重评。认领 AIRA。
+
 ### 2026-10-09 AIRA (z3) 热修：确认卡等客户的博客任务不得召唤放行官（成稿重写死循环，rev cc2ebbb）
 
 - 事故：WF 轮结束起，确认卡已出等客户的配额博客进「result 自动召唤放行官（批二 A）→判 release→blog_release_as_write 当大纲重写→新 result 再召唤」死循环，Apollo #825 / Ben's NZ #831 各 67 次重写、Kuddles #79 28 次、Louvresky #835/#837 各 6 次，烧约一整天 opus。根因：blog_outline_stage 靠 output_url 不含 /blog/ 判大纲段，卡机制上线后成稿任务的 output_url 是卡链接同样不含 /blog/，「只有大纲」与「成稿等客户」不可分；批二 A 给了自动召唤入口后闭环成形。卡页面反复重渲染但未对外推送，客户无感知。
