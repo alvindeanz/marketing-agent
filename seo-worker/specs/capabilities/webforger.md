@@ -44,6 +44,8 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 - page-create: reversible（2026-10-10 登记：强制 placeholder 空壳 + 建后即挂 seo.noindex 不进导航，外露由后续内容 op 与放行把门，删页即回滚；此前被误标 capability-gap 拆人工工单，#813/#815 教训）
 - page-advanced-update: reversible（2026-10-10 登记：merge 语义，平台每次写自动归档 history/{ts}-config-advanced-{slug}.json，反向 PATCH 即回滚）
 - content-edit: reversible
+- blog-edit: reversible（2026-10-10 登记：PATCH 博文字段级修改，改稿轮同一端点，平台留 history；#809/#812/#1189/#1192 拆条族教训，平台一直支持只是没登记）
+- collection-item-update: reversible（2026-10-10 登记：PUT 单字段增量合并，不动未提交字段；#814 拆条族教训）
 - page-rewrite: reversible（L0 排除：整页覆盖影响面大）
 - page-rebuild: reversible（L0 排除）
 - redirect-batch: reversible
@@ -193,6 +195,22 @@ POST /api/auth/login  {"email":"...","password":"..."}
 - customJsonLd 硬规则：key 匹配 `/^[a-z][a-z0-9_-]{0,63}$/i` 页内唯一，data 必须带 `@type`，单条 ≤50KB 最多 20 条。Organization / WebSite / BlogPosting / BreadcrumbList 平台自动注入，customJsonLd 里出现即重复，lint 打回；页级该走这里的类型：Service、FAQPage、Product、HowTo、LocalBusiness（/contact/）、ProfessionalService、AboutPage、ItemList。
 - 默认 `replace: false` 按字段 merge，字段置 `null` 删除；每次写平台归档 `history/{ts}-config-advanced-{slug}.json`，失败重试安全。
 - 方案里必须带写前 GET 的现值留档步骤；回滚 = 按留档反向 PATCH。
+
+## blog-edit
+
+- 端点：`PATCH /api/blog/{siteId}/{slug}`，可改字段 title / body / excerpt / category / keyword / meta.description。
+- 与博客改稿轮同一端点。已发布文章照样可 PATCH，平台写前落 history 备份；不轮换 previewToken。
+- 方案里必须先 `GET /api/blog/{siteId}/{slug}` 留档原文（body 全文进改前存档），回滚 = 反向 PATCH 原值。
+- body 是 Markdown 正文；内链只准指向已发布路径（白名单口径同博客产线）；禁 script。
+- 语言前缀 slug 的 `/` 编码为 `%2F`。
+
+## collection-item-update
+
+- 端点：`PUT /api/collections/{siteId}/{collSlug}/items/{itemId}`。
+- **增量合并**：只碰提交的键，未提交字段原样保留（发 `{"seoTitle":"..."}` 不会丢 images/title）；update 不校验 required，单字段 PUT 安全。
+- 可写键 = 该 collection `fields[]` 声明的 id，外加 `status`（published/draft）与 `order`；handler 不收任意键。
+- `id` 改名只在 visualEditing collection 生效（自动写 301），其余场景不要提交 id。
+- 方案里必须先 GET 留档该 item 现值，回滚 = 反向 PUT 原值。
 
 ## page-rewrite
 
