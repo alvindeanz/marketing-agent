@@ -624,3 +624,10 @@ t('CLI 与裸 REST 两种形态都命中,已申报不报,博客产线近邻豁�
   // 只读不报
   assert.deepStrictEqual(A3.wfagentUndeclaredOps('wfagent status sdalu\nwfagent content get sdalu 991\nGET /wp-json/wf-agent/v1/seo/14935', []), []);
 });
+
+t('sitemap flush 随发布豁免,未申报发布时照报', () => {
+  const A4 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const plan = 'wfagent content set kiaorakids 15672 --status publish\nwfagent sitemap flush kiaorakids';
+  assert.deepStrictEqual(A4.wfagentUndeclaredOps(plan, ['wp-draft-create', 'blog-publish']), []);
+  assert.deepStrictEqual(A4.wfagentUndeclaredOps('wfagent sitemap flush kiaorakids', []), ['wp-sitemap-flush']);
+});
