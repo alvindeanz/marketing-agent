@@ -2281,11 +2281,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
        熔断：每任务只自动续一次，第二次还无方案说明 execute 本身出不了方案
        （如 #808 掉分析模式那族），置停人标转人。止损闩生效不排。 */
     if((string)($i['chain']??'')==='execute'){
-        $qC=db()->prepare("SELECT client_id,note FROM seo_tasks WHERE id=?");
+        /* 任务备注的真身是 result_note 列（task_append_note 的写入口），seo_tasks 没有 note 列，
+           首发版 SELECT note 直接 fatal（2026-10-10 首杀当场抓到，DEFECTS 有案）。 */
+        $qC=db()->prepare("SELECT client_id,result_note FROM seo_tasks WHERE id=?");
         $qC->execute([$tid]);
         $rC=$qC->fetch();
         $cidC=(int)($rC['client_id']??0);
-        $prevC=substr_count((string)($rC['note']??''),'[auto-chain:execute]');
+        $prevC=substr_count((string)($rC['result_note']??''),'[auto-chain:execute]');
         if(ops_halted($cidC)){
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             task_append_note($tid,'[auto-chain:execute] apply 无已批方案，请求续排 execute，但止损闩生效中，不排，等人。');
