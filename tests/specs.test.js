@@ -120,7 +120,7 @@ try {
 try {
   const pol = JSON.parse(fs.readFileSync(path.join(S, 'release_policy.json'), 'utf8'));
   const miss = [];
-  for (const plat of ['webforger', 'shopify']) {
+  for (const plat of ['webforger', 'shopify', 'wordpress', 'googleads']) {
     const txt = fs.readFileSync(path.join(S, 'capabilities', plat + '.md'), 'utf8');
     const m = txt.match(/PLANNING_VIEW_START -->([\s\S]*?)<!-- PLANNING_VIEW_END/);
     assert.ok(m, plat + ' 缺 planning view 标记');
@@ -136,7 +136,7 @@ try {
     }
   }
   assert.ok(!miss.length, 'planning view 有 agent 档 op 不在 policy risk 表: ' + miss.join(', '));
-  console.log('  ok   planning view 与 policy 的 op 集合一致（WF 与 Shopify）');
+  console.log('  ok   planning view 与 policy 的 op 集合一致（WF/Shopify/WordPress/GoogleAds）');
 } catch (e) { fail += 1; console.log('  FAIL planning-view/policy 一致性 :: ' + e.message); }
 
 console.log(fail ? '\n' + fail + ' failed' : '\nall ok');

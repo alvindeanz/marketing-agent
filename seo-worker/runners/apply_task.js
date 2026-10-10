@@ -115,6 +115,42 @@ function shopseoUndeclaredOps(plan, declaredOps) {
   return Array.from(hits);
 }
 
+/* 行为闸 WordPress 版形状表（2026-10-10 WP 轮前置，与 WF/Shopify 同一第一性：闸认行为不认申报）。
+   两种书写形态都认：wfagent CLI 与 wf-agent/v1 裸 REST。宁可漏报（申报闸兜底）不乱误报。 */
+const WFAGENT_SHAPE_TO_OP = [
+  // CLI 形态（wfagent 是 WP 站唯一写通道的推荐入口）
+  [/wfagent\s[^\n]*\bcontent\s+create\b/, 'wp-draft-create'],
+  [/wfagent\s[^\n]*\bcontent\s+set\b[^\n]*--status\s+publish\b/, 'blog-publish'],
+  [/wfagent\s[^\n]*\bcontent\s+set\b/, 'wp-content-edit'],
+  [/wfagent\s[^\n]*\bseo\s+set\s+\S+\s+term\b/, 'wp-term-seo-update'],
+  [/wfagent\s[^\n]*\bseo\s+set\s+\S+\s+post\b/, 'wp-seo-meta-update'],
+  [/wfagent\s[^\n]*\bredirect\s+add\b/, 'wp-redirect-add'],
+  [/wfagent\s[^\n]*\bsitemap\s+flush\b/, 'wp-sitemap-flush'],
+  // 裸 REST 形态（插件命名空间）
+  [/POST\s+\S*\/wf-agent\/v1\/content(?![\/\w])/, 'wp-draft-create'],
+  [/(?:PATCH|POST)\s+\S*\/wf-agent\/v1\/content\/\d+[^\n]*["']status["']\s*:\s*["']publish/, 'blog-publish'],
+  [/(?:PATCH|POST)\s+\S*\/wf-agent\/v1\/content\/\d+/, 'wp-content-edit'],
+  [/\/wf-agent\/v1\/seo\/term\//, 'wp-term-seo-update'],
+  [/(?:PATCH|POST)\s+\S*\/wf-agent\/v1\/seo\/\d+/, 'wp-seo-meta-update'],
+  [/POST\s+\S*\/rankmath\/redirections\b/, 'wp-redirect-add'],
+  [/\/rankmath\/sitemap\/flush\b/, 'wp-sitemap-flush'],
+];
+function wfagentUndeclaredOps(plan, declaredOps) {
+  const declared = (declaredOps || []).map((o) => String(o).toLowerCase());
+  const BLOGISH = ['blog-draft', 'blog-publish', 'blog-edit', 'article-publish', 'wp-draft-create'];
+  const hasBlogish = BLOGISH.some((o) => declared.indexOf(o) !== -1);
+  const hits = new Set();
+  for (const [re, op] of WFAGENT_SHAPE_TO_OP) {
+    if (!re.test(String(plan))) continue;
+    // 博客产线近邻豁免：建稿/发布类任务对自家草稿写正文和 SEO 字段是份内事，
+    // 真正要单独把门的是发布翻转、重定向、term 级写入。
+    if ((op === 'wp-content-edit' || op === 'wp-seo-meta-update') && hasBlogish) continue;
+    if (op === 'blog-publish' && declared.indexOf('article-publish') !== -1) continue;
+    if (declared.indexOf(op) === -1) hits.add(op);
+  }
+  return Array.from(hits);
+}
+
 /** 方案正文里的结构类端点调用探测（行为闸用，#76 教训：闸认行为不认申报）。
  *  只认几种形状明确的调用行，宁可漏报（漏报回到申报闸兜底）不乱误报。 */
 function planStructuralCalls(plan) {
@@ -1265,6 +1301,14 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
   }
   const planFile = changePlanPath(workspace, taskId);
   const plan = await loadChangePlanOrChain(ctx, workspace, taskId);
+  /* 行为闸 WordPress 版（2026-10-10 WP 轮前置）：方案正文出现未申报的 wfagent 写命令
+     或插件写端点时零写入中止。发布翻转（status publish）是 external 档，绕过申报
+     就是绕过批文闸，与 WF/Shopify 同一条第一性。 */
+  const undeclaredW = wfagentUndeclaredOps(plan, taskOps(task));
+  if (undeclaredW.length) {
+    await fail('执行中止：方案正文含未申报的 WordPress 写操作（需 op：' + undeclaredW.join('、') + '），任务 ops 没有申报，放行分档没覆盖这些动作。零写入。修法：方案剔除这些调用，或补申报对应 op 重走判定与放行。');
+    throw new Error('task ' + taskId + ': plan contains undeclared wf-agent ops: ' + undeclaredW.join(','));
+  }
   const manifest = capabilities.fullText('wordpress');
   const prompt = buildWordpressPrompt({ task, plan, planFile, restBase, manifest });
   log('task ' + taskId + ': wordpress apply, ' + restBase + ', model ' + cfg.applyModel);
@@ -1667,6 +1711,7 @@ module.exports = {
   loadChangePlanOrChain,
   planStructuralCalls,
   shopseoUndeclaredOps,
+  wfagentUndeclaredOps,
   cooldownGate,
   cooldownGateLive,
   planTargetUrls,

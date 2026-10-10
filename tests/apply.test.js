@@ -593,3 +593,34 @@ t('方案文件存在：原样返回，不碰 API', async () => {
   const plan = await A2.loadChangePlanOrChain(ctx, ws, 779);
   assert.strictEqual(plan, '# plan body');
 });
+
+console.log('行为闸 WordPress 版：未申报 wfagent 命令与插件端点探测');
+t('CLI 与裸 REST 两种形态都命中,已申报不报,博客产线近邻豁免', () => {
+  const A3 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const plan = [
+    'wfagent content create kiaorakids --type post --title "Guide"',
+    'wfagent content set kiaorakids 15672 --status publish',
+    'wfagent seo set kiaorakids term 12 --title "Category"',
+    'wfagent redirect add kiaorakids /old /new',
+  ].join('\n');
+  // 全裸奔:五个 op 全报(publish 行同时命中 content-edit,零申报时从严)
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps(plan, []).sort(),
+    ['blog-publish', 'wp-content-edit', 'wp-draft-create', 'wp-redirect-add', 'wp-term-seo-update'].sort());
+  // 全申报:零报
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps(plan, ['wp-draft-create', 'blog-publish', 'wp-term-seo-update', 'wp-redirect-add']), []);
+  // 博客产线:建稿+发布已申报时,正文与 SEO 字段写入是份内事不报
+  const blogPlan = [
+    'wfagent content create sdalu --type post --title "Bollards"',
+    'wfagent content set sdalu 991 --content-file body.html',
+    'wfagent seo set sdalu post 991 --title "Bollards NZ" --desc "..."',
+  ].join('\n');
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps(blogPlan, ['wp-draft-create', 'blog-publish']), []);
+  // 但发布翻转没申报照样报
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps('wfagent content set sdalu 991 --status publish', ['wp-content-edit']), ['blog-publish']);
+  // 裸 REST 形态
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps('POST https://sdalu.co.nz/wp-json/wf-agent/v1/rankmath/redirections body {...}', []), ['wp-redirect-add']);
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps('PATCH /wp-json/wf-agent/v1/content/15672 body {"status":"publish"}', ['wp-content-edit']).sort(), ['blog-publish']);
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps('PATCH /wp-json/wf-agent/v1/seo/14935 {"title":"x"}', ['wp-seo-meta-update']), []);
+  // 只读不报
+  assert.deepStrictEqual(A3.wfagentUndeclaredOps('wfagent status sdalu\nwfagent content get sdalu 991\nGET /wp-json/wf-agent/v1/seo/14935', []), []);
+});
