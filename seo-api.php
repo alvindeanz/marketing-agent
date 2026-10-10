@@ -987,8 +987,10 @@ function attach_human_state($tasks,$cid){
                attention=1 的单列「停人」（hold-human/熔断/harness 阻塞都打这个标），和普通待放行分开，
                普通待放行下一轮放行官会推进，停人的不会（2026-10-07 僵尸根因：Louvresky #752 hold 后 9 天没人裁）。 */
             $hs='wait_me';$why=!empty($t['attention'])?'停人：需人裁决（note 有 hold 判语）':'待放行';
-        }elseif(strpos((string)($t['origin']??''),'split:')===0){
-            /* 拆条人工工单（2026-09-21）：母判决已继承，没有排期概念，就是等人上手。 */
+        }elseif(strpos((string)($t['origin']??''),'split:')===0&&(string)($t['owner_type']??'')!=='agent'){
+            /* 拆条人工工单（2026-09-21）：母判决已继承，没有排期概念，就是等人上手。
+               2026-10-10 补 owner 判断：转回机器位（machine_run/转位）的拆条单不再标
+               「待人工执行」，掉进下面排期口径，由 harness 正常推进。 */
             $hs='wait_me';$why='待人工执行（母任务已判 do）';
         }else{
             /* 待判（无判决，等闸A）/ 待拍板（有判决，等 harness apply_verdicts）是机器待办 backlog，
@@ -5095,7 +5097,10 @@ if($m==='GET'&&$ROUTE==='/clients'){
         }
         $agentTasks[$idA]=($agentTasks[$idA]??0)+1;
     }
-    foreach(db()->query("SELECT client_id,sprint,status FROM seo_tasks WHERE archived=0 AND owner_type<>'agent' AND (status IN('in_progress','review') OR (status='approved' AND (origin LIKE 'split:%' OR origin LIKE 'verify:%')))")->fetchAll() as $r){
+    /* 红点含全部人工位 approved（2026-10-10 抽查洞：原先只认拆条/verify 的 approved，
+       普通人工位单（如 sdalu #595 客户审稿、kiaorakids #386）在板上隐身数周，
+       与 2026-10-07 僵尸根因「人工位无人看面」同族。人工位 approved 就是等人动，一律计红。 */
+    foreach(db()->query("SELECT client_id,sprint,status FROM seo_tasks WHERE archived=0 AND owner_type<>'agent' AND status IN('in_progress','review','approved')")->fetchAll() as $r){
         $idB=(int)$r['client_id'];
         if($r['status']!=='in_progress'){
             $curB=$curBy[$idB]??null;$snB=null;
