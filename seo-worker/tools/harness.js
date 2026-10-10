@@ -584,6 +584,9 @@ async function report(all, sprint, retried) {
     // Apollo #825 / Ben's NZ #831 死循环教训；服务端 blog_card_waiting 同口径兜底）
     if (note.includes('blog_confirmation') && !t.card_feedback_at) continue;
     if (t.review_pending) continue;
+    // 新鲜的非 do 判决（later/drop/merge）等 apply_verdicts 消化，不召唤放行官对着它唱反调
+    // （2026-10-10 #813：判定官 later 刚落库，本处又排放行官判 release，两官打架第三入口）
+    if (t.review_effective && t.review_effective !== 'do' && !t.review_stale) continue;
     judgeIds.push(r.id);
   }
   if (matured.length && !DRY) {
