@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-10 AIRA (e) apply 无方案续接 chain=execute（rev ecd0845）
+
+- 背景：#814 放行后 apply 撞「no approved change plan」裸抛等人，而「先跑 execute」这句话只活在报错文案里；Alvin 当日批「按你的规划修复升级」。同场把四条泳道各自内联的方案加载块收成单点（14 天盖章公式 fa26285 两处内联漏改的同族预防）。
+- 干了什么：apply_task 新增 loadChangePlanOrChain 单点（ads/shopify/wordpress/通用四泳道共用），方案文件缺失时带 chain=execute 回 result 端点并照常 fail 留痕；seo-api result 端点新增续接块：一次性续排 execute（note 的 [auto-chain:execute] 标记做熔断，第二次无方案置停人标转人；止损闩生效不排，排后任务回 approved），方案出来走闸A与放行官原链既有接线。不违反硬规矩 1：不是重试 apply，是补前置步骤，链条源头仍是人放行。
+- 测试：apply 新增 3 条（含「chain=execute 必须真的出现在服务端输入里」断言，盲重出教训的验收标准），23 件全绿；php -l 远端过。api 与 worker 两机 rev ecd0845。
+- 配套（仓外）：频道回帖唯一出口 /data/aira/scripts/post_chat_reply.py（URL 200 零跳转 + 域名工作区出处双闸，badgerusa.com 编造域名实测被出处闸拦下，纯 HTTP 检查拦不住活着的错域名）；共享监视器 /data/aira/scripts/watch_jobs.py（空响应不算终态）。
+- 下一步/认领：批五 4（自愈 pass 轮内固化，含停人超期/hold 未裁计数进 attention）按原排期并批四 C 10/15 首跑。认领 AIRA。
+
 ### 2026-10-10 AIRA (d) Shopify 轮跑前三件（rev 6c66bbf）
 
 - 干了什么：shopseo 能力三方对账（15 op 全对齐，1.3.x 新命令文档已按三问折进既有 op，零缺口）；行为闸 Shopify 版（方案夹带未申报的 publish/create/redirect/theme 命令零写入中止）；specs 断言 planning view 与 policy op 集合一致（#808 洞的拦法）；weekly_run 支持 RUN_TAG 双道并行。tests 23 件全绿，worker 两机 6c66bbf。
