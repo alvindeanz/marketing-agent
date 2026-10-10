@@ -515,3 +515,18 @@ Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 });
+
+console.log('行为闸：方案结构类调用探测（#76 教训）');
+t('POST 建页命中，rebuild/branding 子段不误报，DELETE 页与 PUT nav 命中', () => {
+  const A = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const plan = [
+    '- 调用 POST /api/pages/{siteId}，body {"title":"Fees","placeholder":true}',
+    '- 调用 POST /api/pages/{siteId}/{slug}/rebuild 重建正文',
+    '- 调用 POST /api/pages/{siteId}/branding 换 favicon',
+    '- `DELETE /api/pages/{siteId}/old-page`',
+    '- PUT /api/nav/{siteId} 更新菜单',
+  ].join('\n');
+  const got = A.planStructuralCalls(plan).sort();
+  assert.deepStrictEqual(got, ['nav-edit', 'page-create', 'page-delete', 'page-rebuild'].sort());
+  assert.deepStrictEqual(A.planStructuralCalls('PATCH /api/content/{siteId}/edit 改 5 处文案'), []);
+});

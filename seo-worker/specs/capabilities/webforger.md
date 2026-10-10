@@ -19,8 +19,12 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | redirect-batch | agent_apply | 批量增删 301 重定向，写前平台自动归档 config.json |
 | page-rebuild | agent_apply | 按当前主题和业务信息重新生成某页正文 |
 | page-meta-update | agent_prepare | 改页面注册表字段：标题、导航显隐、父级、落地页标记 |
+| page-create | agent_prepare | 新建页面（强制 placeholder 空壳 + 即挂 noindex），落地前有客户确认卡硬闸 |
+| page-advanced-update | agent_prepare | 页面 seo 字段与 customJsonLd 注入，merge 语义平台自动归档 |
 | page-rewrite | agent_prepare | 整页正文覆盖重写，用于 SEO 改版 |
 | content-edit | agent_prepare | 元素级改文案、图片、按钮，一次最多 50 处 |
+| blog-edit | agent_prepare | PATCH 已有博文字段级修改（title/body/excerpt/category/keyword/meta），平台留 history |
+| collection-item-update | agent_prepare | PUT collection item 单字段增量合并，未提交字段不动 |
 | blog-draft | agent_apply | 建与修订未发布博客草稿，公众看不到，改稿不换预览链接 |
 | blog-publish | agent_prepare | 发布已审草稿并验证线上，人放行后由 apply 执行 |
 | image-generate | agent_prepare | FLUX 生成配图并入库 |

@@ -61,6 +61,23 @@ const STRUCTURAL_OP_COPY = {
   'page-delete': { term: '下线页面', intent: '把页面从站上移除，原内容有留档' },
 };
 
+/** 方案正文里的结构类端点调用探测（行为闸用，#76 教训：闸认行为不认申报）。
+ *  只认几种形状明确的调用行，宁可漏报（漏报回到申报闸兜底）不乱误报。 */
+function planStructuralCalls(plan) {
+  const hits = new Set();
+  for (const raw of String(plan).split('\n')) {
+    const l = raw.trim();
+    // 建页：POST /api/pages/{siteId}，siteId 后没有子路径段（rebuild/branding/{slug} 都带子段）。
+    // 路径段止于空白、引号、反引号或中英文标点（#76 复盘样本里是全角逗号紧跟 body）。
+    const mCreate = /POST\s+\S*\/api\/pages\/([^\s`"'，。；,;)）]+)/.exec(l);
+    if (mCreate && mCreate[1].replace(/\/$/, '').indexOf('/') === -1) hits.add('page-create');
+    if (/DELETE\s+\S*\/api\/pages\//.test(l)) hits.add('page-delete');
+    if (/PUT\s+\S*\/api\/nav\b/.test(l)) hits.add('nav-edit');
+    if (/\/api\/pages\/\S*\/rebuild\b/.test(l)) hits.add('page-rebuild');
+  }
+  return Array.from(hits);
+}
+
 async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops, lastOc) {
   const { cfg, api, log } = ctx;
   const note = String(task.result_note || '');
@@ -1418,6 +1435,21 @@ async function runOne(ctx, context, workspace, taskId) {
   if (!plan.trim()) throw new Error('task ' + taskId + ': the change plan file is empty');
   log('task ' + taskId + ': change plan loaded, ' + Buffer.byteLength(plan, 'utf8') + ' bytes');
 
+  /* 行为闸（2026-10-10 #76 教训）：上面的结构闸只认 ops 申报，#76 申报 page-rewrite 却在
+     方案里 POST /api/pages 建了新页，客户确认被绕过。闸认行为不认申报：方案正文出现结构类
+     端点调用即视同结构类，照走 onsite_confirm 闸。 */
+  const undeclared = planStructuralCalls(plan).filter((op) => ops.indexOf(op) === -1);
+  if (undeclared.length) {
+    const fbB = await api.cardFeedback(taskId).catch(() => ({ rows: [] }));
+    const ocB = (fbB.rows || []).filter((r) => String(r.item) === 'onsite_confirm');
+    const lastB = ocB.length ? ocB[ocB.length - 1] : null;
+    if (!lastB || String(lastB.choice) !== 'agree') {
+      log('task ' + taskId + '：方案正文含未申报的结构类调用（' + undeclared.join(',') + '），行为闸接管出卡');
+      return issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops.concat(undeclared), lastB);
+    }
+    log('task ' + taskId + '：方案含未申报结构类调用（' + undeclared.join(',') + '）但客户已确认（onsite_confirm=agree），放行');
+  }
+
   const credPath = path.join(
     workspace,
     'notes',
@@ -1590,6 +1622,7 @@ async function run(ctx) {
 }
 
 module.exports = {
+  planStructuralCalls,
   cooldownGate,
   cooldownGateLive,
   planTargetUrls,
