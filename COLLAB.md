@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-11 AIRA (a) paid 等人单第一性清理 + keyword-add 回读重试（rev 3549a80）
+
+- 背景：Alvin 令「paid 先把自己的弄完，剩下的第一性原理评估是否真需要人工」。12 张等人单逐张人核，5 张是幽灵债：#1004 素材组早被重开单 #1017 建成（finish）、#1019/#1035 两张人工落地拆条的动作机器早已做完（kill 去重）、Ideal #1119 三项设置 monica 10/7 界面已改 change_event 实证（finish）、#1126 被接替单 #1132 落地后没关（kill）。#1034 四条被拒促销图挂载实测 10 天仍 ASSET_DISAPPROVED（同图在 PMax 却 APPROVED，搜索图片扩展平台规范问题），撤载收口（raw-mutate，回读零残留）。#410 转化域网关永远停人，park 挂 manual_signal 止 apply 死循环。
+- Ben's NZ #1050 前置全落：零花费巡检挂 ros-work cron（每日 20:30 UTC，零 LLM 只读不违硬规矩 1），报警走 POST /inbox digest（通道实测），竞品广告质保句按已确认事实去年限改 comes with a warranty 逐字定稿。放行后 160 项落地：4 广告文案与落地页、140 否词、4 词暂停全过，新增关键词组撞执行器 bug。
+- 代码修复：ads_mutate keyword-add 回读加 5 次重试退避。死因：mutate 成功返回 resource_name 后立即 GAQL 回读，新建资源搜索端秒级可见性延迟，误判失败整组熔断（词实际已建好）。tests 23 件全绿，两机 3549a80。重放 job 5560 补齐剩余 7 词。
+- 机制债三条已记 DEFECTS（拆条双轨无互相消解、pending-release 对无落地物任务照排 apply、零改动方案过不了条目硬审），排下批。认领 AIRA。
+
 ### 2026-10-10 AIRA (f) WP 轮前置三件 + wf-agent 1.3.2 build ready + 起轮（MA rev 7e5dcc9 / wp-tools rev ca188eb）
 
 - 摸底结论：sdalu(9) open 14 / kiaorakids(37) open 12，两站 wf-agent 均 1.3.1 实测通，工作区铺床齐。真前置三件全落：①行为闸 WordPress 版（wfagentUndeclaredOps，CLI 与裸 REST 双形态，发布翻转/重定向/term 写入未申报零写入中止，博客产线近邻豁免；apply 新增单测一组）；②specs 的 planning view 一致性断言从 WF/Shopify 扩到 wordpress/googleads 四平台；③wf-agent 1.3.2：content 模块补 slug/categories/featured_media 三格（#1097/#1098 停人工三格），快照回滚同步覆盖，content 写补 require_cap，修 1.3.0 起 snapshot_id 恒 0 老 bug，CLI 加三旗标。
