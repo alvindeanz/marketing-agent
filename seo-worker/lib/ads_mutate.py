@@ -37,6 +37,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 ENV_FILE = "/data/aira/.env.google-ads"
 OPS = ["final-url-change", "ad-pause", "adgroup-pause", "campaign-pause", "keyword-pause", "negative-keyword-add", "negative-keyword-remove",
@@ -654,13 +655,23 @@ def op_keyword_add(client, cid, args):
         c.cpc_bid_micros = int(args.cpc_bid_micros)
     res = svc.mutate_ad_group_criteria(customer_id=cid, operations=[op])
     rn = res.results[0].resource_name
-    rows2 = gaql(client, cid,
-                 "SELECT ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.final_urls "
-                 "FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + rn.replace("'", "") + "'")
+    # 新建资源在搜索端有秒级可见性延迟（2026-10-11 Ben's NZ #1050：词已建好、
+    # 立即回读空行/字段未就绪，误判成失败整组熔断）。mutate 已返回 resource_name
+    # 即平台收单成功，回读只为验证终态，给它重试窗口而不是一枪毙命。
+    rows2 = None
+    for attempt in range(5):
+        if attempt:
+            time.sleep(attempt * 2)
+        rows2 = gaql(client, cid,
+                     "SELECT ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.final_urls "
+                     "FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + rn.replace("'", "") + "'")
+        if rows2 and "ENABLED" in str(rows2[0].ad_group_criterion.status) \
+                and (not args.final_url or args.final_url in list(rows2[0].ad_group_criterion.final_urls)):
+            break
     if not rows2 or "ENABLED" not in str(rows2[0].ad_group_criterion.status):
-        die("回读验证失败：新词状态不是 ENABLED，人工核对 " + rn, 1)
+        die("回读验证失败（重试 5 次仍不符）：新词状态不是 ENABLED，人工核对 " + rn, 1)
     if args.final_url and args.final_url not in list(rows2[0].ad_group_criterion.final_urls):
-        die("回读验证失败：关键词级 final URL 未生效，人工核对 " + rn, 1)
+        die("回读验证失败（重试 5 次仍不符）：关键词级 final URL 未生效，人工核对 " + rn, 1)
     out({"ok": True, "op": "keyword-add", "resource_name": rn, "text": text, "match": match,
          "final_url": args.final_url or None,
          "budget_impact": "0（预算与出价策略未动；新词扩大触发面，回滚 = 暂停该词）"})
