@@ -3584,6 +3584,9 @@ function isPendingClientCard(t){
   /* 折叠/落地类任务标题也带「方向卡」字样，但它们是执行任务不是客户卡，先排除 */
   const title=String(t.title||'');
   if(/^(卡反馈落地|卡到期落地)/.test(title))return false;
+  /* 月报/报告与内部验收类不是客户卡（2026-10-11 Alvin 定：报告归报告栏目，在途的、
+     卡在客户的才留）。own-token 兜底会把它们误钉（Ideal #1078 月报草稿实证），先排除 */
+  if(/月报|报告草稿|报告定稿|内部验收|不直发客户/.test(title))return false;
   /* 纯只读交付不是卡（2026-09-25）：analysis-readonly 是 OPS_CHECK 自证的「报告/清单类
      交付，自动收货抽查制」，不收集客户表态，不进钉板——sdalu 五张月报修订单各自带
      own-token 被误钉实证。真卡走 card_kind / 卡类 op / 确认卡文件名。 */

@@ -5087,7 +5087,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
         $nB=semimonth_index($todayB->format('Y-m-d'))-semimonth_index(substr((string)$p['created_at'],0,10))+1;
         $curBy[(int)$p['client_id']]=max(1,min($nB,6));
     }
-    foreach(db()->query("SELECT client_id,sprint,status,attention,(result_note LIKE '%?t=%&k=%' AND result_note NOT LIKE '%[卡反馈折叠%') AS cardish FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status IN('proposed','in_progress','review')")->fetchAll() as $r){
+    foreach(db()->query("SELECT client_id,sprint,status,attention,(result_note LIKE CONCAT('%?t=',id,'&k=%') AND result_note NOT LIKE '%[卡反馈折叠%') AS cardish FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status IN('proposed','in_progress','review')")->fetchAll() as $r){
         $idA=(int)$r['client_id'];
         if($r['status']==='review'&&((int)$r['attention']===1||(int)$r['cardish']===1))continue;
         if($r['status']!=='in_progress'){
@@ -5110,9 +5110,12 @@ if($m==='GET'&&$ROUTE==='/clients'){
         $manualTasks[$idB]=($manualTasks[$idB]??0)+1;
     }
     /* 待发卡：出了没发（sent_at 空）也没折叠的客户卡，owner agent 与上面的人工计数天然不重。
-       判卡认 card_kind 字段或 t/k 反馈令牌（存量卡无字段靠令牌兜底）。本期过滤同上（2026-09-25）。
-       只认 review 态且非停人（批五 3：done 是幽灵，停人是误判，见上）。 */
-    foreach(db()->query("SELECT client_id,sprint FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status='review' AND attention=0 AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE '%?t=%&k=%') AND result_note NOT LIKE '%[卡反馈折叠%'")->fetchAll() as $r){
+       判卡认 card_kind 字段或本任务自己的 t/k 令牌（存量卡无字段靠令牌兜底；只认自己
+       任务号，引用别家卡链接的任务不算卡，与前端 2026-09-25 口径一致）。本期过滤同上。
+       review 与 done 都算（2026-10-11 Alvin 定：在途的、卡在客户的留——done 的在途卡
+       前端钉在进行中视图，徽章必须同口径计数，否则列表有卡徽章没数，1 对好几个）。
+       月报/内部验收类不是客户卡，排除（报告归报告栏目）。 */
+    foreach(db()->query("SELECT client_id,sprint FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status IN('review','done') AND attention=0 AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE CONCAT('%?t=',id,'&k=%')) AND result_note NOT LIKE '%[卡反馈折叠%' AND (ops IS NULL OR ops<>'analysis-readonly') AND title NOT LIKE '卡反馈落地%' AND title NOT LIKE '卡到期落地%' AND title NOT LIKE '%月报%' AND title NOT LIKE '%报告草稿%' AND title NOT LIKE '%报告定稿%' AND title NOT LIKE '%内部验收%' AND title NOT LIKE '%不直发客户%'")->fetchAll() as $r){
         $idC=(int)$r['client_id'];
         $curC=$curBy[$idC]??null;$snC=null;
         if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smC))$snC=(int)$smC[1];
