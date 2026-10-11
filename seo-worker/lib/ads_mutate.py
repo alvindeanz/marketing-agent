@@ -114,7 +114,7 @@ def campaign_learning(client, cid, campaign_id):
                 "FROM campaign WHERE campaign.id = " + str(int(campaign_id)))
     if not rows:
         return False
-    reasons = [str(r) for r in rows[0].campaign.primary_status_reasons]
+    reasons = [enum_name(r) for r in rows[0].campaign.primary_status_reasons]
     return any("LEARNING" in r for r in reasons)
 
 
@@ -171,7 +171,7 @@ def op_ad_pause(client, cid, args):
         die("ad 不存在")
     if campaign_learning(client, cid, rows[0].campaign.id):
         die("目标 campaign 处于学习期，暂停动作拒绝执行（学习期内不下杀）")
-    old = str(rows[0].ad_group_ad.status)
+    old = enum_name(rows[0].ad_group_ad.status)
     out({"step": "before", "op": "ad-pause", "old_status": old})
     if args.dry_run:
         out({"ok": True, "dry_run": True, "would_set": "PAUSED"})
@@ -194,7 +194,7 @@ def op_adgroup_pause(client, cid, args):
         die("ad group 不存在")
     if campaign_learning(client, cid, rows[0].campaign.id):
         die("目标 campaign 处于学习期，暂停动作拒绝执行（学习期内不下杀）")
-    old = str(rows[0].ad_group.status)
+    old = enum_name(rows[0].ad_group.status)
     out({"step": "before", "op": "adgroup-pause", "old_status": old})
     if args.dry_run:
         out({"ok": True, "dry_run": True, "would_set": "PAUSED"})
@@ -338,7 +338,7 @@ def op_keyword_pause(client, cid, args):
                 "FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + res_name + "'")
     if not rows:
         die("criterion 不存在")
-    old = str(rows[0].ad_group_criterion.status)
+    old = enum_name(rows[0].ad_group_criterion.status)
     kw = rows[0].ad_group_criterion.keyword.text
     out({"step": "before", "op": "keyword-pause", "keyword": kw, "old_status": old})
     if old == "PAUSED":
@@ -355,7 +355,7 @@ def op_keyword_pause(client, cid, args):
     svc.mutate_ad_group_criteria(customer_id=cid, operations=[op])
     rows2 = gaql(client, cid,
                  "SELECT ad_group_criterion.status FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + res_name + "'")
-    new = str(rows2[0].ad_group_criterion.status) if rows2 else ""
+    new = enum_name(rows2[0].ad_group_criterion.status) if rows2 else ""
     if "PAUSED" not in new:
         die("回读验证失败：期望 PAUSED，读到 " + new)
     out({"ok": True, "op": "keyword-pause", "keyword": kw, "old_status": old, "new_status": "PAUSED",
@@ -423,14 +423,14 @@ def op_adgroup_create(client, cid, args):
                 "SELECT campaign.id, campaign.name, campaign.status FROM campaign WHERE campaign.id = " + str(campaign_id))
     if not rows:
         die("campaign " + str(campaign_id) + " 不存在")
-    out({"step": "campaign", "id": campaign_id, "name": rows[0].campaign.name, "status": str(rows[0].campaign.status),
+    out({"step": "campaign", "id": campaign_id, "name": rows[0].campaign.name, "status": enum_name(rows[0].campaign.status),
          "note": "本操作不动 campaign 预算与出价策略，预算中性"})
     dup = gaql(client, cid,
                "SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE campaign.id = " + str(campaign_id) +
                " AND ad_group.status != 'REMOVED'")
     for r in dup:
         if r.ad_group.name.strip().lower() == name.lower():
-            die("同名 ad group 已存在（id " + str(r.ad_group.id) + "，status " + str(r.ad_group.status) + "），拒绝重复建组")
+            die("同名 ad group 已存在（id " + str(r.ad_group.id) + "，status " + enum_name(r.ad_group.status) + "），拒绝重复建组")
     plan = {"create": name, "keywords": len(kws), "negatives": len(negs),
             "rsa_headlines": len(rsa["headlines"]), "rsa_descriptions": len(rsa["descriptions"]),
             "final_url": rsa["final_url"], "cpc_bid_micros": spec.get("cpc_bid_micros")}
@@ -623,7 +623,7 @@ def op_keyword_add(client, cid, args):
                 "WHERE ad_group.id = " + str(int(args.ad_group_id)))
     if not rows:
         die("ad group " + str(args.ad_group_id) + " 不存在")
-    if "REMOVED" in str(rows[0].ad_group.status):
+    if "REMOVED" in enum_name(rows[0].ad_group.status):
         die("ad group " + str(args.ad_group_id) + " 已移除")
     dup = gaql(client, cid,
                "SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, "
@@ -633,9 +633,9 @@ def op_keyword_add(client, cid, args):
     for r in dup:
         if (not r.ad_group_criterion.negative
                 and r.ad_group_criterion.keyword.text.strip().lower() == text.lower()
-                and match in str(r.ad_group_criterion.keyword.match_type)):
+                and match == enum_name(r.ad_group_criterion.keyword.match_type)):
             die("同词同匹配已存在（criterion " + str(r.ad_group_criterion.criterion_id) +
-                "，status " + str(r.ad_group_criterion.status) + "），拒绝重复加词")
+                "，status " + enum_name(r.ad_group_criterion.status) + "），拒绝重复加词")
     out({"step": "before", "op": "keyword-add", "ad_group_id": args.ad_group_id,
          "ad_group_name": rows[0].ad_group.name, "text": text, "match": match,
          "final_url": args.final_url or None, "cpc_bid_micros": args.cpc_bid_micros or None})
@@ -665,10 +665,10 @@ def op_keyword_add(client, cid, args):
         rows2 = gaql(client, cid,
                      "SELECT ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.final_urls "
                      "FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + rn.replace("'", "") + "'")
-        if rows2 and "ENABLED" in str(rows2[0].ad_group_criterion.status) \
+        if rows2 and "ENABLED" in enum_name(rows2[0].ad_group_criterion.status) \
                 and (not args.final_url or args.final_url in list(rows2[0].ad_group_criterion.final_urls)):
             break
-    if not rows2 or "ENABLED" not in str(rows2[0].ad_group_criterion.status):
+    if not rows2 or "ENABLED" not in enum_name(rows2[0].ad_group_criterion.status):
         die("回读验证失败（重试 5 次仍不符）：新词状态不是 ENABLED，人工核对 " + rn, 1)
     if args.final_url and args.final_url not in list(rows2[0].ad_group_criterion.final_urls):
         die("回读验证失败（重试 5 次仍不符）：关键词级 final URL 未生效，人工核对 " + rn, 1)
@@ -743,7 +743,7 @@ def op_ad_create(client, cid, args):
                 "SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE ad_group.id = " + str(ag_id))
     if not rows:
         die("ad group " + str(ag_id) + " 不存在")
-    if "REMOVED" in str(rows[0].ad_group.status):
+    if "REMOVED" in enum_name(rows[0].ad_group.status):
         die("ad group " + str(ag_id) + " 已移除")
     ex = gaql(client, cid,
               "SELECT ad_group_ad.ad.id, ad_group_ad.status FROM ad_group_ad "
@@ -789,7 +789,7 @@ def op_ad_create(client, cid, args):
     if url not in list(rows2[0].ad_group_ad.ad.final_urls):
         die("回读验证失败：final URL 不符，人工核对 " + rn, 1)
     out({"ok": True, "op": "ad-create", "resource_name": rn, "ad_id": new_ad_id,
-         "approval_status": str(rows2[0].ad_group_ad.policy_summary.approval_status),
+         "approval_status": enum_name(rows2[0].ad_group_ad.policy_summary.approval_status),
          "headlines": len(hs), "descriptions": len(ds),
          "budget_impact": "0（预算与既有广告未动；新广告进审核，回滚 = 暂停新广告）"})
 
