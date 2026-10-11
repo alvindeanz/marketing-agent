@@ -3598,7 +3598,10 @@ function isPendingClientCard(t){
      「提到调整卡/确认卡」的执行任务曾被误钉成卡（sungait #614/#642 实证），
      卡的签名只可能出现在 URL 里。 */
   const urls=(s.match(/https?:\/\/\S+/g)||[]).join(' ')+' '+String(t.output_url||'');
-  if(/确认卡|blog_confirmation|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(urls))return true;
+  /* 带任务号的卡文件名只认自己的号（2026-10-11：sungait #895 引用 #939 的
+     blog_confirmation 链接被误钉实证，同 9/25 own-token 口径） */
+  if(new RegExp('(blog_confirmation|onsite_confirm)_task-'+t.id+'\\b').test(urls))return true;
+  if(/确认卡|keyword_direction_|creative_direction_|keyword_confirmation_|negatives_direction_/.test(urls))return true;
   /* t/k 反馈令牌是所有客户卡的共同签名（badger #452 博客卡实证：文件名是 topic-slug，
      上面的清单全认不出）。只认自己任务号的令牌（2026-09-25 修）：卡链接天生带 t=自己的 id，
      引用别家卡链接的修订/执行任务不算卡（sdalu #862 等 5 张引用 #857 链接被误钉实证）。 */
