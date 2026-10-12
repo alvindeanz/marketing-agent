@@ -7,12 +7,44 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { URL } = require('node:url');
 
+/* 传输层瞬断判定：连响应头都没收到就断了的那类错误。收到了响应（哪怕 5xx）
+   一律不算：状态码语义归调用方，这里只兜网络打嗝。错误码清单来自 2026-09 以来
+   12 单 failed job 的实测（ETIMEDOUT 系）。 */
+function isTransient(e) {
+  if (!e) return false;
+  const code = String(e.code || '');
+  if (['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'EPIPE'].includes(code)) return true;
+  const msg = String(e.message || '');
+  return msg.includes('socket hang up') || msg.startsWith('http timeout after');
+}
+
 /**
  * Perform an HTTP request.
- * opts: { method, headers, body (string|object), timeoutMs }
+ * opts: { method, headers, body (string|object), timeoutMs, idempotent }
  * Resolves { status, headers, text, json }. Never throws on non 2xx.
+ *
+ * 瞬断原地重试一次（哲学同 llm.js 的 spawn flake：一次掩盖不了什么，第二次照旧抛）：
+ * 仅限 isTransient 的传输层错误，GET 默认开，非 GET 必须显式传 idempotent: true
+ * （POST 可能已到服务端而响应丢了，重发非幂等写会双计，宁可失败）。
  */
-function request(urlStr, opts = {}) {
+async function request(urlStr, opts = {}) {
+  try {
+    return await requestOnce(urlStr, opts);
+  } catch (e) {
+    const method = (opts.method || 'GET').toUpperCase();
+    const mayRetry = method === 'GET' || opts.idempotent === true;
+    if (!mayRetry || !isTransient(e)) throw e;
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      return await requestOnce(urlStr, opts);
+    } catch (e2) {
+      if (e2 && e2.message) e2.message += '（瞬断已原地重试一次仍失败）';
+      throw e2;
+    }
+  }
+}
+
+function requestOnce(urlStr, opts = {}) {
   return new Promise((resolve, reject) => {
     let u;
     try {
@@ -229,4 +261,4 @@ function downloadTo(urlStr, destPath, opts = {}) {
   });
 }
 
-module.exports = { request, requestJson, downloadTo, multipartBody, postMultipart };
+module.exports = { request, requestJson, downloadTo, multipartBody, postMultipart, isTransient };

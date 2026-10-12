@@ -67,6 +67,7 @@ async function getAccessToken(keyFile, scopes) {
     encodeURIComponent(assertion);
 
   const res = await requestJson(TOKEN_URL, {
+    idempotent: true, /* token 交换可安全重发，瞬断重试开 */
     method: 'POST',
     body: form,
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -82,12 +83,16 @@ async function getAccessToken(keyFile, scopes) {
   return res.access_token;
 }
 
-/** POST a JSON body to a Google API endpoint with a service account token. */
+/** POST a JSON body to a Google API endpoint with a service account token.
+ *  全部调用点都是 GSC searchanalytics query 与 GA4 runReport 这类纯读（POST 只是
+ *  Google 的查询语法），所以标 idempotent 吃 http.js 的瞬断重试；谁要拿它做写操作，
+ *  先把这个标摘了另开口子。 */
 async function googlePost(keyFile, scopes, url, body, timeoutMs) {
   const token = await getAccessToken(keyFile, scopes);
   return requestJson(url, {
     method: 'POST',
     body,
+    idempotent: true,
     timeoutMs: timeoutMs || 60000,
     headers: { Authorization: 'Bearer ' + token },
   });
