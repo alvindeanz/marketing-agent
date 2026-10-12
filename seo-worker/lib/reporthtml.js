@@ -955,7 +955,11 @@ function buildBrandSectionsHtml(pack, narrative) {
     const rows = g.top10
       .map((r) => {
         const pct = r.impr_delta_pct === null ? '<span style="color:' + MUTED + '">新进</span>' : '<span style="color:' + (r.impr_delta_pct >= 0 ? GREEN : AMBER) + ';font-weight:600">' + (r.impr_delta_pct > 0 ? '+' : '') + round1(r.impr_delta_pct * 100) + '%</span>';
-        return '<tr><td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + escapeHtml(r.query) + '</td>' +
+        /* GSC 原词是用户敲的，什么都可能有；带空格的连字符会撞交付 lint 的
+           space_hyphen 规则（v4 实证：一条法语长尾把整报拦下）。展示层把
+           「空格-空格」收成单空格，只动显示不动数据。 */
+        const qShow = r.query.replace(/\s+-\s+/g, ' ');
+        return '<tr><td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + escapeHtml(qShow) + '</td>' +
           '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right">' + (r.pos_prev === null ? '-' : r.pos_prev) + '</td>' +
           '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;font-weight:700">' + r.pos_cur + '</td>' +
           '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--muted)">' + (r.impr_prev === null ? '-' : fmtInt(r.impr_prev)) + '</td>' +
