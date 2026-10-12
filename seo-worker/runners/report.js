@@ -86,6 +86,9 @@ function headerBlock(pack) {
       : null,
     'hero_kpi_keys 四个里至多一个负向指标，招牌位优先放我方可控且向好的指标；hero_headline 永远是正向信号。',
     '非自然渠道的大盘波动（如直接访问、付费渠道的涨跌）只进统计说明，不作招牌结论：那不是 SEO 工作的盘，既不邀功也不背锅。',
+    pack.meta.orders_attribution === 'first_user'
+      ? '订单与订单金额按用户首次到站渠道归属（客户既定统计方式），订单一节必须有一句统计说明交代这一归属方式（记住全文禁用「口径」二字）；PACK 里 purchases_session、revenue_session 是会话归属的对照值，只可在统计说明处一笔带过，不作主数、不进标题与招牌位。'
+      : null,
   ];
   if (pack.ga4 && pack.ga4.anomaly) {
     frame.push(
@@ -352,6 +355,19 @@ async function run(ctx) {
   const slug = clientDirName(profile, cfg);
   const today = localYmd();
 
+  /* 客户自定义模板（2026-10-13 Alvin 定）：不指定用通用骨架，指定了一律用指定的。
+     SEO 与 SEM 模板分开，本产线是 SEO 月报，只认 _seo 文件（SEM 月报走
+     specs/report/paid_monthly_spec.md 的 _paid 文件）。模板必须用通用骨架同一套
+     mustache 子集占位符：数字仍由渲染层填、叙事只进指定槽位，渲染后照样过
+     占位符残留断言与 lint，防编造的防线不随模板放开。老客户模板由 PJ 时期
+     月报 HTML 挖槽改造而来，首例 LuxeLink。 */
+  let renderOpts = {};
+  const clientTplPath = path.join(workspace, 'reports', 'report_template_seo.html');
+  if (fs.existsSync(clientTplPath)) {
+    renderOpts = { template: fs.readFileSync(clientTplPath, 'utf8') };
+    log('使用客户自定义 SEO 报告模板 reports/report_template_seo.html');
+  }
+
   // clampEnd：数据可用上限统一走 PT 口径（见 factspack.ptCutoffYmd 注释），
   // 与 seo-api 的校验同源，避免 API 放行的终点在这里被本地时区多夹一天。
   const period = computePeriod({
@@ -432,14 +448,14 @@ async function run(ctx) {
   }
 
   // ---- 第三层：渲染 ----
-  let html = renderReport(pack, narrative, {});
+  let html = renderReport(pack, narrative, renderOpts);
   let lint = lintReport(html);
   if (!lint.ok && narrative) {
     log('成品 lint 命中 ' + lint.hits.length + ' 条，降级成纯数据版重渲染：' + lint.hits.map((h) => h.rule).join('、'));
     narrative = null;
     narrativeStatus = 'fallback';
     narrativeNote = '叙事文字未通过发布前检查（' + lint.hits.map((h) => h.rule).join('、') + '），本版为纯数据版';
-    html = renderReport(pack, null, {});
+    html = renderReport(pack, null, renderOpts);
     lint = lintReport(html);
   }
   if (!lint.ok) {
@@ -480,7 +496,7 @@ async function run(ctx) {
         const problems2 = parsed2.json ? validateNarrative(parsed2.json, allowedNumbers) : ['json 块不是对象'];
         if (!problems2.length) {
           stripUnknownUrls(parsed2.json, pack, log);
-          const html2 = renderReport(pack, parsed2.json, {});
+          const html2 = renderReport(pack, parsed2.json, renderOpts);
           const lint2 = lintReport(html2);
           if (lint2.ok) {
             narrative = parsed2.json;

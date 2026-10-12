@@ -395,7 +395,10 @@ function ensure_metrics_schema(){
     }
     foreach(['semrush_db'=>"VARCHAR(16) DEFAULT NULL",'workspace_dir'=>"VARCHAR(64) DEFAULT NULL",
              /* W8 批 0：services=seo/sem/both（sem 兼容别名，语义即 paid），owner=aira/kira 唯一写入方 */
-             'services'=>"VARCHAR(16) DEFAULT NULL",'ads_customer_id'=>"VARCHAR(20) DEFAULT NULL",'owner'=>"VARCHAR(32) DEFAULT NULL"] as $col=>$ddl){
+             'services'=>"VARCHAR(16) DEFAULT NULL",'ads_customer_id'=>"VARCHAR(20) DEFAULT NULL",'owner'=>"VARCHAR(32) DEFAULT NULL",
+             /* 月报订单归因（2026-10-13 LuxeLink 2对4事故）：session=购买所在会话的渠道（GA4 默认），
+                first_user=购买用户首次到站的渠道。客户已被某一把尺子教育过的，这里锁死跟客户走。 */
+             'orders_attribution'=>"VARCHAR(16) NOT NULL DEFAULT 'session'"] as $col=>$ddl){
         $c=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_profiles' AND COLUMN_NAME=?");
         $c->execute([$col]);
         $hit=$c->fetch();
@@ -2062,7 +2065,7 @@ if($ROUTE==='')$ROUTE='/';
 
 /* brand_regex 排在最后，是后加的列（见 ensure_metrics_schema）。留空表示
    "让 worker 自己从客户名或域名推"，不是"这个客户没有品牌词"。 */
-$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','business_goals','conversion_goals','notes','brand_regex','services','ads_customer_id','owner'];
+$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','business_goals','conversion_goals','notes','brand_regex','services','ads_customer_id','owner','orders_attribution'];
 
 /* =========================================================
    Worker endpoints (service token)
@@ -5397,24 +5400,30 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     /* W8 批 0 的三列。services: seo=只做自然, sem/paid=只做投放, both=都做; 空串=还没定性(老客户默认按 seo 处理)。 */
     $svc=trim($vals['services']);
     if($svc!==''&&!in_array($svc,['seo','sem','paid','both'],true))res(400,['error'=>'services 取 seo / sem / paid / both']);
+    /* 月报订单归因，空串回落 session。枚举锁死：worker 按它选 GA4 维度，野值会让报告静默回落。 */
+    $oa=trim($vals['orders_attribution']);
+    if($oa==='')$oa='session';
+    if(!in_array($oa,['session','first_user'],true))res(400,['error'=>'orders_attribution 取 session / first_user']);
+    $vals['orders_attribution']=$oa;
     $acid=str_replace('-','',trim($vals['ads_customer_id']));
     if($acid!==''&&!preg_match('/^\d{10}$/',$acid))res(400,['error'=>'ads_customer_id 应为 10 位数字（可带横杠）']);
     $own=trim($vals['owner']);
     if($own!==''&&!preg_match('/^[a-z0-9._-]{1,32}$/',$own))res(400,['error'=>'owner 只允许小写字母数字和 . _ -']);
-    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,semrush_db,workspace_dir,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang,services,ads_customer_id,owner)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,semrush_db,workspace_dir,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang,services,ads_customer_id,owner,orders_attribution)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON DUPLICATE KEY UPDATE platform=VALUES(platform),domain=VALUES(domain),ga4_property=VALUES(ga4_property),
             gsc_property=VALUES(gsc_property),semrush_project=VALUES(semrush_project),
             semrush_db=VALUES(semrush_db),workspace_dir=VALUES(workspace_dir),target_keywords=VALUES(target_keywords),
             brand_regex=VALUES(brand_regex),
             business_goals=VALUES(business_goals),conversion_goals=VALUES(conversion_goals),notes=VALUES(notes),
             status=VALUES(status),report_lang=VALUES(report_lang),
-            services=VALUES(services),ads_customer_id=VALUES(ads_customer_id),owner=VALUES(owner)";
+            services=VALUES(services),ads_customer_id=VALUES(ads_customer_id),owner=VALUES(owner),
+            orders_attribution=VALUES(orders_attribution)";
     db()->prepare($sql)->execute([
         $cid,$vals['platform'],$vals['domain'],$vals['ga4_property'],$vals['gsc_property'],
         $vals['semrush_project'],$sdb,$wd,$kwJson,$vals['brand_regex'],
         $vals['business_goals'],$vals['conversion_goals'],$vals['notes'],$st,$lang,
-        $svc,$acid,$own
+        $svc,$acid,$own,$oa
     ]);
     audit($u['username'],'seo_profile_save',(string)$cid,['domain'=>$vals['domain'],'status'=>$st,'report_lang'=>$lang]);
     res(200,['ok'=>true]);

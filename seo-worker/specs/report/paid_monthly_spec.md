@@ -4,6 +4,13 @@
      产出是【内部草稿】，对客发送必须过人审，这是红线；月报口径的坑见 DEFECTS（leads 口径、
      投放天数、告警红），机器负责拉数与排版，口径核对留给人，跑满观察期再谈降级。 -->
 
+## 客户自定义模板（2026-10-13 Alvin 定）
+
+出稿前先查客户工作区 `reports/report_template_paid.html`：存在则以它为版式基准（结构、配色、
+模块顺序照它，数字与叙事按本 spec 的口径规则填），不存在才用下方通用五块结构。SEO 与 SEM
+模板分开，别拿 `report_template_seo.html` 凑数。模板是客户多年形成的阅读习惯，属于客户资产，
+不许擅自「优化」它的版式。
+
 ## 产出物
 
 - `reports/{client_slug}_paid_monthly_{YYYY-MM}.draft.html`：完整月报草稿，文件名带 `.draft`，

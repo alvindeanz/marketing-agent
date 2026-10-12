@@ -980,6 +980,34 @@ async function ga4Ecommerce(ctx, propertyId, range, log) {
   }
 }
 
+/**
+ * 自然渠道订单与金额，按用户首次到站渠道归属（firstUserDefaultChannelGroup）。
+ * 只给 profile.orders_attribution=first_user 的客户用，覆盖 ga4Ecommerce 里
+ * 会话口径的 organic.purchases/revenue 两个数；加购、结账、全站总量仍是会话口径，
+ * 和 PJ 时期的手工月报行为一致（LuxeLink 2026-09 两份报告 2 对 4 的事故源头）。
+ * 全站总量不用重拉：对任何渠道维度求和都是同一个全站数。
+ */
+async function ga4OrganicOrdersFirstUser(ctx, propertyId, range, log) {
+  try {
+    const rows = await ga4Report(ctx, propertyId, {
+      dateRanges: [{ startDate: range.start, endDate: range.end }],
+      dimensions: [{ name: 'firstUserDefaultChannelGroup' }],
+      metrics: [{ name: 'ecommercePurchases' }, { name: 'purchaseRevenue' }],
+    });
+    const out = { purchases: 0, revenue: 0 };
+    for (const r of rows) {
+      if (!isOrganicChannel(r.firstUserDefaultChannelGroup)) continue;
+      out.purchases += Number(r.ecommercePurchases) || 0;
+      out.revenue += Number(r.purchaseRevenue) || 0;
+    }
+    out.revenue = round2(out.revenue);
+    return out;
+  } catch (e) {
+    if (log) log('ga4 首次触点订单取不到，订单维持会话口径：' + e.message);
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 取数：工作量
 // ---------------------------------------------------------------------------
@@ -1332,6 +1360,31 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     if (ecomPrev) inputs.ga4_calls += 1;
     inputs.ga4_calls += 2;
 
+    // 订单归因按客户配置（profile.orders_attribution，默认 session）。first_user 时
+    // 用首次触点数覆盖自然渠道订单与金额，会话口径的原值留作 *_session 对照字段，
+    // 渲染与叙事的主数一律是覆盖后的。配置的由来见 seo-api ensure_metrics_schema 的列注释。
+    if (String((profile && profile.orders_attribution) || 'session') === 'first_user' && ecom && ecom.organic) {
+      say('订单归因按客户配置走首次触点（first_user），会话口径留作对照');
+      const fuCur = await ga4OrganicOrdersFirstUser(ctx, ga4Property, per, say);
+      inputs.ga4_calls += 1;
+      if (fuCur) {
+        ecom.organic.purchases_session = ecom.organic.purchases;
+        ecom.organic.revenue_session = ecom.organic.revenue;
+        ecom.organic.purchases = fuCur.purchases;
+        ecom.organic.revenue = fuCur.revenue;
+      }
+      if (ecomPrev && ecomPrev.organic) {
+        const fuPrev = await ga4OrganicOrdersFirstUser(ctx, ga4Property, per.compare, say);
+        inputs.ga4_calls += 1;
+        if (fuPrev) {
+          ecomPrev.organic.purchases_session = ecomPrev.organic.purchases;
+          ecomPrev.organic.revenue_session = ecomPrev.organic.revenue;
+          ecomPrev.organic.purchases = fuPrev.purchases;
+          ecomPrev.organic.revenue = fuPrev.revenue;
+        }
+      }
+    }
+
     // 基数异常：本期与对比期分别检测。对比期有异常时给出剔除后的全渠道环比，
     // 叙事层按铁律必须用剔除后口径描述全渠道变化。数字都放进 pack，模型只许照抄。
     let anomaly = null;
@@ -1673,6 +1726,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       domain,
       slug: String(opts.slug || ''),
       report_lang: String((profile && profile.report_lang) || 'zh'),
+      /* 订单归因（session/first_user）：渲染层与叙事层据此决定要不要写统计说明 */
+      orders_attribution: String((profile && profile.orders_attribution) || 'session'),
       biz_type: bizType,
       // 市场优先取档案字段，没有就按域名后缀推：.com.au 澳洲、.co.nz 新西兰，其余留空不猜。
       market: String(
