@@ -15,6 +15,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 $DB_HOST='localhost'; $DB_USER='always-op'; $DB_PASS='mMewGDczS6hMJsWF'; $DB_NAME='always-op';
 $JWT_KEY='horntech-ops-2026-key';
 $WORKER_TKN='seo-worker-svc-9f3a71c2e8d4';
+/* WebForger Marketing 面板的只读 service token（2026-10-12 Alvin 放行，需求包
+   /mnt/share/aiden/webforger-marketing-20261012）。GET 且命中 ro_allowed() 白名单
+   才放行，其余一律 403：这枚 token 的能力上限就是「看」，白名单之外的 GET
+   （反馈附件、交付物文件、收件箱）也不给。Aiden 侧每日 cron 持有。 */
+$READONLY_TKN='wf-marketing-ro-531977e28cfca284b98e6b49b57b31c1';
 $WAKE_URL='http://192.168.10.205:8377/wake';
 $WAKE_SECRET='seo-wake-2f8c1b7e';
 /* Outside the webroot on purpose, see fb_dir(). Requires the BT panel's
@@ -114,6 +119,22 @@ function auth_admin(){
     if($role!=='admin')res(403,['error'=>'Forbidden']);
     return $u;
 }
+/* 只读 token 的路由白名单。闭集：精确路径 + 两个带行 id 的形状，无前缀匹配。
+   注意 GET /tasks 自带 archive_closed_chat_tasks 维护写（幂等），已告知 Aiden，
+   这是我们自己的家务不算外部写入。 */
+function ro_allowed(){
+    global $ROUTE;
+    if($_SERVER['REQUEST_METHOD']!=='GET')return false;
+    if(in_array($ROUTE,['/clients','/tasks','/plans','/facts','/metrics','/snapshots'],true))return true;
+    return preg_match('#^/(plans|snapshots)/[1-9][0-9]{0,8}$#D',$ROUTE)===1;
+}
+/* 持只读 token 则返回其身份，白名单外直接 403 终止；非该 token 返回 null 走原层。 */
+function auth_readonly_try($t){
+    global $READONLY_TKN;
+    if(!hash_equals($READONLY_TKN,$t))return null;
+    if(!ro_allowed())res(403,['error'=>'Read-only token']);
+    return ['username'=>'wf-marketing','role'=>'readonly'];
+}
 /* Worker layer: hardcoded service token only, never a JWT. */
 function auth_worker(){
     global $WORKER_TKN;
@@ -131,6 +152,7 @@ function auth_worker(){
 function auth_user(){
     $t=bearer();
     if(!$t)res(401,['error'=>'No auth']);
+    if($ro=auth_readonly_try($t))return $ro;
     $u=jwt_dec($t);
     if(!$u)res(401,['error'=>'Bad token']);
     $s=db()->prepare("SELECT active,role FROM users WHERE username=?");
@@ -145,6 +167,7 @@ function auth_any(){
     $t=bearer();
     if(!$t)res(401,['error'=>'No auth']);
     if(hash_equals($WORKER_TKN,$t))return ['username'=>'seo-worker','role'=>'seo_worker'];
+    if($ro=auth_readonly_try($t))return $ro;
     /* 读端点对全部登录用户开放（2026-09-02 sales 开放）；此前这里要求 admin。 */
     return auth_user();
 }
