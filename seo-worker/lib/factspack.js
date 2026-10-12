@@ -1713,6 +1713,23 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     .slice(0, 5)
     .map((r) => ({ path: r.path, prev: r.prev_sessions, cur: r.sessions }));
 
+  // ---- 品牌/品类板块（客户点名的分析资产，定义与数据来源见 lib/brandsections.js 头注）----
+  let brandSections = null;
+  if (opts.sections && Array.isArray(opts.sections.groups) && opts.sections.groups.length && gscProperty) {
+    const { buildBrandSections } = require('./brandsections');
+    const lpCurRows = (ga4.landing_pages || []).map((r) => ({ path: r.path, sessions: r.sessions }));
+    const lpPrevRows = (ga4.landing_pages || [])
+      .filter((r) => r.prev_sessions !== null && r.prev_sessions !== undefined)
+      .map((r) => ({ path: r.path, sessions: r.prev_sessions }));
+    brandSections = await buildBrandSections({
+      cfg, property: gscProperty, per,
+      groups: opts.sections.groups,
+      ledger: opts.marketLedger || null,
+      lpCur: lpCurRows, lpPrev: lpPrevRows, log: say,
+    });
+    inputs.gsc_calls += opts.sections.groups.length * 4;
+  }
+
   const pack = {
     meta: {
       client_id: clientId,
@@ -1764,6 +1781,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     },
     gsc: { ...gsc, coverage: gscCoverage },
     ga4: { ...ga4, coverage: ga4Coverage },
+    brand_sections: brandSections,
     // 去年同月对照。月中出报、去年无数据、取数失败时为 null，缘由在 gaps。
     yoy,
     rankings,

@@ -149,8 +149,22 @@ function factsBlock(pack) {
   return ['客户专属事实与禁区，逐条遵守：'].concat(facts.map((f) => '- ' + f)).join('\n');
 }
 
+/** 品牌板块的叙事槽说明。pack 没有 brand_sections 时一个字不加。 */
+function brandSchemaLines(pack) {
+  const bs = pack && pack.brand_sections;
+  if (!Array.isArray(bs) || !bs.length) return [];
+  const keys = bs.map((s) => s.key).join(' / ');
+  return [
+    '  "brand_sections": {"<key>": {"conclusion": "120 至 220 字", "market_recon": "100 至 200 字"}},',
+    '品牌板块（brand_sections 节点，key 为 ' + keys + '，每组两段都必填）：',
+    'conclusion 解读该组卡内数字：词数与曝光的覆盖面走向、TOP10 里交易意图词的排名进退（逐词写「旧位次→新位次」照抄表内数字）、增量或回落集中在哪些词。',
+    'market_recon 是市场对账：用该组 market 节点的市场量（latest、环比、同比）对照站点曝光走向，判断是需求问题还是承接问题，结尾必须落到下月一个具体可执行动作（优先从 next 节点或该组 pages 里的页面找落点）。market 为 null 的组不写市场量数字，只按站点数据写并注明市场量本期未统计。',
+  ];
+}
+
 /** 输出 schema 说明，字数区间与固定槽位照 prompt_contract.md。 */
-function schemaBlock() {
+function schemaBlock(pack) {
+  const brandLines = brandSchemaLines(pack);
   return [
     '输出要求：只回一个 json 代码块，块外一个字都不要有。结构如下。',
     '```json',
@@ -176,14 +190,16 @@ function schemaBlock() {
     '    {"slot":4,"priority":"P4","title":"站点健康检查","body":"50 至 110 字"},',
     '    {"slot":5,"priority":"P5","title":"数据监督与报告交付","body":"50 至 110 字"}',
     '  ],',
+    brandLines.length ? brandLines[0] : null,
     '  "self_check": {"numbers_all_from_pack": true, "no_banned_words": true, "callouts_paired": true}',
     '}',
     '```',
+    ...brandLines.slice(1),
     'work_items 是这份报告的重点：客户要看到我方本月做了什么。把 DATA PACK 的 work.items 按分类整理成 3 至 8 条，每一条原始动作都要有归宿不得漏项，每条写清对象与数量（改了哪些页、发了几篇、修了什么、交付了什么），成果与投入并列。分类只能取 onpage、content、link、tech、ads（广告账户操作）、report，内部速记要改写成客户面表达。',
     '成对 callout 必须两条都给。排名亮点里的「旧位次 → 新位次（差值，曝光数）」只能取 narrative_inputs.ranking_highlights 里的行。',
     'DATA PACK 里若有 yoy 节点（去年同月对照），ga4_sdesc 或 ga4_callouts 里补一句同比走向，数字照抄 yoy 节点，不自行换算；yoy 为 null 时全文不提同比。',
     'next_items 第一槽的 urls 只能取 DATA PACK 里出现过的路径。',
-  ].join('\n');
+  ].filter((x) => x !== null).join('\n');
 }
 
 /** 给模型看的 pack。去掉纯内部追溯字段，其余原样。 */
@@ -209,7 +225,7 @@ function buildPrompt(pack) {
     JSON.stringify(packForPrompt(pack), null, 1),
     '```',
     '',
-    schemaBlock(),
+    schemaBlock(pack),
   ].join('\n');
 }
 
@@ -237,6 +253,14 @@ function narrativeText(n) {
   if (!n || typeof n !== 'object') return '';
   push(n.hero_headline);
   for (const k of ['ga4_sdesc', 'channels_sdesc', 'funnel_sdesc', 'rankings_sdesc', 'pages_sdesc', 'work_sdesc']) push(n[k]);
+  // 品牌板块两段叙事同样要过禁词与数字校验，漏在外面等于给编造开了口子。
+  if (n.brand_sections && typeof n.brand_sections === 'object') {
+    for (const g of Object.values(n.brand_sections)) {
+      if (!g || typeof g !== 'object') continue;
+      push(g.conclusion);
+      push(g.market_recon);
+    }
+  }
   const eachCallout = (list) => {
     const arr = Array.isArray(list) ? list : list ? [list] : [];
     for (const c of arr) {
@@ -387,11 +411,29 @@ async function run(ctx) {
   log('版本号先按 v' + versionHint + ' 起名，最终以服务端返回的为准');
 
   // ---- 第一层：数据 ----
+  /* 品牌板块定义与市场量台账（客户点名的分析资产）：和模板同住客户 reports/ 目录，
+     文件不存在就没有该板块，坏 JSON 当场抛（静默吞掉等于把客户资产悄悄丢了）。 */
+  let sectionsCfg = null;
+  let marketLedger = null;
+  const sectionsPath = path.join(workspace, 'reports', 'report_sections_seo.json');
+  if (fs.existsSync(sectionsPath)) {
+    sectionsCfg = JSON.parse(fs.readFileSync(sectionsPath, 'utf8'));
+    log('读入品牌板块定义 reports/report_sections_seo.json（' + ((sectionsCfg.groups || []).length) + ' 组）');
+    const ledgerPath = path.join(workspace, 'reports', 'market_volume_ledger.json');
+    if (fs.existsSync(ledgerPath)) {
+      marketLedger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+    } else {
+      log('市场量台账 market_volume_ledger.json 不存在，品牌卡不出市场趋势图');
+    }
+  }
+
   const pack = await buildFactsPack(ctx, profile, context, period, {
     workspace,
     slug,
     instructions: payload.instructions || '',
     versionHint,
+    sections: sectionsCfg,
+    marketLedger,
   });
   if (pack.gaps && pack.gaps.length) log('数据缺口 ' + pack.gaps.length + ' 条：' + pack.gaps.join('；'));
 

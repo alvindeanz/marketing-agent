@@ -857,6 +857,151 @@ function buildAovCallout(pack, isEcom) {
 }
 
 // ---------------------------------------------------------------------------
+// 品牌/品类板块（客户点名的分析资产，数据在 pack.brand_sections，见 lib/brandsections.js）
+// 整节 HTML 在这里拼好作为 {{{brand_sections_html}}} 注入模板：结构是板块价值的一部分，
+// 不摊给每个客户模板自己抄；皮肤仍走模板的 CSS 变量。
+// ---------------------------------------------------------------------------
+
+function round1(n) { return Math.round(Number(n) * 10) / 10; }
+
+/** 坐标轴上限取整到好看的数：1/1.5/2/2.5/5 乘 10^n。 */
+function niceCeil(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 1.5, 2, 2.5, 5, 10]) {
+    if (m * p >= v) return m * p;
+  }
+  return 10 * p;
+}
+
+function kLabel(v) {
+  return v >= 1000 ? Math.round(v / 1000) + 'k' : String(Math.round(v));
+}
+
+function monthShort(ym) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym || ''));
+  if (!m) return String(ym || '');
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return names[Number(m[2]) - 1] + ' ' + m[1].slice(2);
+}
+
+/** 市场月度搜索量折线，内联 SVG，版式沿 PJ 月报（viewBox 800x118，基线 y=92，顶 y=22）。 */
+function buildMarketSvg(market, accent) {
+  const s = market.series;
+  const n = s.length;
+  if (n < 2) return '';
+  const max = niceCeil(Math.max.apply(null, s));
+  const X = (i) => round1(48 + (i * 736) / (n - 1));
+  const Y = (v) => round1(92 - (v / max) * 70);
+  const pts = s.map((v, i) => X(i) + ',' + Y(v)).join(' ');
+  const monthsTxt = [];
+  for (let i = 0; i < n; i += 3) {
+    monthsTxt.push('<text x="' + X(i) + '" y="110" font-size="9" fill="#94a3b8" text-anchor="middle">' + escapeHtml(String(market.months[i] || '').slice(2)) + '</text>');
+  }
+  const mark = (i, extra) => {
+    const label = monthShort(market.months[i]) + (extra ? ' · ' + extra : '') + ' · ' + kLabel(s[i]);
+    const tx = i === n - 1 ? Math.max(48, X(i) - 14) : X(i);
+    return (
+      '<line x1="' + X(i) + '" y1="22" x2="' + X(i) + '" y2="92" stroke="' + accent + '" stroke-width="0.8" stroke-dasharray="2,3" opacity="0.45"/>' +
+      '<circle cx="' + X(i) + '" cy="' + Y(s[i]) + '" r="3.2" fill="#fff" stroke="' + accent + '" stroke-width="1.6"/>' +
+      '<text x="' + tx + '" y="16" font-size="9.5" fill="' + accent + '" text-anchor="middle" font-weight="700">' + escapeHtml(label) + '</text>'
+    );
+  };
+  const marks = (n >= 13 ? mark(n - 13, '') : '') + mark(n - 1, '最新');
+  return (
+    '<svg viewBox="0 0 800 118" preserveAspectRatio="none" style="display:block;width:100%;height:118px">' +
+    '<line x1="48" y1="92" x2="784" y2="92" stroke="#e5e7eb" stroke-width="1"/>' +
+    '<polygon points="' + pts + ' 784,92 48,92" fill="' + accent + '" fill-opacity="0.10"/>' +
+    '<polyline points="' + pts + '" fill="none" stroke="' + accent + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+    monthsTxt.join('') +
+    '<text x="42" y="26" font-size="9" fill="#94a3b8" text-anchor="end">' + kLabel(max) + '</text>' +
+    '<text x="42" y="95" font-size="9" fill="#94a3b8" text-anchor="end">0</text>' +
+    marks +
+    '</svg>'
+  );
+}
+
+function brandDelta(v, suffix, goodIsUp) {
+  if (v === null || v === undefined) return '<span style="color:' + MUTED + '">待更新</span>';
+  const num = Number(v);
+  const good = goodIsUp ? num >= 0 : num <= 0;
+  const color = num === 0 ? MUTED : good ? GREEN : AMBER;
+  const txt = (num > 0 ? '+' : '') + num + suffix;
+  return '<span style="color:' + color + ';font-weight:600">' + escapeHtml(txt) + '</span>';
+}
+
+function buildBrandSectionsHtml(pack, narrative) {
+  const bs = pack.brand_sections;
+  if (!Array.isArray(bs) || !bs.length) return '';
+  const curS = pack.meta.period.short;
+  const prevS = pack.meta.compare.short;
+  const nbs = (narrative && narrative.brand_sections) || {};
+  const parts = [];
+  for (const g of bs) {
+    const ng = nbs[g.key] || {};
+    const accent = g.accent || 'var(--primary)';
+    const posDeltaTxt = g.position_prev
+      ? g.position_delta <= 0
+        ? '前进 ' + Math.abs(g.position_delta) + ' vs ' + prevS
+        : '后退 ' + g.position_delta + ' vs ' + prevS
+      : '待更新';
+    const imprPct = g.impressions_delta_pct === null ? '待更新' : (g.impressions_delta_pct > 0 ? '+' : '') + round1(g.impressions_delta_pct * 100) + '% vs ' + prevS;
+    const head =
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;padding:18px;background:color-mix(in srgb,' + accent + ' 6%,var(--surface));border-bottom:1px solid var(--border)">' +
+      '<div><div style="font-size:1.6rem;font-weight:800">' + fmtInt(g.kw_total) + '</div><div style="font-size:11px;color:var(--muted)">关键词总数</div><div style="font-size:12px">' + brandDelta(g.kw_delta, ' vs ' + prevS, true) + '</div></div>' +
+      '<div><div style="font-size:1.6rem;font-weight:800">' + fmtInt(g.impressions) + '</div><div style="font-size:11px;color:var(--muted)">总曝光</div><div style="font-size:12px;color:' + (g.impressions_delta_pct > 0 ? GREEN : AMBER) + ';font-weight:600">' + escapeHtml(imprPct) + '</div></div>' +
+      '<div><div style="font-size:1.6rem;font-weight:800">' + g.position + '</div><div style="font-size:11px;color:var(--muted)">平均排名</div><div style="font-size:12px;color:' + (g.position_delta <= 0 ? GREEN : AMBER) + ';font-weight:600">' + escapeHtml(posDeltaTxt) + '</div></div>' +
+      '</div>';
+    const rows = g.top10
+      .map((r) => {
+        const pct = r.impr_delta_pct === null ? '<span style="color:' + MUTED + '">新进</span>' : '<span style="color:' + (r.impr_delta_pct >= 0 ? GREEN : AMBER) + ';font-weight:600">' + (r.impr_delta_pct > 0 ? '+' : '') + round1(r.impr_delta_pct * 100) + '%</span>';
+        return '<tr><td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + escapeHtml(r.query) + '</td>' +
+          '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right">' + (r.pos_prev === null ? '-' : r.pos_prev) + '</td>' +
+          '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;font-weight:700">' + r.pos_cur + '</td>' +
+          '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--muted)">' + (r.impr_prev === null ? '-' : fmtInt(r.impr_prev)) + '</td>' +
+          '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;font-weight:700">' + fmtInt(r.impr_cur) + '</td>' +
+          '<td style="padding:7px 10px;border-bottom:1px solid var(--border);text-align:right">' + pct + '</td></tr>';
+      })
+      .join('');
+    const table =
+      '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>' +
+      ['关键词 (TOP 10)', prevS + '排名', curS + '排名', prevS + '曝光', curS + '曝光', '环比']
+        .map((h, i) => '<th style="padding:8px 10px;text-align:' + (i === 0 ? 'left' : 'right') + ';font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap">' + escapeHtml(h) + '</th>')
+        .join('') +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
+    const conclusion =
+      '<div style="padding:14px 18px;border-top:1px solid var(--border);font-size:13.5px;line-height:1.75"><strong style="color:' + accent + '">结论：</strong>' +
+      escapeHtml(String(ng.conclusion || '本组解读本期未生成，数字以上表为准。')) + '</div>';
+    let marketBlock = '';
+    if (g.market) {
+      marketBlock =
+        '<div style="padding:14px 18px 10px;background:var(--surface2);border-top:1px solid var(--border)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;gap:12px;flex-wrap:wrap">' +
+        '<span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">' + escapeHtml(String(pack.meta.market || '')) + ' 市场月度搜索量（该品类 10 个目标词合计）</span>' +
+        '<span style="font-size:10px;color:var(--muted)">月度搜索量 · 来源：关键词研究 · 最新可得月份 ' + escapeHtml(g.market.latest_month) + '</span></div>' +
+        buildMarketSvg(g.market, accent) +
+        '<div style="padding:10px 0 6px;font-size:13.5px;line-height:1.75"><strong style="color:' + accent + '">市场对账：</strong>' +
+        escapeHtml(String(ng.market_recon || '本组市场对账本期未生成，图中为市场月度搜索量走势。')) + '</div></div>';
+    }
+    let pagesBlock = '';
+    if (Array.isArray(g.pages) && g.pages.length) {
+      pagesBlock =
+        '<div style="padding:12px 18px;border-top:1px solid var(--border)"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">组内重点落地页（自然搜索 Sessions，' + escapeHtml(curS) + ' 对 ' + escapeHtml(prevS) + '）</div>' +
+        g.pages
+          .map((p) => '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0"><span style="word-break:break-all;color:var(--text)">' + escapeHtml(p.path) + '</span><span style="white-space:nowrap"><strong>' + fmtInt(p.sessions_cur) + '</strong><span style="color:var(--muted)"> / ' + (p.sessions_prev === null ? '-' : fmtInt(p.sessions_prev)) + '</span></span></div>')
+          .join('') +
+        '</div>';
+    }
+    parts.push(
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:22px">' +
+      '<div style="padding:14px 18px 0"><span style="font-size:1.15rem;font-weight:800;color:' + accent + '">' + escapeHtml(g.label) + '</span></div>' +
+      head + table + conclusion + marketBlock + pagesBlock + '</div>'
+    );
+  }
+  return parts.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // 主入口
 // ---------------------------------------------------------------------------
 
@@ -881,6 +1026,7 @@ function renderReport(pack, narrative, opts = {}) {
   const meta = pack.meta;
   // 电商客户全篇不说「询盘」（2026-10-05 客户汇报框架：报告语言匹配生意形态）。
   const isEcom = meta.biz_type === 'ecommerce' && pack.ga4 && pack.ga4.funnel && pack.ga4.funnel.kind === 'ecommerce';
+  const hasBrand = Array.isArray(pack.brand_sections) && pack.brand_sections.length > 0;
   const leadWord = isEcom ? '转化' : '询盘';
   const ga4Cards = buildGa4Cards(pack);
   const channels = buildChannelRows(pack);
@@ -949,9 +1095,13 @@ function renderReport(pack, narrative, opts = {}) {
     sec_channels_num: 2,
     sec_funnel_num: 3,
     sec_rankings_num: 4,
-    sec_pages_num: 5,
-    sec_work_num: 6,
-    sec_next_num: 7,
+    /* 品牌板块插在排名与页面之间（PJ 月报顺位），有它时后续节号顺延。 */
+    has_brand_sections: hasBrand,
+    sec_brand_num: 5,
+    brand_sections_html: hasBrand ? buildBrandSectionsHtml(pack, n) : '',
+    sec_pages_num: hasBrand ? 6 : 5,
+    sec_work_num: hasBrand ? 7 : 6,
+    sec_next_num: hasBrand ? 8 : 7,
 
     ga4_sdesc: paragraphs(sdesc('ga4_sdesc', fallbackSdesc(pack) + partialNote)),
     ga4_kpis_row1: ga4Cards.row1,

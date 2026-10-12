@@ -357,6 +357,15 @@ footer{background:var(--surface2);border-top:1px solid var(--border);padding:24p
 <!-- /section:rankings -->
 
 <!-- section:pages -->
+{{#has_brand_sections}}
+<section id="brands">
+<div class="wrap">
+  <div class="stag">Section {{sec_brand_num}}</div>
+  <div class="sec-head"><span class="sec-num">{{sec_brand_num}}</span><h2 class="stitle">品牌与品类表现</h2></div>
+  {{{brand_sections_html}}}
+</div>
+</section>
+{{/has_brand_sections}}
 <section id="pages">
 <div class="wrap">
   <div class="stag">Section {{sec_pages_num}}</div>
