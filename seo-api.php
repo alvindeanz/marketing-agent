@@ -19,7 +19,7 @@ $WORKER_TKN='seo-worker-svc-9f3a71c2e8d4';
    /mnt/share/aiden/webforger-marketing-20261012）。GET 且命中 ro_allowed() 白名单
    才放行，其余一律 403：这枚 token 的能力上限就是「看」，白名单之外的 GET
    （反馈附件、交付物文件、收件箱）也不给。Aiden 侧每日 cron 持有。 */
-$READONLY_TKN='wf-marketing-ro-531977e28cfca284b98e6b49b57b31c1';
+$READONLY_TKN='wf-marketing-ro-8073b0b8c7922a93a8b77e79721b1bde';
 $WAKE_URL='http://192.168.10.205:8377/wake';
 $WAKE_SECRET='seo-wake-2f8c1b7e';
 /* Outside the webroot on purpose, see fb_dir(). Requires the BT panel's
