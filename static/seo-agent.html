@@ -2605,25 +2605,28 @@ function cardKind(t){
   if(/blog_confirmation/.test(s))return '博客卡';
   return '确认卡';
 }
-function cardState(t){
+function cardState(t,link){
   var note=String(t.result_note||'');
   if(/\[卡反馈折叠/.test(note))return ['done','已处理'];
   if(t.card_feedback_at)return ['review','有新反馈'];
   if(t.sent_at)return ['review','已发待反馈'];
+  /* 无链接 = 没有可发的卡（静默提案或产线中断，2026-10-13 #1016：这种单标「待发」挂 12 天
+     没人知道该干什么）。招牌要说实话：这是等人裁决，不是等谁去发。 */
+  if(!link)return ['pri P0','等裁决：无卡可发'];
   return ['pri P1','待发'];
 }
 function cardRow(t){
   var note=String(t.result_note||'');
   var link=t.output_url||'';
   if(!link){var m=note.match(/(https?:\S+\?t=\d+&k=[a-f0-9]+)/);link=m?m[1]:''}
-  var st=cardState(t);
+  var st=cardState(t,link);
   return '<div class="plan-row">'+
     '<span class="badge mod">'+cardKind(t)+'</span>'+
     '<span class="badge mod">#'+t.id+'</span>'+
     '<span class="badge '+st[0]+'">'+st[1]+'</span>'+
     '<span class="pr-main">'+esc(t.title)+'</span>'+
     (link?'<a class="log-toggle" href="'+esc(link)+'" target="_blank" rel="noopener">打开卡片</a>':'<span class="muted">无链接</span>')+
-    (/\[卡反馈折叠/.test(note)?'':'<button class="btn tiny ghost" onclick="proxyCardFb('+t.id+')" title="客户没空看卡时，替客户确认整卡同意，署你的名留档">代确认</button>')+
+    (/\[卡反馈折叠/.test(note)||!link?'':'<button class="btn tiny ghost" onclick="proxyCardFb('+t.id+')" title="客户没空看卡时，替客户确认整卡同意，署你的名留档">代确认</button>')+
     '<span class="plan-meta">'+esc(String(t.updated_at||'').slice(0,16))+'</span>'+
     '</div>';
 }

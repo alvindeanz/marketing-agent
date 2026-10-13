@@ -2276,10 +2276,24 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     /* 只读交付默认放行（2026-09-18 Alvin 第一性原理：可逆的直接放行不卡流程，错靠事后抽查+原地还原）。
        分析型任务（只读卡/报告，放行本就不 apply）交付即自动收货，不进「待放行 等我」。止损闩生效时仍留人。 */
     ensure_review_schema(); /* card_kind 列（analysis_task 空 ops 分岔要读） */
-    $arow=db()->prepare("SELECT owner_type,ops,client_id,card_kind FROM seo_tasks WHERE id=?");
+    $arow=db()->prepare("SELECT owner_type,ops,client_id,card_kind,output_url,result_note FROM seo_tasks WHERE id=?");
     $arow->execute([$tid]);
     $at=$arow->fetch();
     if($at&&analysis_task($at)&&!ops_halted((int)$at['client_id'])){
+        /* 静默提案停人（2026-10-13 #1016 教训）：确认卡任务交付时没有卡链接，等于没有可发的
+           卡（agent 裁定走静默补 fact，或产线中断没出卡）。这不是只读交付收口，是一个等人
+           拍板的裁决点。auto-accept 会把它收成 done 加待发卡幽灵：无链接、无人认领，#1016
+           就这样躺了 12 天直到运营发工单。每个需要人拍板的产出必须落进一个有人认领的队列：
+           留 review 置 attention=1，进红点与「停人：需人裁决」，人裁完（照提案落 fact，或
+           改走发卡路径重跑）再人工收口。卡链接认 output_url 或 note 里本任务自己的 t/k 令牌，
+           与看板「待发卡」判卡口径一致。 */
+        $hasCardLink=((string)($at['output_url']??'')!=='')||strpos((string)($at['result_note']??''),'?t='.$tid.'&k=')!==false;
+        if(!empty($at['card_kind'])&&!$hasCardLink){
+            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[hold-human] 确认卡任务交付时没有卡链接（静默提案或产线中断），不自动收口：等人裁决走发卡还是照提案落 fact，裁完人工收口开闸');
+            audit('seo-worker','seo_task_card_hold',(string)$tid,['reason'=>'card task delivered without card link']);
+            res(200,['ok'=>true,'held'=>true]);
+        }
         $errAA=task_close($tid,'accepted','[auto-accept] 只读交付默认放行（可逆，事后抽查+原地还原），无需人工放行');
         if($errAA===null){
             audit('seo-worker','seo_task_auto_accept',(string)$tid,['reason'=>'analysis delivered']);
@@ -5548,17 +5562,30 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/card_feedback_proxy$#',$ROUTE,$mm)){
     res(200,['ok'=>true,'actor'=>$actor]);
 }
 
-/* GET /card_feedback?task_id= -> 该卡的全部反馈行（id 升序即时间序），harness 折叠用。 */
+/* GET /card_feedback?task_id= -> 该卡的全部反馈行（id 升序即时间序），harness 折叠用。
+   GET /card_feedback?client_id=&limit= -> 该客户全部卡的近期反馈行（带 task_id 与任务标题，
+   id 升序）。chat 简报用（2026-10-13 ticket 28：客户在卡上的逐字反馈存了库却没有任何
+   通道回流给 agent，agent 只能答「拿不到原话」）。 */
 if($m==='GET'&&$ROUTE==='/card_feedback'){
     auth_any();
     $tid=(int)($_GET['task_id']??0);
-    if(!$tid)res(400,['error'=>'task_id required']);
+    $cidF=(int)($_GET['client_id']??0);
+    if(!$tid&&!$cidF)res(400,['error'=>'task_id or client_id required']);
     $rows=[];
     try{
         ensure_card_feedback_schema(); /* actor 列惰性补齐，否则 SELECT 抛错会被吞成零行 */
-        $q=db()->prepare("SELECT id,item,choice,fb,created_at,actor FROM seo_card_feedback WHERE task_id=? ORDER BY id");
-        $q->execute([$tid]);
-        $rows=$q->fetchAll();
+        if($tid){
+            $q=db()->prepare("SELECT id,item,choice,fb,created_at,actor FROM seo_card_feedback WHERE task_id=? ORDER BY id");
+            $q->execute([$tid]);
+            $rows=$q->fetchAll();
+        }else{
+            $limF=min(max((int)($_GET['limit']??60),1),200);
+            $q=db()->prepare("SELECT f.id,f.task_id,f.item,f.choice,f.fb,f.created_at,f.actor,t.title AS task_title
+                FROM seo_card_feedback f INNER JOIN seo_tasks t ON t.id=f.task_id
+                WHERE t.client_id=? ORDER BY f.id DESC LIMIT ".$limF);
+            $q->execute([$cidF]);
+            $rows=array_reverse($q->fetchAll());
+        }
     }catch(Exception $e){/* 表还没建过（从未有人提交过反馈）就是空 */}
     res(200,['rows'=>$rows]);
 }

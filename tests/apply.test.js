@@ -511,6 +511,46 @@ t('planItems：显式空数组是无变更声明，不走 ops 兜底（批二 B�
   assert.strictEqual(E.planDeclaresNoChange(malformed), false, '有条目但全坏不算无变更声明');
 });
 
+/* ---------- 博客任务的契约路由（2026-10-13 #1246 教训） ---------- */
+section('博客任务的契约路由（#1246）');
+
+t('带变更方案的任务进博客捷径直接抛错（第二道保险，routing 不该放进来）', () => {
+  const fs2 = require('fs');
+  const os2 = require('os');
+  const ws = fs2.mkdtempSync(path.join(os2.tmpdir(), 'apply-blogplan-ws-'));
+  fs2.mkdirSync(path.join(ws, 'seo-agent-output'), { recursive: true });
+  fs2.writeFileSync(path.join(ws, 'seo-agent-output', 'change-plan-task-999.md'), '# 方案', 'utf8');
+  return A.runBlogPublish({ cfg: {}, api: {}, log: quiet }, { id: 999 }, ws, {}, 'https://x.co.nz/blog/a/').then(
+    () => { throw new Error('存在方案文件却没有拦下'); },
+    (e) => { assert.ok(/方案泳道/.test(e.message), '错误话术要指路方案泳道：' + e.message); }
+  );
+});
+
+t('revisedReadbackMismatch：一致为 null，不一致给人话（写入没落上）', () => {
+  assert.strictEqual(A.revisedReadbackMismatch({ body: 'abc' }, { body: 'abc' }), null);
+  const m = A.revisedReadbackMismatch({ body: 'old old' }, { body: 'new' });
+  assert.ok(m && m.indexOf('不一致') >= 0 && m.indexOf('写入没有落上') >= 0, String(m));
+  assert.ok(A.revisedReadbackMismatch(null, { body: 'x' }), '平台读不回也算不一致');
+});
+
+t('发布凭证闸：本任务无行时回退引用任务，取到 agree 放行并记来源', () => {
+  const calls = [];
+  const apiOk = { cardFeedback: async (id) => { calls.push(id); return id === 75 ? { rows: [{ item: 'publish_blog', choice: 'agree' }] } : { rows: [] }; } };
+  const rec = [];
+  return A.requireBlogPublishConsent(apiOk, { id: 1, detail: '凭证见 blog_confirmation_task-75 的卡', result_note: '' }, (l) => rec.push(l)).then(() => {
+    assert.deepStrictEqual(calls, [1, 75], '候选顺序该是本任务再引用任务');
+    assert.ok(rec.some((l) => l.indexOf('#75') >= 0), '来源没记进步骤');
+  });
+});
+
+t('发布凭证闸：最后一次表态非 agree 必须拦（以最后表态为准）', () => {
+  const apiHold = { cardFeedback: async () => ({ rows: [{ item: 'publish_blog', choice: 'agree' }, { item: 'publish_blog', choice: 'hold' }] }) };
+  return A.requireBlogPublishConsent(apiHold, { id: 2, detail: '', result_note: '' }, () => {}).then(
+    () => { throw new Error('hold 没有拦住'); },
+    (e) => { assert.ok(/hold/.test(e.message), e.message); }
+  );
+});
+
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

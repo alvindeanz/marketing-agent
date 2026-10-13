@@ -706,9 +706,56 @@ function publishGate(post) {
   return problems;
 }
 
+/* 客户发布凭证闸（2026-09-15 定）：博客对外发布的终局裁决权在客户，fable 判 do、人放行
+   都不构成发布凭证，必须确认卡上客户点过「同意，安排发布」（publish_blog=agree，以最后
+   一次表态为准）。凭证跟动作走，不跟泳道走（2026-10-13 #1246 教训：带方案的博客任务改走
+   方案泳道后，这道闸必须跟过去，否则换个泳道就把客户裁决权绕没了）。
+   凭证所在的卡不一定是本任务（2026-10-01 Kuddles #921 实证：发布单独立拆出，客户的
+   publish_blog=agree 落在确认卡任务上，按本任务查永远是空，两次误拦烧光重试额度）。
+   候选顺序：本任务 → detail/note 里引用的确认页任务号，取到 publish_blog 行即停。 */
+async function requireBlogPublishConsent(api, task, record) {
+  const taskId = task.id;
+  const refIds = [];
+  const refSrc = String(task.detail || '') + '\n' + String(task.result_note || '');
+  for (const m of refSrc.matchAll(/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)/g)) {
+    const rid = Number(m[1] || m[2]);
+    if (rid && rid !== taskId && refIds.indexOf(rid) === -1) refIds.push(rid);
+  }
+  let pub = [];
+  for (const cand of [taskId].concat(refIds)) {
+    const fbres = await api.cardFeedback(cand).catch(() => ({ rows: [] }));
+    const rows = (fbres.rows || []).filter((r) => String(r.item) === 'publish_blog');
+    if (rows.length) { pub = rows; record('发布凭证取自任务 #' + cand + ' 的确认卡'); break; }
+  }
+  const lastPub = pub.length ? pub[pub.length - 1] : null;
+  if (!lastPub || String(lastPub.choice) !== 'agree') {
+    throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
+      + (lastPub ? '，当前最后表态是 ' + lastPub.choice : '，卡上没有任何发布表态') + '）。'
+      + '不发布。等客户在确认卡上点「同意，安排发布」后再放行。');
+  }
+  record('客户确认卡已同意发布（publish_blog=agree），继续');
+}
+
+/* 已发布文章改稿的回读比对：PATCH 之后平台读回的正文必须和交付文件逐字节一致，
+   否则就是写入没落上（2026-10-13 #1246 的死法：改动没写进去，验收却只看状态与 200）。
+   返回 null 表示一致，否则返回给人看的一句话。 */
+function revisedReadbackMismatch(afterPost, payload) {
+  const got = String((afterPost || {}).body || '');
+  const want = String((payload || {}).body || '');
+  if (got === want) return null;
+  return '正文替换后平台回读与交付文件不一致（回读 ' + got.length + ' 字符，交付 ' + want.length + ' 字符），写入没有落上';
+}
+
 async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   const { cfg, api, log } = ctx;
   const taskId = task.id;
+  /* 契约在哪，执行就在哪（2026-10-13 #1246 教训）：带已批变更方案的任务，验收标准在方案
+     §5，本捷径只认「草稿转发布」契约，看到 published 会跳过改稿、验收只查状态与 200，
+     必然误报通过。routing（runOne）已把带方案的博客任务分去方案泳道，这里是第二道保险。 */
+  if (fs.existsSync(changePlanPath(workspace, taskId))) {
+    throw new Error('task ' + taskId + '：存在变更方案 ' + path.basename(changePlanPath(workspace, taskId))
+      + '，博客捷径不接带方案的任务，应走方案泳道（能走到这说明 routing 有洞，修 runOne）');
+  }
   const steps = [];
   const record = (line) => {
     steps.push(line);
@@ -729,31 +776,9 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   const who = await client.login(cred.email, cred.password);
   record('已登录 WebForger，siteId ' + who.siteId);
 
-  // 客户同意发布是硬前置（2026-09-15）：博客对外发布的终局裁决权在客户，fable 判 do、
-  // 人放行都不构成发布凭证，必须确认卡上客户点过「同意，安排发布」(publish_blog=agree，
-  // 以最后一次表态为准)。杜绝未经客户确认的草稿被误发（#138/#139 收账时误放行事故）。
-  /* 凭证所在的卡不一定是本任务（2026-10-01 Kuddles #921 实证：发布单独立拆出，客户的
-     publish_blog=agree 落在确认卡任务 #75 上，按本任务查永远是空，两次误拦烧光重试额度）。
-     候选顺序：本任务 → detail/note 里引用的确认页任务号，取到 publish_blog 行即停。 */
-  const refIds = [];
-  const refSrc = String(task.detail || '') + '\n' + String(task.result_note || '');
-  for (const m of refSrc.matchAll(/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)/g)) {
-    const rid = Number(m[1] || m[2]);
-    if (rid && rid !== taskId && refIds.indexOf(rid) === -1) refIds.push(rid);
-  }
-  let pub = [];
-  for (const cand of [taskId].concat(refIds)) {
-    const fbres = await api.cardFeedback(cand).catch(() => ({ rows: [] }));
-    const rows = (fbres.rows || []).filter((r) => String(r.item) === 'publish_blog');
-    if (rows.length) { pub = rows; record('发布凭证取自任务 #' + cand + ' 的确认卡'); break; }
-  }
-  const lastPub = pub.length ? pub[pub.length - 1] : null;
-  if (!lastPub || String(lastPub.choice) !== 'agree') {
-    throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
-      + (lastPub ? '，当前最后表态是 ' + lastPub.choice : '，卡上没有任何发布表态') + '）。'
-      + '不发布。等客户在确认卡上点「同意，安排发布」后再放行。');
-  }
-  record('客户确认卡已同意发布（publish_blog=agree），继续');
+  // 客户同意发布是硬前置（2026-09-15）：杜绝未经客户确认的草稿被误发（#138/#139 事故）。
+  // 凭证解析与判定在 requireBlogPublishConsent（方案泳道同用，凭证跟动作走）。
+  await requireBlogPublishConsent(api, task, record);
 
   const slug = wf.slugFromBlogUrl(previewUrl);
   if (!slug) throw new Error('task ' + taskId + '：从 output_url 解析不出 slug：' + previewUrl);
@@ -776,6 +801,11 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
       if (gate.length) throw new Error('task ' + taskId + '：发布门未过，不替换已发布文章：' + gate.join('；'));
       await client.patchPost(slug, payload);
       record('已发布文章已按交付文件替换正文（' + Buffer.byteLength(String(payload.body || ''), 'utf8') + ' 字节）');
+      /* 写后回读（2026-10-13 #1246 教训）：PATCH 返回 ok 不等于内容落上，平台读回逐字节比对。 */
+      const rb = await client.getPost(slug);
+      const mismatch = revisedReadbackMismatch((rb && rb.post) || null, payload);
+      if (mismatch) throw new Error('task ' + taskId + '：' + mismatch + '，停手报人');
+      record('正文替换平台回读一致');
       await client.publishPost(slug);
       record('重新 publish 以推送');
     } else {
@@ -1485,9 +1515,15 @@ async function runOne(ctx, context, workspace, taskId) {
   // 路由按 ops 不按 URL 形状（2026-09-17 #138/#139 事故）：output_url 可能被换成确认卡
   // 链接（预览 token 失效后的补救），博客任务掉进 change-plan 分支必然失败。URL 从
   // note 兜底找平台文章链接，与 execute_task 的 revise 兜底同一口径。
+  /* 按产物路由（2026-10-13 #1246 教训）：同是博客 ops，execute 的产物决定契约。产物是平台
+     草稿或 revised-body 交付文件 → 博客捷径；产物是变更方案（纠偏类：先撤回、改正文、
+     多篇联动）→ 契约在方案 §5，走下面的方案泳道照方案执行并跑方案自己的验收。#1246 三轮
+     误报通过就是纠偏单被按 ops 派进捷径：看到 published 跳过改稿，验收只查状态与 200。 */
   const ops = taskOps(task);
   let outputUrl = String(task.output_url || '');
-  if (ops.some((op) => BLOG_OPS.indexOf(op) !== -1)) {
+  const hasBlogOps = ops.some((op) => BLOG_OPS.indexOf(op) !== -1);
+  const planOnDisk = fs.existsSync(changePlanPath(workspace, taskId));
+  if (hasBlogOps && !planOnDisk) {
     if (!wf.isBlogUrl(outputUrl, profile.domain)) {
       const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
       const alt = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
@@ -1498,6 +1534,11 @@ async function runOne(ctx, context, workspace, taskId) {
     }
     log('task ' + taskId + '：博客发布模式，目标 ' + wf.publicUrlOf(outputUrl));
     return runBlogPublish(ctx, task, workspace, profile, outputUrl);
+  }
+  if (hasBlogOps && planOnDisk) {
+    log('task ' + taskId + '：带变更方案的博客任务，契约在方案，不走博客捷径，照方案泳道执行');
+    /* 客户发布凭证闸跟动作走：换泳道不换裁决权。 */
+    await requireBlogPublishConsent(api, task, (line) => log('task ' + taskId + '：' + line));
   }
 
   /* 落地页确认卡硬闸（2026-09-17 Alvin 定）：结构类改动（新建/删/并页、URL 与 301、
@@ -1725,6 +1766,8 @@ module.exports = {
   readOutcome,
   changePlanPath,
   runBlogPublish,
+  requireBlogPublishConsent,
+  revisedReadbackMismatch,
   taskOps,
   normalizeChecks,
   normalizeUrls,

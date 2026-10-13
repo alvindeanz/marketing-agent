@@ -57,6 +57,13 @@ class Api {
     return this.req('GET', '/card_feedback?task_id=' + encodeURIComponent(taskId));
   }
 
+  /** GET /card_feedback?client_id=&limit= -> { rows } 该客户全部卡的近期反馈（含 task_id
+      与任务标题，id 升序）。chat 简报回流客户逐字反馈用（2026-10-13 ticket 28）。 */
+  async cardFeedbackForClient(clientId, limit) {
+    return this.req('GET', '/card_feedback?client_id=' + encodeURIComponent(clientId)
+      + (limit ? '&limit=' + encodeURIComponent(limit) : ''));
+  }
+
   /** POST /plans body { client_id, body, authored_by } -> { ok, id, version } */
   async postPlan(body) {
     return this.req('POST', '/plans', body);
