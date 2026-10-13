@@ -18,7 +18,7 @@ pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert �
 2. 风险闸门（2026-09-14 Alvin 改版）：放行凭证先于一切写操作，凭证 = 频道委托确认（服务端双验引语）/ 客户批文 fact / 人工放行，凭证即放行，不二次采集（意图携带，policy mandate_doc）。执行分两级：有 L1 确定性实现的 op 走白名单执行器（ads_mutate 等，零模型且幂等）；白名单外的 op 由 apply 的无头 agent 泳道直接执行，收口必须过零模型后置对账（lib/ads_audit 账户硬读全符）。白名单是路由偏好不是能力天花板。生意闸永远停人：超委托范围的花钱/不可逆、合同外、客户关系动作。旧表述「模型只提议，服务端白名单执行」自本日废止。
 3. facts 三分法：平台可读即 confirmed 可刷新；分析推断进报告带置信度；只有人类独有信息进待确认队列。
 4. 结构化输出走三层防线模板（prompt 自检、同 job 报错喂回自修一次、仍败安全落地例外队列）。
-5. 模型选择走 config（lib/config.js 的 *Model 键，权威在那），禁散落硬编码。路由原则（2026-09-17 Alvin 定）：fable/premium 只留定战略框架与不可回收现场判断（现为 planModel/planReviewModel/chatModel）；框内 go/no-go、服务端有硬校验的动作、总结、内容 QA 一律 opus（review/triage/ruling/thread/blogReview）。具体值以 config.js 为准，别在文档里复刻会腐烂的枚举。
+5. 模型选择走 config（lib/config.js 的 *Model 键，权威在那），禁散落硬编码。路由原则（2026-10-14 Alvin 定）：worker 全链路 opus，fable 退出 worker 路由（fable 配额留给人；起因是 10-11 起收件箱 chat 暴涨把人的周配额烧穿，Mac worker 认证走操作者本机凭据库，烧的就是人的额度）。注意 config.json 覆盖优先于 config.js 默认值，改路由要两层都对齐，worker 各自的 config.json 里不留模型覆盖键。具体值以 config.js 为准，别在文档里复刻会腐烂的枚举。
 6. 客户内容与话术不编造事实，缺的信息占位标注待提供。
 7. 测试先行于推送：node tests/ 全套加 php -l 全绿才 push，见 COLLAB.md。
 8. **可扩充 workers 是设计地基（2026-09-18 Alvin 定）**：一切新机制默认要经得起「N 个 worker 任意来去（重启/断网/被杀）系统照常」。三条硬约束：①无单实例假设（如 reap 早期「库里 running 必是上一世孤儿」那种，一律按 worker 身份收窄或超时清扫）；②共享状态要么 DB 原子（claim 走 CAS `UPDATE WHERE status=queued`+rowCount，同客户互斥走服务端 running 排除）、要么按 worker 隔离（fuse/logs/pending_terminal 各 worker 本地，注意 FUSE_FILE 默认是绝对 NFS 路径不自动隔离）；③绝对路径依赖走 NFS 单一事实源不做双份。写任何新代码前先问「两个 worker 同时跑这段会怎样」。宿主机形态：ros 是 systemd 服务；Mac worker 是 tmux 常驻非 launchd（macOS TCC 按二进制对网络卷授权，launchd 归因下 bash/coreutils 写全被拦，tmux 继承终端授权，2026-09-18 Connie 实测矩阵），重启机器后人工跑 /data/aira/start-seo-worker.sh。

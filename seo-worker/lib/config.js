@@ -21,7 +21,9 @@ const DEFAULTS = {
   claudeBin: 'claude',
   claudeModel: 'opus',
   // Planning is the highest stakes run, it gets its own model knob.
-  planModel: 'fable',
+  // 2026-10-14 Alvin 定：worker 全链路降 opus，fable 退出 worker 路由。起因是 10-11 起
+  // 收件箱 chat 量暴涨（单日 146 次 fable spawn），把人的 fable 周配额烧穿。fable 回收给人用。
+  planModel: 'opus',
   discoverModel: 'opus',
   // Applying an approved change plan is the only stage that writes to a site.
   applyModel: 'opus',
@@ -48,7 +50,9 @@ const DEFAULTS = {
   // 收件箱对话。人在工作台按客户跟它聊数据、聊博客规划，只读加提议，
   // 唯一的产物是任务草案，人点开工才落账。谈的是策略，所以给大模型。
   /* 2026-09-11 Alvin 定走 fable 观察周配额，快超再降 opus；2026-09-21 应验（周中 fable 已烧 75%），
-     Alvin 定降 opus：聊天用 fable 大材小用，premium 只留 plan 与 planReview 两个低频真判断位。 */
+     Alvin 定降 opus：聊天用 fable 大材小用，premium 只留 plan 与 planReview 两个低频真判断位。
+     2026-10-14 教训补一刀：这次降档被 Mac config.json 的陈旧 chatModel/threadModel=fable 覆盖挡住，
+     10-11 至 10-13 三天 Mac 又烧 329 次 fable（走操作者本机凭据库）。全链路降 opus，覆盖键一并清理。 */
   chatModel: 'opus',
   // 任务判定（闸A）：一批任务该不该做，按 specs/review_principles.md 判。
   // 2026-09-17 Alvin 定降 opus：这是 fable 定好 plan 框架之内的单任务 go/no-go，边界清楚；
@@ -57,7 +61,8 @@ const DEFAULTS = {
   // 放行官（2026-09-27 Alvin 定方案 B）：opus 判 release/hold_human/redo，服务端执行分流
   releaseReviewModel: 'opus',
   // 方案层过闸：整份方案按跨客户经验改成 v2 并出方向确认卡，一个客户一季度一次，给大模型。
-  planReviewModel: 'fable',
+  // 2026-10-14 随全链路降 opus（见 planModel 注释）。
+  planReviewModel: 'opus',
   // 任务线程（chat runner 的任务模式）。落看板层动作（改任务、重派、改判）。
   // 2026-09-17 降 opus：同 ruling，动作靠服务端双锚校验兜底，opus 判断够稳。普通收件箱会话仍走 chatModel。
   threadModel: 'opus',
