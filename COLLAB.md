@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-13 AIRA capability-gap 收口拆人工单 + 死任务话术两修（rev ff29dc3，api 与 worker 已部署）
+
+- 背景（tracker ticket #31，monica）：sdalu #1232 的 163 条 placement 排除执行单按能力缺口收口，注记写「进运营清理队列」，但系统里没有这个队列，分析验收一关单活就消失；monica 频道喊 apply，chat 对死任务许诺「这就放行」，派发层再拒绝时只给黑话（「出新的委托单…别复用死任务」），而能力缺口的任务重开也做不了，客户经理原地转圈。
+- 修一（seo-api.php task_close）：kind=accepted 且 result_note 命中 capability-gap 注记时自动拆「人工落地」工单。origin=split:<母单> 与判定期分流共用去重键，套娃护栏同款，split 单落当期、继承母判决、母任务留 [capgap-split] 注、回发起频道。
+- 修二（频道指令死任务拒绝）：带最后一条收口记录；有 split 人工工单直接指号；note 含 capability-gap 的说明重开也做不了；都没有才指新委托单。
+- 修三（chat.js 频道 prompt）：死任务规则入 prompt，先核状态再许诺，禁止对已结束任务承诺放行执行，能力缺口指路人工工单。
+- 数据补账：#1232 按新机制格式补拆 #1260（已核三问：Google Ads API 不支持 PMax campaign 级 placement 排除，官方 criteria 清单无负向 placement，账户级排除列表会波及其他 campaign 超授权，属真人工）。
+- 测试：node 全套绿（chat 41 含新断言），chatapi.test.php 24 绿（250），php -l 过。认领 AIRA。
+
 ### 2026-10-13 AIRA 博客发布形态线：方案防漏闸 + 发布后零模型对账（rev b75f161，worker 两机已部署）
 
 - 背景：summer 频道一句「再发布一次」，机器给 kiaorakids 重出的方案（#1239/#1240）把上一轮人工单里已定的三格静默降级（slug 改口自动生成、分类特色图只字不提），照方案发布后两篇无封面、挂站点默认分类上线。agent 自验以方案为纲，方案降级了就查不出降级。
