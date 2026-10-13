@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-14 AIRA worker 心跳红条 + auto-release 确定性拒绝停人 + fuse 按 worker 隔离（rev 5125821，api 已部署，worker 等 drain）
+
+- 背景两洞（10-14 fable 配额事故连带挖出）：一是 ros 的 .spawn_fuse 10-10 跳闸后静默躺 3.5 天零告警，全部流量压到带陈旧 fable 覆盖的 Mac 把 Alvin 周配额烧穿；二是 #1266/#1269/#1270 带申报外 theme 步骤的方案被 auto-apply chat 和 auto-release L0 连推五次，确定性拒绝重试必然同结果，把 Mac 熔断打跳两次，「留人处理」只写注记无状态变化人看不见。
+- 修一（心跳，第一性「护栏触发必须有人看见，worker 要持续自证活着」）：listener 启动/每 poll/跳闸瞬间 POST /worker_heartbeat（存活+熔断+rev，失败吞错不碍主流程）；server 惰性表 seo_worker_status，fused 0→1 记 audit；/clients 顺带返回 worker_alerts（fused 在报、心跳缺席 15min~72h 在报、72h 外视退役），前端顶部全局红条，零新轮询。
+- 修二（auto-release guard，第一性「无新信息时重复同一动作不会有不同结果；转人工必须是状态变化」）：本版方案有 failed apply 且 log 命中确定性标记（plan contains undeclared/执行中止/未申报/放行凭证/零写入打回/还没同意）即停人：置 blocked+attention，一次都不吃重试额度；环境抖动类失败不命中标记，维持原同版两次额度。原 an0>=2 熔断分支同步升级 blocked+attention。blocked 退出 auto 候选集（候选只认 review），方案重出 execute 收口推回 review 自然解锁。
+- 修三（fuse 隔离）：FUSE_FILE 默认路径带 workerId 后缀（.spawn_fuse.<workerId>），堵 CLAUDE.md 8-② 点名的 NFS 共享坑；显式 WORKER_FUSE_FILE env 最优先；旧无后缀 fuse 兼容仍算熔断，换版瞬间不失效。
+- 实测：heartbeat 两态落表+audit 落账（模拟行已清）；node 全套绿，chatapi 24 绿，php -l 过。认领 AIRA。
+
 ### 2026-10-13 AIRA capability-gap 三问分流进拆单 + 重开链去重 + 禁 agent 自装工具（rev 104e73f，api 与 worker 已部署）
 
 - 背景（tracker ticket #33/#34）：ff29dc3 的拆单机制上线首日暴露两洞。一是 sungait #1263 的缺口实为「shopseo 没写 tags/excerpt 命令」（三问第三问），机制照样拆成人工落地单 #1265，执行 agent 还自己 build 了「1.5.0」等 root 安装，summer 被指去协调 Alvin：CLI 缺口按 2026-09-24 定则归工具维护者，工具绕版本库发版没有审计链。二是 sdalu #1232 重开成 #1261 后按新母单 id 再拆 #1262，与 #1260 重复。
