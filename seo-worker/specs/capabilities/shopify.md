@@ -15,7 +15,7 @@
 <!-- PLANNING_VIEW_START -->
 | operation | autonomy | note |
 |---|---|---|
-| article-meta-update | agent_apply | 改博客文章 title_tag / description_tag，纯 metafield 不动正文；双闸授权域内免卡直落（见操作集说明），无双闸客户覆盖已有值走网页调整卡 |
+| article-meta-update | agent_apply | 改博客文章 title_tag / description_tag，纯 metafield 不动正文；另含文章 tags 与列表简介 excerpt（summary_html）写入（shopseo 1.5.0 article set-tags-excerpt / batch-tags-excerpt）；双闸授权域内免卡直落（见操作集说明），无双闸客户覆盖已有值走网页调整卡 |
 | article-content-edit | agent_prepare | 改博客正文（压缩、内链、H2 调整、扩写），方案先行；双闸授权域内免卡直落，无双闸客户走网页调整卡 |
 | article-publish | agent_prepare | 发布未发布文章，对外可见，凭证走客户卡批文 fact |
 | article-unpublish | agent_apply | 下线文章，可逆（再发布即回） |
@@ -48,6 +48,7 @@
 - 文章封面 alt：shopseo article set-cover-alt，语义归 article-meta-update，不另立 op（2026-09-24 三问教训：这行曾被当 capability-gap 排了人工单 #861）。
 - 文章封面图更换：shopseo article set-cover（1.3.1 起，--src https 图址，可带 --alt），语义同归 article-meta-update，不另立 op（2026-09-30 Sunseeker #932 实证：agent 曾以 article-set-cover-image 报 capability-gap 停手，缺的是 CLI 不是能力）。
 - 文章 slug：shopseo article set-handle（1.3.2 起，仅 DRAFT，已发布拒绝：Shopify 不自动 301，动在售 slug 走人工评估加 redirect）；article create 也收 --handle 直接建成短 slug。语义归 article-meta-update，不另立 op（2026-09-30 Badger #884 发布前阻断项实证）。
+- 文章标签与列表简介：shopseo article set-tags-excerpt（单篇，--tags "A, B" / --excerpt 或 --excerpt-file / --clear-tags / --clear-excerpt）与 article batch-tags-excerpt --file <json>（批量，行格式 {"handle","tags","excerpt"}，只认这三个键），1.5.0 起。语义归 article-meta-update，不另立 op，属双闸授权域：锁定词表与 mapping 双闸 confirmed 的客户免卡直落，无双闸客户覆盖已有值走网页调整卡。护栏内建：PUT 载荷白名单只含 id/tags/summary_html；现值非空且不同默认拒写（客户自改停手），覆盖须 --overwrite 且方案点名；写前快照；写后按 id 回读，tags 与 excerpt 逐字核对，body_html/title/handle/published_at/template_suffix/image/author 与两条 SEO metafield 对快照逐字比对，任一不符非零退出；批量逐篇写、首个失败即停。回滚 shopseo article restore-tags-excerpt <快照> --yes。excerpt 按给定字符串原样写入，不自动包 <p>（2026-10-13 #1263，#1258 实证缺口）。
 - theme-text-edit / theme-template-create / collection-template-assign [risk_class: reversible]：shopseo 1.3.0 theme 族（2026-09-25 Alvin「发挥到极致」）。三道护栏内建：只动 main 主题、set-text 只许改既有 string 字段（类型不符拒绝）、写前快照且写前写后 jq 解析。首战 sungait round H1/首屏、oversized 与 rimless 两张专用模板全链落地线上验证。导航菜单仍无通路（缺 write_online_store_navigation scope），是 shopify 面最后一个真人工位。
 - blog-draft [risk_class: reversible]（2026-10-02 Alvin 去官僚化降档，草稿永不对外）：prepare 阶段按 /data/aira/seo-worker/specs/sops/seo-blog-sop.md 产出完整成稿
   （Style Roll 文件头注释、骨架轮换、指纹查重、13 条红线自检、封面图必配且只用客户站 CDN 已有图、

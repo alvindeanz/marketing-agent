@@ -59,9 +59,15 @@ function parseOpsCheck(text) {
     const ops = needs[1].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     return ops.length ? { kind: 'needs', ops } : { kind: 'gap', note: '声明 needs 但没给 op 名' };
   }
-  const gap = /^capability-gap\s*(.*)$/i.exec(hit);
-  if (gap) return { kind: 'gap', note: (gap[1] || '').trim() || '（未说明缺口内容）' };
-  return { kind: 'gap', note: 'OPS_CHECK 格式不识别：' + hit.slice(0, 120) };
+  const gap = /^capability-gap(?:\[(cli|api|scope)\])?\s*(.*)$/i.exec(hit);
+  if (gap) {
+    return {
+      kind: 'gap',
+      cls: gap[1] ? gap[1].toLowerCase() : null,
+      note: (gap[2] || '').trim() || '（未说明缺口内容）',
+    };
+  }
+  return { kind: 'gap', cls: null, note: 'OPS_CHECK 格式不识别：' + hit.slice(0, 120) };
 }
 
 /** ops arrives as a comma separated string from the server, or an array. */
@@ -146,8 +152,14 @@ function buildPrompt(brief, task, workspace) {
     '     the whole point of the deliverable is changes that must be executed later, and',
     '     those changes map to registered operation names you saw in the brief or the',
     '     capability manifest. Never invent an op name.',
-    '   OPS_CHECK: capability-gap <one short line, what execution ability is missing>',
-    '     changes are needed but no registered operation covers them.',
+    '   OPS_CHECK: capability-gap[cli|api|scope] <one short line, what execution ability is missing>',
+    '     changes are needed but no registered operation covers them. The bracket tag is the',
+    '     three-question verdict (2026-09-24 rule) and decides who the gap goes to, so get it right:',
+    '     [api]   the platform API itself cannot do it (verify before claiming, cite what you checked)',
+    '     [scope] the API can, but our token/grant lacks the scope or the client authorisation',
+    '     [cli]   the API and scope are fine, only our executor (CLI/runner) has no command yet.',
+    '     [cli] gaps are tooling work for the tool maintainer via the code repo, never a human',
+    '     doing it in a vendor backend. If unsure between tags, leave the tag off and say why.',
     '   Misdeclaring readonly when changes are pending is the worst outcome, it closes the',
     '   task while the work silently never happens. When unsure, use capability-gap.',
     '',
@@ -231,6 +243,10 @@ function buildPreparePrompt(opts) {
     '方案照常出到定稿粒度（每一处改什么写全），「API 调用序列」一节写明',
     '「执行器缺 <操作名>，标记 [capability-gap]，本单转人工按本方案逐条落地」。',
     '补不补执行器是基建排期问题，由维护者看 [capability-gap] 标记决定，不进方案的决策面。',
+    '执行器缺口的硬边界（2026-10-13 #1263 教训）：你可以把缺口写到可收编的粒度（缺哪条命令、',
+    '期望语义、护栏要点，附 diff 提案也行），但工具本体不归你发版：不得构建、替换或要求 root',
+    '安装你自制的工具产物，提案必须声明「待维护者在版本库审核收编，不得按暂存产物直接安装」。',
+    '工具只有一个发版通道（维护者 + git），绕过它上线的二进制没有审计链。',
     '',
     capabilities.riskNotes(platform) || '',
     '',
@@ -2326,8 +2342,13 @@ async function runOne(ctx, context, workspace, taskId) {
       log('task ' + taskId + ': OPS_CHECK needs ' + resultExtra.ops + '，回填待服务端校验');
     } else {
       resultExtra.attention = true;
-      noteFinal = 'capability-gap：' + oc.note + '（缺执行能力，进运营清理队列，补执行器是既定定则）\n' + noteFinal;
-      log('task ' + taskId + ': OPS_CHECK capability-gap :: ' + oc.note);
+      const tag = oc.cls ? '[' + oc.cls + ']' : '';
+      const tail =
+        oc.cls === 'cli'
+          ? '（缺的是执行器命令不是平台能力，由工具维护者走版本库补发版后机器直落，不排真人到后台做）'
+          : '（缺执行能力，验收收口会拆人工落地工单）';
+      noteFinal = 'capability-gap' + tag + '：' + oc.note + tail + '\n' + noteFinal;
+      log('task ' + taskId + ': OPS_CHECK capability-gap' + tag + ' :: ' + oc.note);
     }
   }
   await api.postTaskResult(taskId, Object.assign({ output_url: '', note: noteFinal }, resultExtra));

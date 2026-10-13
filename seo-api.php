@@ -891,12 +891,32 @@ function capgap_split_on_accept($tid){
     $tid=(int)$tid;
     $q=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
     if(!$t)return 0;
-    if(!preg_match('/(^|\n)capability-gap：\s*([^\n]{1,300})/u',(string)$t['result_note'],$m))return 0;
+    if(!preg_match('/(^|\n)capability-gap(?:\[(cli|api|scope)\])?：\s*([^\n]{1,300})/u',(string)$t['result_note'],$m))return 0;
+    $gapCls=strtolower((string)$m[2]);$gapNote=trim((string)$m[3]);
     if(strpos((string)$t['origin'],'split:')===0)return 0; /* 套娃护栏，口径同判定期分流 */
-    if(mb_strpos((string)$t['title'],'人工落地：')===0)return 0;
+    if(mb_strpos((string)$t['title'],'人工落地：')===0||mb_strpos((string)$t['title'],'补执行器：')===0)return 0;
     $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
     $sq->execute(['split:'.$tid]);$sr=$sq->fetch();$sq->closeCursor();
     if($sr)return (int)$sr['id'];
+    /* 重开链去重（2026-10-13 #1260/#1262 教训）：重开单的母单 id 是新的，只按本 tid 去重会给
+       同一件活拆第二张人工单。母单标题里引用的任务号（如「重开 #1232」）若已有未收口的 split
+       单，视为同一件活，不再拆，注记和频道都指向已有单。已收口的旧 split 单不算：重开通常
+       意味着活要再做一遍。 */
+    if(preg_match_all('/#(\d{1,10})/',(string)$t['title'],$rm)&&$rm[1]){
+        $refs=array_values(array_unique(array_map('intval',$rm[1])));
+        $rq=db()->prepare("SELECT id,origin FROM seo_tasks WHERE origin IN (".implode(',',array_fill(0,count($refs),"CONCAT('split:',?)")).") AND status NOT IN('done','dropped','merged','killed') LIMIT 1");
+        $rq->execute($refs);$rr=$rq->fetch();$rq->closeCursor();
+        if($rr){
+            $dupId=(int)$rr['id'];
+            task_append_note($tid,'[capgap-split] 能力缺口的执行步已有未收口的人工工单 #'.$dupId.'（'.$rr['origin'].'，重开链去重，不再拆新单），做完在那单对账');
+            if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$t['origin'],$om)){
+                $rq2=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+                $rq2->execute([(int)$om[2]]);$rootN=$rq2->fetch();
+                if($rootN)chat_msg_insert($rootN,'chat_agent','任务 #'.$tid.' 已验收，机器缺执行能力的一步此前已有人工工单 #'.$dupId.'（同一件活，不重复拆单），进展看那一单。','seo-worker');
+            }
+            return $dupId;
+        }
+    }
     $cid=(int)$t['client_id'];
     /* split 单落当期不继承母期（#861 教训），锚算法同判定期分流 */
     $splitSprint=(string)$t['sprint'];
@@ -908,23 +928,42 @@ function capgap_split_on_accept($tid){
         $sn=$anchorD>$nowD?1:((int)floor($nowD->diff($anchorD)->days/14)+1);
         $splitSprint='S'.max(1,min($sn,6));
     }
+    /* 三问分流（2026-10-13 #1265 教训）：[cli] 是执行器没实现，活归工具维护者走版本库补命令，
+       不许排真人到客户后台做（2026-09-24 定则）；[api]/[scope]/未标注才是人工落地单。 */
+    $isCli=($gapCls==='cli');
+    if($isCli){
+        $title=mb_substr('补执行器：#'.$tid.' '.$t['title'],0,255,'UTF-8');
+        $detail="母任务 #".$tid." 的交付已验收归档，收口标注的缺口是执行器命令没实现（capability-gap[cli]），不是平台能力或授权问题：\n- ".mb_substr($gapNote,0,300,'UTF-8')."\n\n本单归工具维护者（Aira）：在工具版本库补命令、过测试、发版、登记能力表，装好后缺口消失，母单的落地由机器直落或新委托单接力。母任务若附了实现提案（diff、测试要点），只作审核材料，不得按暂存产物直接安装上线。\n按 2026-09-24 定则：CLI 没实现不是真人工，不许把这单转成客户后台的人工操作。";
+        $reviewReason='继承母任务 #'.$tid.' 判决（capability-gap[cli]，执行器缺命令归工具维护者补发版，不排真人）';
+        $motherNote='[capgap-split] 能力缺口为执行器命令未实现（[cli]），已生成补执行器工单 #';
+    }else{
+        $title=mb_substr('人工落地：#'.$tid.' '.$t['title'],0,255,'UTF-8');
+        $detail="母任务 #".$tid." 的交付已验收归档，但收口时标注了能力缺口，执行步机器做不了，按本单转人工：\n- ".mb_substr($gapNote,0,300,'UTF-8')."\n\n执行材料（执行单与附件）在母任务 #".$tid."，验收标准以母任务执行单为准，做完在母任务或本单备注对账。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。".($gapCls===''?"\n注意：母单收口没带三问标注（[cli]/[api]/[scope]），排人前先把三问补核一遍。":"");
+        $reviewReason='继承母任务 #'.$tid.' 判决（能力缺口收口拆人工，验收标准以母执行单为准）';
+        $motherNote='[capgap-split] 能力缺口的执行步已生成人工工单 #';
+    }
     list($ts,$te)=task_fields_clean([
-        'title'=>mb_substr('人工落地：#'.$tid.' '.$t['title'],0,255,'UTF-8'),
-        'detail'=>"母任务 #".$tid." 的交付已验收归档，但收口时标注了能力缺口，执行步机器做不了，按本单转人工：\n- ".mb_substr(trim((string)$m[2]),0,300,'UTF-8')."\n\n执行材料（执行单与附件）在母任务 #".$tid."，验收标准以母任务执行单为准，做完在母任务或本单备注对账。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。",
+        'title'=>$title,
+        'detail'=>$detail,
         'module'=>(string)$t['module'],'owner_type'=>'agency','priority'=>(string)$t['priority'],'ops'=>'','sprint'=>$splitSprint,
     ],['status_force'=>'approved']);
     if($te)return 0;
     $splitTid=task_insert($cid,$ts,'seo-worker','split:'.$tid);
     ensure_review_schema();
     db()->prepare("UPDATE seo_tasks SET review_verdict='do',review_reason=?,reviewed_at=NOW() WHERE id=?")
-        ->execute(['继承母任务 #'.$tid.' 判决（能力缺口收口拆人工，验收标准以母执行单为准）',$splitTid]);
-    task_append_note($tid,'[capgap-split] 能力缺口的执行步已生成人工工单 #'.$splitTid.'（验收收口自动拆，不再只写「进运营清理队列」）');
-    audit('seo-worker','seo_task_capgap_split',(string)$tid,['split_task'=>$splitTid]);
+        ->execute([$reviewReason,$splitTid]);
+    task_append_note($tid,$motherNote.$splitTid.'（验收收口自动拆，不再只写「进运营清理队列」）');
+    audit('seo-worker','seo_task_capgap_split',(string)$tid,['split_task'=>$splitTid,'gap_cls'=>($gapCls!==''?$gapCls:null)]);
     /* 回发起频道，让提需求的人知道活落在了哪，口径同判定期分流 */
     if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$t['origin'],$om)){
         $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
         $rq->execute([(int)$om[2]]);$rootN=$rq->fetch();
-        if($rootN)chat_msg_insert($rootN,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」已验收，其中机器缺执行能力的一步已生成人工工单 #'.$splitTid.'，在任务列表可见，做完在频道说一声。','seo-worker');
+        if($rootN){
+            $msg=$isCli
+                ?('任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」已验收，缺的一步是执行器命令没实现（不是权限问题），已生成补执行器工单 #'.$splitTid.'，由工具维护者补上后机器直落，不用人工到后台做。')
+                :('任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」已验收，其中机器缺执行能力的一步已生成人工工单 #'.$splitTid.'，在任务列表可见，做完在频道说一声。');
+            chat_msg_insert($rootN,'chat_agent',$msg,'seo-worker');
+        }
     }
     return $splitTid;
 }

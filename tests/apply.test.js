@@ -486,7 +486,15 @@ t('OPS_CHECK 声明解析：readonly / needs / capability-gap / 缺失 / 花名'
   });
   const gap = E.parseOpsCheck('x\nOPS_CHECK: capability-gap 导航菜单没有机器通路');
   assert.strictEqual(gap.kind, 'gap');
+  assert.strictEqual(gap.cls, null, '无三问标注时 cls 为 null（向后兼容）');
   assert.ok(gap.note.indexOf('导航菜单') > -1);
+  const cli = E.parseOpsCheck('x\nOPS_CHECK: capability-gap[cli] shopseo 没有 tags/excerpt 写入命令');
+  assert.strictEqual(cli.kind, 'gap');
+  assert.strictEqual(cli.cls, 'cli', '[cli] 标注解析为 cls=cli（#1265 教训：执行器缺口不排真人）');
+  assert.ok(cli.note.indexOf('shopseo') > -1);
+  assert.strictEqual(E.parseOpsCheck('OPS_CHECK: capability-gap[API] 平台不支持').cls, 'api', '标注大小写不敏感');
+  assert.strictEqual(E.parseOpsCheck('OPS_CHECK: capability-gap[scope] 缺授权').cls, 'scope');
+  assert.strictEqual(E.parseOpsCheck('OPS_CHECK: capability-gap[啥] 乱写标注').kind, 'gap', '非法标注不炸，按 gap 从严');
   assert.strictEqual(E.parseOpsCheck('全文没有声明'), null, '不声明返回 null，维持从严');
   assert.strictEqual(E.parseOpsCheck('OPS_CHECK: readonly\n后文\nOPS_CHECK: capability-gap 后者算数').kind, 'gap', '取最后一次出现');
   assert.strictEqual(E.parseOpsCheck('OPS_CHECK: 随便写点什么').kind, 'gap', '不识别的格式按 gap 从严');
