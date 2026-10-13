@@ -5028,6 +5028,23 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
     $src='来源：收件箱对话 #'.$rootId;
     $t['detail']=trim($t['detail']);
     $t['detail']=($t['detail']===''?$src:($t['detail']."\n\n".$src));
+    /* 对话附件随单带走（2026-10-13 Alvin 定的资产变更链路）：把本会话 chat_user 消息里的
+       附件引用钉进 detail，execute runner 开跑前按 /feedback_file/ 引用预下载到工作区，
+       模板蒸馏这类「拿着客户发的文件干活」的任务才接得住。只取人发的，封顶 8 个。 */
+    $afS=db()->prepare("SELECT refs FROM seo_inbox WHERE (id=? OR reply_to=?) AND kind='chat_user' ORDER BY id");
+    $afS->execute([$rootId,$rootId]);
+    $attachLines=[];
+    foreach($afS->fetchAll() as $afr){
+        $refs=jdec($afr['refs'])?:[];
+        foreach(array_merge($refs['files']??[],$refs['images']??[]) as $fx){
+            if(!is_array($fx)||empty($fx['name']))continue;
+            if(!fb_file_name_ok($fx['name']))continue;
+            $lineA='- '.(($fx['orig']??'')!==''?$fx['orig']:$fx['name']).' (/feedback_file/'.$fx['name'].')';
+            if(!in_array($lineA,$attachLines,true))$attachLines[]=$lineA;
+            if(count($attachLines)>=8)break 2;
+        }
+    }
+    if($attachLines)$t['detail'].="\n\n来源附件（execute 开跑前自动下载到工作区 temp/attachments/）：\n".implode("\n",$attachLines);
     $cid=(int)$root['client_id'];
     /* 防重（2026-10-05 ticket #20）：产出类快路直启后，卡上的开工按钮曾照常可点，点了就建出
        重复任务。与 commission_start 同一套 title+origin 排重，撞上回 409 带任务号，

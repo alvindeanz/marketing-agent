@@ -2011,6 +2011,29 @@ async function recordFacts(ctx, taskId, text) {
   return stored;
 }
 
+/* 对话附件预下载（2026-10-13 资产变更链路）：spawn_task 把附件引用钉进 detail，
+   这里按 /feedback_file/<name> 引用在模型跑之前拉到 workspace/temp/attachments/，
+   agent 的 briefing 里 detail 原文就带着引用行，加一行落地路径说明即可读到。
+   失败不挡任务：附件坏了模型会在产出里说清缺料，比整单卡死好。 */
+async function downloadTaskAttachments(ctx, task, workspace) {
+  const { api, log } = ctx;
+  const detail = String((task && task.detail) || '');
+  const names = Array.from(new Set((detail.match(/\/feedback_file\/([A-Za-z0-9._-]+)/g) || []).map((s) => s.replace('/feedback_file/', ''))));
+  if (!names.length) return;
+  const dir = path.join(workspace, 'temp', 'attachments');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const name of names.slice(0, 8)) {
+    const dest = path.join(dir, name);
+    if (fs.existsSync(dest)) continue;
+    try {
+      await api.downloadFeedbackImage(name, dest);
+      log('task ' + task.id + ': 附件已就位 temp/attachments/' + name);
+    } catch (e) {
+      log('task ' + task.id + ': 附件下载失败 ' + name + ' :: ' + (e && e.message ? e.message : e));
+    }
+  }
+}
+
 async function runOne(ctx, context, workspace, taskId) {
   const { cfg, api, log, job } = ctx;
   const profile = (context && context.profile) || {};
@@ -2018,6 +2041,7 @@ async function runOne(ctx, context, workspace, taskId) {
   if (!task) {
     throw new Error('task ' + taskId + ' not found in context for client_id ' + job.client_id);
   }
+  await downloadTaskAttachments(ctx, task, workspace);
   // paid 通道路由（2026-09-08）：paid 任务的能力清单是 googleads（channel 级），
   // 不是站点 CMS。凭据走中心 env，不吃 notes/ 里的站台凭据文件。
   const platform = String(task.module || '') === 'paid' ? 'googleads' : (profile.platform || profile.cms || null);
