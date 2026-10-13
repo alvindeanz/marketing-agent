@@ -36,6 +36,11 @@ class Api {
     return res && res.job ? res.job : null;
   }
 
+  /** POST /worker_heartbeat -> 自报存活与熔断状态（2026-10-14 ros 熔断静默教训），server 落表供看板红条 */
+  async postHeartbeat(body) {
+    return this.req('POST', '/worker_heartbeat', Object.assign({ worker: this.workerId }, body || {}));
+  }
+
   /** POST /jobs/reap -> 启动收尸：只收本 worker 名下遗留的 running 孤儿判 failed，返回 {reaped:[ids]} */
   async reapJobs() {
     return this.req('POST', '/jobs/reap', { worker: this.workerId });

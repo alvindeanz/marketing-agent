@@ -358,6 +358,38 @@ function ensure_jobs_worker_schema(){
     if(!$has)db()->exec("ALTER TABLE agent_jobs ADD COLUMN claimed_by VARCHAR(32) NOT NULL DEFAULT ''");
 }
 
+/* worker 心跳表（2026-10-14，ros 熔断静默 3.5 天教训）。第一性：护栏触发必须有人看见，
+   且「跳闸告警」只覆盖跳闸一种死法，进程死、机器关同样静默，所以 worker 要持续自证活着。
+   worker 每轮 poll 上报一行（UPSERT），看板 /clients 顺带读出告警。 */
+function ensure_worker_status_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_worker_status(
+        worker_id VARCHAR(32) NOT NULL PRIMARY KEY,
+        last_seen DATETIME NOT NULL,
+        fused TINYINT NOT NULL DEFAULT 0,
+        fuse_reason VARCHAR(500) NOT NULL DEFAULT '',
+        rev VARCHAR(40) NOT NULL DEFAULT '',
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/* worker 告警行（/clients 顺带返回，前端渲染全局红条）。规则：
+   fused=1 的在报；last_seen 缺席超过 miss 分钟的在报；缺席超过 retire 小时的视为退役不报
+   （临时下线的机器不该永久霸占红条，阈值 Alvin 可调）。 */
+function worker_alerts($missMin=15,$retireHours=72){
+    ensure_worker_status_schema();
+    $out=[];
+    foreach(db()->query("SELECT worker_id,last_seen,fused,fuse_reason,TIMESTAMPDIFF(MINUTE,last_seen,NOW()) mins FROM seo_worker_status")->fetchAll() as $w){
+        $mins=(int)$w['mins'];
+        if($mins>=$retireHours*60)continue;
+        if((int)$w['fused']===1)$out[]=['worker'=>$w['worker_id'],'kind'=>'fused','since'=>$w['last_seen'],'detail'=>mb_substr((string)$w['fuse_reason'],0,200,'UTF-8')];
+        elseif($mins>=$missMin)$out[]=['worker'=>$w['worker_id'],'kind'=>'missing','since'=>$w['last_seen'],'detail'=>'心跳缺席 '.$mins.' 分钟'];
+    }
+    return $out;
+}
+
 /* 日粒度时序表，首次访问 /metrics 系端点时惰性建表，同 seo_feedback 的套路。
    seo_snapshots 存的是 28 天窗口的一大坨 JSON，能看当期总量看不了连续趋势；
    这张表把同样的数据摊成 (client, 日期, 指标名) 三元组，一行一个点，
@@ -2203,6 +2235,26 @@ if($m==='POST'&&$ROUTE==='/jobs/claim'){
     $job=$g->fetch();
     if($job){$job['payload']=jdec($job['payload']);$job['token_usage']=(int)$job['token_usage'];}
     res(200,['job'=>$job?:null]);
+}
+
+/* POST /worker_heartbeat -> worker 每轮 poll 自报存活与熔断状态（2026-10-14）。
+   跳闸瞬间也发一次，fused 0->1 的转变记 audit 留痕。失败不影响 worker 主流程（worker 侧吞错）。 */
+if($m==='POST'&&$ROUTE==='/worker_heartbeat'){
+    auth_worker();
+    ensure_worker_status_schema();
+    $i=input();
+    $wid=mb_substr(preg_replace('/[^A-Za-z0-9_-]/','',(string)($i['worker']??'')),0,32,'UTF-8');
+    if($wid==='')res(400,['error'=>'worker id required']);
+    $fused=empty($i['fused'])?0:1;
+    $reason=mb_substr(trim((string)($i['fuse_reason']??'')),0,500,'UTF-8');
+    $rev=mb_substr(preg_replace('/[^A-Za-z0-9._-]/','',(string)($i['rev']??'')),0,40,'UTF-8');
+    $prev=db()->prepare("SELECT fused FROM seo_worker_status WHERE worker_id=?");
+    $prev->execute([$wid]);$pr=$prev->fetch();$prev->closeCursor();
+    db()->prepare("INSERT INTO seo_worker_status(worker_id,last_seen,fused,fuse_reason,rev)VALUES(?,NOW(),?,?,?)
+        ON DUPLICATE KEY UPDATE last_seen=NOW(),fused=VALUES(fused),fuse_reason=VALUES(fuse_reason),rev=VALUES(rev)")
+        ->execute([$wid,$fused,$reason,$rev]);
+    if($fused&&(!$pr||(int)$pr['fused']===0))audit('seo-worker','worker_fuse_tripped',$wid,['reason'=>$reason]);
+    res(200,['ok'=>true]);
 }
 
 /* GET /jobs/queue -> 全局队列一眼看清：现在在跑哪一条、后面排着谁、我排第几。
@@ -5319,7 +5371,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
         $r['last_job_at']=$jobs[$id]??null;
     }
     unset($r);
-    res(200,['clients'=>$rows,'inbox_open_total'=>$inboxTotal]);
+    res(200,['clients'=>$rows,'inbox_open_total'=>$inboxTotal,'worker_alerts'=>worker_alerts()]);
 }
 
 // POST /clients/{id}/star body { on: bool } -> 当前登录用户星标/取消星标该客户。
@@ -6077,9 +6129,27 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $seen0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
         $r0=$seen0->fetch();
         $an0=(int)(($r0['c'])??0);
+        /* 确定性拒绝不重试（2026-10-14 #1266/#1269/#1270 五连挂教训）。第一性：同一任务
+           无新信息时重复同一动作不会有不同结果；行为闸类拒绝（方案契约违规、未申报 op、缺放行
+           凭证）是确定性的，环境抖动（spawn flake、登录过期）才值得第二次额度。本版方案有过
+           确定性拒绝的，一次就停人：置 blocked（退出 auto 候选集，状态变化而非注记）+ attention
+           红点。方案重出（execute done 刷新 $lx0）后天然解锁。 */
+        if($an0>=1){
+            $lf0=db()->prepare("SELECT log_text FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status='failed' AND payload LIKE ?".($lx0!==''?' AND created_at>?':'')." ORDER BY id DESC LIMIT 1");
+            $lf0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
+            $flog0=(string)((($lf0->fetch())['log_text'])??'');
+            $lf0->closeCursor();
+            if($flog0!==''&&preg_match('/plan contains undeclared|执行中止|未申报|放行凭证|零写入打回|还没有.*同意/u',$flog0)){
+                db()->prepare("UPDATE seo_tasks SET status='blocked',attention=1 WHERE id=?")->execute([$tid]);
+                if(strpos((string)$t['result_note'],'[auto-release 停人] 确定性拒绝')===false)
+                    task_append_note($tid,'[auto-release 停人] 确定性拒绝（方案契约或凭证问题），重试不会有不同结果，已停自动放行并转人工：剔除违规步骤重出方案，或人工拆单重走判定。方案重出后自动解锁。');
+                continue;
+            }
+        }
         if($an0>=2){
+            db()->prepare("UPDATE seo_tasks SET status='blocked',attention=1 WHERE id=?")->execute([$tid]);
             if(strpos((string)$t['result_note'],'[auto-release 熔断] 本版方案')===false)
-                task_append_note($tid,'[auto-release 熔断] 本版方案已自动落地 '.$an0.' 次，第三次留人处理');
+                task_append_note($tid,'[auto-release 熔断] 本版方案已自动落地 '.$an0.' 次，第三次留人处理（已置 blocked 停人红点，方案重出后解锁）');
             continue;
         }
         list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],$mand0?'mandate-carry':'release-policy-l0','seo_tasks_release');

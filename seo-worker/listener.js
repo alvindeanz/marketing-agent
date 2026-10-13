@@ -17,7 +17,16 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 const { fork } = require('node:child_process');
-const FUSE_FILE = process.env.WORKER_FUSE_FILE || '/data/aira/seo-worker/.spawn_fuse';
+/* fuse 路径按 worker 隔离（2026-10-14）：默认值带 workerId 后缀，堵 CLAUDE.md 8-② 点名的
+   「FUSE_FILE 是 NFS 绝对路径不自动隔离，一台跳闸全队停」坑。显式 WORKER_FUSE_FILE env 仍最优先。
+   兼容：旧的无后缀 .spawn_fuse 若存在也算熔断（换版瞬间旧 fuse 不失效），跳闸只写新路径。 */
+const FUSE_LEGACY = '/data/aira/seo-worker/.spawn_fuse';
+let FUSE_FILE = process.env.WORKER_FUSE_FILE || FUSE_LEGACY; // workerId 还没加载，cfg 就绪后收窄
+function fuseActive() {
+  if (fs.existsSync(FUSE_FILE)) return FUSE_FILE;
+  if (FUSE_FILE !== FUSE_LEGACY && fs.existsSync(FUSE_LEGACY)) return FUSE_LEGACY;
+  return null;
+}
 
 const { load } = require('./lib/config');
 const { Api } = require('./lib/api');
@@ -44,6 +53,31 @@ if (!cfg.claudeBin) {
 }
 if (cfg.claudeBinNote) log('claudeBin 自愈: ' + cfg.claudeBinNote);
 const api = new Api(cfg);
+
+/* fuse 路径收窄为本 worker 专属（显式 env 不动）。 */
+if (!process.env.WORKER_FUSE_FILE && cfg.workerId) {
+  FUSE_FILE = path.join(path.dirname(FUSE_LEGACY), '.spawn_fuse.' + cfg.workerId);
+}
+
+/* 心跳（2026-10-14，ros 熔断静默 3.5 天教训）：启动、每轮 poll、跳闸瞬间各发一次，
+   自报存活与熔断状态，server 落表供看板红条。失败只记日志，绝不影响主流程。 */
+let deployedRev = '';
+try {
+  const m = /rev\s+([A-Za-z0-9._-]+)/.exec(fs.readFileSync(path.join(__dirname, 'DEPLOYED'), 'utf8'));
+  if (m) deployedRev = m[1];
+} catch (e) { /* 本地跑没有 DEPLOYED，留空 */ }
+function sendHeartbeat(trigger) {
+  const fuse = fuseActive();
+  let reason = '';
+  if (fuse) {
+    try { reason = summarize(String(JSON.parse(fs.readFileSync(fuse, 'utf8')).reason || ''), 200); }
+    catch (e) { reason = 'fuse file unreadable'; }
+    reason = fuse + ' :: ' + reason;
+  }
+  return api
+    .postHeartbeat({ fused: fuse ? 1 : 0, fuse_reason: reason, rev: deployedRev })
+    .catch((e) => log('heartbeat(' + trigger + ') failed :: ' + e.message));
+}
 
 function laneState() {
   return { busy: false, pendingWake: false, currentJobs: {}, lastDrainAt: null, lastDrainReason: null };
@@ -216,9 +250,10 @@ function runJob(job, lane) {
            任意时刻过期，熔断才是真兜底。人修好环境后删熔断文件恢复。 */
         if (runMs < 90000 && !cancelled) {
           state.fastFails += 1;
-          if (state.fastFails >= 3 && !fs.existsSync(FUSE_FILE)) {
+          if (state.fastFails >= 3 && !fuseActive()) {
             fs.writeFileSync(FUSE_FILE, JSON.stringify({ at: ts(), last_job: job.id, reason: summarize(err.message, 200), note: '连续 ' + state.fastFails + ' 个 job 起跑即挂，已停止领单。修好环境（多半是 claude 登录过期）后删除本文件恢复。' }, null, 1));
             log('!! 熔断：连续 ' + state.fastFails + ' 个 job 秒挂，已写 ' + FUSE_FILE + '，停止领新单直到人工删除该文件');
+            sendHeartbeat('fuse-tripped'); // 跳闸即上报，看板红条当轮可见，不等下个 poll
           }
         } else {
           state.fastFails = 0;
@@ -318,8 +353,9 @@ async function drainLane(reason, lane) {
       if (state.shuttingDown) break;
       while (active.size < maxSlots && !stop) {
         let job;
-        if (fs.existsSync(FUSE_FILE)) {
-          log('熔断生效（' + FUSE_FILE + '），本轮不领单；修好环境后删除该文件恢复');
+        const fuseHit = fuseActive();
+        if (fuseHit) {
+          log('熔断生效（' + fuseHit + '），本轮不领单；修好环境后删除该文件恢复');
           stop = true;
           break;
         }
@@ -483,6 +519,7 @@ server.listen(cfg.wakePort, cfg.bindHost, () => {
       'min, lanes ' +
       LANE_NAMES.join('+')
   );
+  sendHeartbeat('startup');
   // Startup reap then drain. Reap first: this worker is the only executor, so a
   // 'running' row at boot is always an orphan from a previous life (deploy
   // restart, crash, OOM). Recovery must not depend on the dying process having
@@ -506,6 +543,7 @@ server.listen(cfg.wakePort, cfg.bindHost, () => {
 // 满足的经 condition_met 续跑。巡检自身只读，续跑的授权在委托单那一次。
 let probeTickCount = 0;
 const pollTimer = setInterval(() => {
+  sendHeartbeat('poll');
   pendingTerminalFlush().catch(() => {});
   drain('poll').then(blogReviewTick, blogReviewTick);
   probeTickCount += 1;

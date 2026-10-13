@@ -446,6 +446,8 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
   </div>
 </div>
 
+<div id="workerAlertBar" class="hidden" style="background:#7a1f1f;color:#fff;padding:8px 16px;font-size:13px;line-height:1.5"></div>
+
 <div class="deny hidden" id="denyView">
   <div class="deny-box">
     <h2>无访问权限</h2>
@@ -987,8 +989,22 @@ async function loadClients(keepView){
   const d=await api('/clients');
   if(fail(d,'客户列表载入失败'))return;
   clientsData=d.clients||[];
+  renderWorkerAlerts(d.worker_alerts||[]);
   if(keepView)renderSidebar();
   else router();
+}
+
+/* 全局红条（2026-10-14 ros 熔断静默 3.5 天教训）：worker 熔断或心跳缺席时顶部常亮，
+   谁开看板谁看见。数据搭 /clients 顺风车，无新轮询。 */
+function renderWorkerAlerts(alerts){
+  const bar=document.getElementById('workerAlertBar');
+  if(!bar)return;
+  if(!alerts.length){bar.classList.add('hidden');bar.textContent='';return;}
+  bar.innerHTML=alerts.map(a=>{
+    const what=a.kind==='fused'?'熔断中（不领单）':'心跳缺席（疑似离线）';
+    return 'Worker「'+esc(a.worker)+'」'+what+'：'+esc(a.detail||'')+'，最后活动 '+esc(a.since||'');
+  }).join('<br>')+'<span style="opacity:.75">　熔断需人工修复环境后删除该 worker 的 fuse 文件恢复领单</span>';
+  bar.classList.remove('hidden');
 }
 
 function platLabel(p){
