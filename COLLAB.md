@@ -20,6 +20,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-13 AIRA capability-gap 三问分流进拆单 + 重开链去重 + 禁 agent 自装工具（rev 104e73f，api 与 worker 已部署）
+
+- 背景（tracker ticket #33/#34）：ff29dc3 的拆单机制上线首日暴露两洞。一是 sungait #1263 的缺口实为「shopseo 没写 tags/excerpt 命令」（三问第三问），机制照样拆成人工落地单 #1265，执行 agent 还自己 build 了「1.5.0」等 root 安装，summer 被指去协调 Alvin：CLI 缺口按 2026-09-24 定则归工具维护者，工具绕版本库发版没有审计链。二是 sdalu #1232 重开成 #1261 后按新母单 id 再拆 #1262，与 #1260 重复。
+- 修一（execute_task.js OPS_CHECK 协议）：capability-gap 带三问标注 [cli/api/scope]，prompt 写明判法，无标注向后兼容；noteFinal 带标注落注记，[cli] 话术明示「不排真人」。
+- 修二（seo-api.php capgap_split_on_accept）：注记 regex 收 [cli/api/scope]；[cli] 拆「补执行器：」工单（detail 写明归工具维护者走版本库，附提案只作审核材料不得直接安装，频道话术同口径），其余拆「人工落地：」照旧，未标注的单内提示排人前补核三问。
+- 修三（重开链去重）：拆单前抽母单标题里的 #引用号，查这些号的未收口 split 单，命中即不拆、注记与频道指向已有单；已收口的旧 split 单不算（重开要再做）。
+- 修四（execute_task.js prompt 硬边界）：agent 可把缺口写到可收编粒度（含 diff 提案），但禁止构建/替换/要求安装自制工具产物，工具只有维护者+git 一个发版通道。
+- 周边：shopseo 1.5.0（tags/excerpt 命令族）由 AIRA 审核 #1263 机器提案后在 /data/aira 仓正规发版（ac683ef，diff 与成品 sha 核对、函数签名核、试写 verified），能力表 shopify.md 登记随本 rev 部署；#1260 并入 #1262（status=merged 不在 ENUM 被截空的坑再次实证，已按 done+[merged] 注记收口）；#1262 执行路径更正（PMax 无 campaign 级 placement 排除入口，真路径是 Google 官方修改申请表或账户级排除重授权）。
+- 测试：node 全套绿（apply 52 含 [cli] 解析新断言），chatapi.test.php 24 绿（250），php -l 过。认领 AIRA。
+
 ### 2026-10-13 AIRA capability-gap 收口拆人工单 + 死任务话术两修（rev ff29dc3，api 与 worker 已部署）
 
 - 背景（tracker ticket #31，monica）：sdalu #1232 的 163 条 placement 排除执行单按能力缺口收口，注记写「进运营清理队列」，但系统里没有这个队列，分析验收一关单活就消失；monica 频道喊 apply，chat 对死任务许诺「这就放行」，派发层再拒绝时只给黑话（「出新的委托单…别复用死任务」），而能力缺口的任务重开也做不了，客户经理原地转圈。
