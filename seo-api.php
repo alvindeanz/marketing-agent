@@ -878,7 +878,55 @@ function task_close($tid,$kind,$reason='',$by=''){
     }
     db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
     task_append_note($tid,'['.$kind.'] '.($by!==''?($by.'：'):'').$reason);
+    if($kind==='accepted')capgap_split_on_accept($tid);
     return null;
+}
+/* capability-gap 收口拆人工单（2026-10-13 ticket #31 教训：#1232 的 placement 排除执行单
+   按能力缺口标注「进运营清理队列」，但系统里没有这个队列，分析验收一关单，人工执行步就只
+   活在归档任务的备注里，客户经理在任务列表找不到活，chat 还对着死任务许诺放行。修法与
+   判定期分流同一条第一性：该人做的活必须落成看板上看得见的人工工单。只在 accepted（验收
+   收口）时拆：dropped/killed 是有意不做，applied 是机器已落地，都轮不到。origin=split:<母单>
+   与判定期分流共用去重键，两条路对同一母单只会拆出一张。 */
+function capgap_split_on_accept($tid){
+    $tid=(int)$tid;
+    $q=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
+    if(!$t)return 0;
+    if(!preg_match('/(^|\n)capability-gap：\s*([^\n]{1,300})/u',(string)$t['result_note'],$m))return 0;
+    if(strpos((string)$t['origin'],'split:')===0)return 0; /* 套娃护栏，口径同判定期分流 */
+    if(mb_strpos((string)$t['title'],'人工落地：')===0)return 0;
+    $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
+    $sq->execute(['split:'.$tid]);$sr=$sq->fetch();$sq->closeCursor();
+    if($sr)return (int)$sr['id'];
+    $cid=(int)$t['client_id'];
+    /* split 单落当期不继承母期（#861 教训），锚算法同判定期分流 */
+    $splitSprint=(string)$t['sprint'];
+    $apq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
+    $apq->execute([$cid]);$apr=$apq->fetch();$apq->closeCursor();
+    if($apr&&$apr['created_at']){
+        $anchorD=new DateTime(substr((string)$apr['created_at'],0,10));
+        $nowD=new DateTime('today');
+        $sn=$anchorD>$nowD?1:((int)floor($nowD->diff($anchorD)->days/14)+1);
+        $splitSprint='S'.max(1,min($sn,6));
+    }
+    list($ts,$te)=task_fields_clean([
+        'title'=>mb_substr('人工落地：#'.$tid.' '.$t['title'],0,255,'UTF-8'),
+        'detail'=>"母任务 #".$tid." 的交付已验收归档，但收口时标注了能力缺口，执行步机器做不了，按本单转人工：\n- ".mb_substr(trim((string)$m[2]),0,300,'UTF-8')."\n\n执行材料（执行单与附件）在母任务 #".$tid."，验收标准以母任务执行单为准，做完在母任务或本单备注对账。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。",
+        'module'=>(string)$t['module'],'owner_type'=>'agency','priority'=>(string)$t['priority'],'ops'=>'','sprint'=>$splitSprint,
+    ],['status_force'=>'approved']);
+    if($te)return 0;
+    $splitTid=task_insert($cid,$ts,'seo-worker','split:'.$tid);
+    ensure_review_schema();
+    db()->prepare("UPDATE seo_tasks SET review_verdict='do',review_reason=?,reviewed_at=NOW() WHERE id=?")
+        ->execute(['继承母任务 #'.$tid.' 判决（能力缺口收口拆人工，验收标准以母执行单为准）',$splitTid]);
+    task_append_note($tid,'[capgap-split] 能力缺口的执行步已生成人工工单 #'.$splitTid.'（验收收口自动拆，不再只写「进运营清理队列」）');
+    audit('seo-worker','seo_task_capgap_split',(string)$tid,['split_task'=>$splitTid]);
+    /* 回发起频道，让提需求的人知道活落在了哪，口径同判定期分流 */
+    if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$t['origin'],$om)){
+        $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+        $rq->execute([(int)$om[2]]);$rootN=$rq->fetch();
+        if($rootN)chat_msg_insert($rootN,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」已验收，其中机器缺执行能力的一步已生成人工工单 #'.$splitTid.'，在任务列表可见，做完在频道说一声。','seo-worker');
+    }
+    return $splitTid;
 }
 function task_append_note($tid,$note){
     $note=trim((string)$note);
@@ -4858,7 +4906,19 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
             if(!$t2){$failLine('任务 #'.$tidA.' 不存在');continue;}
             if((int)$t2['client_id']!==$cidA){$failLine('任务 #'.$tidA.' 属于其他客户，频道只能动本客户的任务');continue;}
             if(mb_stripos((string)$t2['title'],$tcA)===false){$failLine('任务 #'.$tidA.' 的标题与「'.$tcA.'」对不上，可能记错号，请人工确认');continue;}
-            if(in_array($t2['status'],['done'],true)){$failLine('任务 #'.$tidA.' 已经结束（结果备注里有结束类型与原因）。要重做这件事请出新的委托单，明确指令可走快路同轮启动，别复用死任务');continue;}
+            if(in_array($t2['status'],['done'],true)){
+                /* 死任务拒绝要给人路（2026-10-13 ticket #31）：光说「出新的委托单」对能力缺口
+                   收口的任务是指错路，重开照样做不了。带上结束原因，有人工工单就指号。 */
+                $closeLineD='';
+                if(preg_match_all('/\[(applied|accepted|dropped|merged|killed)\][^\n]*/u',(string)$t2['result_note'],$mmD)&&$mmD[0])$closeLineD=mb_substr(trim((string)end($mmD[0])),0,160,'UTF-8');
+                $sqD=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
+                $sqD->execute(['split:'.$tidA]);$srD=$sqD->fetch();$sqD->closeCursor();
+                $msgD='任务 #'.$tidA.' 已经结束'.($closeLineD!==''?('，收口记录：'.$closeLineD):'（结果备注里有结束类型与原因）').'。';
+                if($srD)$msgD.='这件事的人工执行工单是 #'.(int)$srD['id'].'，在任务列表可见，机器没有这一步的执行器，执行完在频道说一声即可。';
+                elseif(strpos((string)$t2['result_note'],'capability-gap')!==false)$msgD.='结束原因是能力缺口，重开任务机器也做不了，要么按母任务附件人工执行，要么等补执行器。';
+                else $msgD.='要重做请出新的委托单（明确指令可当轮启动），别复用死任务。';
+                $failLine($msgD);continue;
+            }
             if($a['type']==='kill'){
                 /* 在跑保护：queued 的 job 随砍随撤，running 的拒砍 */
                 $jq=db()->prepare("SELECT id,status FROM agent_jobs WHERE client_id=? AND status IN('queued','running') AND payload LIKE ? ORDER BY id");

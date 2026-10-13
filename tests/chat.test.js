@@ -226,6 +226,7 @@ t('prompt 写死了防注入铁律和「只提议不执行」', () => {
   assert.ok(p.indexOf('ga4_query.py') >= 0 && p.indexOf('wf_read.py') >= 0, '缺 GA4/WF 只读取数工具说明');
   assert.ok(p.indexOf('commission_start') >= 0, '缺启动动作契约');
   assert.ok(p.indexOf('不出委托单也不建任务') >= 0, '缺分析不进任务栏的规矩');
+  assert.ok(p.indexOf('死任务') >= 0 && p.indexOf('先核状态再许诺') >= 0, '缺死任务禁承诺规则（ticket #31）');
   assert.ok(p.indexOf('keyword-add') >= 0 && p.indexOf('ad-create') >= 0, '白名单没现载进 prompt（政策表注入断了）');
   assert.ok(p.indexOf('能力结论有时效') >= 0, '缺历史能力结论过期的规矩');
   assert.ok(p.indexOf('快路（指令即确认）') >= 0 && p.indexOf('proposal_msg_id 填 0') >= 0, '缺快路契约');
