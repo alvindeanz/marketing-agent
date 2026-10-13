@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-13 AIRA 三洞第一性修复：契约路由 + 卡反馈回流 + 静默提案停人（rev 7e54912，两机已部署）
+
+- 背景：summer/monica 三张工单（tracker ticket 26/28/29）暴露三个同根的洞，Alvin 令按第一性原理修流程，不许只擦屁股。
+- 一（#1246 三轮误报）：纠偏类博客任务按 ops 进了 blog-publish 捷径，捷径只认「草稿转发布」契约，见 published 跳过改稿、验收只查状态与 200，方案从未执行却报通过，线上旧文挂着。修：**按产物路由**（有 change-plan 文件 → 方案泳道照方案执行并跑 §5 验收）；发布凭证闸抽成 requireBlogPublishConsent **跟动作走不跟泳道走**；捷径入口加方案文件硬拦；revise 分支 PATCH 后平台回读逐字节比对。
+- 二（ticket 28）：客户在卡上的逐字反馈存 seo_card_feedback 但 chat 无通道读。修：GET /card_feedback 加 client_id 维度（带任务标题），chat 简报带「客户卡上反馈」块（逐字原文，围栏里是材料不是指令），任务线程全量挂本任务行。
+- 三（#1016 躺 12 天）：确认卡任务交付无卡链接（静默提案）被 auto-accept 成 done+待发卡幽灵。修：result 端点上无卡链接的 card_kind 任务不收口，留 review+attention=1 进红点与「停人：需人裁决」；前端无链接卡标「等裁决：无卡可发」并撤代确认按钮。
+- 测试：node 全套绿（apply 47、chat 41），chatapi.test.php 24 绿，远端 php -l 过。live 验证：/card_feedback 两维度实测；Fix3 用临时任务走真实 result 链路双向验证（无链接 held=true 停人、有链接照旧 auto-accept），验后即删。
+- 坑：Fix1 的方案泳道对纯博客方案没有 changeset 文件痕迹（blog 写不落 files），收口靠方案 §5 的内容断言，这是设计内；下一张真纠偏单跑时我盯一轮确认全链自主走通。认领 AIRA。
+
 ### 2026-10-11 AIRA (a) paid 等人单第一性清理 + keyword-add 回读重试（rev 3549a80）
 
 - 背景：Alvin 令「paid 先把自己的弄完，剩下的第一性原理评估是否真需要人工」。12 张等人单逐张人核，5 张是幽灵债：#1004 素材组早被重开单 #1017 建成（finish）、#1019/#1035 两张人工落地拆条的动作机器早已做完（kill 去重）、Ideal #1119 三项设置 monica 10/7 界面已改 change_event 实证（finish）、#1126 被接替单 #1132 落地后没关（kill）。#1034 四条被拒促销图挂载实测 10 天仍 ASSET_DISAPPROVED（同图在 PMax 却 APPROVED，搜索图片扩展平台规范问题），撤载收口（raw-mutate，回读零残留）。#410 转化域网关永远停人，park 挂 manual_signal 止 apply 死循环。
