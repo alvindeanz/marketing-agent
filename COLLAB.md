@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-13 AIRA 博客发布形态线：方案防漏闸 + 发布后零模型对账（rev b75f161，worker 两机已部署）
+
+- 背景：summer 频道一句「再发布一次」，机器给 kiaorakids 重出的方案（#1239/#1240）把上一轮人工单里已定的三格静默降级（slug 改口自动生成、分类特色图只字不提），照方案发布后两篇无封面、挂站点默认分类上线。agent 自验以方案为纲，方案降级了就查不出降级。
+- 修（apply_task.js，WordPress 泳道）：**wpPublishIntent**（申报 blog-publish/article-publish 或方案含发布翻转形状即命中）；**wpBlogPlanPresentationGap** 发布类方案没交代分类与特色图零写入打回（1.3.2 起 --category/--featured 机器可写，没有降级的理由）；**wpBlogPresentationAudit** 发布收口后公开 REST 回读（slug 查 /wp/v2/posts），封面为零、分类停默认（id 1）、查不到文章，一律不记完成停人（attention + [presentation-hold] 注），回读失败按违规宁严不松。防漏闸防遗漏，对账防谎报。
+- specs/capabilities/wordpress.md 升 v3：content 端点 1.3.2 三字段入表（已发布拒改 slug、featured 只收库内图、非法分类拒收），新增 wp-media-upload human_only 行，风险注记加「重出方案不许降级继承」。
+- 同日配套（wp-tools 仓）：Aiden 发版 1.3.2 并升两站；我用新端点把线上两篇补齐分类 Blogs(101) 与特色图（15682→13863、15672→13859，快照 8/9），sdalu 草稿 168072/168073 补 slug 与分类 Blogs(425)（快照 11/12，保持 draft，差封面上传走 #1242）。
+- 测试：node 全套绿（apply 52 含新 5 条），没动 PHP。认领 AIRA。
+
 ### 2026-10-13 AIRA 三洞第一性修复：契约路由 + 卡反馈回流 + 静默提案停人（rev 7e54912，两机已部署）
 
 - 背景：summer/monica 三张工单（tracker ticket 26/28/29）暴露三个同根的洞，Alvin 令按第一性原理修流程，不许只擦屁股。
