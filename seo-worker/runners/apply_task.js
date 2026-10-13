@@ -117,10 +117,12 @@ function shopseoUndeclaredOps(plan, declaredOps) {
 
 /* 行为闸 WordPress 版形状表（2026-10-10 WP 轮前置，与 WF/Shopify 同一第一性：闸认行为不认申报）。
    两种书写形态都认：wfagent CLI 与 wf-agent/v1 裸 REST。宁可漏报（申报闸兜底）不乱误报。 */
+const WFAGENT_PUBLISH_RE_CLI = /wfagent\s[^\n]*\bcontent\s+set\b[^\n]*--status\s+publish\b/;
+const WFAGENT_PUBLISH_RE_REST = /(?:PATCH|POST)\s+\S*\/wf-agent\/v1\/content\/\d+[^\n]*["']status["']\s*:\s*["']publish/;
 const WFAGENT_SHAPE_TO_OP = [
   // CLI 形态（wfagent 是 WP 站唯一写通道的推荐入口）
   [/wfagent\s[^\n]*\bcontent\s+create\b/, 'wp-draft-create'],
-  [/wfagent\s[^\n]*\bcontent\s+set\b[^\n]*--status\s+publish\b/, 'blog-publish'],
+  [WFAGENT_PUBLISH_RE_CLI, 'blog-publish'],
   [/wfagent\s[^\n]*\bcontent\s+set\b/, 'wp-content-edit'],
   [/wfagent\s[^\n]*\bseo\s+set\s+\S+\s+term\b/, 'wp-term-seo-update'],
   [/wfagent\s[^\n]*\bseo\s+set\s+\S+\s+post\b/, 'wp-seo-meta-update'],
@@ -128,7 +130,7 @@ const WFAGENT_SHAPE_TO_OP = [
   [/wfagent\s[^\n]*\bsitemap\s+flush\b/, 'wp-sitemap-flush'],
   // 裸 REST 形态（插件命名空间）
   [/POST\s+\S*\/wf-agent\/v1\/content(?![\/\w])/, 'wp-draft-create'],
-  [/(?:PATCH|POST)\s+\S*\/wf-agent\/v1\/content\/\d+[^\n]*["']status["']\s*:\s*["']publish/, 'blog-publish'],
+  [WFAGENT_PUBLISH_RE_REST, 'blog-publish'],
   [/(?:PATCH|POST)\s+\S*\/wf-agent\/v1\/content\/\d+/, 'wp-content-edit'],
   [/\/wf-agent\/v1\/seo\/term\//, 'wp-term-seo-update'],
   [/(?:PATCH|POST)\s+\S*\/wf-agent\/v1\/seo\/\d+/, 'wp-seo-meta-update'],
@@ -153,6 +155,69 @@ function wfagentUndeclaredOps(plan, declaredOps) {
     if (declared.indexOf(op) === -1) hits.add(op);
   }
   return Array.from(hits);
+}
+
+/* ==== 博客发布形态线（2026-10-13 #1239/#1240 教训）====
+   summer 一句「再发布一次」，重出的方案把交付标准静默降级：slug 改口由系统自动生成，
+   分类与特色图只字不提，发布后文章无封面、挂在站点默认分类下，客户打开博客页就能看见。
+   两道零模型防线，发布前防漏、发布后对账：
+   1) wpBlogPlanPresentationGap：发布类方案必须交代分类与特色图（写入或断言已就位）。
+      wf-agent 1.3.2 起 --category/--featured 机器可写，方案没有降级的理由，没交代零写入打回；
+   2) wpPresentationViolations：发布收口后公开 REST 回读，封面为零或分类停在站点默认
+      不记完成，停人。防漏闸防遗漏不防谎报，谎报由这道对账兜底。 */
+function wpPublishIntent(plan, declaredOps) {
+  const declared = (declaredOps || []).map((o) => String(o).toLowerCase());
+  if (declared.indexOf('blog-publish') !== -1 || declared.indexOf('article-publish') !== -1) return true;
+  return WFAGENT_PUBLISH_RE_CLI.test(String(plan)) || WFAGENT_PUBLISH_RE_REST.test(String(plan));
+}
+function wpBlogPlanPresentationGap(plan) {
+  const txt = String(plan);
+  const missing = [];
+  if (!/featured_media|--featured\b|特色图/.test(txt)) missing.push('特色图');
+  if (!/categories|--category\b|分类/.test(txt)) missing.push('分类');
+  return missing;
+}
+/** 单篇文章的形态违规清单（纯函数）。post 是 /wp/v2 公开回读的行；公开查不到本身就是违规
+ *  （发布类任务收口时文章必须对外可见）。默认分类按 WP 惯例 id 1 判（两站实测均为 1）。 */
+function wpPresentationViolations(post) {
+  if (!post) return ['公开 REST 查不到这篇文章（slug 不符或发布未生效）'];
+  const v = [];
+  if (!(Number(post.featured_media || 0) > 0)) v.push('特色图缺失（featured_media=0，博客必配封面）');
+  const cats = Array.isArray(post.categories) ? post.categories.map(Number) : [];
+  if (!cats.length) v.push('分类为空');
+  else if (cats.length === 1 && cats[0] === 1) v.push('分类停留在站点默认（id 1），未归入正式栏目');
+  return v;
+}
+/* kiaorakids display_errors 开着：REST 响应可能带 PHP warning 前缀，解析前截到首个 { 或 [。 */
+function parseLooseJson(text) {
+  const s = String(text || '');
+  const candidates = [s.indexOf('{'), s.indexOf('[')].filter((i) => i !== -1);
+  if (!candidates.length) return null;
+  try { return JSON.parse(s.slice(Math.min.apply(null, candidates))); } catch (e) { return null; }
+}
+/** 发布后形态对账：每个目标 URL 取尾段 slug 公开回读。回读失败按违规处理，对账线宁严
+ *  不松：误伤的代价是多一次人工复核，漏放的代价是客户看到无封面文章。 */
+async function wpBlogPresentationAudit(domain, urls, fetchFn) {
+  const f = fetchFn || fetch;
+  const base = String(domain).replace(/\/+$/, '');
+  const out = [];
+  for (const u of (urls || []).slice(0, 10)) {
+    let slug = null;
+    try { slug = new URL(u).pathname.replace(/\/+$/, '').split('/').pop() || null; } catch (e) { slug = null; }
+    if (!slug) { out.push({ url: String(u), violations: ['目标 URL 解析不出 slug'] }); continue; }
+    let row = null;
+    try {
+      const r = await f(base + '/wp-json/wp/v2/posts?slug=' + encodeURIComponent(slug) + '&_fields=id,status,categories,featured_media', { signal: AbortSignal.timeout(20000) });
+      const rows = parseLooseJson(await r.text());
+      row = Array.isArray(rows) && rows.length ? rows[0] : null;
+    } catch (e) {
+      out.push({ url: String(u), violations: ['形态对账回读失败：' + e.message] });
+      continue;
+    }
+    const v = wpPresentationViolations(row);
+    if (v.length) out.push({ url: String(u), violations: v });
+  }
+  return out;
 }
 
 /** 方案正文里的结构类端点调用探测（行为闸用，#76 教训：闸认行为不认申报）。
@@ -1343,6 +1408,15 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
     await fail('执行中止：方案正文含未申报的 WordPress 写操作（需 op：' + undeclaredW.join('、') + '），任务 ops 没有申报，放行分档没覆盖这些动作。零写入。修法：方案剔除这些调用，或补申报对应 op 重走判定与放行。');
     throw new Error('task ' + taskId + ': plan contains undeclared wf-agent ops: ' + undeclaredW.join(','));
   }
+  /* 形态防漏闸（2026-10-13 #1239/#1240 教训，见上方形态线注释）。 */
+  const publishingW = wpPublishIntent(plan, taskOps(task));
+  if (publishingW) {
+    const gap = wpBlogPlanPresentationGap(plan);
+    if (gap.length) {
+      await fail('执行中止：发布类方案没交代' + gap.join('与') + '。博客发布形态线：分类与特色图必须在方案里写入或断言已就位（wf-agent 1.3.2 起 wfagent content set --category/--featured 机器可写，不是人工位），slug 发布前定稿。零写入，重出方案。');
+      throw new Error('task ' + taskId + ': blog publish plan misses presentation fields: ' + gap.join(','));
+    }
+  }
   const manifest = capabilities.fullText('wordpress');
   const prompt = buildWordpressPrompt({ task, plan, planFile, restBase, manifest });
   log('task ' + taskId + ': wordpress apply, ' + restBase + ', model ' + cfg.applyModel);
@@ -1372,6 +1446,20 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
     '检查: 通过 ' + checks + ' 项，待人工 0 项',
     '预算影响: 0（站内内容操作）',
   ].join('\n');
+  /* 发布后形态对账（零模型，见形态线注释）：无头 agent 的自验以方案为纲，方案本身降级过
+     就查不出降级，这道对账只认硬规矩不认方案。违规不记完成，文章可能已对外，停人快补。 */
+  if (status === 'success' && publishingW) {
+    const tu = planTargetUrls(workspace, taskId).urls;
+    const auditUrls = tu.length ? tu : affected.filter((u) => /^https?:\/\//.test(u));
+    const bad = await wpBlogPresentationAudit(domain, auditUrls);
+    if (bad.length) {
+      const lines = bad.map((b) => b.url + ' ：' + b.violations.join('；')).join('\n');
+      await fail(head + '\n[presentation-hold] 发布动作已执行但形态对账不过：\n' + lines + '\n不记完成，停人：补齐分类与特色图（wfagent content set --category N --featured ID）后人工复核收口，或把文章退回草稿。执行记录 ' + path.basename(logFile));
+      log('task ' + taskId + ': wordpress presentation audit failed, held for human');
+      return { taskId, status: 'failed', logFile };
+    }
+    if (auditUrls.length) log('task ' + taskId + ': presentation audit passed on ' + auditUrls.length + ' url(s)');
+  }
   if (status === 'success' && affected.length) {
     await api.completeTask(taskId, {
       note: head + '\n已按授权方案执行并线上自验通过。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
@@ -1768,6 +1856,11 @@ module.exports = {
   runBlogPublish,
   requireBlogPublishConsent,
   revisedReadbackMismatch,
+  wpPublishIntent,
+  wpBlogPlanPresentationGap,
+  wpPresentationViolations,
+  wpBlogPresentationAudit,
+  parseLooseJson,
   taskOps,
   normalizeChecks,
   normalizeUrls,

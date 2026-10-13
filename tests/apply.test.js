@@ -551,6 +551,51 @@ t('发布凭证闸：最后一次表态非 agree 必须拦（以最后表态为�
   );
 });
 
+console.log('博客发布形态线（#1239/#1240 教训）');
+t('wpPublishIntent：申报或方案含发布翻转即命中，纯改稿不命中', () => {
+  assert.strictEqual(A.wpPublishIntent('', ['blog-publish']), true);
+  assert.strictEqual(A.wpPublishIntent('wfagent content set kiaorakids 15682 --status publish', []), true);
+  assert.strictEqual(A.wpPublishIntent('POST /wp-json/wf-agent/v1/content/15682 body {"status":"publish"}', []), true);
+  assert.strictEqual(A.wpPublishIntent('wfagent content set kiaorakids 14935 --content-file b.html', ['wp-content-edit']), false);
+});
+t('防漏闸：方案没交代分类与特色图打回，交代了（CLI 旗标或中文）放行', () => {
+  assert.deepStrictEqual(A.wpBlogPlanPresentationGap('发布翻转 status publish，网址由系统自动生成'), ['特色图', '分类']);
+  assert.deepStrictEqual(A.wpBlogPlanPresentationGap('wfagent content set k 1 --category 101 --featured 13863 --status publish'), []);
+  assert.deepStrictEqual(A.wpBlogPlanPresentationGap('分类只勾 Blogs，特色图用媒体库 13859，然后发布'), []);
+  assert.deepStrictEqual(A.wpBlogPlanPresentationGap('分类保持 Blogs 不动，发布即可'), ['特色图']);
+});
+t('形态对账纯函数：缺封面、默认分类、查不到各报各的，合规为空', () => {
+  assert.deepStrictEqual(A.wpPresentationViolations({ featured_media: 13863, categories: [101] }), []);
+  assert.ok(A.wpPresentationViolations({ featured_media: 0, categories: [101] }).join('').indexOf('特色图缺失') >= 0);
+  assert.ok(A.wpPresentationViolations({ featured_media: 13863, categories: [1] }).join('').indexOf('站点默认') >= 0);
+  assert.ok(A.wpPresentationViolations({ featured_media: 13863, categories: [1, 101] }).length === 0, '默认加正式栏目并存不算违规');
+  assert.ok(A.wpPresentationViolations(null).join('').indexOf('查不到') >= 0);
+});
+t('parseLooseJson：display_errors 的 PHP warning 前缀被剥掉', () => {
+  assert.deepStrictEqual(A.parseLooseJson('<br/><b>Warning</b>: x in y\n[{"id":1}]'), [{ id: 1 }]);
+  assert.strictEqual(A.parseLooseJson('no json here'), null);
+});
+t('发布后对账：违规文章被点名，合规文章不上榜，回读失败按违规', () => {
+  const rows = {
+    'good-post': [{ id: 1, status: 'publish', categories: [101], featured_media: 13863 }],
+    'bad-post': [{ id: 2, status: 'publish', categories: [1], featured_media: 0 }],
+  };
+  const fakeFetch = async (url) => {
+    if (url.indexOf('boom') >= 0) throw new Error('timeout');
+    const slug = decodeURIComponent(url.match(/slug=([^&]+)/)[1]);
+    return { text: async () => JSON.stringify(rows[slug] || []) };
+  };
+  return A.wpBlogPresentationAudit('https://kiaorakids.co.nz', [
+    'https://kiaorakids.co.nz/good-post/',
+    'https://kiaorakids.co.nz/bad-post/',
+    'https://kiaorakids.co.nz/boom-post/',
+  ], fakeFetch).then((bad) => {
+    assert.strictEqual(bad.length, 2, JSON.stringify(bad));
+    assert.ok(bad[0].url.indexOf('bad-post') >= 0 && bad[0].violations.length === 2);
+    assert.ok(bad[1].url.indexOf('boom-post') >= 0 && bad[1].violations.join('').indexOf('回读失败') >= 0);
+  });
+});
+
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

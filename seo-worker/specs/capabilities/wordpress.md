@@ -1,6 +1,6 @@
-# WordPress 能力清单 v2
+# WordPress 能力清单 v3
 
-<!-- WP-CAP-V1（2026-09-21）：首版。执行通道是 wf-agent 插件 1.3.0 的 REST 命名空间（v2 2026-09-25：content 模块上线，正文编辑与 draft 建稿转机器道；插件与 CLI 现由 Aira 全权共维，wp-tools 仓）
+<!-- WP-CAP-V1（2026-09-21）：首版。执行通道是 wf-agent 插件的 REST 命名空间（v2 2026-09-25：content 模块上线，正文编辑与 draft 建稿转机器道；v3 2026-10-13：插件 1.3.2 上线，slug/分类/特色图转机器道，加博客发布形态线；插件与 CLI 现由 Aira 全权共维，wp-tools 仓）
      `<domain>/wp-json/wf-agent/v1`，token 鉴权（header `X-WF-Agent-Token`），Aiden 维护。
      接入包与回执见 /mnt/share/aiden/to-aira-wp-sites-access-20260920-1847.md（阅后即删的交接文件，
      长期真相源是各客户工作区 CLAUDE.md 与 notes/wordpress_credentials.md）。 -->
@@ -25,8 +25,9 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 | wp-sitemap-flush | agent_apply | 清 Rank Math sitemap 缓存，走 `/rankmath/sitemap/flush`，配合前三个 op 收尾用 |
 | ga4-audit | agent_readonly | 只读审计 GA4，口径同 webforger.md |
 | gsc-audit | agent_readonly | 只读审计 GSC，口径同 webforger.md |
-| wp-content-edit | agent_prepare | 正文/标题/摘要编辑，走插件 1.3.0 `/content/<post_id>`（写前自动快照 post_content 类，可回滚，另有 WP 原生 revisions）。方案逐处点名读改写；双闸授权域内免卡。Elementor 页端点自动拒写（正文在 _elementor_data），撞到即转人工。核心 /wp/v2 被主机封锁的旧说明作废，一切走插件隧道 |
-| wp-draft-create | agent_prepare | 新建 draft（post/page），走插件 `/content`（需站上 wf-agent >= 1.3.1，写前按风险注记验版），post_status 硬编码 draft 永不直接发布；发布是 status 字段另一次显式写（对外可见，凭证走客户卡批文） |
+| wp-content-edit | agent_prepare | 正文/标题/摘要编辑，走插件 `/content/<post_id>`（写前自动快照 post_content 类，可回滚，另有 WP 原生 revisions）。**1.3.2 起同端点可写 slug、categories、featured_media**（CLI `wfagent content set --slug/--category/--featured`）：已发布文章改 slug 插件拒收（草稿期定稿）；featured_media 只收媒体库已有图的 id；非法分类 id 拒收。方案逐处点名读改写；双闸授权域内免卡。Elementor 页端点自动拒写（正文在 _elementor_data），撞到即转人工。核心 /wp/v2 被主机封锁的旧说明作废，一切走插件隧道 |
+| wp-draft-create | agent_prepare | 新建 draft（post/page），走插件 `/content`（需站上 wf-agent >= 1.3.1；1.3.2 起建稿可直接带 slug/categories/featured_media，写前按风险注记验版），post_status 硬编码 draft 永不直接发布；发布是 status 字段另一次显式写（对外可见，凭证走客户卡批文） |
+| wp-media-upload | human_only | 往媒体库上传新文件插件无端点（1.3.2 的 featured_media 只认已有图），能力缺口已登记回 wp-tools，方案另议。封面是新图的任务这一步转人工 |
 | wp-structured-data | human_only | FAQ/JSON-LD 走 Rank Math（正文内联 JSON-LD 会被剥），插件暂无端点 |
 | wp-woocommerce-write | human_only | Woo 商品数据（价格、库存、描述正文）插件无端点，SEO meta 除外（走 wp-seo-meta-update） |
 | wp-plugin-theme-ops | human_only | 插件、主题、核心更新与配置，一律人工 |
@@ -43,6 +44,7 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 
 ## 风险注记（execute 与 apply 阶段必读）
 
+- **博客发布形态线（2026-10-13 #1239/#1240 实证）**：发布类方案必须交代三样：slug（发布前定稿，发布后插件拒改）、分类（归入正式栏目，不留站点默认）、特色图（博客必配封面，featured_media 非零）。重出方案不许降级继承：上一轮方案或人工单里已定的 slug、分类、封面，新方案照单全收，写入或断言已就位，不许改口「系统自动生成」「保持默认」。apply 侧两道硬闸：方案没交代分类与特色图零写入打回（wpBlogPlanPresentationGap）；发布收口后公开 REST 对账，封面为零或分类停默认不记完成停人（wpPresentationViolations）。封面是媒体库没有的新图时按 wp-media-upload 转人工，其余两格照常机器做。
 - **写前验版（2026-10-07 #1097 实证）**：wp-content-edit 与 wp-draft-create 需要站上 wf-agent >= 1.3.1（Content 模块）。execute 与 apply 动手前先 GET /status 核插件版本与 modules 含 Content；站点版本不够时按 capability-gap 三分法这是「站点插件滞后」，gap 说明必须写「等 wp-tools 线程升级站点插件到 x.y.z」，不许判成要人工进 WP 后台建稿（#1097 当时能力表已登记 wp-draft-create，站上还是 1.2.0 没有 /content 端点，apply 把插件滞后误判成人工位，正确路由是 wp-tools 升级后重跑）。
 - **token 纪律**：token 只活在 `.secrets.env` 里。curl 用 `-H "X-WF-Agent-Token: $(sed -n 's/^WF_AGENT_TOKEN=//p' .secrets.env)"` 内联取值；禁止 cat/echo/打印该文件或该变量，禁止把 token 写进方案、执行记录或任何输出。
 - **写前现读**：客户会自行改站。写前 GET 当前值与方案「改前值」比对，不符即停手（aborted），差异写进执行记录，不动那一处也不「纠正」客户的改动。
