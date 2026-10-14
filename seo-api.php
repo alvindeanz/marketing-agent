@@ -950,16 +950,11 @@ function capgap_split_on_accept($tid){
         }
     }
     $cid=(int)$t['client_id'];
-    /* split 单落当期不继承母期（#861 教训），锚算法同判定期分流 */
+    /* split 单落当期不继承母期（#861 教训），锚算法同判定期分流。
+       2026-10-14 修残余：原 floor(days/14) 是两周制漏改（fa26285 同批），统一走半月制指针。 */
     $splitSprint=(string)$t['sprint'];
-    $apq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
-    $apq->execute([$cid]);$apr=$apq->fetch();$apq->closeCursor();
-    if($apr&&$apr['created_at']){
-        $anchorD=new DateTime(substr((string)$apr['created_at'],0,10));
-        $nowD=new DateTime('today');
-        $sn=$anchorD>$nowD?1:((int)floor($nowD->diff($anchorD)->days/14)+1);
-        $splitSprint='S'.max(1,min($sn,6));
-    }
+    $curLbl=client_current_sprint_label($cid);
+    if($curLbl!=='')$splitSprint=$curLbl;
     /* 三问分流（2026-10-13 #1265 教训）：[cli] 是执行器没实现，活归工具维护者走版本库补命令，
        不许排真人到客户后台做（2026-09-24 定则）；[api]/[scope]/未标注才是人工落地单。 */
     $isCli=($gapCls==='cli');
@@ -1362,7 +1357,7 @@ function ensure_task_archived(){
     $anch=[];
     foreach(db()->query("SELECT client_id,created_at FROM seo_plans ORDER BY FIELD(status,'active') DESC, id DESC")->fetchAll() as $p){
         $pc=(int)$p['client_id'];
-        if(!isset($anch[$pc]))$anch[$pc]=substr((string)$p['created_at'],0,10);
+        if(!isset($anch[$pc]))$anch[$pc]=sprint_anchor_norm($p['created_at']);
     }
     $sel=db()->query("SELECT id,client_id,created_at FROM seo_tasks WHERE status<>'done' AND TRIM(IFNULL(sprint,''))='' AND ".CHAT_ORIGIN_SQL)->fetchAll();
     $upd=db()->prepare("UPDATE seo_tasks SET sprint=? WHERE id=?");
@@ -1391,7 +1386,7 @@ function client_current_sprint_label($cid){
     $pq->execute([(int)$cid]);
     $pr=$pq->fetch();
     $pq->closeCursor();
-    $anchor=($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null;
+    $anchor=($pr&&$pr['created_at'])?sprint_anchor_norm($pr['created_at']):null;
     if(!$anchor)return '';
     $n=semimonth_index((new DateTime('today'))->format('Y-m-d'))-semimonth_index($anchor)+1;
     return 'S'.max(1,min($n,6));
@@ -2853,17 +2848,10 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
                 /* split 工单落当期不继承母期（2026-09-24 Alvin 定，配合本期视图铁律）：
                    拆条出来的是当下就能做的手活，顶着母任务的未来期号会被视图铁律藏掉，
                    「即时就位」就成了空话（#861 继承 S3 实证）。当期按日历锚算，无锚回退母期。 */
+                /* 2026-10-14 修残余：原 floor(days/14) 是两周制漏改（fa26285 同批），统一走半月制指针。 */
                 $splitSprint=(string)$task['sprint'];
-                $apq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
-                $apq->execute([$cid]);
-                $apr=$apq->fetch();
-                $apq->closeCursor();
-                if($apr&&$apr['created_at']){
-                    $anchorD=new DateTime(substr((string)$apr['created_at'],0,10));
-                    $nowD=new DateTime('today');
-                    $sn=$anchorD>$nowD?1:((int)floor($nowD->diff($anchorD)->days/14)+1);
-                    $splitSprint='S'.max(1,min($sn,6));
-                }
+                $curLbl=client_current_sprint_label($cid);
+                if($curLbl!=='')$splitSprint=$curLbl;
                 list($ts,$te)=task_fields_clean([
                     'title'=>mb_substr('人工落地：#'.$tid.' '.$task['title'],0,255,'UTF-8'),
                     'detail'=>"母任务 #".$tid." 的方案里以下 ".count($blocked)." 处写入不在机器白名单，按判定期分流转人工。逐条做完在母任务条目账本上对账（或在本任务备注写明），验收标准以母任务方案为准。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。\n\n".implode("\n",$lines),
@@ -5292,7 +5280,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
           （note 里引用过确认链接就被令牌正则误认成卡）。 */
     $todayB=new DateTime('today');$curBy=[];
     foreach(db()->query("SELECT client_id,created_at FROM seo_plans WHERE status='active'")->fetchAll() as $p){
-        $nB=semimonth_index($todayB->format('Y-m-d'))-semimonth_index(substr((string)$p['created_at'],0,10))+1;
+        $nB=semimonth_index($todayB->format('Y-m-d'))-semimonth_index(sprint_anchor_norm($p['created_at']))+1;
         $curBy[(int)$p['client_id']]=max(1,min($nB,6));
     }
     foreach(db()->query("SELECT client_id,sprint,status,attention,(result_note LIKE CONCAT('%?t=',id,'&k=%') AND result_note NOT LIKE '%[卡反馈折叠%') AS cardish FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status IN('proposed','in_progress','review')")->fetchAll() as $r){
@@ -6832,6 +6820,23 @@ function semimonth_index($ymd){
     if(!$y||!$mo)return null;
     return $y*24+($mo-1)*2+($d>=15?1:0);
 }
+/* 新 plan 锚点对齐轮次（2026-10-14 Alvin 批「新开客户都是每月两轮」）：2026-10-15 起创建的
+   plan，锚点取离创建日最近的档起点（1 号或 15 号），S1 从完整半月档起算，与双月轮节拍对齐；
+   此前创建的 plan 锚点保持创建日原样，历史档号不动。锚点的所有读取位置统一过这里，
+   前端拿到的 sprint_anchor 已是对齐值，无需同步改。 */
+function sprint_anchor_norm($created){
+    $ymd=substr((string)$created,0,10);
+    if($ymd==='')return null;
+    if($ymd<'2026-10-15')return $ymd;
+    $y=(int)substr($ymd,0,4);$mo=(int)substr($ymd,5,2);$d=(int)substr($ymd,8,2);
+    if(!$y||!$mo||!$d)return $ymd;
+    if($d<15)return ($d-1<=15-$d)?sprintf('%04d-%02d-01',$y,$mo):sprintf('%04d-%02d-15',$y,$mo);
+    $last=(int)(new DateTime($ymd))->format('t');
+    if($d-15<=$last-$d+1)return sprintf('%04d-%02d-15',$y,$mo);
+    $n=new DateTime(sprintf('%04d-%02d-01',$y,$mo));
+    $n->add(new DateInterval('P1M'));
+    return $n->format('Y-m').'-01';
+}
 if($m==='GET'&&$ROUTE==='/board'){
     auth_any();
     ensure_review_schema();
@@ -6845,7 +6850,7 @@ if($m==='GET'&&$ROUTE==='/board'){
         $pq->execute([$cid]);
         $pr=$pq->fetch();
         $pq->closeCursor();
-        $anchor=($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null;
+        $anchor=($pr&&$pr['created_at'])?sprint_anchor_norm($pr['created_at']):null;
         $cur=null;
         if($anchor){
             $n=semimonth_index($today->format('Y-m-d'))-semimonth_index($anchor)+1;
@@ -6964,7 +6969,7 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     $pq->execute([$cid]);
     $pr=$pq->fetch();
     $pq->closeCursor();
-    res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid),'sprint_anchor'=>($pr&&$pr['created_at'])?substr((string)$pr['created_at'],0,10):null,'sprint_mode'=>'semimonth']);
+    res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid),'sprint_anchor'=>($pr&&$pr['created_at'])?sprint_anchor_norm($pr['created_at']):null,'sprint_mode'=>'semimonth']);
 }
 
 // POST /tasks

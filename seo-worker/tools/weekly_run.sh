@@ -1,7 +1,9 @@
 #!/bin/bash
-# weekly_run.sh — 每周批跑：跑前快照 → 顺序对客户跑 harness（一次一个防内存挤兑）→
-# 跑后快照 → weekly_digest.py 出结构化收尾（顺利几家、卡壳几条、按原因分组的人工修复清单）。
-# 人触发，不挂 cron，不违反硬规矩 1。
+# weekly_run.sh — 半月轮批跑（每月 1 号与 15 号开轮，2026-10-07 Alvin 定）：跑前快照 →
+# 顺序对客户跑 harness（一次一个防内存挤兑）→ 跑后快照 → weekly_digest.py 出结构化收尾
+# （顺利几家、卡壳几条、按原因分组的人工修复清单）。
+# 不传 client_id 时全量 active，paid 客户（services=sem/paid/both）排在前（2026-10-14 Alvin 批）。
+# 人触发，不挂 cron，不违反硬规矩 1。文件名沿用 weekly_ 前缀，口径以本注释为准。
 # 用法：SEO_AGENT_TOKEN=<jwt> bash tools/weekly_run.sh [client_id ...]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -23,7 +25,10 @@ else
 import json,sys
 rows=json.load(sys.stdin)
 rows=rows.get('clients') or rows
-print(' '.join(str(c.get('client_id')) for c in rows if str(c.get('status'))=='active'))")
+act=[c for c in rows if str(c.get('status'))=='active']
+# paid 优先（2026-10-14 Alvin 批）：sem/paid/both 在前，组内保持 API 的名字序
+act.sort(key=lambda c: 0 if str(c.get('services') or '').lower() in ('sem','paid','both') else 1)
+print(' '.join(str(c.get('client_id')) for c in act))")
 fi
 
 python3 seo-worker/tools/weekly_digest.py snapshot "$WORK/before.json" $IDS

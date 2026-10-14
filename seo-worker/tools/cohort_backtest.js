@@ -6,7 +6,8 @@
 // 打印船队 digest。这是「学得回」闭环缺的另一半：experience_sync 回流人工纠偏（判断层），
 // 本工具回流改动实效（结果层），月报证据素材是副产品。
 //
-// 用法：SEO_WORKER_CONFIG=/data/aira/seo-worker/config.json node tools/cohort_backtest.js <cid...> [--min-age 28] [--force]
+// 用法：SEO_WORKER_CONFIG=/data/aira/seo-worker/config.json node tools/cohort_backtest.js [cid...] [--min-age 28] [--force]
+//   不传 cid 默认全量 active（从 /board 现取，不再依赖 crontab 写死清单）
 //   --min-age  落地后至少几天才回测（默认 28，再加 GSC 3 天滞后）
 //   --force    已回测过的批次重算（默认跳过 json 里已有结果的任务）
 //
@@ -29,8 +30,8 @@ const MIN_AGE = (() => { const i = argv.indexOf('--min-age'); return i === -1 ? 
 const FORCE = argv.includes('--force');
 const flagVals = new Set();
 { const i = argv.indexOf('--min-age'); if (i !== -1) flagVals.add(i + 1); }
-const ids = argv.filter((a, i) => /^\d+$/.test(a) && !flagVals.has(i)).map(Number);
-if (!ids.length) { console.error('用法：node tools/cohort_backtest.js <client_id...> [--min-age 28] [--force]'); process.exit(2); }
+let ids = argv.filter((a, i) => /^\d+$/.test(a) && !flagVals.has(i)).map(Number);
+// 不传 id = 全量 active（2026-10-14 Alvin 批统一半月制口径，取代 crontab 写死 id 清单的漂移）
 
 const cfg = cfgLib.load();
 const api = new Api(cfg);
@@ -153,6 +154,11 @@ async function runClient(cid) {
 }
 
 (async () => {
+  if (!ids.length) {
+    const b = await api.req('GET', '/board');
+    ids = (b.clients || []).map((c) => c.client_id);
+    log('未传 client_id，取全量 active 共 ' + ids.length + ' 家');
+  }
   const all = [];
   for (const cid of ids) {
     try { all.push(...await runClient(cid)); }

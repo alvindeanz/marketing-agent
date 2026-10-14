@@ -11,8 +11,9 @@
 // GSC 已知坑照抄 cohort_backtest：页级 dimensions=['page'] 一把抓，不用 page 过滤器；
 // 右端压到 today-3。sitemap 抓取带浏览器 UA（WF 站 WAF 挡默认 UA）。
 //
-// 用法：SEO_WORKER_CONFIG=/data/aira/seo-worker/config.json node tools/site_hygiene.js <cid...>
-// cron：周一 cron 家族（live_audit 18:00 / cohort 18:30 之后，19:00）。
+// 用法：SEO_WORKER_CONFIG=/data/aira/seo-worker/config.json node tools/site_hygiene.js [cid...]
+//   不传 cid 默认全量 active（从 /board 现取，不再依赖 crontab 写死清单）
+// cron：周日 cron 家族（live_audit 18:00 / cohort 18:30 之后，19:00）。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,8 +30,8 @@ const GSC_WINDOW_DAYS = 90;
 const LAG_DAYS = 3;
 
 const argv = process.argv.slice(2);
-const ids = argv.filter((a) => /^\d+$/.test(a)).map(Number);
-if (!ids.length) { console.error('用法：node tools/site_hygiene.js <client_id...>'); process.exit(2); }
+let ids = argv.filter((a) => /^\d+$/.test(a)).map(Number);
+// 不传 id = 全量 active（2026-10-14 Alvin 批统一半月制口径，取代 crontab 写死 id 清单的漂移）
 
 const cfg = cfgLib.load();
 const api = new Api(cfg);
@@ -175,6 +176,11 @@ async function runClient(cid) {
 }
 
 (async () => {
+  if (!ids.length) {
+    const b = await api.req('GET', '/board');
+    ids = (b.clients || []).map((c) => c.client_id);
+    log('未传 client_id，取全量 active 共 ' + ids.length + ' 家');
+  }
   const digest = [];
   for (const cid of ids) {
     try {
