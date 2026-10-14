@@ -4,6 +4,7 @@
      （/data/aira/tools/shopseo/shopseo，token 服务现取不落盘，写命令默认 dry-run，--yes 实弹且写前自动快照）。
      店铺清单见 /data/aira/tools/stores.conf（alias 与 profile.workspace_dir 同名，apply_task 靠它定位店铺）；
      2026-09-17 起共 10 店（sungait + 9 家新入列，oakfurniture 待装 app）。
+     v5（2026-10-15，ticket #35）加 product 面三 op：改商品名 rename、自定义 metafield 写入带 --clear、tags 追加移除（shopseo 1.6.0，Badger #1287/#1288 十二处落地卡点实证）；
      v4（2026-09-24 同日）加 product 面三 op 与 collection 改名、封面 alt（Alvin 三问定则：CLI 没写不等于做不到）；v3 新增 collections 命令面（collections list / collection get / set-meta / create / publish / unpublish，
      scope 走 write_products 全船队已授，零 app 改动）；products/pages 未接通，相关任务保持交付包模式；
      导航菜单需 write_online_store_navigation scope（全船队未授，补授要客户重装 app），保持人工。
@@ -27,6 +28,9 @@
 | collection-title-update | agent_apply | 改集合 title（即店面 H1），handle 与 URL 不变；双闸授权域内免卡 |
 | product-meta-update | agent_apply | 改 PDP title_tag / description_tag，纯 metafield；双闸授权域规则同 collection-meta-update |
 | product-content-edit | agent_prepare | 改 PDP 正文（body_html 整替，读改写），方案逐处点名；双闸授权域内免卡 |
+| product-title-update | agent_apply | 改店面商品名（product title，即 PDP H1），handle 与 URL 不变，SEO title_tag 是另一字段不受影响；双闸授权域内免卡（shopseo 1.6.0 product rename） |
+| product-metafield-update | agent_apply | 写任意自定义 metafield（卖点标题/卖点正文/图片说明类店面内容块），支持 --clear 真删（liquid 判空隐藏整块）；方案逐字段点名；双闸授权域内免卡（shopseo 1.6.0 product set-metafield / restore-metafield） |
+| product-tags-update | agent_apply | 商品 tags 追加或移除，大小写去重保留现有顺序；tags 变更会改变 smart collection 成员归属，dry-run 必须核对影响面（shopseo 1.6.0 product set-tags） |
 | theme-text-edit | agent_apply | 改主题模板 JSON 里既有字符串字段（H1 块/副文案块），shopseo theme set-text：只动 main 主题、只许 string 字段、写前快照、写前写后 jq 校验 |
 | theme-template-create | agent_prepare | 复制现有集合模板为新模板（theme copy，拒绝覆盖已存在的），配合 collection-template-assign 使用 |
 | collection-template-assign | agent_apply | 指派集合 template_suffix，模板不存在则拒绝（防店面 500） |
@@ -45,6 +49,9 @@
 - collection-title-update [risk_class: reversible]：shopseo collection rename。改的是店面 H1，URL 不动；快照回滚。
 - product-meta-update [risk_class: reversible]：shopseo product set-meta。60/160 与品牌后缀规矩同族；双闸授权域免卡。
 - product-content-edit [risk_class: reversible]：shopseo product update --body-file。读现值改点名处整替，未点名的客户原文一字不动；写前快照。
+- product-title-update [risk_class: reversible]：shopseo product rename（1.6.0 起，ticket #35 Badger #1287/#1288 实证缺口）。改的是店面商品名（PDP H1 与全站引用处），handle 与 URL 不变，SEO title_tag 不动；载荷白名单只含 id/title，写后回读核对且守护 handle/body_html 不变；回滚 = 用快照里的旧名再 rename 一次（失败输出里直接给命令）。
+- product-metafield-update [risk_class: reversible]：shopseo product set-metafield（1.6.0 起）。写任意 namespace.key 自定义 metafield；更新保留现有 type（--type 只在新建时生效，默认 single_line_text_field）；--clear 真删 metafield（店面 liquid 判空才会隐藏整块，写空串不等于清）；写前快照、写后回读逐字核对；方案必须逐字段点名（namespace.key、现值、新值、为什么）。回滚 shopseo product restore-metafield <快照> --namespace --key（快照里没有该字段 = 恢复为删除）。
+- product-tags-update [risk_class: reversible]：shopseo product set-tags --add/--remove（1.6.0 起）。追加去重（大小写不敏感比对，保留现有顺序与写法）；**tags 决定 smart collection 成员归属，加减 tag 等于把商品挪进挪出集合页，dry-run 阶段必须说明预期的归属变化**；载荷白名单只含 id/tags，写后回读核对且守护 title/handle/body_html 不变；回滚 = --remove 加回来的 tag（失败输出里直接给命令），整体恢复用快照。
 - 文章封面 alt：shopseo article set-cover-alt，语义归 article-meta-update，不另立 op（2026-09-24 三问教训：这行曾被当 capability-gap 排了人工单 #861）。
 - 文章封面图更换：shopseo article set-cover（1.3.1 起，--src https 图址，可带 --alt），语义同归 article-meta-update，不另立 op（2026-09-30 Sunseeker #932 实证：agent 曾以 article-set-cover-image 报 capability-gap 停手，缺的是 CLI 不是能力）。
 - 文章 slug：shopseo article set-handle（1.3.2 起，仅 DRAFT，已发布拒绝：Shopify 不自动 301，动在售 slug 走人工评估加 redirect）；article create 也收 --handle 直接建成短 slug。语义归 article-meta-update，不另立 op（2026-09-30 Badger #884 发布前阻断项实证）。
