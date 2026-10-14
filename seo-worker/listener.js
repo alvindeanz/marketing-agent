@@ -61,11 +61,14 @@ if (!process.env.WORKER_FUSE_FILE && cfg.workerId) {
 
 /* 心跳（2026-10-14，ros 熔断静默 3.5 天教训）：启动、每轮 poll、跳闸瞬间各发一次，
    自报存活与熔断状态，server 落表供看板红条。失败只记日志，绝不影响主流程。 */
-let deployedRev = '';
-try {
-  const m = /rev\s+([A-Za-z0-9._-]+)/.exec(fs.readFileSync(path.join(__dirname, 'DEPLOYED'), 'utf8'));
-  if (m) deployedRev = m[1];
-} catch (e) { /* 本地跑没有 DEPLOYED，留空 */ }
+function deployedRev() {
+  /* 每次现读：DEPLOYED 由 deploy.sh 在重启后才写，启动时读一次会报上一版（首发实证）。 */
+  try {
+    const m = /rev\s+([A-Za-z0-9._-]+)/.exec(fs.readFileSync(path.join(__dirname, 'DEPLOYED'), 'utf8'));
+    if (m) return m[1];
+  } catch (e) { /* 本地跑没有 DEPLOYED，留空 */ }
+  return '';
+}
 function sendHeartbeat(trigger) {
   const fuse = fuseActive();
   let reason = '';
@@ -75,7 +78,7 @@ function sendHeartbeat(trigger) {
     reason = fuse + ' :: ' + reason;
   }
   return api
-    .postHeartbeat({ fused: fuse ? 1 : 0, fuse_reason: reason, rev: deployedRev })
+    .postHeartbeat({ fused: fuse ? 1 : 0, fuse_reason: reason, rev: deployedRev() })
     .catch((e) => log('heartbeat(' + trigger + ') failed :: ' + e.message));
 }
 
