@@ -3557,7 +3557,7 @@ function currentSprint(tasks){
   return 1;
 }
 /* 三档往前看的范围。current 只到当前 sprint 为止，near 再往后放两个 sprint
-   （near = 当前加下一个 sprint，两个双周约 28 天，「30 天」标签才名实相符），
+   （near = 当前加下一个 sprint，两个半月档约 30 天，「30 天」标签名实相符），
    all 不做任何 sprint 限制。 */
 function scopeHorizon(cur){
   if(sprintScope==='all')return Infinity;

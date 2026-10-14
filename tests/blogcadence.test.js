@@ -9,7 +9,7 @@ function t(name, fn) {
 }
 
 const FACT = { fact_key: 'contract.blog_per_sprint', value: '1，每个 sprint 一篇（2026-09-23 Alvin 定）' };
-function ctx(tasks, withFact = true, anchor = '2026-08-29') {
+function ctx(tasks, withFact = true, anchor = '2026-09-05') {
   return { facts: { confirmed: withFact ? [FACT] : [] }, active_plan: { created_at: anchor + ' 10:00:00' }, tasks };
 }
 
@@ -29,7 +29,7 @@ t('博客任务识别：写新文算，内链/封面/修订不算', () => {
 });
 
 t('缺口：死任务不占配额，已过 sprint 补在当前 sprint，9 月前的不追溯', () => {
-  // 锚点 08-29：S1 08/29-09/11，S2 09/12-09/25（今天 09-23 在 S2），S3 起未来
+  // 半月制：锚点 09-05 落在 09/01-09/14 档，S1 09/01-09/14，S2 09/15-09/30（今天 09-23 在 S2），S3 起未来
   const c = ctx([
     { id: 1, title: '博客：A', sprint: 'S2', status: 'approved' },
     { id: 2, title: '博客：B', sprint: 'S3', status: 'done', result_note: '[dropped] 判不做' },

@@ -2,7 +2,8 @@
 /**
  * 博客节奏：一个 sprint 一篇（2026-09-23 Alvin 定）。
  *
- * 背景：合同口径每月两篇博客，sprint 是 14 天，所以一个 sprint 一篇。这条以前只写在 ops tracker
+ * 背景：合同口径每月两篇博客，sprint 是半月档（每月 1 到 14 日一档、15 日到月末一档，
+ * 2026-10-08 Alvin 定，取代两周制），所以一个 sprint 一篇。这条以前只写在 ops tracker
  * 的任务文字里，规划随手分配（有的 sprint 空、有的堆三篇），判定又能把合同内的博客判 drop/later，
  * 2026-09 WF 六家欠 7 篇。现在变成机器约束，三处生效：
  *   1. 规划落库（plan.js persist）：缺博客的 sprint 自动补占位任务，零模型；
@@ -16,7 +17,8 @@
  */
 
 const FACT_KEY = 'contract.blog_per_sprint';
-const SPRINT_DAYS = 14;
+/* 半月历法与 seo-api.php 的 semimonth_index / sprint_anchor_norm 同口径，改一边必改另一边。 */
+const ANCHOR_NORM_FROM = '2026-10-15';
 const SPRINTS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 /* 补缺只追到这一天为止：规矩 9 月立，9 月以前空掉的 sprint 不追溯。 */
 const CATCHUP_FROM = '2026-09-01';
@@ -72,16 +74,43 @@ function addDays(ymd, n) {
   return d.toISOString().slice(0, 10);
 }
 
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function ymdOf(y, mo, d) { return y + '-' + pad2(mo) + '-' + pad2(d); }
+
+/** 半月档序号：每月 1 到 14 日一档、15 日到月末一档。 */
+function smIdx(ymd) {
+  const y = Number(ymd.slice(0, 4)), mo = Number(ymd.slice(5, 7)), d = Number(ymd.slice(8, 10));
+  if (!y || !mo) return null;
+  return y * 24 + (mo - 1) * 2 + (d >= 15 ? 1 : 0);
+}
+function smStart(i) {
+  const y = Math.floor(i / 24), r = i % 24;
+  return ymdOf(y, Math.floor(r / 2) + 1, (r % 2) ? 15 : 1);
+}
+
+/** 锚点对齐：2026-10-15 起创建的 plan 锚取最近的档起点（1 号或 15 号），存量锚原样。 */
+function anchorNorm(created) {
+  const ymd = String(created || '').slice(0, 10);
+  if (!ymd) return '';
+  if (ymd < ANCHOR_NORM_FROM) return ymd;
+  const y = Number(ymd.slice(0, 4)), mo = Number(ymd.slice(5, 7)), d = Number(ymd.slice(8, 10));
+  if (!y || !mo || !d) return ymd;
+  if (d < 15) return (d - 1 <= 15 - d) ? ymdOf(y, mo, 1) : ymdOf(y, mo, 15);
+  const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (d - 15 <= last - d + 1) return ymdOf(y, mo, 15);
+  return mo === 12 ? ymdOf(y + 1, 1, 1) : ymdOf(y, mo + 1, 1);
+}
+
 function sprintRange(anchor, n) {
-  const start = addDays(anchor, SPRINT_DAYS * (n - 1));
-  return { start, end: addDays(start, SPRINT_DAYS - 1) };
+  const i = smIdx(anchorNorm(anchor)) + (n - 1);
+  return { start: smStart(i), end: addDays(smStart(i + 1), -1) };
 }
 
 function currentSprint(anchor, today) {
-  if (!anchor) return 0;
-  const days = Math.floor((Date.parse(today + 'T00:00:00Z') - Date.parse(anchor + 'T00:00:00Z')) / 86400000);
-  if (days < 0) return 1;
-  return Math.min(6, Math.floor(days / SPRINT_DAYS) + 1);
+  const a = anchorNorm(anchor);
+  if (!a) return 0;
+  const n = smIdx(String(today).slice(0, 10)) - smIdx(a) + 1;
+  return Math.max(1, Math.min(6, n));
 }
 
 /** 每个 sprint 的活博客任务数。sprint 不是 S1..S6 的（如 W38）不计入任何 sprint。 */
@@ -196,6 +225,7 @@ module.exports = {
   isDead,
   isWritingStage,
   countBySprint,
+  anchorNorm,
   currentSprint,
   sprintRange,
   gaps,

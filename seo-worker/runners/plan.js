@@ -205,7 +205,7 @@ function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota
     '说清取舍。把不值得做的事和理由讲明白，是这一段存在的全部意义。',
     '',
     '## 3. 90 天方案',
-    'Markdown，按六个双周 sprint 组织，标号 S1 到 S6。每个 sprint 写清目标、交付物、以及',
+    'Markdown，按六个半月 sprint 组织（每月 1 到 14 日一档、15 日到月末一档），标号 S1 到 S6。每个 sprint 写清目标、交付物、以及',
     '用什么指标判断它做成了。能解锁后续工作的排前面。S1 必须是明天就能动手、不需要再摸底的活。',
     '',
     '## 数据缺口',

@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-15 AIRA 半月轮改法复审：blogcadence 还是 14 天历法 + sprint「今天」钟是 PRC 时区（待部署）
+
+- 背景：首轮 15 号 paid 轮开跑同时，Alvin 要求复审半月轮改法有没有坑。两个实锤加两处陈旧注释。
+- 一（blogcadence 两周残余）：lib/blogcadence.js 的 sprintRange/currentSprint 仍按锚点加 14 天滚窗口，且锚用 plan.created_at 裸值不走对齐。bc67e4b 清残余时全库搜的是 /14 日历算式，这里的写法是 SPRINT_DAYS 常量乘法，又漏网。影响面：自动产线（plan.js 落库补位、plan_review/review_plan 判定保护）全按 S 标签计数不碰日期，幸免；只有人手补缺工具 tools/blog_cadence.js 走 gaps() 日期数学，当期判定可偏一档、catchup 文案日期区间错。修法：blogcadence 内置 smIdx/smStart/anchorNorm（与 seo-api.php 的 semimonth_index/sprint_anchor_norm 同口径，改一边必改另一边），gaps 自动走新历法；测试夹具锚点从 08-29 挪到 09-05 保持场景形状。
+- 二（时区暗雷）：250 的 php.ini 时区是 PRC（UTC+8），seo-api.php 三处 new DateTime('today')（client_current_sprint_label、/clients 徽标、/board）跟着 PRC 走，sprint 要到 NZ 凌晨 5 点才翻页；MySQL created_at 又是 NZ 钟，两套历法并存。实害窗口窄（NZ 0 到 5 点建任务/开 chat 盖上一档的章，轮子都是 NZ 白天跑），但属暗雷。修法：三处 today 显式 new DateTimeZone('Pacific/Auckland')，翻页对齐 NZ 零点。存量标签只写不改，零扰动。
+- 三（注释与 prompt 陈旧）：plan.js 规划 prompt 还写「六个双周 sprint」（模型对档期日历理解错位），前端 scopeHorizon 注释还说「两个双周约 28 天」，一并改半月措辞。
+- 复核干净的：sprint_anchor_norm 数学（前后取近、未来锚 clamp S1、年界索引连续、月长 format('t')）、ros 系统时区 UTC 与五条 cron 的 UTC 时刻及 date -u guard 口径一致、round_remind 首次实弹 20:00 UTC 发送成功、weekly_digest/fleet_digest/board_todo 都吃 board 的 current_sprint 不自己算。
+- 测试：node tests 全套全绿（blogcadence 5 件按半月制重写预期）。api 与 worker 均待部署：15 号 paid 轮在跑，收尾后再上，部署前确认 running job 为 0。认领 AIRA。
+
 ### 2026-10-14 AIRA 删「待发」概念：展示层三处随 9-20「卡出即送达」口径改齐（rev 9356d90，api 已部署）
 
 - 背景：Alvin 定「没有待发的概念，卡片一出来就发给客户了，视为已发送」。查证发现机制层 2026-09-20 已是此口径（cardClockAnchor 锚=sent_at 与最早附件较早者，方向卡到期视同同意不依赖 sent_at；sent_at 由客户开卡自动打点，语义是已读），但三处展示层还在用旧概念说话，把「客户没打开」说成「我们没发」，并把等客户的卡计进「当下要人动」红点。

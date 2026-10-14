@@ -31,7 +31,7 @@ async function main() {
       if (argIds.length) console.log('[' + cid + ' ' + c.name + '] 没开博客节奏（缺 fact ' + blogcadence.FACT_KEY + '），跳过');
       continue;
     }
-    const anchor = ctx.active_plan && ctx.active_plan.created_at ? String(ctx.active_plan.created_at).slice(0, 10) : '';
+    const anchor = blogcadence.anchorNorm(ctx.active_plan && ctx.active_plan.created_at);
     const cur = blogcadence.currentSprint(anchor, today);
     const g = blogcadence.gaps(ctx, today);
     const by = blogcadence.countBySprint(ctx.tasks || []);

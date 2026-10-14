@@ -1388,7 +1388,7 @@ function client_current_sprint_label($cid){
     $pq->closeCursor();
     $anchor=($pr&&$pr['created_at'])?sprint_anchor_norm($pr['created_at']):null;
     if(!$anchor)return '';
-    $n=semimonth_index((new DateTime('today'))->format('Y-m-d'))-semimonth_index($anchor)+1;
+    $n=semimonth_index((new DateTime('today',new DateTimeZone('Pacific/Auckland')))->format('Y-m-d'))-semimonth_index($anchor)+1;
     return 'S'.max(1,min($n,6));
 }
 function sprint_label_norm($cid,$s){
@@ -5279,7 +5279,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
           （等客户或等发卡，与红点重复计数且不是「待做」）；
        三、待发卡剔 done 态（收口单的卡链接是历史痕迹不是待办，幽灵永不消）、剔停人单
           （note 里引用过确认链接就被令牌正则误认成卡）。 */
-    $todayB=new DateTime('today');$curBy=[];
+    $todayB=new DateTime('today',new DateTimeZone('Pacific/Auckland'));$curBy=[];
     foreach(db()->query("SELECT client_id,created_at FROM seo_plans WHERE status='active'")->fetchAll() as $p){
         $nB=semimonth_index($todayB->format('Y-m-d'))-semimonth_index(sprint_anchor_norm($p['created_at']))+1;
         $curBy[(int)$p['client_id']]=max(1,min($nB,6));
@@ -6807,6 +6807,8 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/manual_done$#',$ROUTE,$mm)){
    15 日到月末一档，S1 = 方案锚点所在半月档，本期 = 今天所在档的序号。配合每月 1 号与 15 号
    的双月轮节拍，sprint 边界与轮次天然对齐。前端 seo-agent.html 的 sprintRange/currentSprint
    同步此口径，改一边必改另一边。 */
+/* 「今天」一律用 NZ 时区实例化：250 的 php.ini 时区是 PRC（UTC+8），裸 DateTime('today')
+   会让 sprint 在 NZ 凌晨 5 点才翻页，NZ 0 到 5 点建的任务盖上一档的章。 */
 function semimonth_index($ymd){
     $y=(int)substr($ymd,0,4);$mo=(int)substr($ymd,5,2);$d=(int)substr($ymd,8,2);
     if(!$y||!$mo)return null;
@@ -6833,7 +6835,7 @@ if($m==='GET'&&$ROUTE==='/board'){
     auth_any();
     ensure_review_schema();
     archive_closed_chat_tasks(); /* 全库扫一次，循环里不再逐客户扫（批五 1） */
-    $today=new DateTime('today');
+    $today=new DateTime('today',new DateTimeZone('Pacific/Auckland'));
     $out=[];
     $cs=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id WHERE p.status='active' ORDER BY c.name");
     foreach($cs->fetchAll() as $c){
