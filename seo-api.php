@@ -5261,8 +5261,9 @@ if($m==='GET'&&$ROUTE==='/clients'){
     $s=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status,p.services FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id ORDER BY FIELD(p.status,'active','archived'),c.name");
     $rows=$s->fetchAll();
     /* 侧边栏三色徽标（红橙蓝）。红的语义 2026-09-21 Alvin 改版：不再是「人工位任务数」
-       （旧口径把 S4-S6 排期占位全点红，真要发的卡反而因 done 不亮，oak 实证），改为
-       「当下要人动的数」= 待发的客户卡 + 真在等人办的人工任务（in_progress/review/split 工单）。
+       （旧口径把 S4-S6 排期占位全点红，oak 实证），改为「当下要人动的数」= 真在等人办的
+       人工任务（in_progress/review/split 工单）+ 停人单。2026-10-14 Alvin 定：没有待发概念，
+       卡出即送客户，客户未读不计红（原「待发的客户卡」项退役，见下方 5308 注）。
        proposed 排期占位不进红。蓝(agent 任务)口径不变。 */
     ensure_review_schema();
     ensure_task_origin();
@@ -5305,19 +5306,10 @@ if($m==='GET'&&$ROUTE==='/clients'){
         }
         $manualTasks[$idB]=($manualTasks[$idB]??0)+1;
     }
-    /* 待发卡：出了没发（sent_at 空）也没折叠的客户卡，owner agent 与上面的人工计数天然不重。
-       判卡认 card_kind 字段或本任务自己的 t/k 令牌（存量卡无字段靠令牌兜底；只认自己
-       任务号，引用别家卡链接的任务不算卡，与前端 2026-09-25 口径一致）。本期过滤同上。
-       review 与 done 都算（2026-10-11 Alvin 定：在途的、卡在客户的留——done 的在途卡
-       前端钉在进行中视图，徽章必须同口径计数，否则列表有卡徽章没数，1 对好几个）。
-       月报/内部验收类不是客户卡，排除（报告归报告栏目）。 */
-    foreach(db()->query("SELECT client_id,sprint FROM seo_tasks WHERE archived=0 AND owner_type='agent' AND status IN('review','done') AND attention=0 AND sent_at IS NULL AND (card_kind IS NOT NULL OR result_note LIKE CONCAT('%?t=',id,'&k=%')) AND result_note NOT LIKE '%[卡反馈折叠%' AND (ops IS NULL OR ops<>'analysis-readonly') AND title NOT LIKE '卡反馈落地%' AND title NOT LIKE '卡到期落地%' AND title NOT LIKE '%月报%' AND title NOT LIKE '%报告草稿%' AND title NOT LIKE '%报告定稿%' AND title NOT LIKE '%内部验收%' AND title NOT LIKE '%不直发客户%'")->fetchAll() as $r){
-        $idC=(int)$r['client_id'];
-        $curC=$curBy[$idC]??null;$snC=null;
-        if(preg_match('/^S(\d+)$/i',trim((string)$r['sprint']),$smC))$snC=(int)$smC[1];
-        if($curC!==null&&$snC!==null&&min($snC,6)>$curC)continue; /* S7+ 折算 S6:期指针封顶 6,不折则永久隐身(2026-10-10 全量扫,Midea #504) */
-        $manualTasks[$idC]=($manualTasks[$idC]??0)+1;
-    }
+    /* 「待发卡」计红已删（2026-10-14 Alvin 定，沿 2026-09-20「卡出即社媒送达」口径）：
+       没有待发概念，卡出来就视为已送客户；sent_at 是客户打开卡的自动打点，语义是已读。
+       客户未读是等客户不是人工待办，不计红；在途卡的到期倒数与未读状态看舰队摘要等确认桶。
+       原 2026-10-11「done 的在途卡也计数」口径随本块一并退役。 */
     /* 停人单计红（2026-10-10 全量扫：48 张 agent review+attention=1 的「需人裁决」单
        红蓝两边都不算——批五把它们剔出蓝点（不是机器在跑）却没接进红点。停人就是等人，
        一律计红；带卡的停人同样计（它们已被剔出待发卡，批五 3），本期过滤同上。 */

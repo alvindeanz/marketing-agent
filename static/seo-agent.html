@@ -1026,7 +1026,7 @@ function sbRow(c){
   const arch=c.status==='archived';
   // 三色徽标，排序红橙蓝：红=人工任务待处理，橙=fact 待确认，蓝=agent 任务待做
   let pills='';
-  if(c.manual_tasks_open)pills+='<span class="sb-pill manual" title="当下要人动：待发卡与在办人工任务">'+c.manual_tasks_open+'</span>';
+  if(c.manual_tasks_open)pills+='<span class="sb-pill manual" title="当下要人动：在办人工任务与停人单">'+c.manual_tasks_open+'</span>';
   if(c.facts_pending)pills+='<span class="sb-pill facts" title="fact 待确认">'+c.facts_pending+'</span>';
   if(c.agent_tasks_open)pills+='<span class="sb-pill agent" title="agent 任务待做">'+c.agent_tasks_open+'</span>';
   const star='<span class="sb-star'+(c.starred?' on':'')+'" title="'+(c.starred?'取消星标':'星标（标为我负责）')+'" onclick="event.stopPropagation();toggleStar('+c.client_id+','+(c.starred?0:1)+')">✡</span>';
@@ -2625,11 +2625,12 @@ function cardState(t,link){
   var note=String(t.result_note||'');
   if(/\[卡反馈折叠/.test(note))return ['done','已处理'];
   if(t.card_feedback_at)return ['review','有新反馈'];
-  if(t.sent_at)return ['review','已发待反馈'];
-  /* 无链接 = 没有可发的卡（静默提案或产线中断，2026-10-13 #1016：这种单标「待发」挂 12 天
-     没人知道该干什么）。招牌要说实话：这是等人裁决，不是等谁去发。 */
+  if(t.sent_at)return ['review','客户已读待反馈'];
+  /* 无链接 = 没有可生成的卡（静默提案或产线中断，2026-10-13 #1016）。招牌要说实话：这是等人裁决。 */
   if(!link)return ['pri P0','等裁决：无卡可发'];
-  return ['pri P1','待发'];
+  /* 没有「待发」概念（2026-10-14 Alvin 定，沿 2026-09-20 口径）：卡出即送客户，
+     sent_at 是客户打开卡的自动打点，语义是已读不是已发。未读不是人工待办。 */
+  return ['review','已送客户未读'];
 }
 function cardRow(t){
   var note=String(t.result_note||'');

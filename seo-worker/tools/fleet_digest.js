@@ -134,7 +134,8 @@ function isPendingCard(t) {
   L.push('# 舰队摘要 ' + new Date().toISOString().slice(0, 10) + '（近 ' + DAYS + ' 天口径）');
   L.push('');
   L.push('## 等确认（' + wait.length + ' 张在途卡，按到期倒数排）');
-  for (const w of wait) L.push('- ' + w.c + ' #' + w.id + ' 出卡 ' + w.d + ' 天' + (w.left <= 0 ? '，已到期待落地' : '，剩 ' + w.left + ' 天到期') + (w.fb ? '，有新反馈待折叠' : w.sent ? '，已发待反馈' : '，待发') + '：' + w.title);
+  /* 没有「待发」概念（2026-10-14 Alvin 定）：卡出即送客户。sent_at=客户打开卡的自动打点，语义是已读。 */
+  for (const w of wait) L.push('- ' + w.c + ' #' + w.id + ' 出卡 ' + w.d + ' 天' + (w.left <= 0 ? '，已到期待落地' : '，剩 ' + w.left + ' 天到期') + (w.fb ? '，有新反馈待折叠' : w.sent ? '，客户已读待反馈' : '，已送客户未读') + '：' + w.title);
   if (!wait.length) L.push('- 无');
   L.push('');
   L.push('## 已开跑（' + running.length + '）');
