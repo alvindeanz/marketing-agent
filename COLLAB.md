@@ -20,6 +20,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-14 AIRA 半月轮口径统一：新 plan 锚点对齐 1 号/15 号 + 清两周制残余 + 舰队 cron 对轮（rev bc67e4b，api 已部署）
+
+- 背景：Alvin 批半月轮为唯一口径（取代两周制），新开客户一律每月两轮，并要求清掉残余。首轮 2026-10-15。
+- 一（锚点对齐）：新函数 sprint_anchor_norm，2026-10-15 起创建的 plan 锚取离创建日最近的档起点（1 号或 15 号），S1 从完整半月档起算；存量 plan 锚不动（cutoff 字符串比较）。锚点读取七处（/board、/tasks、/clients 徽标、client_current_sprint_label、sprint 回填、两处 split 分流）统一走该函数，前端拿到的 sprint_anchor 已对齐无需改。部署后 /board 全量锚点 diff 为空，存量零扰动。
+- 二（残余修复）：split 单当期计算两处（capability-gap 分流 ~958、人工落地分流 ~2862）还在用 floor(days/14)+1，是 fa26285 换半月制时的漏改（同批五 3 类：fa26285 的改动点清单只扫了带 semimonth 字样的位置，没全库搜 /14 的日历算式）。统一改走 client_current_sprint_label，顺手去重两段裸查询。
+- 三（paid 优先）：weekly_run.sh 不传 id 时 services=sem/paid/both 的 15 家排前（排序稳定，组内保持名字序），实测顺序正确。
+- 四（cron 清单漂移）：cohort_backtest / site_hygiene 不传 id 默认从 /board 现取全量 active，crontab 写死的 22 个 id 清单退役（缺 34 Ideal、54 Merii，签新客户就漂）。今后签新客户 cron 侧零维护。
+- 五（舰队 cron 对轮，ros root crontab 已更新，备份在 scratchpad）：pull_sweep 新增 14 号与月末 14:00 UTC 两条（落在 NZ 1 号/15 号凌晨 3 点，轮当天吃新数据），周六那条保留做周中保鲜；新增 round_remind.sh 两条（20:00 UTC = NZ 轮日早 9 点），用 Aira bot token 零 LLM 发 horntech-sem 频道开轮提醒并 @Alvin，claude-bot 对 bot 消息不响应不会触发 LLM，开轮仍人触发，硬规矩 1 不动。
+- 测试：node tests 25 件全绿，php -l 走 deploy 远端闸过，/board worker token 实测取 26 家 active。坑：本机无 php，本地 lint 做不了，语法闸只剩 deploy 远端那一道。认领 AIRA。
+
 ### 2026-10-14 AIRA worker 心跳红条 + auto-release 确定性拒绝停人 + fuse 按 worker 隔离（rev 5125821，api 已部署，worker 等 drain）
 
 - 背景两洞（10-14 fable 配额事故连带挖出）：一是 ros 的 .spawn_fuse 10-10 跳闸后静默躺 3.5 天零告警，全部流量压到带陈旧 fable 覆盖的 Mac 把 Alvin 周配额烧穿；二是 #1266/#1269/#1270 带申报外 theme 步骤的方案被 auto-apply chat 和 auto-release L0 连推五次，确定性拒绝重试必然同结果，把 Mac 熔断打跳两次，「留人处理」只写注记无状态变化人看不见。
