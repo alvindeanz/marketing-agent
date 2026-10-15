@@ -767,3 +767,23 @@ t('同页冷却：拆单血缘豁免母任务触碰，其他任务照拦', () =>
   assert.strictEqual(A5.cooldownGate(ws, ['product-title-update'], 1289, 999).blocked, true);
   fs.rmSync(ws, { recursive: true, force: true });
 });
+
+t('resolveBlogUrl：output_url 优先，卡链接兜底到 note，找不到回空串', () => {
+  const A6 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const profile = { domain: 'www.apolloenergy.nz' };
+  // output_url 本身是站内博客 URL：直接用
+  assert.strictEqual(
+    A6.resolveBlogUrl({ output_url: 'https://www.apolloenergy.nz/blog/solar-post/?preview=tok', result_note: '' }, profile),
+    'https://www.apolloenergy.nz/blog/solar-post/?preview=tok');
+  // output_url 被换成确认卡链接：从 note 兜底找平台文章链接
+  assert.strictEqual(
+    A6.resolveBlogUrl({
+      output_url: 'https://agencyreport.horntech-dev.com/reports/x.html?t=1',
+      result_note: '目标页面: https://www.apolloenergy.nz/blog/industrial-solar/\n其他 https://example.com/a',
+    }, profile),
+    'https://www.apolloenergy.nz/blog/industrial-solar/');
+  // 都没有：空串（调用方决定拦或抛）
+  assert.strictEqual(A6.resolveBlogUrl({ output_url: '', result_note: '没链接' }, profile), '');
+  // 别家域名的博客链接不算数
+  assert.strictEqual(A6.resolveBlogUrl({ output_url: 'https://other.com/blog/p/', result_note: '' }, profile), '');
+});

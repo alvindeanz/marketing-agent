@@ -786,6 +786,15 @@ function publishGate(post) {
    凭证所在的卡不一定是本任务（2026-10-01 Kuddles #921 实证：发布单独立拆出，客户的
    publish_blog=agree 落在确认卡任务上，按本任务查永远是空，两次误拦烧光重试额度）。
    候选顺序：本任务 → detail/note 里引用的确认页任务号，取到 publish_blog 行即停。 */
+/* 任务的目标博客 URL：output_url 优先；预览 token 失效被换成卡链接时从 note 兜底找
+   平台文章链接（2026-09-17 #138/#139 口径），捷径与方案泳道同用。找不到回空串。 */
+function resolveBlogUrl(task, profile) {
+  const direct = String(task.output_url || '');
+  if (wf.isBlogUrl(direct, profile.domain)) return direct;
+  const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
+  return noteUrls.find((u) => wf.isBlogUrl(u, profile.domain)) || '';
+}
+
 async function requireBlogPublishConsent(api, task, record) {
   const taskId = task.id;
   const refIds = [];
@@ -1629,11 +1638,7 @@ async function runOne(ctx, context, workspace, taskId) {
   const hasBlogOps = ops.some((op) => BLOG_OPS.indexOf(op) !== -1);
   const planOnDisk = fs.existsSync(changePlanPath(workspace, taskId));
   if (hasBlogOps && !planOnDisk) {
-    if (!wf.isBlogUrl(outputUrl, profile.domain)) {
-      const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
-      const alt = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
-      if (alt) outputUrl = alt;
-    }
+    outputUrl = resolveBlogUrl(task, profile) || outputUrl;
     if (!wf.isBlogUrl(outputUrl, profile.domain)) {
       throw new Error('task ' + taskId + '：博客任务，但 output_url 和 note 里都找不到平台文章链接，无法定位目标文章，不发布');
     }
@@ -1642,8 +1647,22 @@ async function runOne(ctx, context, workspace, taskId) {
   }
   if (hasBlogOps && planOnDisk) {
     log('task ' + taskId + '：带变更方案的博客任务，契约在方案，不走博客捷径，照方案泳道执行');
-    /* 客户发布凭证闸跟动作走：换泳道不换裁决权。 */
-    await requireBlogPublishConsent(api, task, (line) => log('task ' + taskId + '：' + line));
+    /* 客户发布凭证闸跟动作走：换泳道不换裁决权。凭证管的是未上线内容对外见光；目标文章
+       已公开在线的修订单（补内链、改正文），客户裁决权在首发时已行使，不二次索要
+       publish_blog=agree（2026-10-15 Apollo #1236/#1237 误拦，各烧光两次重试额度）。
+       拿不到目标 URL 或线上实测非 200 一律照旧走闸，宁可拦错不可漏放。 */
+    const blogUrl = resolveBlogUrl(task, profile);
+    let live = false;
+    if (blogUrl) {
+      try {
+        live = (await wf.fetchPublic(wf.publicUrlOf(blogUrl), cfg.httpTimeoutMs)).status === 200;
+      } catch (e) { live = false; }
+    }
+    if (live) {
+      log('task ' + taskId + '：目标文章已公开在线（' + wf.publicUrlOf(blogUrl) + '），修订单不触发发布凭证闸');
+    } else {
+      await requireBlogPublishConsent(api, task, (line) => log('task ' + taskId + '：' + line));
+    }
   }
 
   /* 落地页确认卡硬闸（2026-09-17 Alvin 定）：结构类改动（新建/删/并页、URL 与 301、
@@ -1875,6 +1894,7 @@ module.exports = {
   changePlanPath,
   runBlogPublish,
   requireBlogPublishConsent,
+  resolveBlogUrl,
   revisedReadbackMismatch,
   wpPublishIntent,
   wpBlogPlanPresentationGap,
