@@ -787,3 +787,33 @@ t('resolveBlogUrl：output_url 优先，卡链接兜底到 note，找不到回�
   // 别家域名的博客链接不算数
   assert.strictEqual(A6.resolveBlogUrl({ output_url: 'https://other.com/blog/p/', result_note: '' }, profile), '');
 });
+
+console.log('闸改版 2026-10-15（redirect 出客户闸、page-create 软闸、发布权委托）');
+t('发布凭证闸：policy.blog_publish_executor=agent 即委托放行，不再查卡', () => {
+  let cardCalled = false;
+  const api = {
+    listFacts: async () => ({ facts: [{ fact_key: 'policy.blog_publish_executor', value: 'agent', status: 'confirmed' }] }),
+    cardFeedback: async () => { cardCalled = true; return { rows: [] }; },
+  };
+  const rec = [];
+  return A.requireBlogPublishConsent(api, { id: 3, client_id: 99, detail: '', result_note: '' }, (l) => rec.push(l)).then(() => {
+    assert.ok(rec.some((l) => l.indexOf('委托') >= 0), '没记委托来源');
+    assert.strictEqual(cardCalled, false, '委托放行不该再查卡');
+  });
+});
+t('发布凭证闸：policy 非 agent 或 retracted 照走卡凭证', () => {
+  const api = {
+    listFacts: async () => ({ facts: [{ fact_key: 'policy.blog_publish_executor', value: 'agent', status: 'retracted' }] }),
+    cardFeedback: async () => ({ rows: [] }),
+  };
+  return A.requireBlogPublishConsent(api, { id: 4, client_id: 99, detail: '', result_note: '' }, () => {}).then(
+    () => { throw new Error('retracted 委托不该放行'); },
+    (e) => { assert.ok(/没有任何发布表态/.test(e.message), e.message); }
+  );
+});
+t('onsiteCardExpired：只认 [到期执行] 标记，满 14 天才到期，旧卡永不到期', () => {
+  assert.strictEqual(A.onsiteCardExpired({ result_note: '[落地页确认卡] 结构类调整需客户确认' }), false, '旧卡没有标记不该到期');
+  assert.strictEqual(A.onsiteCardExpired({ result_note: '[落地页确认卡] [到期执行 2026-01-01] 新建页' }), true, '老日期该到期');
+  const today = new Date().toISOString().slice(0, 10);
+  assert.strictEqual(A.onsiteCardExpired({ result_note: '[落地页确认卡] [到期执行 ' + today + '] 新建页' }), false, '当天出的卡不该到期');
+});

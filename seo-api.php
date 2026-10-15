@@ -843,6 +843,24 @@ function blog_card_waiting($t){
     if(strpos(strtolower((string)($t['ops']??'')),'blog-draft')!==false&&strpos($sig,'blog_confirmation')!==false)$item='publish_blog';
     elseif(strpos($sig,'[落地页确认卡]')!==false)$item='onsite_confirm'; /* 结构类卡产线 2026-10-10，同族等客户态 */
     if($item==='')return false;
+    /* 发布权委托（2026-10-15 Alvin 定）：policy.blog_publish_executor=agent 的客户，
+       博客确认卡是选题知会不是发布闸，不算等客户，L0/放行照常流转。
+       apply 侧 requireBlogPublishConsent 同口径，两处要一起改。 */
+    if($item==='publish_blog'){
+        try{
+            $pq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
+            $pq->execute([(int)($t['client_id']??0)]);
+            $pv=$pq->fetch();
+            if($pv&&stripos((string)$pv['value'],'agent')!==false)return false;
+        }catch(Exception $e){/* facts 读不到按未委托处理 */}
+    }
+    /* 软闸到期（2026-10-15 Alvin 定）：带 [到期执行 YYYY-MM-DD] 标记的新版落地页卡
+       （page-create 类）出卡满 14 天即不再等客户，apply 侧 onsiteCardExpired 同口径。 */
+    if($item==='onsite_confirm'&&preg_match('/\[到期执行 (\d{4}-\d{2}-\d{2})\]/',$sig,$m)){
+        $anchor=new DateTime($m[1].' 00:00:00',new DateTimeZone('Pacific/Auckland'));
+        $now=new DateTime('now',new DateTimeZone('Pacific/Auckland'));
+        if(($now->getTimestamp()-$anchor->getTimestamp())/86400>=14)return false;
+    }
     try{
         $fb=db()->prepare("SELECT id FROM seo_card_feedback WHERE task_id=? AND item=? ORDER BY id DESC LIMIT 1");
         $fb->execute([(int)$t['id'],$item]);

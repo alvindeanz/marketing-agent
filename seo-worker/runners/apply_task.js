@@ -245,6 +245,21 @@ function planStructuralCalls(plan) {
   return Array.from(hits);
 }
 
+/* 软闸（page-create）到期视同同意的宽限期。14 天是卡面对客承诺的一部分，
+   与 sprint 历法无关，别跟半月制混（2026-10-15 Alvin 定）。 */
+const ONSITE_CARD_GRACE_DAYS = 14;
+/* page-create 专用的软闸 op 清单，闸内判断与出卡文案共用（apply 泳道 runOne 同口径）。 */
+const ONSITE_EXPIRY_OPS = ['page-create'];
+
+/** 新版落地页确认卡的到期判断：note 里有 [到期执行 YYYY-MM-DD] 标记（出卡时写入，
+ *  仅软闸 op 组合才写）且出卡日起满宽限期。旧卡没有标记，永不到期（卡面承诺不同）。 */
+function onsiteCardExpired(task) {
+  const m = /\[到期执行 (\d{4}-\d{2}-\d{2})\]/.exec(String(task.result_note || ''));
+  if (!m) return false;
+  const days = (Date.now() - new Date(m[1] + 'T00:00:00').getTime()) / 86400000;
+  return days >= ONSITE_CARD_GRACE_DAYS;
+}
+
 async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops, lastOc) {
   const { cfg, api, log } = ctx;
   const note = String(task.result_note || '');
@@ -270,6 +285,9 @@ async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops
     }
   } catch (e) { /* 方案读不到就不列明细，卡照出 */ }
   const cleanTitle = String(task.title || '').replace(/^(\[[^\]]*\]\s*)+/, '').replace(/^人工落地：\s*/, '').replace(/#\d+\s*/g, '').trim().slice(0, 60);
+  /* 软闸组合（只含 page-create 类）：卡面承诺换「不回复则到期按方案执行」，note 带
+     [到期执行] 标记起钟；含硬闸 op 的照旧承诺「不回复保持现状」，永不到期。 */
+  const softOnly = structOps.length > 0 && structOps.every((op) => ONSITE_EXPIRY_OPS.indexOf(op) !== -1);
   const render = require('../specs/report/render_onsite_confirm.js');
   const cardData = {
     title: '站点调整确认：' + cleanTitle,
@@ -284,11 +302,15 @@ async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops
       q: '可以按这份方案调整您的网站吗？',
       situation: cleanTitle,
       recommendation: '同意后我们按方案执行，每一步都有改前留档；新页面的内容上线前还会再请您确认',
-      no_reply: '不回复我们就先不动您的网站，一直保持现状',
+      no_reply: softOnly
+        ? '不回复的话，' + ONSITE_CARD_GRACE_DAYS + ' 天后我们将按方案执行；每一步留档，随时可以还原'
+        : '不回复我们就先不动您的网站，一直保持现状',
       item: 'onsite_confirm',
       textarea_hint: '有任何顾虑直接写：哪个页面、哪里不想动，都可以。',
     },
-    window_line: '同意后自动进入执行；不回复则保持现状。',
+    window_line: softOnly
+      ? '同意后自动进入执行；不回复则 ' + ONSITE_CARD_GRACE_DAYS + ' 天后按方案执行。'
+      : '同意后自动进入执行；不回复则保持现状。',
     attach_line: '技术执行细节我们这边留档备查。',
   };
   const cardHtml = render.renderCard(cardData);
@@ -303,7 +325,9 @@ async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops
   if (!cardUrl) throw new Error('task ' + taskId + '：落地页确认卡发布失败，结构类改动保持不落地');
   await api.postTaskResult(taskId, {
     output_url: cardUrl,
-    note: '[落地页确认卡] 结构类调整（' + structOps.join(',') + '）需客户确认。卡（发给客户，客户点同意后自动落地，不回复保持现状）: ' + cardUrl,
+    note: softOnly
+      ? '[落地页确认卡] [到期执行 ' + localYmd() + '] 新建页调整（' + structOps.join(',') + '）已出卡知会。卡（发给客户，点同意即落地，不回复则 ' + ONSITE_CARD_GRACE_DAYS + ' 天后按方案执行）: ' + cardUrl
+      : '[落地页确认卡] 结构类调整（' + structOps.join(',') + '）需客户确认。卡（发给客户，客户点同意后自动落地，不回复保持现状）: ' + cardUrl,
   });
   log('task ' + taskId + '：落地页确认卡已出 ' + cardUrl + '，任务进等客户流，客户同意后自动落地');
   return { taskId, status: 'carded', logFile: '' };
@@ -797,6 +821,21 @@ function resolveBlogUrl(task, profile) {
 
 async function requireBlogPublishConsent(api, task, record) {
   const taskId = task.id;
+  /* 发布权委托（2026-10-15 Alvin 定，降人工介入一级）：客户 facts 里
+     policy.blog_publish_executor=agent 即发布权已托管（全托管客户，Playmate 模式），
+     凭证闸按委托放行，确认卡降级为选题知会（卡照出、反馈照折叠，不再挡发布）。
+     policy 缺位或值非 agent 照旧走卡凭证。 */
+  if (task.client_id) {
+    try {
+      const fr = await api.listFacts(task.client_id);
+      const pol = (fr.facts || []).find((f) => String(f.fact_key) === 'policy.blog_publish_executor'
+        && String(f.status || '') !== 'retracted');
+      if (pol && /\bagent\b/i.test(String(pol.value || ''))) {
+        record('发布权已委托（policy.blog_publish_executor=agent），发布凭证闸按委托放行');
+        return;
+      }
+    } catch (e) { record('policy facts 读取失败（' + e.message + '），按未委托处理，照走卡凭证'); }
+  }
   const refIds = [];
   const refSrc = String(task.detail || '') + '\n' + String(task.result_note || '');
   for (const m of refSrc.matchAll(/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)/g)) {
@@ -1665,25 +1704,32 @@ async function runOne(ctx, context, workspace, taskId) {
     }
   }
 
-  /* 落地页确认卡硬闸（2026-09-17 Alvin 定）：结构类改动（新建/删/并页、URL 与 301、
-     导航、整页换版式）agency 也不拍板，终局裁决权在客户。命中结构类 op 的任务必须有
-     onsite_confirm=agree 凭证（以最后一次表态为准）才落地，否则中止提示出落地页确认卡。
-     title/meta/内链/结构化数据/正文改写等免卡直落，度写在 review_principles.md。 */
-  const STRUCTURAL_CONFIRM_OPS = ['redirect-batch', 'page-rebuild', 'page-create', 'nav-edit', 'page-delete'];
-  if (ops.some((op) => STRUCTURAL_CONFIRM_OPS.indexOf(op) !== -1)) {
+  /* 落地页确认卡闸（2026-09-17 Alvin 定，2026-10-15 Alvin 第一性原理改版）：客户只拍
+     「客户独有信息」的板（生意门面、品牌、花钱），SEO 技术判断不问客户。
+     redirect 类（301 合并、404 回收、batch）自本日移出客户闸：可逆、不删内容、收益判断
+     纯技术，opus 放行官照过，护栏换成技术性的（目标页 200、反向还原清单、回读对账）。
+     删页/导航/整页换形态仍是客户硬闸（动的是生意门面）。新建页（page-create）降为软闸：
+     出卡知会，卡面承诺改「不回复 14 天后按方案执行」，到期视同同意（EXPIRY_CONSENT_OPS，
+     与 seo-api blog_card_waiting 的 [到期执行] 标记同一口径）。 */
+  const STRUCTURAL_CONFIRM_OPS = ['page-rebuild', 'page-create', 'nav-edit', 'page-delete'];
+  const structHit = ops.filter((op) => STRUCTURAL_CONFIRM_OPS.indexOf(op) !== -1);
+  if (structHit.length) {
     const fbS = await api.cardFeedback(taskId).catch(() => ({ rows: [] }));
     const oc = (fbS.rows || []).filter((r) => String(r.item) === 'onsite_confirm');
     const lastOc = oc.length ? oc[oc.length - 1] : null;
-    if (!lastOc || String(lastOc.choice) !== 'agree') {
-      /* 卡产线（2026-10-10 Alvin 批）：此前这里直接抛错让人「出卡」，但系统里没有任何工具
-         出这张卡，结构类任务全部烂成人工债（#813/#815 一族）。现在闸自己出卡：方案翻成
-         客户话渲染落地页确认卡发布到 agencyreport，任务回 review 进等客户流；客户点
+    if (lastOc && String(lastOc.choice) === 'agree') {
+      log('task ' + taskId + '：结构类改动已有客户确认凭证（onsite_confirm=agree），放行落地');
+    } else if (!lastOc && structHit.every((op) => ONSITE_EXPIRY_OPS.indexOf(op) !== -1)
+        && onsiteCardExpired(task)) {
+      /* 软闸到期：只对带 [到期执行] 标记的新版卡生效（旧卡面承诺「不回复保持现状」，
+         不得反悔）。客户任何表态（hold/意见）都终止到期路径，照各自路由。 */
+      log('task ' + taskId + '：落地页确认卡出卡满 ' + ONSITE_CARD_GRACE_DAYS + ' 天零表态，按卡面承诺到期视同同意，落地');
+    } else {
+      /* 卡产线（2026-10-10 Alvin 批）：闸自己出卡，任务回 review 进等客户流；客户点
          「同意，按方案调整」落 onsite_confirm=agree，harness 折叠排 apply，本闸复核凭证
-         后放行。客户 hold 或写意见照各自路由。结构类不走到期视同同意（终局裁决权在客户，
-         硬闸语义即如此）。 */
+         后放行。客户 hold 或写意见照各自路由。 */
       return issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops, lastOc);
     }
-    log('task ' + taskId + '：结构类改动已有客户确认凭证（onsite_confirm=agree），放行落地');
   }
 
   const planFile = changePlanPath(workspace, taskId);
@@ -1895,6 +1941,7 @@ module.exports = {
   runBlogPublish,
   requireBlogPublishConsent,
   resolveBlogUrl,
+  onsiteCardExpired,
   revisedReadbackMismatch,
   wpPublishIntent,
   wpBlogPlanPresentationGap,
