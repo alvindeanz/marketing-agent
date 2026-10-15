@@ -830,7 +830,7 @@ async function requireBlogPublishConsent(api, task, record) {
       const fr = await api.listFacts(task.client_id);
       const pol = (fr.facts || []).find((f) => String(f.fact_key) === 'policy.blog_publish_executor'
         && String(f.status || '') !== 'retracted');
-      if (pol && /\bagent\b/i.test(String(pol.value || ''))) {
+      if (pol && /^\s*agent\b/i.test(String(pol.value || ''))) {
         record('发布权已委托（policy.blog_publish_executor=agent），发布凭证闸按委托放行');
         return;
       }

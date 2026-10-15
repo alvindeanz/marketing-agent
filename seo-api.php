@@ -851,7 +851,7 @@ function blog_card_waiting($t){
             $pq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
             $pq->execute([(int)($t['client_id']??0)]);
             $pv=$pq->fetch();
-            if($pv&&stripos((string)$pv['value'],'agent')!==false)return false;
+            if($pv&&preg_match('/^\s*agent\b/i',(string)$pv['value']))return false;
         }catch(Exception $e){/* facts 读不到按未委托处理 */}
     }
     /* 软闸到期（2026-10-15 Alvin 定）：带 [到期执行 YYYY-MM-DD] 标记的新版落地页卡
