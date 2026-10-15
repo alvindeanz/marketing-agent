@@ -1368,6 +1368,31 @@ function ensure_task_archived(){
         $upd->execute(['S'.max(1,min($n,6)),(int)$r['id']]);
     }
 }
+/* capability-gap 收编扫帚（2026-10-15 Alvin「第一性原理修复，目标下次自动完成」，ticket
+   #35/#37/#38 三单同病：CLI 缺口拆成人工单后一直躺到 Summer 报票、维护者手动 machine_run 才动。
+   第一性：「人工，因为缺执行器 X」是个派生状态，X 登记进政策表的那一刻它就该失效，不该等人想起。
+   零 LLM：只翻 owner 位、补 ops、盖章（章改 detail 哈希使旧判决自然过期），重判与落地仍走
+   下一轮 harness 的既有链路，硬规矩 1 不动。挂 /board 读入口，同懒归档扫帚模式。
+   豁免条件收严：detail 里全部「缺执行器 X」的 X 都已在政策表才翻位，缺一个继续等人。 */
+function reclaim_capability_gap_tasks(){
+    $pol=release_policy_load();
+    $rc=is_array($pol)&&isset($pol['risk_class_by_op'])?$pol['risk_class_by_op']:null;
+    if(!$rc)return;
+    $rows=db()->query("SELECT id,detail,ops FROM seo_tasks WHERE archived=0 AND owner_type='agency' AND status NOT IN ('done') AND detail LIKE '%缺执行器%'")->fetchAll();
+    foreach($rows as $t){
+        if(!preg_match_all('/缺执行器\s+([a-z][a-z0-9-]*)/u',(string)$t['detail'],$m))continue;
+        $need=array_values(array_unique($m[1]));
+        $missing=array_values(array_filter($need,function($op)use($rc){return !isset($rc[$op]);}));
+        if($missing)continue;
+        $ops=array_values(array_unique(array_merge(
+            array_filter(array_map('trim',explode(',',(string)$t['ops']))),$need)));
+        $stamp="\n[capability-gap 收编 ".date('Y-m-d')."] 缺口执行器已全部登记（".implode('，',$need)."），自动转回机器位（零 LLM 扫帚），下轮 harness 重判后机器落地。";
+        db()->prepare("UPDATE seo_tasks SET owner_type='agent',ops=?,detail=CONCAT(detail,?) WHERE id=? AND owner_type='agency'")
+            ->execute([implode(',',$ops),$stamp,(int)$t['id']]);
+        audit('system','seo_capgap_reclaim',(string)$t['id'],['ops'=>$need]);
+    }
+}
+
 /* 懒归档扫帚：任务读取入口顺手把已收口的 chat 单归档。不去猎每个置 done 的写点，
    今后新增的收口路径也逃不出读入口。幂等，通常零行更新的开销。$cid=null 全库扫（/board、/clients）。 */
 function archive_closed_chat_tasks($cid=null){
@@ -6835,6 +6860,7 @@ if($m==='GET'&&$ROUTE==='/board'){
     auth_any();
     ensure_review_schema();
     archive_closed_chat_tasks(); /* 全库扫一次，循环里不再逐客户扫（批五 1） */
+    reclaim_capability_gap_tasks(); /* 缺执行器补齐的人工单自动转回机器位（2026-10-15） */
     $today=new DateTime('today',new DateTimeZone('Pacific/Auckland'));
     $out=[];
     $cs=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id WHERE p.status='active' ORDER BY c.name");

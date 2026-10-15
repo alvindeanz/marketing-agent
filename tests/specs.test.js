@@ -139,5 +139,30 @@ try {
   console.log('  ok   planning view 与 policy 的 op 集合一致（WF/Shopify/WordPress/GoogleAds）');
 } catch (e) { fail += 1; console.log('  FAIL planning-view/policy 一致性 :: ' + e.message); }
 
+// shopseo CLI 写命令必须在 shopify 能力清单有登记（2026-10-15 ticket #38/#39 教训：
+// collection update 1.4.0 就有但清单没登 collection-content-edit，LuxeLink #1229 停人一天；
+// collection-item-update 在政策表却不在清单，旧测试单向比对拦不住。CLI 是能力事实源，
+// 清单漏一条这里就红。CLI 不在本机（如外部 CI）时跳过不判红。
+try {
+  const { execFileSync } = require('child_process');
+  const CLI = process.env.SHOPSEO_CLI || '/data/aira/tools/shopseo/shopseo';
+  if (!fs.existsSync(CLI)) {
+    console.log('  skip shopseo CLI 不在本机，登记覆盖测试跳过');
+  } else {
+    const help = execFileSync(CLI, ['--help'], { encoding: 'utf8' });
+    const sect = help.split(/WRITE COMMANDS/)[1].split(/\nEXAMPLES/)[0];
+    const cmds = new Set();
+    for (const line of sect.split('\n')) {
+      const m = /^  (article|collection|product|theme|redirect) ([a-z-]+)/.exec(line);
+      if (m) cmds.add(m[1] + ' ' + m[2]);
+    }
+    const doc = fs.readFileSync(path.join(S, 'capabilities', 'shopify.md'), 'utf8');
+    const miss = [...cmds].filter((c) => !doc.includes(c));
+    assert.ok(cmds.size >= 10, '--help 解析出的写命令过少（' + cmds.size + '），解析器可能坏了');
+    assert.ok(!miss.length, 'shopseo 写命令未在 shopify 能力清单登记: ' + miss.join(', '));
+    console.log('  ok   shopseo 写命令 ' + cmds.size + ' 条全部在能力清单有登记');
+  }
+} catch (e) { fail += 1; console.log('  FAIL shopseo CLI 登记覆盖 :: ' + e.message); }
+
 console.log(fail ? '\n' + fail + ' failed' : '\nall ok');
 process.exit(fail ? 1 : 0);

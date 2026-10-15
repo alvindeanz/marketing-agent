@@ -55,6 +55,7 @@
     "content-edit": "reversible",
     "blog-edit": "reversible",
     "collection-item-update": "reversible",
+    "collection-content-edit": "reversible",
     "redirect-batch": "reversible",
     "gbp-update": "external",
     "blog-draft": "reversible",
