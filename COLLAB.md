@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-15 AIRA capability-gap 自愈闭环（rev 847bb03/23980c5，api+worker 已部署；shopseo 1.7.0 aidam c317c5c）
+
+- 背景：ticket #35/#37/#38/#39 一天四单同病，CLI 缺口拆人工单后躺到 Summer 报票、维护者手动 machine_run 才动。Alvin 定调「第一性原理修复，目标下次自动完成」。
+- 修复链四件：①seo-api 零 LLM 收编扫帚（挂 /board 读入口，同懒归档模式）：人工单 detail 里全部「缺执行器 X」已登记政策表即自动转回机器位、补 ops、盖章过期旧判决，重判与落地走下轮 harness 既有链路，硬规矩 1 不动；②specs 测试加 shopseo 写命令与能力清单双向覆盖（旧测试单向，当场揪出 6 条登记债）；③execute prompt 加缺口命名硬约束（必须用 op 命名法，#1274 写 CLI 命令名 theme-set-text 导致扫帚认不出的教训）；④shopseo 1.7.0 collection add-products/remove-products（#1291 规格六护栏，不写 position）加 collection-content-edit 补登记（CLI 1.4.0 就有，纯登记债）。
+- 实弹：存量三处名字漂移一次性纠偏后，扫帚收编 #1252/#1274/#1276 三单（ops 自动齐），#1229 machine_run 校正 ops，#1291 维护者收口。sungait/Badger 今晚错峰 harness 落地。
+- 坑：收编扫帚全齐才翻（缺一个继续等人），名字漂移会漏网，命名约束只管未来，存量靠一次性 REPLACE。
+- 测试：node tests 全绿（specs 29 条写命令全覆盖）。认领 AIRA。
+
 ### 2026-10-15 AIRA 半月轮改法复审：blogcadence 还是 14 天历法 + sprint「今天」钟是 PRC 时区（待部署）
 
 - 背景：首轮 15 号 paid 轮开跑同时，Alvin 要求复审半月轮改法有没有坑。两个实锤加两处陈旧注释。
