@@ -889,6 +889,15 @@ function blog_outline_stage($t){
         $lastPub=$fb->fetch();
         if($lastPub&&(string)$lastPub['choice']==='agree')return false;
     }catch(Exception $e){/* 表未建 = 无凭证，走原判据 */}
+    /* 发布权委托客户（policy.blog_publish_executor=agent，2026-10-15）同为真信号：委托即无需
+       等卡上 agree，放行直通 apply 发布。没有这条，委托客户的成稿按 URL 形状（卡链接不含
+       /blog/）误判成大纲，release 把成稿重写一遍再出新卡（2026-10-15 #826/#984 实烧两例）。 */
+    try{
+        $pq2=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
+        $pq2->execute([(int)($t['client_id']??0)]);
+        $pv2=$pq2->fetch();
+        if($pv2&&preg_match('/^\s*agent\b/i',(string)$pv2['value']))return false;
+    }catch(Exception $e){/* facts 读不到按未委托处理 */}
     $u=(string)($t['output_url']??'');
     return ($u===''||strpos($u,'/blog/')===false);
 }
@@ -5943,8 +5952,13 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
     $writeIds=[];$applyIds=[];
     $acceptIds=[];
     $noChangeIds=[];
+    $skipped=[];
     foreach($found as $t){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([(int)$t['id']]);$row=$full->fetch();
+        /* 确认卡已出等客户表态的不放行（与 /tasks/apply_verdicts 同守卫，2026-10-15 补）：
+           此前 release 缺这道闸，卡等客户的成稿被 blog_outline_stage 按 URL 形状误判成
+           大纲走重写线（成稿重写死循环家族第五入口）。委托/到期的 blog_card_waiting 自判。 */
+        if(blog_card_waiting($row)){$skipped[]=['task_id'=>(int)$t['id'],'job_id'=>0,'why'=>'确认卡已出等客户表态，等卡反馈或到期视同同意自动落地'];continue;}
         if(analysis_task($row))$acceptIds[]=(int)$t['id'];
         elseif(blog_outline_stage($row))$writeIds[]=(int)$t['id'];
         elseif(no_change_plan($row))$noChangeIds[]=(int)$t['id'];
@@ -5967,7 +5981,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
         if($err)res(400,['error'=>'任务 '.$nid.'：'.$err]);
         audit($u['username'],'seo_task_release_nochange',(string)$nid,[]);
     }
-    $jids=[];$skipped=[];
+    $jids=[];
     foreach($writeIds as $wid){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([$wid]);$row=$full->fetch();
         list($wj,$ws)=blog_release_as_write($cid,$row,$u['username']);$jids=array_merge($jids,$wj);$skipped=array_merge($skipped,$ws);
