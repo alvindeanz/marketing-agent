@@ -406,7 +406,13 @@ async function main() {
     for (;;) {
       await sleep(20000);
       all = await tasks();
-      const pending = all.filter((t) => noVerdict.includes(t.id) && !t.review_effective);
+      /* 等到判决可用为止：无判决、判定在飞、判决过期（stale 重判中）三态都算没等到。
+         原条件只看 !review_effective，stale 分支进闸A 的任务（machine_run / 收编扫帚盖章后
+         旧判决过期待重判）身上挂着旧判决，第一拍就穿过循环，拍板时又被 !review_stale 排除，
+         新判决落库晚几秒就整轮错过（2026-10-14 #1289/#1290 与 10-15 #1274/#1276 两次实证，
+         都靠人工 apply_verdicts 收尾）。 */
+      const pending = all.filter((t) => noVerdict.includes(t.id)
+        && (t.review_pending || !t.review_effective || t.review_stale));
       if (!pending.length) break;
       if (Date.now() - t1 > 15 * 60 * 1000) { log('判定超 15 分钟未齐，先拍已有判决的'); break; }
     }
