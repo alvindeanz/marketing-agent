@@ -50,6 +50,14 @@ function changePlanPath(workspace, taskId) {
   return path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + taskId + '.md');
 }
 
+/* 闸类拦截错误（2026-10-15）：方案契约校验是零 spawn 的确定性失败，不是环境病。
+   err.gate 标记沿 runner_host IPC 透传到 listener，熔断分诊对其 skip（lib/fuse_policy）。 */
+function gateError(message) {
+  const err = new Error(message);
+  err.gate = true;
+  return err;
+}
+
 /* 无方案续接（2026-10-10 第一性修，#814 教训）：apply 走到这里却没有已批方案文件，
    不是要人裁决的事故，是链条少跑了一步，而「先跑 execute」这句话以前只活在报错文案里。
    现在升级成机器动作：带 chain=execute 回 result 端点，服务端一次性续排 execute
@@ -1272,7 +1280,7 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
   const undeclaredS = shopseoUndeclaredOps(plan, taskOps(task));
   if (undeclaredS.length) {
     await fail('执行中止：方案正文含未申报的 shopseo 命令（需 op：' + undeclaredS.join('、') + '），任务 ops 没有申报，放行分档没覆盖这些动作。零写入。修法：方案剔除这些命令，或补申报对应 op 重走判定与放行。');
-    throw new Error('task ' + taskId + ': plan contains undeclared shopseo ops: ' + undeclaredS.join(','));
+    throw gateError('task ' + taskId + ': plan contains undeclared shopseo ops: ' + undeclaredS.join(','));
   }
   const manifest = capabilities.fullText('shopify');
   const prompt = buildShopifyPrompt({ task, plan, planFile, shopAlias, manifest });
@@ -1406,7 +1414,7 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
   const undeclaredW = wfagentUndeclaredOps(plan, taskOps(task));
   if (undeclaredW.length) {
     await fail('执行中止：方案正文含未申报的 WordPress 写操作（需 op：' + undeclaredW.join('、') + '），任务 ops 没有申报，放行分档没覆盖这些动作。零写入。修法：方案剔除这些调用，或补申报对应 op 重走判定与放行。');
-    throw new Error('task ' + taskId + ': plan contains undeclared wf-agent ops: ' + undeclaredW.join(','));
+    throw gateError('task ' + taskId + ': plan contains undeclared wf-agent ops: ' + undeclaredW.join(','));
   }
   /* 形态防漏闸（2026-10-13 #1239/#1240 教训，见上方形态线注释）。 */
   const publishingW = wpPublishIntent(plan, taskOps(task));
@@ -1817,12 +1825,13 @@ async function run(ctx) {
   log('workspace: ' + workspace);
 
   const problems = [];
+  let allGate = true; /* 批内全部失败都是闸类拦截时，聚合错误才继承 gate 标记 */
   for (const taskId of taskIds) {
     try {
       const res = await runOne(ctx, context, workspace, taskId);
       if (res.status === 'carded') {
         /* 落地页确认卡已出或已在等客户表态：不是失败，job 不挂红，冷却台账不记（零写入） */
-      } else if (res.status !== 'success') problems.push(taskId + ': ' + res.status);
+      } else if (res.status !== 'success') { problems.push(taskId + ': ' + res.status); allGate = false; }
       else {
         /* 冷却台账：成功落地的批次记 URL 集与 op（NFS 共享，双 worker 同源）。
            无变更方案与空 URL 的博客发布不进账（没有触碰既有页面）。 */
@@ -1836,15 +1845,16 @@ async function run(ctx) {
     } catch (e) {
       log('task ' + taskId + ': FAILED :: ' + (e.stack || e.message));
       problems.push(taskId + ': ' + e.message);
+      if (!(e && e.gate)) allGate = false;
     }
   }
 
   if (problems.length) {
     // Surfaced as a failed job so it lands in front of a human, even though each
     // task already carries its own note.
-    throw new Error(
-      problems.length + ' of ' + taskIds.length + ' task(s) did not complete :: ' + problems.join(' | ')
-    );
+    const aggMessage =
+      problems.length + ' of ' + taskIds.length + ' task(s) did not complete :: ' + problems.join(' | ');
+    throw allGate ? gateError(aggMessage) : new Error(aggMessage);
   }
   return { tokenUsage: 0 };
 }
@@ -1854,6 +1864,7 @@ module.exports = {
   planStructuralCalls,
   shopseoUndeclaredOps,
   wfagentUndeclaredOps,
+  gateError,
   cooldownGate,
   cooldownGateLive,
   planTargetUrls,

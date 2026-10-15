@@ -5,7 +5,8 @@
 // taking the listener down. Communication with the parent is IPC only:
 //   { t: 'log',    line }        streamed log line, parent buffers and PATCHes
 //   { t: 'result', tokenUsage }  job finished ok
-//   { t: 'error',  message, stack }
+//   { t: 'error',  message, stack, gate }   gate=true 为闸类拦截（契约校验零写入中止），
+//                                           listener 的熔断分诊据此 skip（lib/fuse_policy）
 //
 // Started with: fork(runner_host.js, [JSON.stringify(job)])
 
@@ -106,7 +107,7 @@ main().then(
     const message = err && err.message ? err.message : String(err);
     const stack = err && err.stack ? err.stack : message;
     process.stdout.write('[' + ts() + '] [runner_host] FAILED: ' + stack + '\n');
-    send({ t: 'error', message, stack });
+    send({ t: 'error', message, stack, gate: !!(err && err.gate) });
     process.exitCode = 1;
     // Give IPC a tick to deliver before the process tears down.
     setTimeout(() => process.exit(1), 250).unref();

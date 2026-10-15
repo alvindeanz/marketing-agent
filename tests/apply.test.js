@@ -640,6 +640,25 @@ t('publish/create/redirect/set-handle 命中，已申报的不报，meta 小改�
   assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme set-text k --jq .a --value v', []), ['theme-text-edit']);
 });
 
+console.log('闸类拦截标记：契约校验失败不喂熔断（2026-10-15 redirect-add 误伤教训）');
+t('gateError 带 gate 标记，熔断分诊对 gate skip、秒挂 count、慢挂与取消 reset', () => {
+  const err = A.gateError('task 1058: plan contains undeclared shopseo ops: redirect-add');
+  assert.strictEqual(err.gate, true);
+  assert.ok(err instanceof Error);
+  assert.ok(/redirect-add/.test(err.message));
+
+  const { fuseVerdict } = require(path.join(W, 'lib', 'fuse_policy'));
+  /* 闸类拦截：不计不清，哪怕秒挂 */
+  assert.strictEqual(fuseVerdict({ gate: true, runMs: 500, cancelled: false }), 'skip');
+  /* 真失败秒挂：计数（环境病嫌疑） */
+  assert.strictEqual(fuseVerdict({ gate: false, runMs: 500, cancelled: false }), 'count');
+  /* 跑满 90 秒的失败：任务病，清零 */
+  assert.strictEqual(fuseVerdict({ gate: false, runMs: 95000, cancelled: false }), 'reset');
+  /* 用户取消：人的意志，清零（沿用旧语义） */
+  assert.strictEqual(fuseVerdict({ gate: false, runMs: 500, cancelled: true }), 'reset');
+  assert.strictEqual(fuseVerdict({ gate: true, runMs: 500, cancelled: true }), 'reset');
+});
+
 console.log('无方案续接：chain=execute 必须真的到达服务端（#814 教训，留言必须出现在收件人输入里）');
 t('方案文件缺失：postTaskResult 收到 chain=execute 且 note 说明零改动，随后抛错', async () => {
   const A2 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));

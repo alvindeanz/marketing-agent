@@ -33,6 +33,7 @@ const { Api } = require('./lib/api');
 const blogreview = require('./lib/blogreview');
 const { conditionProbeTick } = require('./lib/conditions');
 const { LANE_NAMES, laneOf } = require('./lib/lanes');
+const { fuseVerdict } = require('./lib/fuse_policy');
 const { ts, makeStdoutLogger, summarize } = require('./lib/util');
 
 const log = makeStdoutLogger('listener');
@@ -207,7 +208,10 @@ function runJob(job, lane) {
       if (!msg || typeof msg !== 'object') return;
       if (msg.t === 'log') push(msg.line);
       else if (msg.t === 'result') { gotResult = true; tokenUsage = Number(msg.tokenUsage) || 0; }
-      else if (msg.t === 'error') failure = new Error(msg.stack || msg.message || 'runner error');
+      else if (msg.t === 'error') {
+        failure = new Error(msg.stack || msg.message || 'runner error');
+        failure.gate = !!msg.gate;
+      }
     });
 
     child.on('error', (err) => {
@@ -250,17 +254,20 @@ function runJob(job, lane) {
         log(jobTag + ': FAILED :: ' + summarize(err.message, 400));
         /* 连续秒挂熔断（2026-09-16，登录过期连烧 5 个 job 的教训）：起跑即挂是环境病
            （凭据/磁盘/网络），不是这单任务的病，连续 3 个就拉闸停领新单；预检防不住
-           任意时刻过期，熔断才是真兜底。人修好环境后删熔断文件恢复。 */
-        if (runMs < 90000 && !cancelled) {
+           任意时刻过期，熔断才是真兜底。人修好环境后删熔断文件恢复。
+           分诊规则在 lib/fuse_policy：闸类拦截（err.gate，契约校验零写入）skip 不喂熔断
+           （2026-10-15，theme-text-edit/redirect-add 两轮误伤教训）。 */
+        const verdict = fuseVerdict({ gate: !!err.gate, runMs, cancelled });
+        if (verdict === 'count') {
           state.fastFails += 1;
           if (state.fastFails >= 3 && !fuseActive()) {
             fs.writeFileSync(FUSE_FILE, JSON.stringify({ at: ts(), last_job: job.id, reason: summarize(err.message, 200), note: '连续 ' + state.fastFails + ' 个 job 起跑即挂，已停止领单。修好环境（多半是 claude 登录过期）后删除本文件恢复。' }, null, 1));
             log('!! 熔断：连续 ' + state.fastFails + ' 个 job 秒挂，已写 ' + FUSE_FILE + '，停止领新单直到人工删除该文件');
             sendHeartbeat('fuse-tripped'); // 跳闸即上报，看板红条当轮可见，不等下个 poll
           }
-        } else {
+        } else if (verdict === 'reset') {
           state.fastFails = 0;
-        }
+        } /* skip：闸类拦截，不计不清 */
       } else {
         push('job completed ok');
         state.jobsDone += 1;
