@@ -726,3 +726,25 @@ t('sitemap flush 随发布豁免,未申报发布时照报', () => {
   assert.deepStrictEqual(A4.wfagentUndeclaredOps('wfagent content set kiaorakids 14935 --content-file b.html\nwfagent sitemap flush kiaorakids', ['wp-content-edit', 'wp-seo-meta-update']), []);
   assert.deepStrictEqual(A4.wfagentUndeclaredOps('wfagent sitemap flush kiaorakids', []), ['wp-sitemap-flush']);
 });
+
+t('同页冷却：拆单血缘豁免母任务触碰，其他任务照拦', () => {
+  const A5 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const os = require('os');
+  const fs = require('fs');
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'cooldown-'));
+  fs.mkdirSync(path.join(ws, 'seo-agent-output'), { recursive: true });
+  fs.mkdirSync(path.join(ws, 'notes'), { recursive: true });
+  const url = 'https://shop.example.com/products/snow-shovel/';
+  fs.writeFileSync(path.join(ws, 'seo-agent-output', 'change-plan-task-1289.md'),
+    '方案\n```json\n{"target_urls":["' + url + '"]}\n```\n');
+  const today = new Date().toISOString().slice(0, 10);
+  fs.writeFileSync(path.join(ws, 'notes', 'applied_ledger.jsonl'),
+    JSON.stringify({ task: 1287, date: today, ops: ['product-meta-update'], urls: [url] }) + '\n');
+  // 无血缘：同页冷却照拦
+  assert.strictEqual(A5.cooldownGate(ws, ['product-title-update'], 1289, null).blocked, true);
+  // 血缘命中：母任务 #1287 的触碰豁免
+  assert.strictEqual(A5.cooldownGate(ws, ['product-title-update'], 1289, 1287).blocked, false);
+  // 血缘不匹配（别的任务碰的）：照拦
+  assert.strictEqual(A5.cooldownGate(ws, ['product-title-update'], 1289, 999).blocked, true);
+  fs.rmSync(ws, { recursive: true, force: true });
+});

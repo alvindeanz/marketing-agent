@@ -1508,13 +1508,22 @@ function planTargetUrls(workspace, taskId) {
   } catch (e) { return { urls: [], noChange: false }; }
 }
 function daysAgo(dateStr) { return Math.floor((Date.now() - new Date(dateStr + 'T00:00:00Z').getTime()) / 86400000); }
+/** 拆单血缘：capability-gap 分流单的 detail 固定以「母任务 #N」开头（见 split 产线文案）。
+ *  母任务的触碰记录对拆单豁免：两半是同一份方案同一个假设，冷却要防的是同窗双假设，
+ *  不是防一份方案分两步落完。半改状态挂到窗尾反而毁测量（2026-10-15 Badger #1289 实证，
+ *  #1287 落了机器半边后，补执行器转回机器位的另一半被自家前半拦住）。其他任务的触碰照拦。 */
+function splitMotherId(taskDetail) {
+  const m = /母任务\s*#(\d+)/.exec(String(taskDetail || ''));
+  return m ? Number(m[1]) : null;
+}
 /** 返回 { blocked, until, why }。 */
-function cooldownGate(workspace, taskOps_, taskId) {
+function cooldownGate(workspace, taskOps_, taskId, motherId) {
   const { urls, noChange } = planTargetUrls(workspace, taskId);
   if (noChange) return { blocked: false };
   const ledger = readLedger(workspace);
   const isSitewide = taskOps_.some((op) => SITE_WIDE_OPS.indexOf(op) !== -1);
   for (const e of ledger) {
+    if (motherId && Number(e.task) === motherId) continue; /* 拆单血缘豁免，见 splitMotherId 注释 */
     const age = daysAgo(e.date);
     const eSitewide = (e.ops || []).some((op) => SITE_WIDE_OPS.indexOf(op) !== -1);
     if (eSitewide && age < SITEWIDE_WINDOW_DAYS) {
@@ -1537,8 +1546,8 @@ function cooldownGate(workspace, taskOps_, taskId) {
 /* 冷却闸只保护活页（2026-09-30，Sunseeker #932 实证：给未发布草稿修封面被自己草稿期的
    触碰记录拦了一个月）。命中同页冷却时逐个探目标页，全都不是 200 就没有测量窗可言，放行。
    网络失败按保守处理（当作活页照拦），冷却闸宁严不松是它的本性。 */
-async function cooldownGateLive(workspace, taskOps_, taskId, log) {
-  const gate = cooldownGate(workspace, taskOps_, taskId);
+async function cooldownGateLive(workspace, taskOps_, taskId, log, motherId) {
+  const gate = cooldownGate(workspace, taskOps_, taskId, motherId);
   if (!gate.blocked || !Array.isArray(gate.hitUrls) || !gate.hitUrls.length) return gate;
   if (gate.why && gate.why.indexOf('同页冷却') !== 0) return gate; // 全站独占窗不看 liveness
   for (const u of gate.hitUrls.slice(0, 5)) {
@@ -1570,7 +1579,7 @@ async function runOne(ctx, context, workspace, taskId) {
   // 且有客户确认闸把节奏）。挡下的任务保持 review，note 带 [cooldown-until]，到期重放行即可。
   const gateOps = taskOps(task);
   if (!gateOps.some((op) => BLOG_OPS.indexOf(op) !== -1)) {
-    const gate = await cooldownGateLive(workspace, gateOps, taskId, log);
+    const gate = await cooldownGateLive(workspace, gateOps, taskId, log, splitMotherId(task.detail));
     if (gate.blocked) {
       const msg = '[cooldown-until ' + gate.until + '] 落地暂缓：' + gate.why + '。' + gate.until + ' 后重放行即可，方案与判决保留。';
       try { await api.postTaskResult(taskId, { output_url: String(task.output_url || ''), note: msg, attention: false }); } catch (e) { log('task ' + taskId + ': cooldown note write failed :: ' + e.message); }
