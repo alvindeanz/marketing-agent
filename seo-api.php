@@ -7077,6 +7077,9 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     if(isset($i['output_url'])){$sets[]='output_url=?';$args[]=(string)$i['output_url'];}
     if(isset($i['ops'])){$sets[]='ops=?';$args[]=(string)$i['ops'];$sets[]='card_kind=?';$args[]=card_kind_of((string)$i['ops']);}
     if(isset($i['result_note'])){$sets[]='result_note=?';$args[]=(string)$i['result_note'];}
+    /* 追加注记（2026-10-15 补）：此前只有全量 result_note，调用方传 result_note_append 被静默
+       吞掉（status 同批时更新照常走、注记丢失无感知），读改写又有并发覆盖风险。 */
+    if(isset($i['result_note_append'])&&!isset($i['result_note'])){$sets[]="result_note=CONCAT_WS('\n\n',NULLIF(result_note,''),?)";$args[]=(string)$i['result_note_append'];}
     if(array_key_exists('attention',$i)){$sets[]='attention=?';$args[]=empty($i['attention'])?0:1;}
     if(array_key_exists('plan_id',$i)){$sets[]='plan_id=?';$args[]=$i['plan_id']?(int)$i['plan_id']:null;}
     /* 卡反馈处理完毕的收口：只许清空不许手写时间，时间只由 /card_feedback 写入。 */
