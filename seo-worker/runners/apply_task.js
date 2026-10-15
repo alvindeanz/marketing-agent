@@ -305,7 +305,7 @@ async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops
     output_url: cardUrl,
     note: '[落地页确认卡] 结构类调整（' + structOps.join(',') + '）需客户确认。卡（发给客户，客户点同意后自动落地，不回复保持现状）: ' + cardUrl,
   });
-  log('task ' + taskId + '：落地页确认卡已出 ' + cardUrl + '，任务进卡待发流，客户同意后自动落地');
+  log('task ' + taskId + '：落地页确认卡已出 ' + cardUrl + '，任务进等客户流，客户同意后自动落地');
   return { taskId, status: 'carded', logFile: '' };
 }
 
@@ -1658,7 +1658,7 @@ async function runOne(ctx, context, workspace, taskId) {
     if (!lastOc || String(lastOc.choice) !== 'agree') {
       /* 卡产线（2026-10-10 Alvin 批）：此前这里直接抛错让人「出卡」，但系统里没有任何工具
          出这张卡，结构类任务全部烂成人工债（#813/#815 一族）。现在闸自己出卡：方案翻成
-         客户话渲染落地页确认卡发布到 agencyreport，任务回 review 进「卡待发」流；客户点
+         客户话渲染落地页确认卡发布到 agencyreport，任务回 review 进等客户流；客户点
          「同意，按方案调整」落 onsite_confirm=agree，harness 折叠排 apply，本闸复核凭证
          后放行。客户 hold 或写意见照各自路由。结构类不走到期视同同意（终局裁决权在客户，
          硬闸语义即如此）。 */

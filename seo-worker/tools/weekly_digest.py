@@ -51,12 +51,13 @@ def classify(t):
         return ('执行失败', '看失败原因，修材料或环境后重放（多为凭据/基线/lint，修法通常在任务 note 里）')
     if is_card(t) and t.get('status') == 'review':
         # 反馈证据优先于 sent_at：早期卡的反馈先于 sent_at 自动打点上线，字段可能永远是空
-        # （#138/#139 2026-09-17 教训），有反馈行/折叠记录就绝不能标「卡待发」。
+        # （#138/#139 2026-09-17 教训），有反馈行/折叠记录就绝不能标成等送达。
+        # 没有「待发」概念（2026-10-14 Alvin 定）：卡出即送客户，sent_at=客户打开卡的自动打点（已读）。
         note = str(t.get('result_note') or '')
         if t.get('card_feedback_at') or '[卡反馈折叠' in note or '[客户反馈]' in note:
             return ('卡已回等落地', '下一轮 harness 排产即消化；反复出现属机制失效，报 Aira')
         if not t.get('sent_at'):
-            return ('卡待发', '把卡发给客户并在看板打「已发」')
+            return ('卡已送客户未读', '客户开卡自动打点；久未读可催，方向卡类到期视同同意')
         return ('卡等客户', '催客户，或等 30 天到期视同同意')
     if t.get('status') == 'review':
         return ('待放行（真闸/L2）', '看板放行或改判不做（spend/不可逆类是留给人的）')
