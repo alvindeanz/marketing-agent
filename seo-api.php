@@ -5856,12 +5856,13 @@ if($m==='GET'&&$ROUTE==='/card_feedback'){
    时间口径：seo_asks 全表与 seo_card_feedback.answered_at 存 UTC；seo_card_feedback.created_at 仍是库钟（NZ），
    输出前按库钟与 UTC 的实测差值换算，对外一律 ISO8601 Z。 */
 
-/* 集成 token 表：源码只存 sha256，明文只在发放方与持有方。轮换时新旧两条并存，持有方切换后删旧条。 */
-define('INTEGRATION_TOKENS',[
+/* 集成 token 表：源码只存 sha256，明文只在发放方与持有方。轮换时新旧两条并存，持有方切换后删旧条。
+   写成函数不写 define：闸门在文件前部（$ROUTE 之后）就要用，define 是运行到这里才生效，函数定义则提前可用。 */
+function asks_integration_tokens(){return [
     ['id'=>'webforger-20261016','integration'=>'webforger',
      'sha256'=>'7b587d5d7ae5a0cdcf9403639b97db5e38f4e4b399daf46a9552be1304de837a',
      'client_ids'=>[55],'scopes'=>['asks:read','answers:write']],
-]);
+];}
 
 /* ASKS-PURE-START（纯函数块，零数据库零 HTTP，tests/asksapi.test.php 按标记抠出来 eval） */
 define('ASK_KINDS',['direction','confirmation','plan_approval','policy_qa']);
@@ -6128,7 +6129,7 @@ function asks_audience_ok($aud,$role){return $aud==='both'||$aud===$role;}
 function asks_svc_gate(){
     global $ROUTE,$ASKS_INTEG;
     $t=bearer();
-    $integ=asks_integ_match(INTEGRATION_TOKENS,$t);
+    $integ=asks_integ_match(asks_integration_tokens(),$t);
     $isSvc=strpos($ROUTE,'/svc/')===0;
     if($integ&&!$isSvc)res(403,['error'=>'Integration token not allowed on this route']);
     if($isSvc){

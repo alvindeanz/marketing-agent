@@ -13,7 +13,7 @@ if(!preg_match('#/\* ASKS-PURE-START([\s\S]*?)/\* ASKS-PURE-END \*/#',$src,$m)){
 $code=$m[1];
 $code=preg_replace('#^[\s\S]*?\*/#','',$code,1);
 eval($code);
-if(!preg_match("#define\('INTEGRATION_TOKENS',(\[[\s\S]*?\n\])\);#",$src,$tm)){fwrite(STDERR,"找不到 INTEGRATION_TOKENS\n");exit(1);}
+if(!preg_match("#function asks_integration_tokens\(\)\{return (\[[\s\S]*?\n\]);\}#",$src,$tm)){fwrite(STDERR,"找不到 asks_integration_tokens\n");exit(1);}
 $TOKENS=eval('return '.$tm[1].';');
 
 $pass=0;$fail=0;
