@@ -108,6 +108,9 @@ const DEFAULTS = {
   // Skip an external pull when the newest snapshot for that source is younger
   // than this. payload.fresh bypasses it.
   cacheTtlHours: 24,
+  // 按源覆盖缓存 TTL。semrush 走 seoq 烧的是付费额度，排名数据本身也只有周级意义，
+  // 给 144h 后 pull_data 就可以放心日跑（gsc/ga4/ads 免费接口照常 24h）。
+  sourceTtlHours: { semrush: 144 },
   // ssh Host alias for the internal seoq gate that fronts SEMrush.
   seoqSsh: 'seoq',
   semrushDb: 'nz',

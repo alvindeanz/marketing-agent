@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-/* 指标哨兵：周环比回归的命中、门槛、覆盖保护与去重。跑法：node tests/sentinel.test.js
-   防的是两类事故：小样本客户被噪音开单刷屏，和真塌方时因取数空洞而静默漏报。 */
+/* 指标哨兵：周期回归的命中、门槛、覆盖保护、投放断流与去重；外加按源缓存 TTL。
+   跑法：node tests/sentinel.test.js
+   防的是三类事故：小样本客户被噪音开单刷屏、真塌方时因取数空洞静默漏报、
+   日跑 pull 把 semrush 付费额度烧穿。 */
 const assert = require('assert');
 const sentinel = require('../seo-worker/lib/sentinel');
 const { pickWatchCallout } = require('../seo-worker/runners/report');
+const { cacheCheck } = require('../seo-worker/runners/pull_data');
 
 let fail = 0;
 function t(name, fn) {
@@ -16,13 +19,13 @@ function t(name, fn) {
   }
 }
 
-/** 造一段逐日序列：days 个点，按回调给值，锚定在 2026-10-14 往回数。 */
+/** 造一段逐日序列：days 个点，按回调给值，锚定在 2026-10-14 往回数。i=0 是最新一天。 */
 function series(days, valueOf) {
   const out = [];
   const end = Date.UTC(2026, 9, 14);
   for (let i = 0; i < days; i++) {
     const d = new Date(end - i * 86400000).toISOString().slice(0, 10);
-    out.push({ d, v: valueOf(i) }); // i=0 是最新一天
+    out.push({ d, v: valueOf(i) });
   }
   return out;
 }
@@ -63,15 +66,35 @@ t('GSC 窗口取数空洞（覆盖不足 5 天），宁可漏报不误报', () =
   assert.strictEqual(sentinel.evalSentinel(s).length, 0);
 });
 
-t('询盘序列缺行按 0 计，锚取 GSC 最新日，询盘枯竭测得到', () => {
+t('询盘走 14 天窗基数 10：缺行按 0、锚取 GSC 最新日，询盘枯竭测得到', () => {
   const s = {
-    gsc_clicks: series(21, () => 10), // 提供锚，自身平稳不命中
-    ga4_leads: series(21, (i) => (i < 7 ? 0 : 1)).filter((p) => p.v > 0), // 最近 7 天一行都没有
+    gsc_clicks: series(35, () => 10), // 提供锚，自身平稳不命中
+    ga4_leads: series(35, (i) => (i < 14 ? 0 : 1)).filter((p) => p.v > 0), // 近 14 天一行都没有，前 14 天共 14 条
   };
   const alerts = sentinel.evalSentinel(s);
   assert.strictEqual(alerts.length, 1);
   assert.strictEqual(alerts[0].metric, 'ga4_leads');
   assert.strictEqual(alerts[0].cur, 0);
+});
+
+t('询盘 14 天基数 8 不足 10（泊松噪音区），不开单', () => {
+  const s = {
+    gsc_clicks: series(35, () => 10),
+    ga4_leads: series(35, (i) => (i >= 14 && i < 22 ? 1 : 0)).filter((p) => p.v > 0), // 前窗 8 条
+  };
+  assert.strictEqual(sentinel.evalSentinel(s).length, 0);
+});
+
+t('投放断流：近 3 天花费 0 且前 7 天 >= 50，命中；长期停投（基数 0）不命中', () => {
+  const hit = { ads_cost: series(14, (i) => (i < 3 ? 0 : 30)) }; // 前 7 天 210
+  const a = sentinel.evalSentinel(hit);
+  assert.strictEqual(a.length, 1);
+  assert.strictEqual(a[0].metric, 'ads_cost');
+  assert.strictEqual(a[0].tag, '广告花费断流');
+  const paused = { ads_cost: series(14, () => 0) };
+  assert.strictEqual(sentinel.evalSentinel(paused).length, 0);
+  const small = { ads_cost: series(14, (i) => (i < 3 ? 0 : 5)) }; // 前 7 天 35 < 50
+  assert.strictEqual(sentinel.evalSentinel(small).length, 0);
 });
 
 t('空输入不炸不报', () => {
@@ -91,15 +114,17 @@ t('去重：未结哨兵单拦住，14 天内结过的也拦，老单不拦', ()
   assert.strictEqual(sentinel.sentinelBlocked(other, now), null);
 });
 
-t('开单文案：标题带降幅与锚定日，detail 带四选一要求', () => {
+t('开单文案：标题带降幅与锚定日，detail 带生态级并单指引与四选一要求，置顶', () => {
   const alerts = sentinel.evalSentinel({ gsc_clicks: series(21, (i) => (i < 7 ? 2 : 4)) });
   const task = sentinel.buildTask('X', alerts, ['https://a/ ：100 -> 10']);
   assert.ok(task.title.startsWith(sentinel.TITLE_PREFIX));
   assert.ok(task.title.includes('降50%'));
   assert.ok(task.detail.includes('四选一'));
+  assert.ok(task.detail.includes('生态级'));
   assert.ok(task.detail.includes('100 -> 10'));
   assert.strictEqual(task.owner_type, 'agent');
   assert.strictEqual(task.status, 'proposed');
+  assert.strictEqual(task.attention, 1);
 });
 
 t('报告需观察 callout 挑选：黄取正文，缺了返回 null', () => {
@@ -113,6 +138,17 @@ t('报告需观察 callout 挑选：黄取正文，缺了返回 null', () => {
   assert.strictEqual(c.body, '询盘回落');
   assert.strictEqual(pickWatchCallout({ funnel_callouts: [{ tone: 'yellow', body: '  ' }] }), null);
   assert.strictEqual(pickWatchCallout(null), null);
+});
+
+t('按源缓存 TTL：30 小时旧快照，gsc 过期要拉，semrush 在 144h 内跳过', () => {
+  const created = new Date(Date.now() - 30 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+  const latest = [
+    { source: 'gsc', created_at: created },
+    { source: 'semrush', created_at: created },
+  ];
+  const ctx = { cfg: { cacheTtlHours: 24, sourceTtlHours: { semrush: 144 } }, log: () => {}, fresh: false };
+  assert.strictEqual(cacheCheck(ctx, latest, 'gsc').skip, false);
+  assert.strictEqual(cacheCheck(ctx, latest, 'semrush').skip, true);
 });
 
 console.log(fail ? fail + ' fail' : 'sentinel: all pass, 0 fail');

@@ -75,7 +75,9 @@ function cacheCheck(ctx, latest, source) {
     log(source + ': payload.fresh set, cache bypassed');
     return { skip: false };
   }
-  const ttl = Number(cfg.cacheTtlHours);
+  // 按源 TTL 覆盖（2026-10-16）：semrush 这类烧额度的源给长 TTL，pull_data 才能日跑。
+  const override = cfg.sourceTtlHours && Number(cfg.sourceTtlHours[source]);
+  const ttl = Number.isFinite(override) && override >= 0 ? override : Number(cfg.cacheTtlHours);
   if (!(ttl > 0)) return { skip: false };
 
   const snap = snapshotFor(latest, source);
