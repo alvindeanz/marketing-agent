@@ -118,6 +118,7 @@
     "wp-content-edit": "reversible",
     "wp-draft-create": "reversible",
     "collection-metafield-update": "reversible",
+    "theme-code-update": "reversible",
     "article-template-assign": "reversible"
   },
   "readonly_ops": {
