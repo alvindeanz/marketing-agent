@@ -1063,13 +1063,110 @@ async function safeReply(ctx, rootId, body) {
   }
 }
 
+/* ---------- 叙述回合（2026-10-16 Alvin 批，纯叙述模式） ----------
+   频道出身的任务收口后，服务端排一个带 payload.narrate 的 chat job，这里用对话语境
+   补一条简短进展说明。三条硬边界：
+   1. 无执行权：不带 drafts 不带 actions 不开工具带，模型只许说话（合规：链条源于人，
+      但系统触发的回合不许长出手来，否则撞硬规矩 1）。
+   2. 瘦简报：只带频道尾部消息与任务收口材料，不拉 getContext 营销全家桶。
+   3. 便宜模型：narrationModel（默认 sonnet），叙述不是判断。
+   模板事实行由服务端照发（零模型兜底），本回合挂了或判 SKIP 都不影响事实送达。 */
+const NARRATION_MAX_MSGS = 12;
+const NARRATION_KIND_LABEL = {
+  applied: '已落地并通过自验',
+  accepted: '分析或方案交付已验收（账户与站点未因本单改动）',
+  dropped: '判定不做，已收口',
+  merged: '并入其他任务收口',
+  killed: '人工终止',
+};
+
+function buildNarrationPrompt(opts) {
+  const { clientName, messages, task, closeKind } = opts;
+  return [
+    '你是 HornTech 看板频道（客户 ' + clientName + '）里的 agent。一个从本频道发起的任务刚收口，',
+    '系统已经发过模板化的事实行。你补一条简短的对话语境说明，让下任务的人不翻看板就知道',
+    '发生了什么、结果如何。',
+    '',
+    '铁律：',
+    '- 纯叙述，你没有任何执行权：不许派单、不许承诺「我会去做某事」、不许索要确认或口令。',
+    '  下一步该谁做就写谁（工具维护者、运营、客户），不许把自己写成执行者。',
+    '- 2 到 6 句话。说清三件事：结果是什么、账户或站点动没动、下一步是什么谁负责。',
+    '- 数字与结论只许来自下面的收口材料；材料里没有的不提，不许推测原因。',
+    '- 频道里已有的系统事实行不要逐字复读，补语境即可；没有值得补的就只输出 SKIP（大写，单独一行）。',
+    '- 语言跟频道走（中文频道写中文）。直接输出正文，不要前缀不要落款。',
+    '',
+    '===== 频道最近消息 =====',
+    historyBlock(messages),
+    '===== 任务收口材料 =====',
+    '任务 #' + (task.id || '?') + '「' + (task.title || '') + '」',
+    '收口类型：' + (NARRATION_KIND_LABEL[closeKind] || closeKind || '未知'),
+    task.output_url ? '产物链接：' + task.output_url : '',
+    '结果备注（尾部）：',
+    String(task.result_note_tail || '').trim() || '（无）',
+    '',
+    '输出正文，或 SKIP。',
+  ].join('\n');
+}
+
+/** 模型输出规整：SKIP 或空返回 null（不发帖），其余截断成帖子正文。纯函数，供测试。 */
+function narrationBody(stdout) {
+  const text = String(stdout == null ? '' : stdout).trim();
+  if (!text) return null;
+  if (/^SKIP\b/.test(text.split('\n', 1)[0].trim())) return null;
+  return truncate(text, 2000);
+}
+
+async function runNarration(ctx) {
+  const { job, api, cfg, log } = ctx;
+  const payload = job.payload || {};
+  const rootId = Number(payload.inbox_id) || 0;
+  const taskId = Number(payload.narrate && payload.narrate.task_id) || 0;
+  if (!rootId || !taskId) throw new Error('narrate job needs payload.inbox_id and narrate.task_id');
+  const res = await api.getInboxItem(rootId);
+  const root = (res && res.item) || null;
+  if (!root) throw new Error('inbox root ' + rootId + ' not found');
+  const messages = threadMessages(root, (res && res.replies) || []).slice(-NARRATION_MAX_MSGS);
+  const st = await api.getTaskState(taskId);
+  const task = (st && st.task) || {};
+  const prompt = buildNarrationPrompt({
+    clientName: root.client_name || '',
+    messages,
+    task,
+    closeKind: String((payload.narrate && payload.narrate.close_kind) || ''),
+  });
+  const model = cfg.narrationModel || 'sonnet';
+  log('叙述回合：任务 #' + taskId + '，prompt ' + prompt.length + ' 字符，模型 ' + model);
+  const r = await runClaude(cfg, {
+    prompt,
+    cwd: require('node:os').tmpdir(),
+    log,
+    model,
+    allowedTools: ALLOWED_TOOLS,
+    label: 'narrate ' + taskId,
+    timeoutMs: 5 * 60 * 1000,
+  });
+  const body = narrationBody(r.stdout);
+  if (!body) {
+    log('叙述回合：模型判 SKIP 或无输出，不发帖');
+    return { tokenUsage: 0 };
+  }
+  await api.postChatReply(rootId, { body });
+  log('叙述回合：已回帖 ' + body.length + ' 字');
+  return { tokenUsage: 0 };
+}
+
 async function run(ctx) {
+  const payload = (ctx.job && ctx.job.payload) || {};
+  if (payload.narrate) return runNarration(ctx);
   return runWith(ctx, (opts) => parseWithModel(ctx, opts));
 }
 
 module.exports = {
   run,
   runWith,
+  runNarration,
+  buildNarrationPrompt,
+  narrationBody,
   parseWithModel,
   buildPrompt,
   threadMessages,

@@ -54,6 +54,9 @@ const DEFAULTS = {
      2026-10-14 教训补一刀：这次降档被 Mac config.json 的陈旧 chatModel/threadModel=fable 覆盖挡住，
      10-11 至 10-13 三天 Mac 又烧 329 次 fable（走操作者本机凭据库）。全链路降 opus，覆盖键一并清理。 */
   chatModel: 'opus',
+  // 叙述回合（2026-10-16 Alvin 批）：频道出身任务收口后的对话语境进展说明。
+  // 纯叙述不是判断，sonnet 足够；瘦简报下单条成本分钱级。别抬到 opus。
+  narrationModel: 'sonnet',
   // 任务判定（闸A）：一批任务该不该做，按 specs/review_principles.md 判。
   // 2026-09-17 Alvin 定降 opus：这是 fable 定好 plan 框架之内的单任务 go/no-go，边界清楚；
   // 判断漂了由季度 planReview（仍 fable）重规划纠回。全流水线最高频调用，premium 从高频挪走。

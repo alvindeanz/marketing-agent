@@ -303,6 +303,11 @@ class Api {
     return this.req('GET', '/inbox/' + encodeURIComponent(id));
   }
 
+  /** GET /task_state?task_id= -> { task, jobs }，含已归档单。叙述回合与 chat 单号查询共用。 */
+  async getTaskState(taskId) {
+    return this.req('GET', '/task_state?task_id=' + encodeURIComponent(taskId));
+  }
+
   /**
    * POST /inbox body { client_id, kind: 'digest'|'ack', body, refs, reply_to, resolve }
    * The worker may only write a digest or an ack. A ruling is a human's own

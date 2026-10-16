@@ -941,7 +941,32 @@ function task_close($tid,$kind,$reason='',$by=''){
         $sp=capgap_split_on_accept($tid);
         if(!$sp)accepted_close_notify($tid,$reason);
     }
+    narration_queue($tid,$kind,$reason);
     return null;
+}
+/* 叙述回帖排队（2026-10-16 Alvin 批，纯叙述模式）：频道出身的任务收口后排一个带
+   narrate 标记的 chat job，模型用对话语境补一条进展说明，让下任务的人不翻看板就知道
+   结果。模板事实行照发不动（零模型兜底），叙述层挂了或判 SKIP 不影响事实送达。
+   合规边界：链条源于人（任务是频道里的人发起的），worker 侧叙述分支无 drafts 无 actions
+   无工具带，模型只许说话，不自链。 */
+function narration_queue($tid,$kind,$reason){
+    $q=db()->prepare("SELECT id,client_id,origin FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
+    if(!$t)return;
+    if(!preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$t['origin'],$om))return;
+    $rq=db()->prepare("SELECT id FROM seo_inbox WHERE id=?");$rq->execute([(int)$om[2]]);$root=$rq->fetch();
+    if(!$root)return;
+    $dup=db()->prepare("SELECT id FROM agent_jobs WHERE type='chat' AND status IN('queued','running') AND payload LIKE ? LIMIT 1");
+    $dup->execute(['%"narrate":{"task_id":'.(int)$tid.',%']);
+    if($dup->fetch())return;
+    $payload=json_encode([
+        'inbox_id'=>(int)$root['id'],
+        'narrate'=>['task_id'=>(int)$tid,'close_kind'=>(string)$kind,'reason'=>mb_substr((string)$reason,0,400,'UTF-8')],
+    ],JSON_UNESCAPED_UNICODE);
+    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'chat',?,'queued','seo-worker')")
+        ->execute([(int)$t['client_id'],$payload]);
+    $jid=(int)db()->lastInsertId();
+    audit('seo-worker','seo_chat_narrate_queue',(string)$jid,['task_id'=>(int)$tid,'kind'=>$kind]);
+    fire_wake($jid);
 }
 /* 终局回频道（2026-10-16 #1369 教训：任务在频道眼皮底下验收收口，频道却无下文，操作员
    只能靠猜进度）。频道发起的任务 accepted 收口且没有 capgap 拆单消息时，补发三要素：
