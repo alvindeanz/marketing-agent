@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-16 AIDEN 跨认领：asks/answers API Phase 1（seo-api.php 围栏块，开发中）
+
+- 认领内容：seo-api.php 新增 GET /svc/v1/asks（只读聚合，按集成 token 绑定 client 限权，逐字段白名单脱敏，effective_answer 现算）与 POST /svc/v1/answers（写现有 card_feedback 账本，channel 服务端强制 webforger，idempotency_key#item_id 唯一索引幂等）；POST /asks worker 登记端点（auth_worker，ask_id 幂等 upsert）加 admin 回填入口；集成 token 层（源码只存 sha256，绑定 client_ids 与 scopes，双条并存轮换，/svc/ 前缀拒收 JWT/WORKER_TKN/READONLY_TKN，集成 token 打其他路由 403）；ensure_* 惰性 DDL（新表新列全 VARCHAR/DATETIME/MEDIUMTEXT，禁 ENUM）；tests/asksapi.test.php 加 node/php 折叠一致性夹具。新代码集中一个 BEGIN/END 围栏块，插在 /card_feedback 三路由之后。
+- 边界：不碰 seo-worker（含 cardfold.js、出卡路径）、渲染模板、agencyreport 渲染；不改 deploy.sh。
+- 三个落点（引 Aira 10-16 回条 to-aiden-asks-api-reply-20261016.md）：①出卡登记 Ask 归 Aira，本周内接上，契约定稿由 Aiden 发条子；②Phase 1 折叠维持入账序（id 序，口径同 cardfold），answered_at 从 Phase 1 起入库，Phase 2 WF 真实并发前与 cardfold 同窗切 answered_at；③动笔窗口即日至 10-20，seo-api.php 整段归 Aiden，Aira 窗口内不碰。
+- 坑：other 是不覆盖表态的旁注、空文本 other 视为 hold，投影照现行口径不改；卡 token 指纹不传明文（source_ref.card_token_ref 只收指纹，且 source_ref 不对外）；公网入口走 agencyreport vhost 的 /svc/v1/ 转发，nginx 配置不在本仓。
+- 下一步：代码加测试加部署，结果回本条。
+
 ### 2026-10-15 AIRA capability-gap 自愈闭环（rev 847bb03/23980c5，api+worker 已部署；shopseo 1.7.0 aidam c317c5c）
 
 - 背景：ticket #35/#37/#38/#39 一天四单同病，CLI 缺口拆人工单后躺到 Summer 报票、维护者手动 machine_run 才动。Alvin 定调「第一性原理修复，目标下次自动完成」。
