@@ -107,6 +107,20 @@ function headerBlock(pack) {
       '本期曝光上升而点击率下降：解读必须写明这是覆盖扩张的结构效应（新页面与低位次词带来的新增曝光天然点击率低，稀释平均值），不得把平均点击率下降单独当成质量退步的结论。'
     );
   }
+  // 2026-09-16 Google 清理深位次与工具访问的展示计数：全客户组合同日观测到曝光回落、
+  // 平均位次普遍前移而点击未同步下跌（HornTech 两站 2026-10-16 复盘实锤）。
+  // 凡对比窗跨这一天的报告，曝光下跌一律不许当成效果下滑的主证。
+  if (
+    gd &&
+    Number(gd.impressions) < 0 &&
+    meta.period &&
+    String(meta.period.end || '') >= '2026-09-16' &&
+    String(meta.period.start || '') <= '2026-11-30'
+  ) {
+    frame.push(
+      '本期或对比期跨 2026 年 9 月中旬：Google 搜索自该时点起调整了展示次数的计数规则（深位次与工具类访问的展示被清理，行业普遍观测到曝光回落伴随平均位次前移）。曝光下跌不得作为效果下滑的主证，流量概览须有一句统计说明交代计数规则变化（记住全文禁用「口径」二字），效果判断以点击、访问、询盘为准。'
+    );
+  }
   let no = 13;
   lines.push('');
   lines.push('客户汇报框架（与铁律同级，逐条遵守）：');
@@ -613,7 +627,63 @@ async function run(ctx) {
   // 服务端落库时会把反馈参数（?r=&k=）拼进 url，交付用它；拿不到再退回裸链接。
   const finalUrl = (saved && saved.url) || published.url;
   log('报告 v' + finalVersion + ' 完成，链接 ' + finalUrl);
+
+  // 报告「需观察」自动转任务（2026-10-16 Alvin 批）：黄色 callout 不再死在 HTML 里，
+  // 开成 proposed 单交给轮次判定官裁 do/drop。失败只降级，不影响报告交付。
+  try {
+    const wmsg = await watchTask(api, job.client_id, narrative, ym, finalUrl);
+    log('watch: ' + wmsg);
+  } catch (e) {
+    log('watch: 降级跳过 :: ' + e.message);
+  }
   return { tokenUsage: 0 };
+}
+
+/** 从叙事 JSON 里挑「需观察」黄色 callout。纯函数，供测试。 */
+function pickWatchCallout(narrative) {
+  if (!narrative) return null;
+  const list = Array.isArray(narrative.funnel_callouts) ? narrative.funnel_callouts : [];
+  for (const c of list) {
+    if (c && c.tone === 'yellow' && String(c.body || '').trim()) {
+      return { title: String(c.title || '需观察'), body: String(c.body).trim() };
+    }
+  }
+  return null;
+}
+
+const WATCH_PREFIX = '[报告需观察]';
+
+async function watchTask(api, clientId, narrative, ym, reportUrl) {
+  const callout = pickWatchCallout(narrative);
+  if (!callout) return '无叙事或无需观察项，不开单';
+  const title = WATCH_PREFIX + ' ' + ym + ' ' + callout.title;
+  const context = await api.getContext(clientId);
+  const tasks = (context && context.tasks) || [];
+  if (tasks.some((t) => String((t && t.title) || '').startsWith(WATCH_PREFIX + ' ' + ym))) {
+    return '本期已开过需观察单，跳过';
+  }
+  const out = await api.postTasksBulk({
+    client_id: clientId,
+    tasks: [
+      {
+        title: title.slice(0, 250),
+        detail:
+          '来源：' +
+          ym +
+          ' 期报告的「需观察」一节（' +
+          reportUrl +
+          '）。\n\n' +
+          callout.body +
+          '\n\n任务要求：核实该观察项下一期是否需要动作，需要就给出具体清单，不需要就带数据说明收口。',
+        module: 'technical',
+        owner_type: 'agent',
+        status: 'proposed',
+        priority: 'P2',
+      },
+    ],
+  });
+  const id = out && out.ids && out.ids[0];
+  return '已开需观察单 #' + (id || '?');
 }
 
 module.exports = {
@@ -630,4 +700,5 @@ module.exports = {
   defaultPeriodStart,
   nextVersionHint,
   packForPrompt,
+  pickWatchCallout,
 };

@@ -9,6 +9,7 @@ const shopifylink = require('../lib/shopifylink');
 const registry = require('../lib/registry');
 const metrics = require('../lib/metrics');
 const googleads = require('../lib/googleads');
+const sentinel = require('../lib/sentinel');
 
 const GSC_SCOPES = ['https://www.googleapis.com/auth/webmasters.readonly'];
 const GA4_SCOPES = ['https://www.googleapis.com/auth/analytics.readonly'];
@@ -692,6 +693,15 @@ async function refreshSources(ctx, opts = {}) {
     } catch (e) {
       log('content_registry: degraded, unexpected error :: ' + (e.stack || e.message));
     }
+  }
+
+  // 指标哨兵（2026-10-16）：对刚写完的时序做零模型周环比回归，命中阈值开诊断单。
+  // 跑在时序写入之后，读的是库内清洗过的序列；任何失败只降级。
+  try {
+    const smsg = await sentinel.check(ctx, job.client_id, profile, (context && context.tasks) || []);
+    log('sentinel: ' + smsg);
+  } catch (e) {
+    log('sentinel: 降级跳过 :: ' + e.message);
   }
 
   // Shopify 博客任务卡片链接对齐（2026-09-22 #619）：草稿发布后 admin 预览链接换正式链接，
