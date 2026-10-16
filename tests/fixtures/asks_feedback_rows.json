@@ -1,0 +1,28 @@
+{
+  "_doc": "card_feedback 账本行夹具（id 升序即入账序）。node 侧 tests/asksfold.test.js 用 cardfold.foldCardFeedback、php 侧 tests/asksapi.test.php 用 asks_fold_effective 各自折叠，都必须等于 expected。改折叠口径时两边与本文件同步改。",
+  "rows": [
+    {"id": 101, "item": "d1", "choice": "agree", "fb": "", "created_at": "2026-10-10 09:00:00", "actor": "client"},
+    {"id": 102, "item": "d1", "choice": "hold", "fb": "", "created_at": "2026-10-10 09:05:00", "actor": "client"},
+    {"id": 103, "item": "d1", "choice": "other", "fb": "please check suitcase orders", "created_at": "2026-10-10 09:06:00", "actor": "client"},
+    {"id": 104, "item": "negatives", "choice": "flag", "fb": "kw_12, kw_31", "created_at": "2026-10-10 09:07:00", "actor": "client"},
+    {"id": 105, "item": "d2", "choice": "other", "fb": "", "created_at": "2026-10-10 09:08:00", "actor": "client"},
+    {"id": 106, "item": "d2", "choice": "hold", "fb": "", "created_at": "2026-10-11 10:00:00", "actor": "agency:alvin", "channel": ""},
+    {"id": 107, "item": "", "choice": "agree", "fb": "", "created_at": "2026-10-11 10:01:00", "actor": "client"},
+    {"id": 108, "item": "d1", "choice": "other", "fb": "second note", "created_at": "2026-10-12 08:00:00", "actor": "webforger:client:wfu_ab12", "channel": "webforger", "answered_at": "2026-10-11 19:00:00", "ask_rev": 1},
+    {"id": 109, "item": "global_note", "choice": "other", "fb": "overall fine", "created_at": "2026-10-12 08:01:00", "actor": "client"},
+    {"id": 110, "item": "negatives", "choice": "flag", "fb": "kw_12", "created_at": "2026-10-12 08:02:00", "actor": "webforger:client:wfu_ab12", "channel": "webforger", "answered_at": "2026-10-11 19:02:00", "ask_rev": 1},
+    {"id": 111, "item": "d3", "choice": "other", "fb": "   ", "created_at": "2026-10-12 08:03:00", "actor": "client"}
+  ],
+  "expected": {
+    "stance": {
+      "d1": {"choice": "hold", "fb": "", "id": 102},
+      "negatives": {"choice": "flag", "fb": "kw_12", "id": 110},
+      "d2": {"choice": "hold", "fb": "", "id": 106},
+      "_card": {"choice": "agree", "fb": "", "id": 107}
+    },
+    "notes": {
+      "d1": ["please check suitcase orders", "second note"],
+      "global_note": ["overall fine"]
+    }
+  }
+}

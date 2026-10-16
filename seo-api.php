@@ -2272,6 +2272,9 @@ if($sn&&$sn!=='/'&&strpos($ROUTE,$sn)===0)$ROUTE=substr($ROUTE,strlen($sn));
 elseif(($bp=strpos($ROUTE,'.php'))!==false)$ROUTE=substr($ROUTE,$bp+4);
 $ROUTE=rtrim($ROUTE,'/');
 if($ROUTE==='')$ROUTE='/';
+/* BEGIN ASKS-API HOOK（2026-10-16 AIDEN）：集成 token 闸门，函数定义在 ASKS-API 围栏块（/card_feedback 三路由之后）。 */
+asks_svc_gate();
+/* END ASKS-API HOOK */
 
 /* brand_regex 排在最后，是后加的列（见 ensure_metrics_schema）。留空表示
    "让 worker 自己从客户名或域名推"，不是"这个客户没有品牌词"。 */
@@ -5837,6 +5840,593 @@ if($m==='GET'&&$ROUTE==='/card_feedback'){
     }catch(Exception $e){/* 表还没建过（从未有人提交过反馈）就是空 */}
     res(200,['rows'=>$rows]);
 }
+
+/* ===================== BEGIN ASKS-API（2026-10-16 AIDEN 跨认领，Phase 1） =====================
+   确认物双通道（agencyreport 邮件卡页 + WebForger 客户后台）的 Ask 实体与 Answer 账本服务层。
+   设计稿 asks-bridge-plan-v2-20261016；Aira 10-16 回条三落点：出卡登记归 Aira（POST /asks），
+   Phase 1 折叠维持入账序（id 序，口径同 seo-worker/lib/cardfold.js），answered_at 先入库不参与排序。
+   路由：
+     GET  /svc/v1/asks       集成 token（asks:read），按 token 绑定 client 限权，逐字段白名单输出
+     POST /svc/v1/answers    集成 token（answers:write），写 seo_card_feedback，channel 强制 webforger
+     POST /asks              worker token 或 admin：登记/upsert Ask（ask_id 幂等），body.asks[] 即批量回填
+     POST /asks/{ask_id}/void        worker 或 admin：作废（测试 Ask 清理、源头撤销），svc 读不再可见
+     GET  /asks/{ask_id}/answers     worker 或 admin：该 Ask 的账本行（含 channel/actor/幂等键），审计用
+   /svc/ 前缀只认集成 token（JWT、WORKER_TKN、READONLY_TKN 一律 403）；集成 token 打其他路由一律 403，
+   闸门由 $ROUTE 计算后紧跟的 asks_svc_gate() 执行（见 ASKS-API HOOK）。
+   时间口径：seo_asks 全表与 seo_card_feedback.answered_at 存 UTC；seo_card_feedback.created_at 仍是库钟（NZ），
+   输出前按库钟与 UTC 的实测差值换算，对外一律 ISO8601 Z。 */
+
+/* 集成 token 表：源码只存 sha256，明文只在发放方与持有方。轮换时新旧两条并存，持有方切换后删旧条。 */
+define('INTEGRATION_TOKENS',[
+    ['id'=>'webforger-20261016','integration'=>'webforger',
+     'sha256'=>'7b587d5d7ae5a0cdcf9403639b97db5e38f4e4b399daf46a9552be1304de837a',
+     'client_ids'=>[55],'scopes'=>['asks:read','answers:write']],
+]);
+
+/* ASKS-PURE-START（纯函数块，零数据库零 HTTP，tests/asksapi.test.php 按标记抠出来 eval） */
+define('ASK_KINDS',['direction','confirmation','plan_approval','policy_qa']);
+define('ASK_ITEM_TYPES',['single','multi','approve','text']);
+define('ASK_STANCE_CHOICES',['agree','hold','flag','approve','reject']);
+
+/* 明文 token 对 token 表做 sha256 比对，命中返回该条，否则 null。 */
+function asks_integ_match($tokens,$plain){
+    $plain=(string)$plain;
+    if($plain==='')return null;
+    $h=hash('sha256',$plain);
+    foreach($tokens as $tk){if(hash_equals((string)$tk['sha256'],$h))return $tk;}
+    return null;
+}
+/* 'Y-m-d H:i:s' 或 ISO8601 解析成 UTC 'Y-m-d H:i:s'；无时区标记的按 UTC。失败返回 null。 */
+function asks_utc($v){
+    $v=trim((string)$v);
+    if($v==='')return null;
+    try{
+        $d=new DateTime($v,new DateTimeZone('UTC'));
+        $d->setTimezone(new DateTimeZone('UTC'));
+        return $d->format('Y-m-d H:i:s');
+    }catch(Exception $e){return null;}
+}
+function asks_iso($utc){return ($utc===null||$utc==='')?null:str_replace(' ','T',(string)$utc).'Z';}
+/* 库钟时间按 offset 秒（库钟减 UTC）换成 UTC。 */
+function asks_db_to_utc($local,$offset){
+    if($local===null||$local==='')return null;
+    $t=strtotime($local.' UTC');
+    return $t===false?null:gmdate('Y-m-d H:i:s',$t-(int)$offset);
+}
+function asks_json_in($v){
+    if(is_array($v))return $v;
+    if(is_string($v)&&$v!==''){$d=json_decode($v,true);return is_array($d)?$d:null;}
+    return null;
+}
+/* 选项码与 item_id：语言无关的短码，不许含逗号（多选值落库是 ", " 拼接串）。 */
+function asks_code_ok($c){return is_string($c)&&preg_match('/^[A-Za-z0-9_.:-]{1,120}$/D',$c)===1;}
+
+/* POST /asks 的登记体规整。返回 [row, error]。row 的键即 seo_asks 列名（source_ref 为数组，task_id 为整数）。 */
+function asks_norm_register($in){
+    if(!is_array($in))return [null,'body must be object'];
+    $askId=(string)($in['ask_id']??'');
+    if(!preg_match('/^[A-Za-z0-9_-]{4,64}$/D',$askId))return [null,'bad ask_id'];
+    $cid=(int)($in['client_id']??0);
+    if($cid<=0)return [null,'client_id required'];
+    $kind=(string)($in['kind']??'');
+    if(!in_array($kind,ASK_KINDS,true))return [null,'bad kind'];
+    $aud=(string)($in['audience']??'client');
+    if(!in_array($aud,['client','agency','both'],true))return [null,'bad audience'];
+    $rev=isset($in['rev'])?(int)$in['rev']:1;
+    if($rev<1)return [null,'bad rev'];
+    $items=asks_json_in($in['items']??null);
+    if(!$items||array_keys($items)!==range(0,count($items)-1))return [null,'items must be non-empty array'];
+    if(count($items)>60)return [null,'too many items'];
+    $seen=[];$outItems=[];
+    foreach($items as $k=>$it){
+        if(!is_array($it))return [null,"items[$k] must be object"];
+        $iid=(string)($it['item_id']??'');
+        if(!asks_code_ok($iid))return [null,"items[$k] bad item_id"];
+        if(isset($seen[$iid]))return [null,"duplicate item_id $iid"];
+        $seen[$iid]=true;
+        $type=(string)($it['type']??'');
+        if(!in_array($type,ASK_ITEM_TYPES,true))return [null,"item $iid bad type"];
+        $opts=$it['options']??[];
+        if(!is_array($opts))return [null,"item $iid options must be array"];
+        $opts=array_values($opts);
+        foreach($opts as $o){if(!asks_code_ok($o))return [null,"item $iid bad option code"];}
+        if(count(array_unique($opts))!==count($opts))return [null,"item $iid duplicate option"];
+        if($type!=='text'&&!$opts)return [null,"item $iid options required"];
+        if($type==='approve'&&array_diff(['approve','reject'],$opts))return [null,"item $iid approve needs approve/reject"];
+        $rtw=$it['requires_text_when']??[];
+        if(!is_array($rtw))return [null,"item $iid requires_text_when must be array"];
+        $rtw=array_values($rtw);
+        foreach($rtw as $o){if(!in_array($o,$opts,true))return [null,"item $iid requires_text_when not in options"];}
+        $dv=$it['default_value']??null;
+        if($dv!==null&&!in_array($dv,$opts,true))return [null,"item $iid default_value not in options"];
+        $outItems[]=['item_id'=>$iid,'type'=>$type,'options'=>$opts,
+            'required'=>array_key_exists('required',$it)?(bool)$it['required']:true,
+            'requires_text_when'=>$rtw,'default_value'=>$dv];
+    }
+    $lp=array_key_exists('lang_pack',$in)?asks_json_in($in['lang_pack']):[];
+    if($lp===null)return [null,'lang_pack must be object'];
+    if(isset($lp['texts'])&&!is_array($lp['texts']))return [null,'lang_pack.texts must be object'];
+    if(isset($lp['primary'])&&!preg_match('/^[a-z]{2}(-[A-Za-z]{2})?$/D',(string)$lp['primary']))return [null,'bad lang_pack.primary'];
+    $deadline=null;
+    if(isset($in['deadline'])&&$in['deadline']!==''&&$in['deadline']!==null){
+        $deadline=asks_utc($in['deadline']);
+        if($deadline===null)return [null,'bad deadline'];
+    }
+    $dp=(string)($in['default_policy']??($kind==='plan_approval'?'none':'no_reply_follow_recommendation'));
+    if(!in_array($dp,['no_reply_follow_recommendation','none'],true))return [null,'bad default_policy'];
+    $sr=array_key_exists('source_ref',$in)?asks_json_in($in['source_ref']):[];
+    if($sr===null)return [null,'source_ref must be object'];
+    $srOut=[];
+    foreach(['task_id','plan_id','inbox_id'] as $k){if(isset($sr[$k])&&$sr[$k]!==''&&$sr[$k]!==null)$srOut[$k]=(int)$sr[$k];}
+    if(isset($sr['card_kind'])&&$sr['card_kind']!==''){
+        if(!preg_match('/^[a-z0-9_]{1,32}$/D',(string)$sr['card_kind']))return [null,'bad source_ref.card_kind'];
+        $srOut['card_kind']=(string)$sr['card_kind'];
+    }
+    if(isset($sr['card_token_ref'])&&$sr['card_token_ref']!==''){
+        /* 卡 token 只收指纹：'sha256:' 加 16 到 64 位小写十六进制。32 位裸 hex 正是明文卡 token 的形状，拒。 */
+        if(!preg_match('/^sha256:[0-9a-f]{16,64}$/D',(string)$sr['card_token_ref']))return [null,'source_ref.card_token_ref must be sha256:<hex> fingerprint'];
+        $srOut['card_token_ref']=(string)$sr['card_token_ref'];
+    }
+    $lpJson=json_encode($lp?:new stdClass,JSON_UNESCAPED_UNICODE);
+    if(strlen($lpJson)>262144)return [null,'lang_pack too large'];
+    return [['ask_id'=>$askId,'client_id'=>$cid,'kind'=>$kind,'audience'=>$aud,'rev'=>$rev,
+        'items'=>$outItems,'lang_pack'=>$lp,'deadline'=>$deadline,'default_policy'=>$dp,
+        'source_ref'=>$srOut,'task_id'=>(int)($srOut['task_id']??0)],null];
+}
+
+/* 账本一行的渠道：新列优先；存量空值按 actor 推（agency:<user> 是看板代确认即 ops，其余是邮件卡页）。 */
+function asks_row_channel($r){
+    $ch=(string)($r['channel']??'');
+    if($ch!=='')return $ch;
+    return strpos((string)($r['actor']??''),'agency:')===0?'ops':'agencyreport';
+}
+/* 折叠（Phase 1 口径同 cardfold.foldCardFeedback）：行按 id 升序；同 item 取最后一次表态；
+   other 不覆盖表态，非空文本进 notes；空文本 other 跳过（写入层已转 hold，这里兜底）；空 item 归 _card。
+   返回 [item => ['stance'=>行或null, 'notes'=>[行...]]]。 */
+function asks_fold_effective($rows){
+    usort($rows,function($a,$b){return (int)$a['id']-(int)$b['id'];});
+    $out=[];
+    foreach($rows as $r){
+        $item=trim((string)($r['item']??''));
+        if($item==='')$item='_card';
+        $choice=(string)($r['choice']??'');
+        if(!isset($out[$item]))$out[$item]=['stance'=>null,'notes'=>[]];
+        if($choice==='other'){
+            if(trim((string)($r['fb']??''))!=='')$out[$item]['notes'][]=$r;
+            continue;
+        }
+        if(in_array($choice,ASK_STANCE_CHOICES,true))$out[$item]['stance']=$r;
+    }
+    foreach($out as $k=>$v){if($v['stance']===null&&!$v['notes'])unset($out[$k]);}
+    return $out;
+}
+/* 账本行投影成对外的 effective_answer / last_note（白名单字段，不出 actor、ip、幂等键、task_id）。 */
+function asks_answer_view($r,$offset){
+    if(!$r)return null;
+    $choice=(string)$r['choice'];
+    $fb=(string)($r['fb']??'');
+    $at=($r['answered_at']??'')!==''&&$r['answered_at']!==null?(string)$r['answered_at']:asks_db_to_utc((string)($r['created_at']??''),$offset);
+    $values=null;$text=null;
+    if($choice==='flag'){
+        $values=array_values(array_filter(array_map('trim',explode(',',$fb)),'strlen'));
+    }else{
+        $text=$fb!==''?$fb:null;
+    }
+    return ['choice'=>$choice,'values'=>$values,'text'=>$text,'channel'=>asks_row_channel($r),
+        'answered_at'=>asks_iso($at),'ask_rev'=>isset($r['ask_rev'])&&$r['ask_rev']!==null?(int)$r['ask_rev']:null];
+}
+/* 状态读时推导：void/closed 为人工或调度落的终态照返；过截止为 expired；required 项全有生效表态为 answered；否则 open。
+   text 型 item 的「有答」看 notes（自由文本不是表态）。 */
+function asks_state($stored,$deadlineUtc,$nowUtc,$items,$fold){
+    if(in_array($stored,['void','closed'],true))return $stored;
+    if($deadlineUtc&&$nowUtc>=$deadlineUtc)return 'expired';
+    $need=0;$have=0;
+    foreach($items as $it){
+        if(empty($it['required']))continue;
+        $need++;
+        $f=$fold[$it['item_id']]??null;
+        if(!$f)continue;
+        if($it['type']==='text'?(bool)$f['notes']:$f['stance']!==null)$have++;
+    }
+    return ($need>0&&$have===$need)?'answered':'open';
+}
+/* 选出对外语言：lang_pack.primary（登记时已按 report_lang 定版），缺省按 profile 语言，再缺按 zh；
+   texts 里没有该语言时退到 zh，lang 字段如实标退后的语言。 */
+function asks_pick_lang($lp,$profileLang){
+    $texts=is_array($lp['texts']??null)?$lp['texts']:[];
+    $p=(string)($lp['primary']??'');
+    if($p==='')$p=trim((string)$profileLang);
+    if($p==='')$p='zh';
+    if(isset($texts[$p])&&is_array($texts[$p]))return [$p,$texts[$p]];
+    if(isset($texts['zh'])&&is_array($texts['zh']))return ['zh',$texts['zh']];
+    return [$p,[]];
+}
+function asks_str($v){return is_string($v)?$v:(is_numeric($v)?(string)$v:null);}
+/* 一张 Ask 投影成对外 JSON。逐字段拷贝白名单：只出下面列出的键，source_ref、task/plan 编号、output_url、
+   卡 token、note、operator 中文版一律不出。$ask 是 seo_asks 行（items/lang_pack 已解码），$fold 见上。 */
+function asks_project($ask,$fold,$profileLang,$nowUtc,$offset,$updatedUtc){
+    list($lang,$tx)=asks_pick_lang($ask['lang_pack'],$profileLang);
+    $text=[];
+    foreach(['title','intro','deadline_note','default_note'] as $k)$text[$k]=asks_str($tx[$k]??null);
+    $itx=is_array($tx['items']??null)?$tx['items']:[];
+    $items=[];
+    foreach($ask['items'] as $it){
+        $t=is_array($itx[$it['item_id']]??null)?$itx[$it['item_id']]:[];
+        $ol=is_array($t['options']??null)?$t['options']:[];
+        $opts=[];
+        foreach($it['options'] as $code)$opts[]=['code'=>$code,'label'=>asks_str($ol[$code]??null)];
+        $f=$fold[$it['item_id']]??['stance'=>null,'notes'=>[]];
+        $items[]=['item_id'=>$it['item_id'],'type'=>$it['type'],'required'=>(bool)$it['required'],
+            'requires_text_when'=>array_values($it['requires_text_when']),
+            'prompt'=>asks_str($t['prompt']??null),'situation'=>asks_str($t['situation']??null),
+            'recommendation'=>asks_str($t['recommendation']??null),'hint'=>asks_str($t['hint']??null),
+            'options'=>$opts,
+            'effective_answer'=>asks_answer_view($f['stance'],$offset),
+            'last_note'=>$f['notes']?asks_answer_view(end($f['notes']),$offset):null];
+    }
+    return ['ask_id'=>(string)$ask['ask_id'],'kind'=>(string)$ask['kind'],'audience'=>(string)$ask['audience'],
+        'rev'=>(int)$ask['rev'],
+        'state'=>asks_state((string)$ask['state'],$ask['deadline']??null,$nowUtc,$ask['items'],$fold),
+        'deadline'=>asks_iso($ask['deadline']??null),'default_policy'=>(string)$ask['default_policy'],
+        'lang'=>$lang,'text'=>$text,'items'=>$items,'updated_at'=>asks_iso($updatedUtc)];
+}
+/* 幂等键：渠道键加 # 加 item_id，一个 item 一行，唯一索引兜底。 */
+function asks_idem_key($key,$itemId){return $key.'#'.$itemId;}
+/* POST /svc/v1/answers 的 items 校验，全过才给行。返回 [rows, errors]；rows 每行 item/choice/fb。 */
+function asks_validate_answers($askItems,$reqItems){
+    $errs=[];
+    if(!is_array($reqItems)||!$reqItems||array_keys($reqItems)!==range(0,count($reqItems)-1))return [null,['items must be non-empty array']];
+    $byId=[];
+    foreach($askItems as $it)$byId[$it['item_id']]=$it;
+    $seen=[];$rows=[];
+    foreach($reqItems as $k=>$ri){
+        if(!is_array($ri)){$errs[]="items[$k] must be object";continue;}
+        $iid=(string)($ri['item_id']??'');
+        if(!isset($byId[$iid])){$errs[]="unknown item_id $iid";continue;}
+        if(isset($seen[$iid])){$errs[]="duplicate item_id $iid";continue;}
+        $seen[$iid]=true;
+        $it=$byId[$iid];
+        $text=trim((string)($ri['text']??''));
+        if(mb_strlen($text,'UTF-8')>2000){$errs[]="item $iid text over 2000 chars";continue;}
+        if($it['type']==='multi'){
+            $vals=$ri['values']??null;
+            if(!is_array($vals)||!$vals){$errs[]="item $iid values required";continue;}
+            $vals=array_values(array_unique(array_map('strval',$vals)));
+            $bad=array_values(array_diff($vals,$it['options']));
+            if($bad){$errs[]="item $iid values not in option set: ".implode(' ',array_slice($bad,0,5));continue;}
+            $rows[]=['item'=>$iid,'choice'=>'flag','fb'=>implode(', ',$vals)];
+            continue;
+        }
+        if($it['type']==='text'){
+            if($text===''){$errs[]="item $iid text required";continue;}
+            $rows[]=['item'=>$iid,'choice'=>'other','fb'=>$text];
+            continue;
+        }
+        $choice=(string)($ri['choice']??'');
+        if(!in_array($choice,$it['options'],true)){$errs[]="item $iid bad choice";continue;}
+        if(in_array($choice,$it['requires_text_when'],true)&&$text===''){$errs[]="item $iid text required for $choice";continue;}
+        /* 现行口径：空文本 other 视为 hold（同 POST /card_feedback）。 */
+        if($choice==='other'&&$text==='')$choice='hold';
+        if(!in_array($choice,['agree','hold','other','approve','reject'],true)){$errs[]="item $iid choice $choice not storable";continue;}
+        $rows[]=['item'=>$iid,'choice'=>$choice,'fb'=>$text];
+    }
+    return $errs?[null,$errs]:[$rows,[]];
+}
+/* actor 规整：webforger:<role>:<ref>，role 只认 client/agency，ref 只留安全字符，总长不超 actor 列的 80。 */
+function asks_actor($a){
+    if(!is_array($a))return [null,'actor required'];
+    $role=(string)($a['role']??'');
+    if(!in_array($role,['client','agency'],true))return [null,'bad actor.role'];
+    $ref=(string)($a['ref']??'');
+    if(!preg_match('/^[A-Za-z0-9_.:-]{1,60}$/D',$ref))return [null,'bad actor.ref'];
+    return ['webforger:'.$role.':'.$ref,null];
+}
+function asks_audience_ok($aud,$role){return $aud==='both'||$aud===$role;}
+/* ASKS-PURE-END */
+
+/* 集成 token 闸门：$ROUTE 定下后立即调用。/svc/ 只认集成 token；集成 token 不许出 /svc/。 */
+function asks_svc_gate(){
+    global $ROUTE,$ASKS_INTEG;
+    $t=bearer();
+    $integ=asks_integ_match(INTEGRATION_TOKENS,$t);
+    $isSvc=strpos($ROUTE,'/svc/')===0;
+    if($integ&&!$isSvc)res(403,['error'=>'Integration token not allowed on this route']);
+    if($isSvc){
+        if($t==='')res(401,['error'=>'No auth']);
+        if(!$integ)res(403,['error'=>'Forbidden']);
+        $ASKS_INTEG=$integ;
+    }
+}
+/* /svc/ 路由内取身份并校 scope 与 client 绑定。 */
+function auth_integration($scope,$cid){
+    global $ASKS_INTEG;
+    $tk=$ASKS_INTEG??null;
+    if(!$tk)res(403,['error'=>'Forbidden']);
+    if(!in_array($scope,$tk['scopes'],true))res(403,['error'=>'scope '.$scope.' not granted']);
+    if(!$cid)res(400,['error'=>'client_id required']);
+    if(!in_array((int)$cid,array_map('intval',$tk['client_ids']),true))res(403,['error'=>'client not bound to this token']);
+    return $tk;
+}
+/* 内部路由（登记、作废、审计读）：worker token 或 admin JWT。 */
+function asks_auth_internal(){
+    global $WORKER_TKN;
+    $t=bearer();
+    if($t!==''&&hash_equals($WORKER_TKN,$t))return ['username'=>'seo-worker','role'=>'seo_worker'];
+    return auth_admin();
+}
+/* 库钟减 UTC 的秒数（实测，不假设时区；每请求一次）。 */
+function asks_db_offset(){
+    static $o=null;
+    if($o===null){$r=db()->query("SELECT TIMESTAMPDIFF(SECOND,UTC_TIMESTAMP(),NOW()) o")->fetch();$o=(int)round(((int)$r['o'])/60)*60;}
+    return $o;
+}
+function asks_cols_ensure($table,$cols){
+    $in=implode(',',array_fill(0,count($cols),'?'));
+    $q=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME IN ($in)");
+    $q->execute(array_merge([$table],array_keys($cols)));
+    $have=[];
+    foreach($q->fetchAll() as $r)$have[$r['COLUMN_NAME']]=true;
+    $add=[];
+    foreach($cols as $n=>$def){if(!isset($have[$n]))$add[]="ADD COLUMN `$n` $def";}
+    if($add)db()->exec("ALTER TABLE `$table` ".implode(',',$add));
+}
+function asks_index_ensure($table,$name,$ddl){
+    $q=db()->prepare("SELECT COUNT(*) c FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME=?");
+    $q->execute([$table,$name]);
+    if(!(int)$q->fetch()['c'])db()->exec("ALTER TABLE `$table` ADD $ddl");
+}
+/* Ask 表与账本六列，全惰性，information_schema 逐列比对幂等。新列禁 ENUM。 */
+function ensure_asks_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_asks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ask_id VARCHAR(64) NOT NULL,
+        client_id INT NOT NULL,
+        UNIQUE KEY uq_seo_asks_ask (ask_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    asks_cols_ensure('seo_asks',[
+        'kind'=>"VARCHAR(32) NOT NULL DEFAULT ''",
+        'audience'=>"VARCHAR(16) NOT NULL DEFAULT 'client'",
+        'rev'=>"INT NOT NULL DEFAULT 1",
+        'items'=>"MEDIUMTEXT",
+        'lang_pack'=>"MEDIUMTEXT",
+        'deadline'=>"DATETIME DEFAULT NULL",
+        'default_policy'=>"VARCHAR(48) NOT NULL DEFAULT 'no_reply_follow_recommendation'",
+        'state'=>"VARCHAR(16) NOT NULL DEFAULT 'open'",
+        'source_ref'=>"MEDIUMTEXT",
+        'task_id'=>"INT NOT NULL DEFAULT 0",
+        'registered_by'=>"VARCHAR(64) NOT NULL DEFAULT ''",
+        'created_at'=>"DATETIME DEFAULT NULL",
+        'updated_at'=>"DATETIME DEFAULT NULL",
+        'closed_at'=>"DATETIME DEFAULT NULL",
+    ]);
+    asks_index_ensure('seo_asks','idx_seo_asks_client','KEY idx_seo_asks_client (client_id, state)');
+    ensure_card_feedback_schema();
+    asks_cols_ensure('seo_card_feedback',[
+        'ask_id'=>"VARCHAR(64) DEFAULT NULL",
+        'client_id'=>"INT DEFAULT NULL",
+        'channel'=>"VARCHAR(24) DEFAULT NULL",
+        'idempotency_key'=>"VARCHAR(191) DEFAULT NULL",
+        'ask_rev'=>"INT DEFAULT NULL",
+        'answered_at'=>"DATETIME DEFAULT NULL",
+    ]);
+    asks_index_ensure('seo_card_feedback','uq_card_fb_idem','UNIQUE KEY uq_card_fb_idem (idempotency_key)');
+    asks_index_ensure('seo_card_feedback','idx_card_fb_ask','KEY idx_card_fb_ask (ask_id, id)');
+}
+function asks_load($askId){
+    $q=db()->prepare("SELECT * FROM seo_asks WHERE ask_id=?");
+    $q->execute([$askId]);
+    $a=$q->fetch();
+    if(!$a)return null;
+    $a['items']=json_decode((string)$a['items'],true)?:[];
+    $a['lang_pack']=json_decode((string)$a['lang_pack'],true)?:[];
+    return $a;
+}
+/* 一张 Ask 的账本行：新行按 ask_id，存量邮件卡页行按源任务 task_id（Phase 1 两者并集，id 序）。 */
+function asks_ledger_rows($ask){
+    $tid=(int)($ask['task_id']??0);
+    $q=db()->prepare("SELECT * FROM seo_card_feedback WHERE ask_id=?".($tid>0?" OR task_id=?":"")." ORDER BY id");
+    $q->execute($tid>0?[$ask['ask_id'],$tid]:[$ask['ask_id']]);
+    return $q->fetchAll();
+}
+function asks_profile_lang($cid){
+    $q=db()->prepare("SELECT report_lang FROM seo_profiles WHERE client_id=?");
+    $q->execute([(int)$cid]);
+    $r=$q->fetch();
+    return $r?(string)($r['report_lang']??''):null;
+}
+/* Ask 对外视图（带现算 effective 与 updated_at）。 */
+function asks_view($ask,$profileLang){
+    $off=asks_db_offset();
+    $rows=asks_ledger_rows($ask);
+    $fold=asks_fold_effective($rows);
+    $upd=(string)($ask['updated_at']??'');
+    foreach($rows as $r){
+        $u=asks_db_to_utc((string)$r['created_at'],$off);
+        if($u!==null&&$u>$upd)$upd=$u;
+    }
+    return asks_project($ask,$fold,$profileLang,gmdate('Y-m-d H:i:s'),$off,$upd!==''?$upd:null);
+}
+/* 登记一张（upsert）。返回 [httpCode, body]。 */
+function asks_register_one($in,$who){
+    global $WORKER_TKN;
+    list($row,$err)=asks_norm_register($in);
+    if($err)return [422,['error'=>$err,'ask_id'=>is_array($in)?($in['ask_id']??null):null]];
+    $pl=asks_profile_lang($row['client_id']);
+    if($pl===null)return [422,['error'=>'client_id has no seo profile','ask_id'=>$row['ask_id']]];
+    if($row['task_id']>0){
+        $q=db()->prepare("SELECT client_id FROM seo_tasks WHERE id=?");
+        $q->execute([$row['task_id']]);
+        $t=$q->fetch();
+        if(!$t||(int)$t['client_id']!==$row['client_id'])return [422,['error'=>'source_ref.task_id does not belong to client_id','ask_id'=>$row['ask_id']]];
+        /* 明文卡 token 的指纹形状也挡不住有人传 sha256(明文)；这里只防裸明文混进别的字段被原样存。 */
+        $plainCard=md5('cardfb'.$row['task_id'].$WORKER_TKN);
+        if(strpos(json_encode($in),$plainCard)!==false)return [422,['error'=>'payload contains a plaintext card token; send a fingerprint','ask_id'=>$row['ask_id']]];
+    }
+    /* 语言包定版：没给 primary 就按登记时的 report_lang 落，空值按 zh。之后改 report_lang 不影响本张。 */
+    $lp=$row['lang_pack'];
+    if(!isset($lp['primary'])||$lp['primary']==='')$lp['primary']=trim($pl)!==''?trim($pl):'zh';
+    $old=asks_load($row['ask_id']);
+    if($old&&(int)$old['client_id']!==$row['client_id'])return [409,['error'=>'ask_id already registered for another client','ask_id'=>$row['ask_id']]];
+    if($old&&in_array($old['state'],['void','closed'],true))return [409,['error'=>'ask is '.$old['state'].'; register a new ask_id','ask_id'=>$row['ask_id']]];
+    $now=gmdate('Y-m-d H:i:s');
+    $vals=[$row['kind'],$row['audience'],$row['rev'],json_encode($row['items'],JSON_UNESCAPED_UNICODE),
+        json_encode($lp,JSON_UNESCAPED_UNICODE),$row['deadline'],$row['default_policy'],
+        json_encode($row['source_ref']?:new stdClass,JSON_UNESCAPED_UNICODE),$row['task_id'],mb_substr($who,0,64,'UTF-8'),$now];
+    if($old){
+        db()->prepare("UPDATE seo_asks SET kind=?,audience=?,rev=?,items=?,lang_pack=?,deadline=?,default_policy=?,source_ref=?,task_id=?,registered_by=?,updated_at=? WHERE ask_id=?")
+            ->execute(array_merge($vals,[$row['ask_id']]));
+    }else{
+        db()->prepare("INSERT INTO seo_asks(kind,audience,rev,items,lang_pack,deadline,default_policy,source_ref,task_id,registered_by,updated_at,ask_id,client_id,state,created_at)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?)")
+            ->execute(array_merge($vals,[$row['ask_id'],$row['client_id'],$now]));
+    }
+    return [200,['ok'=>true,'ask_id'=>$row['ask_id'],'created'=>!$old,'rev'=>$row['rev'],'lang'=>$lp['primary']]];
+}
+
+/* GET /svc/v1/asks?client_id=&state=open,answered&since=&audience= */
+if($m==='GET'&&$ROUTE==='/svc/v1/asks'){
+    $cid=(int)($_GET['client_id']??0);
+    auth_integration('asks:read',$cid);
+    $states=array_filter(array_map('trim',explode(',',(string)($_GET['state']??'open,answered'))));
+    foreach($states as $s){if(!in_array($s,['open','answered','expired','closed'],true))res(400,['error'=>'bad state']);}
+    $since=null;
+    if(isset($_GET['since'])&&$_GET['since']!==''){$since=asks_utc($_GET['since']);if($since===null)res(400,['error'=>'bad since']);}
+    $aud=(string)($_GET['audience']??'');
+    if($aud!==''&&!in_array($aud,['client','agency'],true))res(400,['error'=>'bad audience']);
+    ensure_asks_schema();
+    $pl=asks_profile_lang($cid);
+    $q=db()->prepare("SELECT * FROM seo_asks WHERE client_id=? AND state<>'void' ORDER BY id");
+    $q->execute([$cid]);
+    $out=[];
+    foreach($q->fetchAll() as $a){
+        if($aud!==''&&!asks_audience_ok((string)$a['audience'],$aud))continue;
+        $a['items']=json_decode((string)$a['items'],true)?:[];
+        $a['lang_pack']=json_decode((string)$a['lang_pack'],true)?:[];
+        $v=asks_view($a,$pl);
+        if(!in_array($v['state'],$states,true))continue;
+        if($since!==null&&($v['updated_at']===null||str_replace(['T','Z'],[' ',''],$v['updated_at'])<$since))continue;
+        $out[]=$v;
+    }
+    res(200,['client_id'=>$cid,'server_time'=>asks_iso(gmdate('Y-m-d H:i:s')),'asks'=>$out]);
+}
+
+/* POST /svc/v1/answers：校验全过才写，事务内逐 item 一行；同 idempotency_key 重放返回首次结果不新增行。 */
+if($m==='POST'&&$ROUTE==='/svc/v1/answers'){
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    $tk=auth_integration('answers:write',$cid);
+    $key=(string)($i['idempotency_key']??'');
+    if(!preg_match('/^[A-Za-z0-9_.:-]{8,150}$/D',$key))res(422,['error'=>'bad idempotency_key']);
+    $askId=(string)($i['ask_id']??'');
+    if(!preg_match('/^[A-Za-z0-9_-]{4,64}$/D',$askId))res(422,['error'=>'bad ask_id']);
+    ensure_asks_schema();
+    $ask=asks_load($askId);
+    if(!$ask||(int)$ask['client_id']!==$cid||$ask['state']==='void')res(404,['error'=>'ask not found']);
+    $pl=asks_profile_lang($cid);
+    $replay=function()use($key,$ask,$pl){
+        $p=$key.'#';
+        $q=db()->prepare("SELECT id FROM seo_card_feedback WHERE LEFT(idempotency_key,?)=? ORDER BY id");
+        $q->execute([strlen($p),$p]);
+        $ids=array_map('intval',array_column($q->fetchAll(),'id'));
+        if(!$ids)return false;
+        $v=asks_view($ask,$pl);
+        $eff=[];
+        foreach($v['items'] as $it)$eff[$it['item_id']]=$it['effective_answer'];
+        res(200,['accepted'=>true,'replay'=>true,'answer_ids'=>$ids,'ask_state'=>$v['state'],'effective'=>$eff]);
+    };
+    $replay();
+    list($actor,$aerr)=asks_actor($i['actor']??null);
+    if($aerr)res(422,['error'=>$aerr]);
+    $role=(string)$i['actor']['role'];
+    if(!asks_audience_ok((string)$ask['audience'],$role))res(403,['error'=>'audience mismatch']);
+    $v=asks_view($ask,$pl);
+    if(in_array($v['state'],['closed','expired'],true)){
+        $eff=[];foreach($v['items'] as $it)$eff[$it['item_id']]=$it['effective_answer'];
+        res(409,['error'=>'ask '.$v['state'],'ask_state'=>$v['state'],'effective'=>$eff]);
+    }
+    $rev=isset($i['ask_rev'])?(int)$i['ask_rev']:(int)$ask['rev'];
+    if($rev<(int)$ask['rev'])res(409,['error'=>'ask_rev stale','ask_state'=>$v['state'],'rev'=>(int)$ask['rev']]);
+    if($rev>(int)$ask['rev'])res(422,['error'=>'ask_rev ahead of server','rev'=>(int)$ask['rev']]);
+    list($rows,$errs)=asks_validate_answers($ask['items'],$i['items']??null);
+    if($errs)res(422,['error'=>'validation failed','details'=>$errs]);
+    $nowUtc=gmdate('Y-m-d H:i:s');
+    $ansAt=isset($i['answered_at'])?asks_utc($i['answered_at']):null;
+    if($ansAt===null||$ansAt>gmdate('Y-m-d H:i:s',time()+300))$ansAt=$nowUtc;
+    $tid=(int)$ask['task_id'];
+    $ip=substr((string)($_SERVER['REMOTE_ADDR']??''),0,64);
+    $ids=[];
+    $pdo=db();
+    try{
+        $pdo->beginTransaction();
+        $ins=$pdo->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip,actor,ask_id,client_id,channel,idempotency_key,ask_rev,answered_at)VALUES(?,?,?,?,?,?,?,?,'webforger',?,?,?)");
+        foreach($rows as $r){
+            $ins->execute([$tid,$r['item'],$r['choice'],$r['fb'],$ip,$actor,$askId,$cid,asks_idem_key($key,$r['item']),$rev,$ansAt]);
+            $ids[]=(int)$pdo->lastInsertId();
+        }
+        $pdo->commit();
+    }catch(PDOException $e){
+        if($pdo->inTransaction())$pdo->rollBack();
+        if((string)$e->getCode()==='23000'){$replay();}
+        res(500,['error'=>'ledger write failed']);
+    }
+    if($tid>0){
+        $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单','approve'=>'批准','reject'=>'驳回'];
+        foreach($rows as $r)task_append_note($tid,'[客户反馈 webforger] '.$r['item'].'：'.$label[$r['choice']].($r['fb']!==''?('：'.$r['fb']):''));
+        ensure_review_schema();
+        db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
+    }
+    db()->prepare("UPDATE seo_asks SET updated_at=? WHERE ask_id=?")->execute([$nowUtc,$askId]);
+    audit('integration:'.$tk['id'],'seo_ask_answer',$askId,['ids'=>$ids,'actor'=>$actor,'items'=>array_column($rows,'item')]);
+    $v=asks_view(asks_load($askId),$pl);
+    $eff=[];foreach($v['items'] as $it)$eff[$it['item_id']]=$it['effective_answer'];
+    res(200,['accepted'=>true,'answer_ids'=>$ids,'ask_state'=>$v['state'],'effective'=>$eff]);
+}
+
+/* POST /asks：worker 出卡登记或 admin 回填。单张对象或 {asks:[...]} 批量（批量逐张独立，返回逐张结果）。 */
+if($m==='POST'&&$ROUTE==='/asks'){
+    $u=asks_auth_internal();
+    $i=input();
+    ensure_asks_schema();
+    if(isset($i['asks'])){
+        if(!is_array($i['asks'])||count($i['asks'])>200)res(400,['error'=>'asks must be array of at most 200']);
+        $results=[];
+        foreach($i['asks'] as $one){list($c,$b)=asks_register_one($one,$u['username']);$b['status']=$c;$results[]=$b;}
+        audit($u['username'],'seo_ask_register_batch','',['n'=>count($results),'ok'=>count(array_filter($results,function($r){return $r['status']===200;}))]);
+        res(200,['results'=>$results]);
+    }
+    list($c,$b)=asks_register_one($i,$u['username']);
+    if($c===200)audit($u['username'],'seo_ask_register',$b['ask_id'],['created'=>$b['created'],'rev'=>$b['rev']]);
+    res($c,$b);
+}
+
+/* POST /asks/{ask_id}/void：作废。只改 state，不删行，账本行一律不动。 */
+if($m==='POST'&&preg_match('#^/asks/([A-Za-z0-9_-]{4,64})/void$#D',$ROUTE,$mm)){
+    $u=asks_auth_internal();
+    ensure_asks_schema();
+    $a=asks_load($mm[1]);
+    if(!$a)res(404,['error'=>'ask not found']);
+    $note=mb_substr(trim((string)(input()['reason']??'')),0,200,'UTF-8');
+    db()->prepare("UPDATE seo_asks SET state='void',closed_at=?,updated_at=? WHERE ask_id=?")->execute([gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s'),$mm[1]]);
+    audit($u['username'],'seo_ask_void',$mm[1],['reason'=>$note]);
+    res(200,['ok'=>true,'ask_id'=>$mm[1],'state'=>'void']);
+}
+
+/* GET /asks/{ask_id}/answers：账本审计视图（内部，含 actor、channel、幂等键）。 */
+if($m==='GET'&&preg_match('#^/asks/([A-Za-z0-9_-]{4,64})/answers$#D',$ROUTE,$mm)){
+    asks_auth_internal();
+    ensure_asks_schema();
+    $a=asks_load($mm[1]);
+    if(!$a)res(404,['error'=>'ask not found']);
+    $rows=asks_ledger_rows($a);
+    $out=[];
+    foreach($rows as $r)$out[]=['id'=>(int)$r['id'],'task_id'=>(int)$r['task_id'],'item'=>$r['item'],'choice'=>$r['choice'],'fb'=>$r['fb'],
+        'actor'=>$r['actor'],'channel'=>asks_row_channel($r),'idempotency_key'=>$r['idempotency_key'],'ask_rev'=>$r['ask_rev'],
+        'answered_at'=>$r['answered_at'],'created_at'=>$r['created_at']];
+    res(200,['ask_id'=>$a['ask_id'],'state'=>$a['state'],'rows'=>$out]);
+}
+/* ====================== END ASKS-API ====================== */
 
 // GET /plans?client_id=
 // GET /plans/{id} -> 一条方案（含 body）。worker 的 plan_review 要读草稿全文，所以 auth_any。
