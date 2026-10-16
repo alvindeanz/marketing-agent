@@ -937,8 +937,23 @@ function task_close($tid,$kind,$reason='',$by=''){
     }
     db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
     task_append_note($tid,'['.$kind.'] '.($by!==''?($by.'：'):'').$reason);
-    if($kind==='accepted')capgap_split_on_accept($tid);
+    if($kind==='accepted'){
+        $sp=capgap_split_on_accept($tid);
+        if(!$sp)accepted_close_notify($tid,$reason);
+    }
     return null;
+}
+/* 终局回频道（2026-10-16 #1369 教训：任务在频道眼皮底下验收收口，频道却无下文，操作员
+   只能靠猜进度）。频道发起的任务 accepted 收口且没有 capgap 拆单消息时，补发三要素：
+   动没动 / 下一步 / 谁负责。频道放行指令自己会发执行回执，靠 reason 关键词跳过防双发。 */
+function accepted_close_notify($tid,$reason){
+    if(mb_strpos((string)$reason,'频道放行')!==false)return;
+    $q=db()->prepare("SELECT id,title,origin FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
+    if(!$t)return;
+    if(!preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$t['origin'],$om))return;
+    $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");$rq->execute([(int)$om[2]]);$rootN=$rq->fetch();
+    if(!$rootN)return;
+    chat_msg_insert($rootN,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」已验收收口：本单交付为分析或方案，账户与站点未因本单改动；若还有执行步，以频道或看板上的后续工单为准。','seo-worker');
 }
 /* capability-gap 收口拆人工单（2026-10-13 ticket #31 教训：#1232 的 placement 排除执行单
    按能力缺口标注「进运营清理队列」，但系统里没有这个队列，分析验收一关单，人工执行步就只
@@ -953,7 +968,11 @@ function capgap_split_on_accept($tid){
     if(!preg_match('/(^|\n)capability-gap(?:\[(cli|api|scope)\])?：\s*([^\n]{1,300})/u',(string)$t['result_note'],$m))return 0;
     $gapCls=strtolower((string)$m[2]);$gapNote=trim((string)$m[3]);
     if(strpos((string)$t['origin'],'split:')===0)return 0; /* 套娃护栏，口径同判定期分流 */
-    if(mb_strpos((string)$t['title'],'人工落地：')===0||mb_strpos((string)$t['title'],'补执行器：')===0)return 0;
+    /* 守卫收窄（2026-10-16 #1369 教训）：频道指令直接开出的「人工落地：」单不是 split 产物
+       （origin 是 chatw:/chat:），它收口带 capability-gap[cli] 时照样要拆补执行器单并回频道，
+       否则整个终局静默，操作员只能靠猜。真正的套娃由上面的 origin split: 检查和
+       origin='split:<tid>' 去重键拦，标题守卫只留「补执行器：」（工具维护单再报缺口不再套拆）。 */
+    if(mb_strpos((string)$t['title'],'补执行器：')===0)return 0;
     $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
     $sq->execute(['split:'.$tid]);$sr=$sq->fetch();$sq->closeCursor();
     if($sr)return (int)$sr['id'];

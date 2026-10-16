@@ -170,6 +170,25 @@ function cleanFacts(json, log) {
   return out;
 }
 
+/* 时间戳守卫（2026-10-16 批五）：feedback 是慢写手，同一条消息 chat 可能已当轮改过档
+   （冲突即凭证）。库内 updated_at 晚于本反馈入队时间的 fact 一律不覆盖，防止两个写手
+   打架把新授权改回旧话。纯函数，供测试。 */
+function filterStaleFacts(facts, existingFacts, jobCreatedAt, log) {
+  const cutoff = String(jobCreatedAt || '');
+  if (!cutoff) return facts;
+  const newer = {};
+  for (const f of existingFacts || []) {
+    if (f && f.fact_key && String(f.updated_at || '') > cutoff) newer[f.fact_key] = String(f.updated_at);
+  }
+  return (facts || []).filter((f) => {
+    if (newer[f.fact_key]) {
+      if (log) log('facts: 跳过 ' + f.fact_key + '，库内版本（' + newer[f.fact_key] + '）晚于本条反馈入队时间，时间戳守卫');
+      return false;
+    }
+    return true;
+  });
+}
+
 function unansweredList(json) {
   const raw = json && Array.isArray(json.unanswered) ? json.unanswered : [];
   return raw
@@ -374,23 +393,32 @@ async function parseNote(ctx, opts) {
   const unanswered = unansweredList(parsed.json);
   log('feedback ' + feedbackId + ': 抽出 ' + facts.length + ' 条 fact，未回答 ' + unanswered.length + ' 项');
 
+  let factsToWrite = facts;
   if (facts.length) {
+    try {
+      const existing = await api.listFacts(job.client_id);
+      factsToWrite = filterStaleFacts(facts, (existing && existing.facts) || [], job.created_at, log);
+    } catch (e) {
+      log('facts: 时间戳守卫读取现有 facts 失败，按原清单写入 :: ' + e.message);
+    }
+  }
+  if (factsToWrite.length) {
     // Batch write, tagged with the feedback id so the server stores them as a
     // human sourced confirmed fact instead of an agent guess.
     let wrote;
     try {
-      wrote = await api.postFacts(job.client_id, facts, feedbackId);
+      wrote = await api.postFacts(job.client_id, factsToWrite, feedbackId);
     } catch (e) {
       const msg = 'feedback ' + feedbackId + ': facts 写入失败 :: ' + e.message;
       await reportFailure(ctx, taskId, feedbackId, msg);
       throw new Error(msg);
     }
     const results = (wrote && wrote.results) || [];
-    for (const f of facts) {
+    for (const f of factsToWrite) {
       log('facts: ' + f.fact_key + ' = ' + truncate(f.value, 120) + ' 已写入（confirmed，来源 ' + source + '）');
     }
-    if (results.length && results.length !== facts.length) {
-      log('facts: 服务端只回了 ' + results.length + ' 条结果，提交的是 ' + facts.length + ' 条');
+    if (results.length && results.length !== factsToWrite.length) {
+      log('facts: 服务端只回了 ' + results.length + ' 条结果，提交的是 ' + factsToWrite.length + ' 条');
     }
   }
 
@@ -420,6 +448,7 @@ module.exports = {
   buildPrompt,
   imageBlock,
   cleanFacts,
+  filterStaleFacts,
   unansweredList,
   cleanupTmp,
   ALLOWED_TOOLS,

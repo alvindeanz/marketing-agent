@@ -884,7 +884,20 @@ function registryPromptBlock(reg, excludeSlug) {
 function factsBlock(context) {
   const confirmed = ((context && context.facts && context.facts.confirmed) || []);
   if (!confirmed.length) return '（没有已确认的 fact，写作素材只能来自任务说明）';
-  return confirmed.map((f) => '- ' + f.fact_key + ' = ' + truncate(String(f.value || ''), 300)).join('\n');
+  // 凭证时序规矩（2026-10-16 #1369 教训：任务随单带着「免除核对」的新授权，产物却照
+  // 旧 fact 写「先发客户核对」）。fact 行带更新日期就是为了让模型能比先后。
+  const rows = confirmed
+    .map((f) => {
+      const d = String(f.updated_at || '').slice(0, 10);
+      return '- ' + f.fact_key + ' = ' + truncate(String(f.value || ''), 300) + (d ? '（更新 ' + d + '）' : '');
+    })
+    .join('\n');
+  return (
+    '凭证时序规矩：任务说明或结果备注里记录的人工表态（免除、变更、授权）晚于下列 fact 时，' +
+    '以新表态为准，不得照旧 fact 输出「等客户确认/核对」这类结论。两者直接冲突且分不清先后时，' +
+    '停下来把冲突原样写进产物和结果备注等人裁决，禁止自作仲裁，也禁止默默沿用任何一边。\n' +
+    rows
+  );
 }
 
 function blogSiteBlock(opts) {
