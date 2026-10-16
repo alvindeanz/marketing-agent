@@ -3863,6 +3863,27 @@ if($m==='POST'&&$ROUTE==='/tasks/bulk'){
 }
 
 // GET /context?client_id= -> single briefing payload for the LLM runner
+/* GET /task_state?task_id= -> 单任务现状（含已归档）+ 关联 job 近况。只读，auth_worker。
+   批五第 5 条（2026-10-16）：chat 对看板失明只能靠猜进度，给它一条单号查询通道。 */
+if($m==='GET'&&$ROUTE==='/task_state'){
+    auth_worker();
+    ensure_task_archived();
+    $tid=(int)($_GET['task_id']??0);
+    if(!$tid)res(400,['error'=>'task_id required']);
+    $q=db()->prepare("SELECT id,client_id,title,status,owner_type,module,sprint,priority,archived,output_url,created_at,updated_at,result_note FROM seo_tasks WHERE id=?");
+    $q->execute([$tid]);$t=$q->fetch();
+    if(!$t)res(404,['error'=>'Task not found']);
+    $t['result_note_tail']=mb_substr((string)$t['result_note'],-1500,NULL,'UTF-8');
+    unset($t['result_note']);
+    $j=db()->prepare("SELECT id,type,status,created_at,finished_at,payload FROM agent_jobs WHERE client_id=? ORDER BY id DESC LIMIT 80");
+    $j->execute([(int)$t['client_id']]);
+    $jobs=[];
+    foreach($j->fetchAll() as $r){
+        if(preg_match('/\b'.$tid.'\b/',(string)$r['payload'])){unset($r['payload']);$jobs[]=$r;if(count($jobs)>=5)break;}
+    }
+    res(200,['task'=>$t,'jobs'=>$jobs]);
+}
+
 if($m==='GET'&&$ROUTE==='/context'){
     auth_worker();
     /* worker 的品牌词拆分要读 profile.brand_regex，这里保证列存在再 SELECT *。 */
