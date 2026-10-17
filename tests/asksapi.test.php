@@ -203,7 +203,7 @@ section('投影与白名单 asks_project');
 t('只出白名单键，source_ref、task/plan 编号、卡指纹、operator 中文版都不出',function()use($ASK,$FX){
     $ask=$ASK+['state'=>'open'];$ask['lang_pack']=$ASK['lang_pack'];
     $p=asks_project($ask,asks_fold_effective($FX['rows']),'en','2026-10-16 03:00:00',46800,'2026-10-15 08:12:05');
-    eq(array_keys($p),['ask_id','kind','audience','rev','state','deadline','default_policy','lang','text','items','updated_at'],'顶层键');
+    eq(array_keys($p),['ask_id','kind','audience','service','rev','state','deadline','default_policy','lang','text','items','updated_at'],'顶层键');
     eq(array_keys($p['items'][0]),['item_id','type','required','requires_text_when','prompt','situation','recommendation','hint','options','effective_answer','last_note'],'item 键');
     $js=json_encode($p,JSON_UNESCAPED_UNICODE);
     foreach(['source_ref','task_id','plan_id','1413','sha256:','card_token','output_url','内部中文','关键词方向','actor','idempotency','wfu_'] as $bad)
@@ -242,6 +242,37 @@ t('语言：primary 缺省按 profile，profile 空按 zh；texts 缺该语言�
     eq(asks_pick_lang(['texts'=>['zh'=>['title'=>'中']]],'')[0],'zh','空 profile 按 zh');
     eq(asks_pick_lang(['primary'=>'ja','texts'=>['zh'=>['title'=>'中']]],'en')[0],'zh','缺 ja 退 zh');
     eq(asks_pick_lang(['primary'=>'en','texts'=>['en'=>['title'=>'E']]],'zh')[1]['title'],'E','定版 primary 优先于后改的 profile');
+});
+
+section('车道字段 service（2026-10-17 SEO 与 SEM 分开反馈分开批准）');
+
+t('登记带 service：seo、sem 照收；缺省、null、空串都落 NULL（通用卡）',function()use($REG){
+    list($r,$e)=asks_norm_register($REG);eq($e,null,'缺省不报错');eq($r['service'],null,'缺省 NULL');
+    foreach(['seo','sem'] as $v){$x=$REG;$x['service']=$v;list($r,$e)=asks_norm_register($x);eq($e,null,"$v 该过");eq($r['service'],$v,"$v 落库值");}
+    $x=$REG;$x['service']=null;eq(asks_norm_register($x)[0]['service'],null,'显式 null');
+    $x=$REG;$x['service']='';eq(asks_norm_register($x)[0]['service'],null,'空串视同缺省');
+});
+t('非法 service 登记拒（asks_register_one 据此回 422）：大小写、paid、both、非字符串都不认',function()use($REG){
+    foreach(['SEO','paid','both','seo,sem',1,['seo']] as $v){
+        $x=$REG;$x['service']=$v;list($r,$e)=asks_norm_register($x);
+        eq($r,null,'非法值不该给行 '.var_export($v,true));eq($e,'bad service','错误文案 '.var_export($v,true));
+    }
+});
+t('GET 车道过滤 asks_service_ok：不传出全部，seo/sem 只出本车道，通用卡不进车道结果',function(){
+    eq(asks_service_ok(null,''),true,'不过滤时通用卡出');
+    eq(asks_service_ok('sem',''),true,'不过滤时 sem 卡出');
+    eq(asks_service_ok('seo','seo'),true,'seo 卡进 seo');
+    eq(asks_service_ok('sem','seo'),false,'sem 卡不进 seo');
+    eq(asks_service_ok(null,'sem'),false,'通用卡不进 sem');
+    eq(asks_service_ok('','seo'),false,'空串按通用');
+});
+t('投影带 service：有值原样出，库里 NULL 或空串出 null',function()use($REG,$FX){
+    $x=$REG;$x['service']='sem';list($a,)=asks_norm_register($x);$a['state']='open';
+    $p=asks_project($a,asks_fold_effective([]),'en','2026-10-16 03:00:00',46800,null);
+    eq($p['service'],'sem','sem 原样');
+    $a['service']=null;eq(asks_project($a,[],'en','2026-10-16 03:00:00',46800,null)['service'],null,'NULL 出 null');
+    $a['service']='';eq(asks_project($a,[],'en','2026-10-16 03:00:00',46800,null)['service'],null,'空串出 null');
+    unset($a['service']);eq(asks_project($a,[],'en','2026-10-16 03:00:00',46800,null)['service'],null,'老行无列出 null');
 });
 
 section('plan_approval 登记约束（2026-10-17 缺口 B）');

@@ -5871,6 +5871,9 @@ define('ASK_ITEM_TYPES',['single','multi','approve','text']);
    other 是旁注，flag 是 multi 落库专用的保留码（single/approve 题不许用）。
    single/approve 题的码会原样落 seo_card_feedback.choice（VARCHAR(16)），登记时限 16 字符护列宽。 */
 define('ASK_CHOICE_COL_MAX',16);
+/* 车道（2026-10-17 Alvin 硬口径：SEO 与 SEM 内容分开反馈分开批准）。seo_asks.service 只收这两个值，
+   缺省 NULL 表示通用（plan_approval 混合方案卡、全局 policy_qa 一类），不归任何单一车道。 */
+define('ASK_SERVICES',['seo','sem']);
 
 /* 明文 token 对 token 表做 sha256 比对，命中返回该条，否则 null。 */
 function asks_integ_match($tokens,$plain){
@@ -5916,6 +5919,9 @@ function asks_norm_register($in){
     if(!in_array($kind,ASK_KINDS,true))return [null,'bad kind'];
     $aud=(string)($in['audience']??'client');
     if(!in_array($aud,['client','agency','both'],true))return [null,'bad audience'];
+    $svc=$in['service']??null;
+    if($svc==='')$svc=null;
+    if($svc!==null&&!in_array($svc,ASK_SERVICES,true))return [null,'bad service'];
     $rev=isset($in['rev'])?(int)$in['rev']:1;
     if($rev<1)return [null,'bad rev'];
     $items=asks_json_in($in['items']??null);
@@ -5988,7 +5994,7 @@ function asks_norm_register($in){
     }
     $lpJson=json_encode($lp?:new stdClass,JSON_UNESCAPED_UNICODE);
     if(strlen($lpJson)>262144)return [null,'lang_pack too large'];
-    return [['ask_id'=>$askId,'client_id'=>$cid,'kind'=>$kind,'audience'=>$aud,'rev'=>$rev,
+    return [['ask_id'=>$askId,'client_id'=>$cid,'kind'=>$kind,'audience'=>$aud,'service'=>$svc,'rev'=>$rev,
         'items'=>$outItems,'lang_pack'=>$lp,'deadline'=>$deadline,'default_policy'=>$dp,
         'source_ref'=>$srOut,'task_id'=>(int)($srOut['task_id']??0)],null];
 }
@@ -6085,7 +6091,9 @@ function asks_project($ask,$fold,$profileLang,$nowUtc,$offset,$updatedUtc){
             'effective_answer'=>asks_answer_view($f['stance'],$offset),
             'last_note'=>$f['notes']?asks_answer_view(end($f['notes']),$offset):null];
     }
+    $svc=$ask['service']??null;
     return ['ask_id'=>(string)$ask['ask_id'],'kind'=>(string)$ask['kind'],'audience'=>(string)$ask['audience'],
+        'service'=>($svc===null||$svc==='')?null:(string)$svc,
         'rev'=>(int)$ask['rev'],
         'state'=>asks_state((string)$ask['state'],$ask['deadline']??null,$nowUtc,$ask['items'],$fold),
         'deadline'=>asks_iso($ask['deadline']??null),'default_policy'=>(string)$ask['default_policy'],
@@ -6145,6 +6153,11 @@ function asks_actor($a){
     return ['webforger:'.$role.':'.$ref,null];
 }
 function asks_audience_ok($aud,$role){return $aud==='both'||$aud===$role;}
+/* 车道过滤：$want 为空串出全部；给了 seo 或 sem 只出该车道的卡，通用卡（service 为 NULL）不进车道过滤结果。 */
+function asks_service_ok($svc,$want){
+    if($want==='')return true;
+    return $svc!==null&&(string)$svc===$want;
+}
 /* seo_plans.approved_by 是 VARCHAR(50)，actor 最长 80。放得下原样存；放不下存 wf: 加去掉 webforger: 前缀的 actor 截到 50，
    完整 actor 在账本行里（seo_card_feedback.actor），审计按 ask_id 回查。 */
 function asks_approved_by($actor){
@@ -6230,6 +6243,7 @@ function ensure_asks_schema(){
     asks_cols_ensure('seo_asks',[
         'kind'=>"VARCHAR(32) NOT NULL DEFAULT ''",
         'audience'=>"VARCHAR(16) NOT NULL DEFAULT 'client'",
+        'service'=>"VARCHAR(8) NULL DEFAULT NULL",
         'rev'=>"INT NOT NULL DEFAULT 1",
         'items'=>"MEDIUMTEXT",
         'lang_pack'=>"MEDIUMTEXT",
@@ -6319,14 +6333,14 @@ function asks_register_one($in,$who){
     if($old&&(int)$old['client_id']!==$row['client_id'])return [409,['error'=>'ask_id already registered for another client','ask_id'=>$row['ask_id']]];
     if($old&&in_array($old['state'],['void','closed'],true))return [409,['error'=>'ask is '.$old['state'].'; register a new ask_id','ask_id'=>$row['ask_id']]];
     $now=gmdate('Y-m-d H:i:s');
-    $vals=[$row['kind'],$row['audience'],$row['rev'],json_encode($row['items'],JSON_UNESCAPED_UNICODE),
+    $vals=[$row['kind'],$row['audience'],$row['service'],$row['rev'],json_encode($row['items'],JSON_UNESCAPED_UNICODE),
         json_encode($lp,JSON_UNESCAPED_UNICODE),$row['deadline'],$row['default_policy'],
         json_encode($row['source_ref']?:new stdClass,JSON_UNESCAPED_UNICODE),$row['task_id'],mb_substr($who,0,64,'UTF-8'),$now];
     if($old){
-        db()->prepare("UPDATE seo_asks SET kind=?,audience=?,rev=?,items=?,lang_pack=?,deadline=?,default_policy=?,source_ref=?,task_id=?,registered_by=?,updated_at=? WHERE ask_id=?")
+        db()->prepare("UPDATE seo_asks SET kind=?,audience=?,service=?,rev=?,items=?,lang_pack=?,deadline=?,default_policy=?,source_ref=?,task_id=?,registered_by=?,updated_at=? WHERE ask_id=?")
             ->execute(array_merge($vals,[$row['ask_id']]));
     }else{
-        db()->prepare("INSERT INTO seo_asks(kind,audience,rev,items,lang_pack,deadline,default_policy,source_ref,task_id,registered_by,updated_at,ask_id,client_id,state,created_at)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?)")
+        db()->prepare("INSERT INTO seo_asks(kind,audience,service,rev,items,lang_pack,deadline,default_policy,source_ref,task_id,registered_by,updated_at,ask_id,client_id,state,created_at)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',?)")
             ->execute(array_merge($vals,[$row['ask_id'],$row['client_id'],$now]));
     }
     return [200,['ok'=>true,'ask_id'=>$row['ask_id'],'created'=>!$old,'rev'=>$row['rev'],'lang'=>$lp['primary']]];
@@ -6389,7 +6403,8 @@ function asks_answers_commit($pdo,$ask,$rows,$c){
 }
 /* ASKS-TXN-END */
 
-/* GET /svc/v1/asks?client_id=&state=open,answered&since=&audience= */
+/* GET /svc/v1/asks?client_id=&state=open,answered&since=&audience=&service=
+   service 可选：seo 或 sem 只出该车道，不传出全部（含通用卡）；其他值 400，与 audience 同口径。 */
 if($m==='GET'&&$ROUTE==='/svc/v1/asks'){
     $cid=(int)($_GET['client_id']??0);
     auth_integration('asks:read',$cid);
@@ -6399,6 +6414,8 @@ if($m==='GET'&&$ROUTE==='/svc/v1/asks'){
     if(isset($_GET['since'])&&$_GET['since']!==''){$since=asks_utc($_GET['since']);if($since===null)res(400,['error'=>'bad since']);}
     $aud=(string)($_GET['audience']??'');
     if($aud!==''&&!in_array($aud,['client','agency'],true))res(400,['error'=>'bad audience']);
+    $svcWant=(string)($_GET['service']??'');
+    if($svcWant!==''&&!in_array($svcWant,ASK_SERVICES,true))res(400,['error'=>'bad service']);
     ensure_asks_schema();
     $pl=asks_profile_lang($cid);
     $q=db()->prepare("SELECT * FROM seo_asks WHERE client_id=? AND state<>'void' ORDER BY id");
@@ -6406,6 +6423,7 @@ if($m==='GET'&&$ROUTE==='/svc/v1/asks'){
     $out=[];
     foreach($q->fetchAll() as $a){
         if($aud!==''&&!asks_audience_ok((string)$a['audience'],$aud))continue;
+        if(!asks_service_ok($a['service']??null,$svcWant))continue;
         $a['items']=json_decode((string)$a['items'],true)?:[];
         $a['lang_pack']=json_decode((string)$a['lang_pack'],true)?:[];
         $v=asks_view($a,$pl);
