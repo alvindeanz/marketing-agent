@@ -5977,6 +5977,15 @@ function asks_norm_register($in){
         if(!preg_match('/^sha256:[0-9a-f]{16,64}$/D',(string)$sr['card_token_ref']))return [null,'source_ref.card_token_ref must be sha256:<hex> fingerprint'];
         $srOut['card_token_ref']=(string)$sr['card_token_ref'];
     }
+    /* plan_approval 的答案会真的批准或驳回方案（2026-10-17 缺口 B），登记时把口子收紧：
+       必须指明方案、恰好一个 approve 题且驳回必填理由、不许默认按建议（沉默不能等于批准）。 */
+    if($kind==='plan_approval'){
+        if((int)($srOut['plan_id']??0)<=0)return [null,'plan_approval requires source_ref.plan_id'];
+        if($dp!=='none')return [null,'plan_approval default_policy must be none'];
+        $ap=array_values(array_filter($outItems,function($x){return $x['type']==='approve';}));
+        if(count($ap)!==1)return [null,'plan_approval needs exactly one approve item'];
+        if(!in_array('reject',$ap[0]['requires_text_when'],true))return [null,'item '.$ap[0]['item_id'].' must require text when reject'];
+    }
     $lpJson=json_encode($lp?:new stdClass,JSON_UNESCAPED_UNICODE);
     if(strlen($lpJson)>262144)return [null,'lang_pack too large'];
     return [['ask_id'=>$askId,'client_id'=>$cid,'kind'=>$kind,'audience'=>$aud,'rev'=>$rev,
@@ -6136,6 +6145,24 @@ function asks_actor($a){
     return ['webforger:'.$role.':'.$ref,null];
 }
 function asks_audience_ok($aud,$role){return $aud==='both'||$aud===$role;}
+/* seo_plans.approved_by 是 VARCHAR(50)，actor 最长 80。放得下原样存；放不下存 wf: 加去掉 webforger: 前缀的 actor 截到 50，
+   完整 actor 在账本行里（seo_card_feedback.actor），审计按 ask_id 回查。 */
+function asks_approved_by($actor){
+    $a=(string)$actor;
+    if(strlen($a)<=50)return $a;
+    return substr('wf:'.preg_replace('/^webforger:/','',$a),0,50);
+}
+define('ASK_PLAN_REJECT_FALLBACK','客户经 WebForger 后台驳回，未附理由');
+/* plan_approval 这次提交对方案的决定：找唯一 approve 题，本次提交里它答了 approve/reject 才算决定，否则 null（只留旁注不动方案）。 */
+function asks_plan_decision($askItems,$rows){
+    $aid=null;
+    foreach($askItems as $it){if(($it['type']??'')==='approve'){$aid=$it['item_id'];break;}}
+    if($aid===null)return null;
+    foreach($rows as $r){
+        if($r['item']===$aid&&in_array($r['choice'],['approve','reject'],true))return ['item'=>$aid,'choice'=>$r['choice'],'text'=>trim((string)$r['fb'])];
+    }
+    return null;
+}
 /* ASKS-PURE-END */
 
 /* 集成 token 闸门：$ROUTE 定下后立即调用。/svc/ 只认集成 token；集成 token 不许出 /svc/。 */
@@ -6279,6 +6306,12 @@ function asks_register_one($in,$who){
         $plainCard=md5('cardfb'.$row['task_id'].$WORKER_TKN);
         if(strpos(json_encode($in),$plainCard)!==false)return [422,['error'=>'payload contains a plaintext card token; send a fingerprint','ask_id'=>$row['ask_id']]];
     }
+    if($row['kind']==='plan_approval'){
+        $q=db()->prepare("SELECT client_id FROM seo_plans WHERE id=?");
+        $q->execute([(int)$row['source_ref']['plan_id']]);
+        $pr=$q->fetch();
+        if(!$pr||(int)$pr['client_id']!==$row['client_id'])return [422,['error'=>'source_ref.plan_id does not belong to client_id','ask_id'=>$row['ask_id']]];
+    }
     /* 语言包定版：没给 primary 就按登记时的 report_lang 落，空值按 zh。之后改 report_lang 不影响本张。 */
     $lp=$row['lang_pack'];
     if(!isset($lp['primary'])||$lp['primary']==='')$lp['primary']=trim($pl)!==''?trim($pl):'zh';
@@ -6298,6 +6331,63 @@ function asks_register_one($in,$who){
     }
     return [200,['ok'=>true,'ask_id'=>$row['ask_id'],'created'=>!$old,'rev'=>$row['rev'],'lang'=>$lp['primary']]];
 }
+
+/* ASKS-TXN-START（answers 入账事务，tests/asksapi.test.php 按标记抠出来配假 PDO 跑）
+   一个事务里：plan_approval 先锁 Ask 行复查 state（防 WF 与看板或两个 WF 请求并发批准），逐 item 写账本行，
+   有方案决定就调 plan_approve_core / plan_reject_core（必须是本 client 的 draft），同事务把 Ask 置 closed。
+   任何一步失败整体回滚。返回 [http码, body]；唯一索引撞键返回 ['replay', null] 交路由走重放。
+   错误分级：方案不是 draft 409，plan_id 缺失、方案不存在或不属本 client 422（WF 都按不可重试处理），DB 临时故障 502。
+   $c：cid、actor、key、rev、ans_at、ip、now。 */
+function asks_answers_commit($pdo,$ask,$rows,$c){
+    $askId=(string)$ask['ask_id'];
+    $tid=(int)($ask['task_id']??0);
+    $isPlan=(string)$ask['kind']==='plan_approval';
+    $planId=0;$dec=null;
+    if($isPlan){
+        $sr=asks_json_in($ask['source_ref']??null)?:[];
+        $planId=(int)($sr['plan_id']??0);
+        if($planId<=0)return [422,['error'=>'plan_approval ask has no source_ref.plan_id']];
+        $dec=asks_plan_decision($ask['items'],$rows);
+    }
+    $by=asks_approved_by($c['actor']);
+    $ids=[];$plan=null;
+    try{
+        $pdo->beginTransaction();
+        if($isPlan){
+            $lq=$pdo->prepare("SELECT state FROM seo_asks WHERE ask_id=? FOR UPDATE");
+            $lq->execute([$askId]);
+            $lr=$lq->fetch();
+            $st=$lr?(string)$lr['state']:'';
+            if($st!=='open'){
+                $pdo->rollBack();
+                return $st===''||$st==='void'?[404,['error'=>'ask not found']]:[409,['error'=>'ask '.$st,'ask_state'=>$st]];
+            }
+        }
+        $ins=$pdo->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip,actor,ask_id,client_id,channel,idempotency_key,ask_rev,answered_at)VALUES(?,?,?,?,?,?,?,?,'webforger',?,?,?)");
+        foreach($rows as $r){
+            $ins->execute([$tid,$r['item'],$r['choice'],$r['fb'],$c['ip'],$c['actor'],$askId,(int)$c['cid'],asks_idem_key($c['key'],$r['item']),(int)$c['rev'],$c['ans_at']]);
+            $ids[]=(int)$pdo->lastInsertId();
+        }
+        if($dec){
+            $opt=['client_id'=>(int)$c['cid'],'require_draft'=>true];
+            if($dec['choice']==='approve')$r=plan_approve_core($pdo,$planId,$by,$opt);
+            else $r=plan_reject_core($pdo,$planId,$by,$dec['text']!==''?$dec['text']:ASK_PLAN_REJECT_FALLBACK,$opt);
+            if(isset($r['err'])){
+                $pdo->rollBack();
+                return [$r['err']==='not_draft'?409:422,['error'=>$r['msg'],'plan_error'=>$r['err']]];
+            }
+            $pdo->prepare("UPDATE seo_asks SET state='closed',closed_at=?,updated_at=? WHERE ask_id=?")->execute([$c['now'],$c['now'],$askId]);
+            $plan=['decision'=>$dec['choice'],'plan_id'=>$planId]+$r;
+        }
+        $pdo->commit();
+    }catch(Exception $e){
+        if($pdo->inTransaction())$pdo->rollBack();
+        if($e instanceof PDOException&&(string)$e->getCode()==='23000')return ['replay',null];
+        return $isPlan?[502,['error'=>'plan approval write failed, retry']]:[500,['error'=>'ledger write failed']];
+    }
+    return [200,['ids'=>$ids,'plan'=>$plan,'by'=>$by]];
+}
+/* ASKS-TXN-END */
 
 /* GET /svc/v1/asks?client_id=&state=open,answered&since=&audience= */
 if($m==='GET'&&$ROUTE==='/svc/v1/asks'){
@@ -6370,20 +6460,18 @@ if($m==='POST'&&$ROUTE==='/svc/v1/answers'){
     if($ansAt===null||$ansAt>gmdate('Y-m-d H:i:s',time()+300))$ansAt=$nowUtc;
     $tid=(int)$ask['task_id'];
     $ip=substr((string)($_SERVER['REMOTE_ADDR']??''),0,64);
-    $ids=[];
-    $pdo=db();
-    try{
-        $pdo->beginTransaction();
-        $ins=$pdo->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip,actor,ask_id,client_id,channel,idempotency_key,ask_rev,answered_at)VALUES(?,?,?,?,?,?,?,?,'webforger',?,?,?)");
-        foreach($rows as $r){
-            $ins->execute([$tid,$r['item'],$r['choice'],$r['fb'],$ip,$actor,$askId,$cid,asks_idem_key($key,$r['item']),$rev,$ansAt]);
-            $ids[]=(int)$pdo->lastInsertId();
+    list($code,$out)=asks_answers_commit(db(),$ask,$rows,['cid'=>$cid,'actor'=>$actor,'key'=>$key,'rev'=>$rev,'ans_at'=>$ansAt,'ip'=>$ip,'now'=>$nowUtc]);
+    if($code==='replay'){$replay();res(500,['error'=>'ledger write failed']);}
+    if($code!==200)res($code,$out);
+    $ids=$out['ids'];
+    /* 方案批准生效后的收尾（同 admin 路由，事务外）：方向卡收件箱收掉，被取代方案的未开工任务收掉。 */
+    if($pf=$out['plan']){
+        if($pf['decision']==='approve'){
+            $closedOld=plan_approve_finish($pf['plan_id'],(int)$pf['plan']['client_id'],$pf['superseded'],$out['by']);
+            audit($out['by'],'seo_plan_approve',(string)$pf['plan_id'],['client_id'=>$cid,'approved_count'=>$pf['approved'],'excluded_count'=>0,'via'=>'webforger','ask_id'=>$askId,'closed_superseded'=>$closedOld]);
+        }else{
+            audit($out['by'],'seo_plan_reject',(string)$pf['plan_id'],['client_id'=>$cid,'reason'=>$pf['reason'],'killed'=>$pf['killed'],'via'=>'webforger','ask_id'=>$askId]);
         }
-        $pdo->commit();
-    }catch(PDOException $e){
-        if($pdo->inTransaction())$pdo->rollBack();
-        if((string)$e->getCode()==='23000'){$replay();}
-        res(500,['error'=>'ledger write failed']);
     }
     if($tid>0){
         $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单','approve'=>'批准','reject'=>'驳回'];
@@ -6532,6 +6620,79 @@ if($m==='GET'&&$ROUTE==='/plans'){
     res(200,['plans'=>$s->fetchAll()]);
 }
 
+/* PLAN-CORE-START（方案批准与驳回的核心，2026-10-17 asks bridge 缺口 B 从两条 admin 路由抽出）
+   admin 路由与 POST /svc/v1/answers（plan_approval Ask）共用。核心不开事务：$p 由调用方给，事务与提交归调用方。
+   $opt：client_id（给了就校方案归属）、require_draft（true 时非 draft 拒；admin 路由不传，保持原来不查状态）、
+   exclude_task_ids（仅批准）。返回 ['ok'=>true,...] 或 ['err'=>not_found|wrong_client|not_draft,'msg'=>...]。
+   tests/asksapi.test.php 按标记抠出来配假 PDO 跑。 */
+function plan_core_load($p,$pid,$opt){
+    $g=$p->prepare("SELECT id,client_id,status FROM seo_plans WHERE id=? FOR UPDATE");
+    $g->execute([(int)$pid]);
+    $plan=$g->fetch();
+    if(!$plan)return [null,['err'=>'not_found','msg'=>'Plan not found']];
+    if(isset($opt['client_id'])&&(int)$plan['client_id']!==(int)$opt['client_id'])return [null,['err'=>'wrong_client','msg'=>'plan does not belong to this client']];
+    if(!empty($opt['require_draft'])&&$plan['status']!=='draft')return [null,['err'=>'not_draft','msg'=>'plan is '.$plan['status'].', only a draft can be decided','status'=>$plan['status']]];
+    return [$plan,null];
+}
+/* 批准：现役方案降 superseded，本方案转 active，proposed 任务转 approved（exclude 的留在 proposed）。
+   收件箱与被取代方案的任务收口在 plan_approve_finish，提交后调。 */
+function plan_approve_core($p,$pid,$by,$opt=[]){
+    $pid=(int)$pid;
+    list($plan,$err)=plan_core_load($p,$pid,$opt);
+    if($err)return $err;
+    $excl=array_values(array_filter(array_map('intval',(array)($opt['exclude_task_ids']??[]))));
+    $cnt=$p->prepare("SELECT COUNT(*) AS n FROM seo_tasks WHERE plan_id=? AND status='proposed'");
+    $cnt->execute([$pid]);
+    $total=(int)$cnt->fetch()['n'];
+    /* 被取代的现役方案：它还没开工的任务（proposed / approved / blocked）一起收掉，
+       理由指向新方案。已在 review / in_progress 的留着，那是做到一半的活。
+       v2 里要保留的内容，plan_review 已经按 from 吸收进新任务了。 */
+    $sq=$p->prepare("SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>?");
+    $sq->execute([$plan['client_id'],$pid]);
+    $supersededIds=array_map('intval',array_column($sq->fetchAll(),'id'));
+    $p->prepare("UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>?")
+      ->execute([$plan['client_id'],$pid]);
+    $p->prepare("UPDATE seo_plans SET status='active',approved_by=?,reject_reason=NULL WHERE id=?")
+      ->execute([$by,$pid]);
+    if($excl){
+        $in=implode(',',array_fill(0,count($excl),'?'));
+        $st=$p->prepare("UPDATE seo_tasks SET status='approved' WHERE plan_id=? AND status='proposed' AND id NOT IN ($in)");
+        $st->execute(array_merge([$pid],$excl));
+    }else{
+        $st=$p->prepare("UPDATE seo_tasks SET status='approved' WHERE plan_id=? AND status='proposed'");
+        $st->execute([$pid]);
+    }
+    $approved=$st->rowCount();
+    return ['ok'=>true,'plan'=>$plan,'approved'=>$approved,'total'=>$total,'superseded'=>$supersededIds];
+}
+/* 批准提交后的收尾：方向确认卡收掉（批准 = 确认方向），被取代方案未开工任务按 merged 收掉。返回收掉的任务 id。 */
+function plan_approve_finish($pid,$cid,$supersededIds,$by){
+    db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([(int)$cid,'[plan:'.$pid.']%']);
+    $closedOld=[];
+    foreach($supersededIds as $spid){
+        $oq=db()->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status IN('proposed','approved','blocked')");
+        $oq->execute([$spid]);
+        foreach($oq->fetchAll() as $r){ if(!task_close((int)$r['id'],'merged','方案 #'.$spid.' 被 #'.$pid.' 取代，未开工任务收掉',$by))$closedOld[]=(int)$r['id']; }
+    }
+    return $closedOld;
+}
+/* 驳回：方案转 rejected 记理由，它带来的 proposed 任务一起关掉（killed 带原因），方向确认卡收掉。
+   原因会被 tools/experience_sync.js 抓进跨客户经验。 */
+function plan_reject_core($p,$pid,$by,$reason,$opt=[]){
+    $pid=(int)$pid;
+    list($plan,$err)=plan_core_load($p,$pid,$opt);
+    if($err)return $err;
+    $p->prepare("UPDATE seo_plans SET status='rejected',reject_reason=?,approved_by=? WHERE id=?")
+        ->execute([$reason,$by,$pid]);
+    $oq=$p->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status='proposed'");
+    $oq->execute([$pid]);
+    $killed=[];
+    foreach($oq->fetchAll() as $r){ if(!task_close((int)$r['id'],'killed','方案 #'.$pid.' 被打回：'.$reason,$by))$killed[]=(int)$r['id']; }
+    $p->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([(int)$plan['client_id'],'[plan:'.$pid.']%']);
+    return ['ok'=>true,'plan'=>$plan,'killed'=>$killed,'reason'=>$reason];
+}
+/* PLAN-CORE-END */
+
 // POST /plans/{id}/approve -> activate, demote the previous active plan, and
 // promote the plan's proposed tasks to approved. body.exclude_task_ids keeps
 // the named tasks sitting at proposed so a human can revisit them.
@@ -6539,54 +6700,24 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/approve$#',$ROUTE,$mm)){
     $u=auth_admin();
     $pid=(int)$mm[1];
     $i=input();
-    $g=db()->prepare("SELECT id,client_id,status FROM seo_plans WHERE id=?");
-    $g->execute([$pid]);
-    $plan=$g->fetch();
-    if(!$plan)res(404,['error'=>'Plan not found']);
     $excl=[];
     if(isset($i['exclude_task_ids'])&&is_array($i['exclude_task_ids'])){
         foreach($i['exclude_task_ids'] as $x){$x=(int)$x;if($x)$excl[$x]=true;}
         $excl=array_keys($excl);
     }
-    $cnt=db()->prepare("SELECT COUNT(*) AS n FROM seo_tasks WHERE plan_id=? AND status='proposed'");
-    $cnt->execute([$pid]);
-    $total=(int)$cnt->fetch()['n'];
-    $approved=0;
+    /* 2026-10-17 抽核心：admin 路由不传 require_draft，保持原来不查方案状态（人在看板上对非草稿批准是有意动作）。 */
     $p=db();
     $p->beginTransaction();
     try{
-        /* 被取代的现役方案：它还没开工的任务（proposed / approved / blocked）一起收掉，
-           理由指向新方案。已在 review / in_progress 的留着，那是做到一半的活。
-           v2 里要保留的内容，plan_review 已经按 from 吸收进新任务了。 */
-        $sq=$p->prepare("SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>?");
-        $sq->execute([$plan['client_id'],$pid]);
-        $supersededIds=array_map('intval',array_column($sq->fetchAll(),'id'));
-        $p->prepare("UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>?")
-          ->execute([$plan['client_id'],$pid]);
-        $p->prepare("UPDATE seo_plans SET status='active',approved_by=?,reject_reason=NULL WHERE id=?")
-          ->execute([$u['username'],$pid]);
-        if($excl){
-            $in=implode(',',array_fill(0,count($excl),'?'));
-            $st=$p->prepare("UPDATE seo_tasks SET status='approved' WHERE plan_id=? AND status='proposed' AND id NOT IN ($in)");
-            $st->execute(array_merge([$pid],$excl));
-        }else{
-            $st=$p->prepare("UPDATE seo_tasks SET status='approved' WHERE plan_id=? AND status='proposed'");
-            $st->execute([$pid]);
-        }
-        $approved=$st->rowCount();
+        $r=plan_approve_core($p,$pid,$u['username'],['exclude_task_ids'=>$excl]);
+        if(isset($r['err'])){$p->rollBack();res(404,['error'=>'Plan not found']);}
         $p->commit();
     }catch(Exception $e){
         if($p->inTransaction())$p->rollBack();
         res(500,['error'=>'approve failed']);
     }
-    /* 方向确认卡：批准 = 确认方向，收件箱里这张卡关掉 */
-    db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([(int)$plan['client_id'],'[plan:'.$pid.']%']);
-    $closedOld=[];
-    foreach($supersededIds as $spid){
-        $oq=db()->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status IN('proposed','approved','blocked')");
-        $oq->execute([$spid]);
-        foreach($oq->fetchAll() as $r){ if(!task_close((int)$r['id'],'merged','方案 #'.$spid.' 被 #'.$pid.' 取代，未开工任务收掉',$u['username']))$closedOld[]=(int)$r['id']; }
-    }
+    $plan=$r['plan'];$total=$r['total'];$approved=$r['approved'];
+    $closedOld=plan_approve_finish($pid,(int)$plan['client_id'],$r['superseded'],$u['username']);
     $excluded=$total-$approved;
     if($excluded<0)$excluded=0;
     audit($u['username'],'seo_plan_approve',(string)$pid,['client_id'=>(int)$plan['client_id'],'approved_count'=>$approved,'excluded_count'=>$excluded]);
@@ -7653,19 +7784,10 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/reject$#',$ROUTE,$mm)){
     $i=input();
     $reason=trim((string)($i['reason']??''));
     if($reason==='')res(400,['error'=>'reason required']);
-    $g=db()->prepare("SELECT id,client_id FROM seo_plans WHERE id=?");
-    $g->execute([$pid]);
-    $plan=$g->fetch();
-    if(!$plan)res(404,['error'=>'Plan not found']);
-    db()->prepare("UPDATE seo_plans SET status='rejected',reject_reason=?,approved_by=? WHERE id=?")
-        ->execute([$reason,$u['username'],$pid]);
-    /* 打回的方案，它带来的 proposed 任务一起关掉（killed 带原因），方向确认卡收掉。
-       原因会被 tools/experience_sync.js 抓进跨客户经验。 */
-    $oq=db()->prepare("SELECT id FROM seo_tasks WHERE plan_id=? AND status='proposed'");
-    $oq->execute([$pid]);
-    $killed=[];
-    foreach($oq->fetchAll() as $r){ if(!task_close((int)$r['id'],'killed','方案 #'.$pid.' 被打回：'.$reason,$u['username']))$killed[]=(int)$r['id']; }
-    db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")->execute([(int)$plan['client_id'],'[plan:'.$pid.']%']);
+    /* 2026-10-17 抽核心 plan_reject_core（见 PLAN-CORE）：admin 路由原样不开事务、不查方案状态。 */
+    $r=plan_reject_core(db(),$pid,$u['username'],$reason);
+    if(isset($r['err']))res(404,['error'=>'Plan not found']);
+    $plan=$r['plan'];$killed=$r['killed'];
     audit($u['username'],'seo_plan_reject',(string)$pid,['client_id'=>(int)$plan['client_id'],'reason'=>$reason,'killed'=>$killed]);
     res(200,['ok'=>true,'killed'=>$killed]);
 }

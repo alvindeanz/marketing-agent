@@ -244,5 +244,191 @@ t('语言：primary 缺省按 profile，profile 空按 zh；texts 缺该语言�
     eq(asks_pick_lang(['primary'=>'en','texts'=>['en'=>['title'=>'E']]],'zh')[1]['title'],'E','定版 primary 优先于后改的 profile');
 });
 
+section('plan_approval 登记约束（2026-10-17 缺口 B）');
+
+$PREG=$REG;$PREG['kind']='plan_approval';$PREG['source_ref']=['plan_id'=>65];
+$PREG['items']=[
+    ['item_id'=>'approve','type'=>'approve','options'=>['approve','reject'],'requires_text_when'=>['reject']],
+    ['item_id'=>'note','type'=>'text','options'=>[],'required'=>false],
+];
+t('缺 plan_id、default_policy 非 none、approve 题不是恰好一个、reject 不必填文本都拒',function()use($PREG){
+    list($r,$e)=asks_norm_register($PREG);eq($e,null,'好登记体该过');eq($r['default_policy'],'none','默认 none');
+    $x=$PREG;unset($x['source_ref']);eq(asks_norm_register($x)[1],'plan_approval requires source_ref.plan_id','缺 source_ref');
+    $x=$PREG;$x['source_ref']=['plan_id'=>0];eq(asks_norm_register($x)[1],'plan_approval requires source_ref.plan_id','plan_id 0');
+    $x=$PREG;$x['default_policy']='no_reply_follow_recommendation';eq(asks_norm_register($x)[1],'plan_approval default_policy must be none','默认策略');
+    $x=$PREG;$x['items'][0]['requires_text_when']=[];eq(asks_norm_register($x)[1],'item approve must require text when reject','reject 不必填');
+    $x=$PREG;$x['items'][]=['item_id'=>'approve2','type'=>'approve','options'=>['approve','reject'],'requires_text_when'=>['reject']];
+    eq(asks_norm_register($x)[1],'plan_approval needs exactly one approve item','两个 approve 题');
+    $x=$PREG;$x['items']=[$PREG['items'][1]];eq(asks_norm_register($x)[1],'plan_approval needs exactly one approve item','没有 approve 题');
+});
+t('approved_by 压缩：放得下原样，超 50 存 wf: 前缀截断',function(){
+    eq(asks_approved_by('webforger:client:wfu_ab12'),'webforger:client:wfu_ab12','短的原样');
+    $long='webforger:agency:'.str_repeat('x',60);
+    $c=asks_approved_by($long);
+    is_true(strlen($c)<=50,'超列宽');eq(substr($c,0,10),'wf:agency:','前缀');
+});
+
+section('plan_approval 审批生效（假 PDO 跑 ASKS-TXN 与 PLAN-CORE 两块）');
+
+foreach(['ASKS-TXN','PLAN-CORE'] as $mk){
+    if(!preg_match('#/\* '.$mk.'-START([\s\S]*?)/\* '.$mk.'-END \*/#',$src,$bm)){fwrite(STDERR,"找不到 $mk 标记\n");exit(1);}
+    eval(preg_replace('#^[\s\S]*?\*/#','',$bm[1],1));
+}
+class FakePDOEx extends PDOException{function __construct($msg,$code){parent::__construct($msg);$this->code=$code;}}
+/* 内存假库：只认两块代码里出现的 SQL，认不出的直接抛，SQL 漂移会当场暴露。事务按快照回滚。 */
+class FakeDB{
+    public $t=['plans'=>[],'tasks'=>[],'asks'=>[],'fb'=>[],'inbox'=>[]];
+    public $snap=null;public $last=0;public $failInsert=null;public $log=[];
+    function beginTransaction(){if($this->snap!==null)throw new Exception('nested tx');$this->snap=$this->t;return true;}
+    function commit(){if($this->snap===null)throw new Exception('no tx');$this->snap=null;return true;}
+    function rollBack(){if($this->snap===null)throw new Exception('no tx');$this->t=$this->snap;$this->snap=null;return true;}
+    function inTransaction(){return $this->snap!==null;}
+    function lastInsertId(){return (string)$this->last;}
+    function prepare($sql){return new FakeStmt($this,preg_replace('/\s+/',' ',trim($sql)));}
+}
+class FakeStmt{
+    public $db;public $sql;public $rows=[];public $n=0;
+    function __construct($db,$sql){$this->db=$db;$this->sql=$sql;}
+    function fetch(){return $this->rows?array_shift($this->rows):false;}
+    function fetchAll(){$r=$this->rows;$this->rows=[];return $r;}
+    function rowCount(){return $this->n;}
+    function execute($a=[]){
+        $d=$this->db;$q=$this->sql;$T=&$d->t;$d->log[]=$q;
+        if($q==="SELECT id,client_id,status FROM seo_plans WHERE id=? FOR UPDATE"){
+            $p=$T['plans'][$a[0]]??null;$this->rows=$p?[['id'=>$p['id'],'client_id'=>$p['client_id'],'status'=>$p['status']]]:[];return true;}
+        if($q==="SELECT COUNT(*) AS n FROM seo_tasks WHERE plan_id=? AND status='proposed'"){
+            $n=0;foreach($T['tasks'] as $x)if($x['plan_id']==$a[0]&&$x['status']==='proposed')$n++;$this->rows=[['n'=>$n]];return true;}
+        if($q==="SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>?"){
+            foreach($T['plans'] as $x)if($x['client_id']==$a[0]&&$x['status']==='active'&&$x['id']!=$a[1])$this->rows[]=['id'=>$x['id']];return true;}
+        if($q==="UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>?"){
+            foreach($T['plans'] as &$x)if($x['client_id']==$a[0]&&$x['status']==='active'&&$x['id']!=$a[1])$x['status']='superseded';return true;}
+        if($q==="UPDATE seo_plans SET status='active',approved_by=?,reject_reason=NULL WHERE id=?"){
+            $T['plans'][$a[1]]['status']='active';$T['plans'][$a[1]]['approved_by']=$a[0];$T['plans'][$a[1]]['reject_reason']=null;return true;}
+        if(strpos($q,"UPDATE seo_tasks SET status='approved' WHERE plan_id=? AND status='proposed'")===0){
+            $ex=array_slice($a,1);
+            foreach($T['tasks'] as &$x)if($x['plan_id']==$a[0]&&$x['status']==='proposed'&&!in_array($x['id'],$ex)){$x['status']='approved';$this->n++;}return true;}
+        if($q==="UPDATE seo_plans SET status='rejected',reject_reason=?,approved_by=? WHERE id=?"){
+            $T['plans'][$a[2]]['status']='rejected';$T['plans'][$a[2]]['reject_reason']=$a[0];$T['plans'][$a[2]]['approved_by']=$a[1];return true;}
+        if($q==="SELECT id FROM seo_tasks WHERE plan_id=? AND status='proposed'"){
+            foreach($T['tasks'] as $x)if($x['plan_id']==$a[0]&&$x['status']==='proposed')$this->rows[]=['id'=>$x['id']];return true;}
+        if($q==="SELECT id FROM seo_tasks WHERE plan_id=? AND status IN('proposed','approved','blocked')"){
+            foreach($T['tasks'] as $x)if($x['plan_id']==$a[0]&&in_array($x['status'],['proposed','approved','blocked']))$this->rows[]=['id'=>$x['id']];return true;}
+        if(strpos($q,"UPDATE seo_inbox SET status='resolved' WHERE client_id=? AND kind='digest' AND status='open' AND body LIKE ?")===0){
+            $T['inbox'][]=[$a[0],$a[1]];return true;}
+        if($q==="SELECT state FROM seo_asks WHERE ask_id=? FOR UPDATE"){
+            $x=$T['asks'][$a[0]]??null;$this->rows=$x?[['state'=>$x['state']]]:[];return true;}
+        if(strpos($q,"INSERT INTO seo_card_feedback(")===0){
+            if($d->failInsert)throw new FakePDOEx('boom',$d->failInsert);
+            $d->last=count($T['fb'])+900;$T['fb'][]=['id'=>$d->last,'item'=>$a[1],'choice'=>$a[2],'fb'=>$a[3],'actor'=>$a[5],'ask_id'=>$a[6]];return true;}
+        if($q==="UPDATE seo_asks SET state='closed',closed_at=?,updated_at=? WHERE ask_id=?"){
+            $T['asks'][$a[2]]['state']='closed';$T['asks'][$a[2]]['closed_at']=$a[0];return true;}
+        throw new Exception('假库认不出的 SQL：'.$q);
+    }
+}
+$FDB=null;
+function db(){global $FDB;return $FDB;}
+/* task_close 替身：真函数在 seo-api.php 主体（改 status=done、追 note、排叙述），这里只记结束类型。 */
+function task_close($tid,$kind,$reason='',$by=''){
+    global $FDB;$t=&$FDB->t['tasks'][$tid];
+    if($t['status']==='done')return '任务已经结束';
+    $t['status']='done';$t['close']=$kind;$t['by']=$by;return null;
+}
+function fx_db(){
+    global $FDB;$FDB=new FakeDB();
+    $FDB->t['plans']=[
+        60=>['id'=>60,'client_id'=>55,'status'=>'active','approved_by'=>'alvin','reject_reason'=>null],
+        65=>['id'=>65,'client_id'=>55,'status'=>'draft','approved_by'=>'','reject_reason'=>null],
+        66=>['id'=>66,'client_id'=>56,'status'=>'draft','approved_by'=>'','reject_reason'=>null],
+        64=>['id'=>64,'client_id'=>55,'status'=>'superseded','approved_by'=>'','reject_reason'=>null],
+    ];
+    $FDB->t['tasks']=[
+        1=>['id'=>1,'plan_id'=>65,'status'=>'proposed'],2=>['id'=>2,'plan_id'=>65,'status'=>'proposed'],
+        3=>['id'=>3,'plan_id'=>65,'status'=>'in_progress'],
+        4=>['id'=>4,'plan_id'=>60,'status'=>'approved'],5=>['id'=>5,'plan_id'=>60,'status'=>'in_progress'],
+        6=>['id'=>6,'plan_id'=>64,'status'=>'proposed'],
+    ];
+    $FDB->t['asks']['ask_plan65']=['state'=>'open'];
+    return $FDB;
+}
+list($PASK,)=asks_norm_register(array_merge($PREG,['ask_id'=>'ask_plan65']));
+$PASK['source_ref']=json_encode($PASK['source_ref']);$PASK['state']='open';
+$CTX=['cid'=>55,'actor'=>'webforger:client:wfu_ab12','key'=>'wf:k1','rev'=>2,'ans_at'=>'2026-10-17 01:00:00','ip'=>'1.2.3.4','now'=>'2026-10-17 01:00:01'];
+
+t('答 approve：方案转 active、旧现役 superseded、proposed 转 approved、Ask closed、账本有行；再答 409',function()use($PASK,$CTX){
+    $d=fx_db();
+    list($c,$o)=asks_answers_commit($d,$PASK,[['item'=>'approve','choice'=>'approve','fb'=>'']],$CTX);
+    eq($c,200,'应 200');
+    eq($d->t['plans'][65]['status'],'active','方案转 active');
+    eq($d->t['plans'][65]['approved_by'],'webforger:client:wfu_ab12','approved_by 记 actor');
+    eq($d->t['plans'][60]['status'],'superseded','旧现役降级');
+    eq([$d->t['tasks'][1]['status'],$d->t['tasks'][2]['status'],$d->t['tasks'][3]['status']],['approved','approved','in_progress'],'任务晋级');
+    eq($d->t['asks']['ask_plan65']['state'],'closed','Ask closed');
+    eq($d->t['asks']['ask_plan65']['closed_at'],'2026-10-17 01:00:01','closed_at');
+    eq(count($d->t['fb']),1,'账本一行');eq($d->inTransaction(),false,'事务已提交');
+    eq($o['plan']['decision'],'approve','决定');eq($o['plan']['superseded'],[60],'被取代方案交给收尾');
+    eq(plan_approve_finish(65,55,$o['plan']['superseded'],$o['by']),[4],'收尾收掉旧现役未开工任务');
+    eq($d->t['tasks'][5]['status'],'in_progress','做到一半的留着');
+    list($c2,$o2)=asks_answers_commit($d,$PASK,[['item'=>'approve','choice'=>'reject','fb'=>'changed mind']],array_merge($CTX,['key'=>'wf:k2']));
+    eq($c2,409,'closed 后再答 409');eq($o2['ask_state'],'closed','回 ask_state');
+    eq(count($d->t['fb']),1,'409 不落账本行');eq($d->t['plans'][65]['status'],'active','方案不动');
+    eq(asks_state('closed',null,'2026-10-17 02:00:00',$PASK['items'],[]),'closed','路由层读时状态同样 closed，前置 409 覆盖');
+});
+t('答 reject：方案 rejected 记理由、proposed 任务 killed、Ask closed；无理由用固定一句兜底',function()use($PASK,$CTX){
+    $d=fx_db();
+    list($c,$o)=asks_answers_commit($d,$PASK,[['item'=>'approve','choice'=>'reject','fb'=>'too aggressive on paid']],$CTX);
+    eq($c,200,'应 200');
+    eq($d->t['plans'][65]['status'],'rejected','方案 rejected');
+    eq($d->t['plans'][65]['reject_reason'],'too aggressive on paid','理由');
+    eq([$d->t['tasks'][1]['close']??null,$d->t['tasks'][2]['close']??null],['killed','killed'],'proposed 任务 killed');
+    eq($d->t['tasks'][3]['status'],'in_progress','非 proposed 不动');
+    eq($o['plan']['killed'],[1,2],'killed 清单');
+    eq($d->t['plans'][60]['status'],'active','驳回不碰现役');
+    eq($d->t['asks']['ask_plan65']['state'],'closed','Ask closed');
+    $d=fx_db();
+    list($c,)=asks_answers_commit($d,$PASK,[['item'=>'approve','choice'=>'reject','fb'=>'']],$CTX);
+    eq($c,200,'兜底也 200');eq($d->t['plans'][65]['reject_reason'],ASK_PLAN_REJECT_FALLBACK,'兜底理由');
+});
+t('业务终态失败整体回滚：非 draft 409、方案不属本 client 422、方案不存在 422、Ask 缺 plan_id 422',function()use($PASK,$CTX){
+    $d=fx_db();$d->t['plans'][65]['status']='superseded';
+    list($c,$o)=asks_answers_commit($d,$PASK,[['item'=>'approve','choice'=>'approve','fb'=>'']],$CTX);
+    eq($c,409,'非 draft 409');eq($o['plan_error'],'not_draft','错误码');
+    eq(count($d->t['fb']),0,'账本行回滚');eq($d->t['asks']['ask_plan65']['state'],'open','Ask 不关');
+    eq($d->t['plans'][60]['status'],'active','现役不动');eq($d->inTransaction(),false,'无悬空事务');
+    $d=fx_db();$x=$PASK;$x['source_ref']=json_encode(['plan_id'=>66]);
+    eq(asks_answers_commit($d,$x,[['item'=>'approve','choice'=>'approve','fb'=>'']],$CTX)[0],422,'别家方案 422');
+    eq($d->t['plans'][66]['status'],'draft','别家方案不动');
+    $d=fx_db();$x=$PASK;$x['source_ref']=json_encode(['plan_id'=>999]);
+    eq(asks_answers_commit($d,$x,[['item'=>'approve','choice'=>'reject','fb'=>'x']],$CTX)[0],422,'不存在 422');
+    $d=fx_db();$x=$PASK;$x['source_ref']='{}';
+    eq(asks_answers_commit($d,$x,[['item'=>'approve','choice'=>'approve','fb'=>'']],$CTX)[0],422,'缺 plan_id 422');
+    eq($d->log,[],'缺 plan_id 不碰库');
+});
+t('只交旁注不动方案也不关 Ask；DB 临时故障 502 回滚、撞唯一键交路由重放',function()use($PASK,$CTX){
+    $d=fx_db();
+    list($c,$o)=asks_answers_commit($d,$PASK,[['item'=>'note','choice'=>'other','fb'=>'reading it now']],$CTX);
+    eq($c,200,'旁注 200');eq($o['plan'],null,'无方案决定');
+    eq($d->t['asks']['ask_plan65']['state'],'open','Ask 仍 open');eq($d->t['plans'][65]['status'],'draft','方案不动');
+    $d=fx_db();$d->failInsert='HY000';
+    eq(asks_answers_commit($d,$PASK,[['item'=>'approve','choice'=>'approve','fb'=>'']],$CTX)[0],502,'临时故障 502');
+    eq($d->t['plans'][65]['status'],'draft','回滚');eq($d->inTransaction(),false,'无悬空事务');
+    $d=fx_db();$d->failInsert='23000';
+    eq(asks_answers_commit($d,$PASK,[['item'=>'approve','choice'=>'approve','fb'=>'']],$CTX)[0],'replay','撞键走重放');
+    $d=fx_db();$d->failInsert='HY000';$x=$PASK;$x['kind']='direction';
+    eq(asks_answers_commit($d,$x,[['item'=>'note','choice'=>'other','fb'=>'x']],$CTX)[0],500,'非方案 Ask 维持原 500');
+});
+t('admin 口径不变：不传 require_draft 时非 draft 也能批/驳，exclude 的任务留在 proposed',function(){
+    $d=fx_db();$d->beginTransaction();
+    $r=plan_approve_core($d,64,'alvin',['exclude_task_ids'=>[6]]);
+    $d->commit();
+    eq($r['ok']??null,true,'superseded 方案 admin 照批');eq([$r['approved'],$r['total']],[0,1],'计数');
+    eq($d->t['tasks'][6]['status'],'proposed','exclude 留 proposed');
+    eq($d->t['plans'][64]['approved_by'],'alvin','approved_by');
+    eq(plan_approve_core($d,999,'alvin')['err'],'not_found','不存在');
+    $d=fx_db();
+    $r=plan_reject_core($d,60,'alvin','stale');
+    eq($r['ok']??null,true,'admin 驳回不开事务不查状态');eq($d->t['plans'][60]['status'],'rejected','现役也能驳');
+    eq($d->inTransaction(),false,'核心不自己开事务');
+});
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail?1:0);

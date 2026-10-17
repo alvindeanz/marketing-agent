@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-17 AIDEN asks bridge 补两缺口：选项码放开 + plan_approval 审批生效（同一认领窗口至 10-20，待部署）
+
+- 缺口 A（commit ec3bf26）：POST /svc/v1/answers 撤掉入账选项码全局白名单（码在本题选项内即可），只留两道护栏：flag 是 multi 保留码（single/approve 题登记与作答都拒）、single/approve 题选项码登记限 16 字符（护 seo_card_feedback.choice VARCHAR(16)，不动 schema，multi 词条码不受限）；asks_fold_effective 凡非 other 非空码都算表态，自定义码必答项有表态即 answered；任务备注标签查不到用码兜底。policy_qa 只选 other 加文字的口径未动（other 仍是旁注不算已答），待 Alvin 拍板。
+- 缺口 B：/plans/{id}/approve 与 /reject 核心抽成 PLAN-CORE 块（plan_approve_core / plan_approve_finish / plan_reject_core，核心不开事务，调用方传 PDO 与批准人）；admin 两路由改调核心，行为不变（approve 仍自开事务、reject 仍不开事务，都不查方案状态，收件箱收卡与被取代方案任务收口仍在提交后）。answers 入账抽成 asks_answers_commit（ASKS-TXN 块）：plan_approval 先 SELECT ... FOR UPDATE 锁 Ask 复查 state，再写账本、按 source_ref.plan_id 调核心（require_draft 且校归属，approve 码批准、reject 码驳回，无理由用固定一句兜底），同事务 Ask 置 closed 记 closed_at，任何失败整体回滚。错误分级：非 draft 409，plan_id 缺失、方案不存在或不属本 client 422，DB 临时故障 502（非方案 Ask 维持原 500）。登记端 plan_approval 必须带 source_ref.plan_id 且方案属本 client、恰好一个 approve 题且 requires_text_when 含 reject、default_policy 只能 none。approved_by 超 50 存 wf: 加去前缀 actor 截断，完整 actor 在账本。closed 后再答：路由层 asks_state 照返 closed 即 409（原有），事务内复查兜并发。
+- 测试：asksapi 18 增到 28 绿（新增 10 条，含内存假 PDO 跑 ASKS-TXN 与 PLAN-CORE 两块：approve 生效加 closed 后 409、reject 杀 proposed、非 draft 409 回滚、别家与不存在方案 422、缺 plan_id 422、502 回滚、admin 口径不变），asksfold 3 绿（夹具加自定义码行，cardfold 不折自定义码的差异写进 _doc 与 cardfold_ignores），chatapi 24 绿，php -l 过，CLI 整请求冒烟过；node tests 全套除基线即红的 blog、shopifylink 两件外全绿。本机 php 补装了 mbstring（缺它 asksapi/chatapi 在本机就红）。
+- 遗留：①看板 admin 批准或驳回不会关联关掉对应 plan_approval Ask，WF 侧再答得 409 not_draft（终态，WF 不重试）；②closed 的 Ask 不在 GET /svc/v1/asks 默认 state=open,answered 里，WF 要看结果需带 state=closed；③cardfold.js 自定义码不折，归 Aira 排期定要不要对齐。
+- 下一步：Aiden 部署 api 后回一行。
+
 ### 2026-10-16 AIDEN 跨认领：asks/answers API Phase 1（seo-api.php 围栏块，开发中）
 
 - 认领内容：seo-api.php 新增 GET /svc/v1/asks（只读聚合，按集成 token 绑定 client 限权，逐字段白名单脱敏，effective_answer 现算）与 POST /svc/v1/answers（写现有 card_feedback 账本，channel 服务端强制 webforger，idempotency_key#item_id 唯一索引幂等）；POST /asks worker 登记端点（auth_worker，ask_id 幂等 upsert）加 admin 回填入口；集成 token 层（源码只存 sha256，绑定 client_ids 与 scopes，双条并存轮换，/svc/ 前缀拒收 JWT/WORKER_TKN/READONLY_TKN，集成 token 打其他路由 403）；ensure_* 惰性 DDL（新表新列全 VARCHAR/DATETIME/MEDIUMTEXT，禁 ENUM）；tests/asksapi.test.php 加 node/php 折叠一致性夹具。新代码集中一个 BEGIN/END 围栏块，插在 /card_feedback 三路由之后。
