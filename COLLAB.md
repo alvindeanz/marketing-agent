@@ -27,6 +27,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 测试：asksapi 18 增到 28 绿（新增 10 条，含内存假 PDO 跑 ASKS-TXN 与 PLAN-CORE 两块：approve 生效加 closed 后 409、reject 杀 proposed、非 draft 409 回滚、别家与不存在方案 422、缺 plan_id 422、502 回滚、admin 口径不变），asksfold 3 绿（夹具加自定义码行，cardfold 不折自定义码的差异写进 _doc 与 cardfold_ignores），chatapi 24 绿，php -l 过，CLI 整请求冒烟过；node tests 全套除基线即红的 blog、shopifylink 两件外全绿。本机 php 补装了 mbstring（缺它 asksapi/chatapi 在本机就红）。
 - 遗留：①看板 admin 批准或驳回不会关联关掉对应 plan_approval Ask，WF 侧再答得 409 not_draft（终态，WF 不重试）；②closed 的 Ask 不在 GET /svc/v1/asks 默认 state=open,answered 里，WF 要看结果需带 state=closed；③cardfold.js 自定义码不折，归 Aira 排期定要不要对齐。
 - 下一步：Aiden 部署 api 后回一行。
+- **部署回条（2026-10-17）**：rev 7979855 已部 250（/board api_rev 实测一致）。线上实测通过：client 55 登记 ask_plan_approval_63，集成 token 答 reject 后 plan 63 转 rejected（reject_reason 即作答理由，approved_by=webforger:agency:aiden），10 条 proposed 任务全 [killed] 收口，方向卡 #4615 resolved，Ask closed；同幂等键重放 200 replay，换键再答 409 ask closed。v4 正式审批卡 ask_plan_approval_65 已登记 open 待 Alvin 在 WF 后台批。
 
 ### 2026-10-16 AIDEN 跨认领：asks/answers API Phase 1（seo-api.php 围栏块，开发中）
 
