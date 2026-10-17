@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-17 AIDEN asks 车道字段 + harness 方案审批执行闸（同一认领窗口至 10-20；api 待部署，harness 是本地工具不走部署）
+
+- 背景：Alvin 硬口径，SEO 与 SEM 内容分开反馈分开批准。第一步给 Ask 加车道字段，顺手堵 harness 不看方案批没批的洞。
+- 改动一（commit 5d9b6ff，seo-api.php ASKS 围栏块内）：seo_asks 惰性补列 service VARCHAR(8) NULL（不用 ENUM，ensure_asks_schema 逐列比对幂等）；asks_norm_register 收可选 service，只认 seo、sem，缺省、null、空串都落 NULL（表示通用卡，如 plan_approval 混合方案卡、全局 policy_qa），其余值 bad service 即 POST /asks 422；asks_register_one 的 INSERT 与 UPDATE 各加一列；asks_project 白名单加 service 键（NULL 出 null）；GET /svc/v1/asks 加可选 ?service=seo|sem，严格匹配，通用卡只在不传时出，非法值 400（与 audience 同口径）。纯函数 asks_service_ok 承担过滤判定。
+- 改动二（本条同 commit，seo-worker/tools/harness.js）：方案审批执行闸。开跑拉一次 GET /plans?client_id= 建 plan_id 到 status 映射（/tasks 不出方案状态，服务端未改），带 plan_id 的任务方案非 active（draft、rejected、superseded、查无）一律不进判定与执行：落点 inScope 首行（覆盖闸A 补判、apply_verdicts 拍板、execute 轮询里的 lint 重排与临时失败重排）、report 的 mine（覆盖阻塞回写、卡时效刷新、放行官判定、静默期满放行）、转位自愈候选。汇总计数 held_unapproved_plan（main 日志一行按方案状态分组，report 单列一节逐条，TODO 批注行带条数），空拍板逐条原因里标明方案闸 held。不带 plan_id 的独立任务不受影响；paid 与 SEO 一视同仁；--ids、--skip-gates 都不豁免；/plans 拉失败整轮中止。只加过滤，不改既有判定与闸门。foldCards（客户已回卡的收口，含 publish_blog 卡 agree 即 release）未加闸，草稿方案任务进不了执行就出不了卡，存量若有另案。
+- 注意：superseded 方案在 review / in_progress 的半成品任务（plan_approve_core 有意保留的「做到一半的活」）现在也被挡，要继续推需人工处理或挂到新方案，按 Alvin 口径执行，如需放宽另议。
+- 测试：asksapi 28 增到 32 绿（新增登记带 service、非法值拒、GET 过滤判定、投影带 service 四条，白名单键断言补 service），chatapi 24 绿，php -l 过；harness 无测试基建，node --check 过，另用本地桩服务 --dry 冒烟（active、无 plan_id 进拍板，draft paid、rejected、superseded review、查无四类计入 held_unapproved_plan=4 且不进放行判定）；node tests 全套除基线即红的 blog、shopifylink 两件（环境缺 NFS 规则文件与店铺配置）外全绿。
+- 下一步：Aiden 择机部署 api（新列惰性补，首个 asks 请求触发）；出卡登记方（Aira）按车道带 service。
+
 ### 2026-10-17 AIDEN asks bridge 补两缺口：选项码放开 + plan_approval 审批生效（同一认领窗口至 10-20，待部署）
 
 - 缺口 A（commit ec3bf26）：POST /svc/v1/answers 撤掉入账选项码全局白名单（码在本题选项内即可），只留两道护栏：flag 是 multi 保留码（single/approve 题登记与作答都拒）、single/approve 题选项码登记限 16 字符（护 seo_card_feedback.choice VARCHAR(16)，不动 schema，multi 词条码不受限）；asks_fold_effective 凡非 other 非空码都算表态，自定义码必答项有表态即 answered；任务备注标签查不到用码兜底。policy_qa 只选 other 加文字的口径未动（other 仍是旁注不算已答），待 Alvin 拍板。

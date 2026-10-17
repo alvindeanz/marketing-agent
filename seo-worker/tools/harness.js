@@ -41,6 +41,29 @@ async function call(method, p, body) {
   return j;
 }
 async function tasks() { const d = await call('GET', '/tasks?client_id=' + cid); return d.tasks || d; }
+/* 方案审批执行闸（2026-10-17，SEO 与 SEM 分开反馈分开批准的第一步）：此前选任务只看 sprint 与任务
+   状态，不看所属方案批没批，draft 方案的任务会被一路推进到判定、执行、放行。现规则：带 plan_id 的任务，
+   其方案状态必须是 active 才进判定与执行队列；draft、rejected、superseded（以及 /plans 里查不到的）
+   一律跳过，汇总里计 held_unapproved_plan。不带 plan_id 的独立任务不受影响。paid 与 SEO 一视同仁，
+   --ids 与 --skip-gates 都不豁免。方案状态 /tasks 不出，开跑时拉一次 /plans 映射；拉失败整轮中止
+   （宁停不放）。本闸只加过滤，不改任何既有判定逻辑与闸门。 */
+let PLAN_STATUS = null; // plan_id -> status
+async function loadPlanStatus() {
+  const d = await call('GET', '/plans?client_id=' + cid);
+  const m = {};
+  for (const p of (d.plans || [])) m[Number(p.id)] = String(p.status || '');
+  PLAN_STATUS = m;
+}
+const planPid = (t) => Number(t.plan_id) || 0;
+const planGateOk = (t) => { const pid = planPid(t); return !pid || !!(PLAN_STATUS && PLAN_STATUS[pid] === 'active'); };
+const planStateOf = (t) => (PLAN_STATUS && PLAN_STATUS[planPid(t)]) || '查无';
+const OPEN_ST = ['proposed', 'approved', 'in_progress', 'review', 'blocked'];
+/* held_unapproved_plan 汇总：未结且被方案闸挡下的任务，按方案状态分组 */
+function planHeldSummary(list) {
+  const by = {};
+  for (const t of list) { const k = planStateOf(t); (by[k] = by[k] || []).push(t); }
+  return Object.entries(by).map(([k, ts]) => k + ' ' + ts.length + ' 条').join('，');
+}
 async function boardClient() {
   const b = await call('GET', '/board');
   return (b.clients || []).find((c) => Number(c.client_id) === cid) || null;
@@ -342,12 +365,14 @@ async function main() {
     log('欠账 ' + overdue.length + ' 条（过期未结，并入本期推进，不锁指针）：' + overdue.map((t) => '#' + t.id + '(' + t.sprint + '/' + t.status + (t.owner_type !== 'agent' ? '/' + t.owner_type : '') + ')').join(' '));
   }
   log(`${bc.name}（${cid}）本期 ${sprint}（日历锚）` + (IDS ? '，只处理 #' + IDS.join(' #') : ''));
+  await loadPlanStatus();
   /* --ids：跨 sprint 指定任务，本次运行把「本期」的口径换成这批 id。
      SEO 闸未过时 SEO 任务 held（module 非 paid 视为 SEO 口径），paid 任务照过。--ids 点名的仍以 id 为准。 */
   /* S7+ 折算 S6（2026-10-10 全量扫）：期指针封顶 6，挪期却能写出 S7+（写入口白名单到 S99），
      不折算这类任务对 harness 永久不可见，与 W 旧标签同族僵尸。 */
   const inSprintScope = (t) => { const n = sprintNum(t.sprint); return n !== null && Math.min(n, 6) <= curNum; };
   const inScope = (t) => {
+    if (!planGateOk(t)) return false; // 方案审批执行闸：所属方案非 active 不进判定与执行
     if (IDS) return IDS.includes(t.id);
     if (!inSprintScope(t)) return false;
     /* 闸材料任务（确认卡/静默提案的生产者）是闸的钥匙，不受闸挡，否则鸡生蛋死锁（#659 老坑结构化修复）。
@@ -362,6 +387,12 @@ async function main() {
     const held = (await tasks()).filter((t) => inSprintScope(t) && String(t.module || '') !== 'paid'
       && ['proposed', 'approved', 'blocked'].includes(t.status)).length;
     if (held) log('SEO 闸未过，本期 ' + held + ' 个 SEO 任务 held，仅推进 paid 卡');
+  }
+  {
+    const heldPlan = (await tasks()).filter((t) => (IDS ? IDS.includes(t.id) : inSprintScope(t))
+      && OPEN_ST.includes(t.status) && !planGateOk(t));
+    if (heldPlan.length) log('方案审批闸：held_unapproved_plan=' + heldPlan.length + '（' + planHeldSummary(heldPlan) + '），不进判定与执行：'
+      + heldPlan.map((t) => '#' + t.id + '(方案' + planPid(t) + '/' + planStateOf(t) + ')').join(' '));
   }
 
   // 0.4 later 存量挪期（2026-09-17）：apply_verdicts 的挪期分支只管新落的判决，规则上线前
@@ -438,7 +469,9 @@ async function main() {
       const why = [];
       if (!inScope(t)) {
         // 区分「不在本期」与「本期但被 SEO 闸 held」，别让 held 的 S1 任务错报成不在本期（2026-09-18）
-        if (!IDS && inSprintScope(t) && !seoGateOk && String(t.module || '') !== 'paid') {
+        if (!planGateOk(t)) {
+          why.push('所属方案 #' + planPid(t) + ' 状态 ' + planStateOf(t) + '，未批准，方案审批闸 held');
+        } else if (!IDS && inSprintScope(t) && !seoGateOk && String(t.module || '') !== 'paid') {
           why.push('本期，但 SEO 闸 held（词表/mapping 未客户确认，paid 卡不受此闸）');
         } else {
           why.push('不在本期（任务 ' + (t.sprint || '无标签') + '，本期口径 ' + (IDS ? '--ids' : sprint + ' 含欠账') + '）');
@@ -512,7 +545,10 @@ async function report(all, sprint, retried) {
   // 与 main 的本期口径一致：日历本期 + 欠账（2026-09-24）
   const sn = (s) => { const m = /^S(\d+)$/i.exec(String(s || '')); return m ? parseInt(m[1], 10) : null; };
   const cn = sn(sprint);
-  const mine = all.filter((t) => (IDS ? IDS.includes(t.id) : (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn)));
+  const scoped = all.filter((t) => (IDS ? IDS.includes(t.id) : (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn)));
+  // 方案审批执行闸：未批准方案的任务不进阻塞回写、卡刷新、放行判定与静默期放行，单列计数
+  const mine = scoped.filter(planGateOk);
+  const heldPlan = scoped.filter((t) => OPEN_ST.includes(t.status) && !planGateOk(t));
   const blockers = [];
   const ready = [];
   for (const t of mine) {
@@ -640,6 +676,9 @@ async function report(all, sprint, retried) {
   for (const r of ready) console.log('- #' + r.id + ' ' + r.title + (r.preview ? ' ' + r.preview : ''));
   console.log('\n## 阻塞与待人定（' + blockers.length + '）');
   for (const b of blockers) console.log('- #' + b.id + ' ' + b.kind + '：' + b.text);
+  console.log('\n## 方案未批准挡下（held_unapproved_plan=' + heldPlan.length + '）' + (heldPlan.length ? '：' + planHeldSummary(heldPlan) : ''));
+  for (const t of heldPlan.slice(0, 25)) console.log('- #' + t.id + ' [方案 ' + planPid(t) + ' ' + planStateOf(t) + '/' + (t.module || '') + '/' + t.status + '] ' + t.title);
+  if (heldPlan.length > 25) console.log('- …另有 ' + (heldPlan.length - 25) + ' 条');
 
   // 转位自愈（2026-09-21 Alvin 批，取代 9/17 的「只提示」）：owner 位是建计划时的快照，
   // 能力表是活的。当期无人工特征的存量自动转机器位（元数据可逆，转回来一条 PATCH），
@@ -663,7 +702,7 @@ async function report(all, sprint, retried) {
     })();
     const ageDays = (t) => { const d = Date.parse(String(t.updated_at || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : (Date.now() - d) / 86400000; };
     const cands = all.filter((t) => ['proposed', 'approved', 'blocked'].includes(t.status)
-      && String(t.owner_type || '') === 'agency');
+      && String(t.owner_type || '') === 'agency' && planGateOk(t));
     const curN = (() => { const m = /^S(\d+)/.exec(String(sprint || '')); return m ? parseInt(m[1], 10) : 1; })();
     const sprintN = (t) => { const m = /^S(\d+)/.exec(String(t.sprint || '')); return m ? parseInt(m[1], 10) : null; };
     const baseOk = (t) => ['proposed', 'approved'].includes(t.status)
@@ -715,7 +754,7 @@ async function report(all, sprint, retried) {
     if (i !== -1) {
       const bc = await boardClient();
       const stamp = new Date().toISOString().slice(0, 10);
-      const lines = ['', `- [harness ${stamp}] ${bc ? bc.name : cid}：待放行 ${ready.length} 条${blockers.length ? '；阻塞 ' + blockers.length + ' 条：' + blockers.map((b) => '#' + b.id + ' ' + b.kind).join('、') : '，无阻塞'}`];
+      const lines = ['', `- [harness ${stamp}] ${bc ? bc.name : cid}：待放行 ${ready.length} 条${blockers.length ? '；阻塞 ' + blockers.length + ' 条：' + blockers.map((b) => '#' + b.id + ' ' + b.kind).join('、') : '，无阻塞'}${heldPlan.length ? '；方案未批准挡下 ' + heldPlan.length + ' 条' : ''}`];
       const j = s.indexOf('\n', s.indexOf('\n', i) + 1); // 跳过标题行和说明行
       const out = s.slice(0, j) + lines.join('\n') + s.slice(j);
       fs.writeFileSync(TODO, out);
