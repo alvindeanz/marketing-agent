@@ -126,6 +126,46 @@ t('多选值不在词条集合、未知 item、重复 item、空 items 都拒',f
     eq(asks_validate_answers($ASK['items'],[['item_id'=>'global_note','text'=>'']])[1],['item global_note text required'],'text 空');
 });
 
+section('选项码放开（2026-10-17 缺口 A）');
+
+t('自定义码：登记过、入账成行、折成 effective_answer、必答项齐即 answered',function()use($REG){
+    $x=$REG;
+    $x['items']=[
+        ['item_id'=>'brand','type'=>'single','options'=>['keep_brand','pause_brand','other']],
+        ['item_id'=>'note','type'=>'text','options'=>[],'required'=>false],
+    ];
+    list($ask,$e)=asks_norm_register($x);
+    eq($e,null,'自定义码登记不该报错');
+    list($rows,$errs)=asks_validate_answers($ask['items'],[['item_id'=>'brand','choice'=>'pause_brand']]);
+    eq($errs,[],'自定义码入账不该报错');
+    eq($rows[0],['item'=>'brand','choice'=>'pause_brand','fb'=>''],'行原样落码');
+    $ledger=[['id'=>501,'item'=>'brand','choice'=>'pause_brand','fb'=>'','created_at'=>'2026-10-17 10:00:00','actor'=>'webforger:client:wfu_ab12','channel'=>'webforger','answered_at'=>'2026-10-16 21:00:00','ask_rev'=>2]];
+    $f=asks_fold_effective($ledger);
+    eq($f['brand']['stance']['choice'],'pause_brand','自定义码算表态');
+    $p=asks_project($ask+['state'=>'open'],$f,'en','2026-10-17 00:00:00',46800,null);
+    eq($p['items'][0]['effective_answer']['choice'],'pause_brand','effective_answer');
+    eq($p['items'][0]['effective_answer']['text'],null,'非 flag 不拆 values');
+    eq($p['state'],'answered','自定义码必答项有表态即 answered');
+});
+t('flag 是 multi 保留码：single/approve 登记带 flag 拒，旧 Ask 的 single 答 flag 也拒',function()use($REG){
+    $x=$REG;$x['items'][1]['options']=['agree','flag','other'];
+    eq(asks_norm_register($x)[1],'item d2 option code flag is reserved for multi','single 登记 flag');
+    $x=$REG;$x['kind']='plan_approval';$x['source_ref']['plan_id']=65;
+    $x['items']=[['item_id'=>'approve','type'=>'approve','options'=>['approve','reject','flag'],'requires_text_when'=>['reject']]];
+    eq(asks_norm_register($x)[1],'item approve option code flag is reserved for multi','approve 登记 flag');
+    $legacy=[['item_id'=>'d9','type'=>'single','options'=>['agree','flag'],'required'=>true,'requires_text_when'=>[],'default_value'=>null]];
+    list($rows,$errs)=asks_validate_answers($legacy,[['item_id'=>'d9','choice'=>'flag']]);
+    eq($rows,null,'整单不给行');eq($errs,['item d9 choice flag is reserved for multi'],'答 flag 拒');
+});
+t('列宽：single/approve 码限 16 字符，multi 词条码不受限',function()use($REG){
+    $x=$REG;$x['items'][1]['options']=['agree',str_repeat('a',17)];
+    eq(asks_norm_register($x)[1],'item d2 option code over 16 chars','17 字符拒');
+    $x=$REG;$x['items'][1]['options']=['agree',str_repeat('a',16)];
+    eq(asks_norm_register($x)[1],null,'16 字符过');
+    $x=$REG;$x['items'][2]['options']=['kw_'.str_repeat('9',100)];
+    eq(asks_norm_register($x)[1],null,'multi 长码过');
+});
+
 section('幂等键与 actor');
 
 t('幂等键 = 渠道键#item_id，一 item 一键',function(){

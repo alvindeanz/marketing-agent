@@ -5867,7 +5867,10 @@ function asks_integration_tokens(){return [
 /* ASKS-PURE-START（纯函数块，零数据库零 HTTP，tests/asksapi.test.php 按标记抠出来 eval） */
 define('ASK_KINDS',['direction','confirmation','plan_approval','policy_qa']);
 define('ASK_ITEM_TYPES',['single','multi','approve','text']);
-define('ASK_STANCE_CHOICES',['agree','hold','flag','approve','reject']);
+/* 选项码 2026-10-17 放开（缺口 A）：single/approve 题的选项码由登记方自定，不再有全局白名单；
+   other 是旁注，flag 是 multi 落库专用的保留码（single/approve 题不许用）。
+   single/approve 题的码会原样落 seo_card_feedback.choice（VARCHAR(16)），登记时限 16 字符护列宽。 */
+define('ASK_CHOICE_COL_MAX',16);
 
 /* 明文 token 对 token 表做 sha256 比对，命中返回该条，否则 null。 */
 function asks_integ_match($tokens,$plain){
@@ -5931,6 +5934,12 @@ function asks_norm_register($in){
         if(!is_array($opts))return [null,"item $iid options must be array"];
         $opts=array_values($opts);
         foreach($opts as $o){if(!asks_code_ok($o))return [null,"item $iid bad option code"];}
+        if($type==='single'||$type==='approve'){
+            foreach($opts as $o){
+                if(strlen($o)>ASK_CHOICE_COL_MAX)return [null,"item $iid option code over ".ASK_CHOICE_COL_MAX." chars"];
+                if($o==='flag')return [null,"item $iid option code flag is reserved for multi"];
+            }
+        }
         if(count(array_unique($opts))!==count($opts))return [null,"item $iid duplicate option"];
         if($type!=='text'&&!$opts)return [null,"item $iid options required"];
         if($type==='approve'&&array_diff(['approve','reject'],$opts))return [null,"item $iid approve needs approve/reject"];
@@ -5983,6 +5992,7 @@ function asks_row_channel($r){
 }
 /* 折叠（Phase 1 口径同 cardfold.foldCardFeedback）：行按 id 升序；同 item 取最后一次表态；
    other 不覆盖表态，非空文本进 notes；空文本 other 跳过（写入层已转 hold，这里兜底）；空 item 归 _card。
+   与 cardfold 的已知差异：cardfold 只认 agree/hold/flag，approve/reject 与自定义码它不折（见夹具 _doc）。
    返回 [item => ['stance'=>行或null, 'notes'=>[行...]]]。 */
 function asks_fold_effective($rows){
     usort($rows,function($a,$b){return (int)$a['id']-(int)$b['id'];});
@@ -5996,7 +6006,8 @@ function asks_fold_effective($rows){
             if(trim((string)($r['fb']??''))!=='')$out[$item]['notes'][]=$r;
             continue;
         }
-        if(in_array($choice,ASK_STANCE_CHOICES,true))$out[$item]['stance']=$r;
+        /* 2026-10-17 选项码放开：凡非 other 的非空码都算表态（自定义码同样生效）。 */
+        if($choice!=='')$out[$item]['stance']=$r;
     }
     foreach($out as $k=>$v){if($v['stance']===null&&!$v['notes'])unset($out[$k]);}
     return $out;
@@ -6108,7 +6119,9 @@ function asks_validate_answers($askItems,$reqItems){
         if(in_array($choice,$it['requires_text_when'],true)&&$text===''){$errs[]="item $iid text required for $choice";continue;}
         /* 现行口径：空文本 other 视为 hold（同 POST /card_feedback）。 */
         if($choice==='other'&&$text==='')$choice='hold';
-        if(!in_array($choice,['agree','hold','other','approve','reject'],true)){$errs[]="item $iid choice $choice not storable";continue;}
+        /* 全局白名单 2026-10-17 撤掉（上面已校验码在本题选项内），只留保留码与列宽两道护栏；列宽一道兜改版前登记的旧 Ask。 */
+        if($choice==='flag'){$errs[]="item $iid choice flag is reserved for multi";continue;}
+        if(strlen($choice)>ASK_CHOICE_COL_MAX){$errs[]="item $iid choice $choice not storable";continue;}
         $rows[]=['item'=>$iid,'choice'=>$choice,'fb'=>$text];
     }
     return $errs?[null,$errs]:[$rows,[]];
@@ -6374,7 +6387,7 @@ if($m==='POST'&&$ROUTE==='/svc/v1/answers'){
     }
     if($tid>0){
         $label=['agree'=>'同意按建议','hold'=>'保持不变继续观察','other'=>'其他反馈','flag'=>'勾选名单','approve'=>'批准','reject'=>'驳回'];
-        foreach($rows as $r)task_append_note($tid,'[客户反馈 webforger] '.$r['item'].'：'.$label[$r['choice']].($r['fb']!==''?('：'.$r['fb']):''));
+        foreach($rows as $r)task_append_note($tid,'[客户反馈 webforger] '.$r['item'].'：'.($label[$r['choice']]??$r['choice']).($r['fb']!==''?('：'.$r['fb']):''));
         ensure_review_schema();
         db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
     }

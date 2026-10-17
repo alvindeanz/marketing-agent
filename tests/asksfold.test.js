@@ -14,13 +14,20 @@ function t(name, fn) {
 }
 
 const f = foldCardFeedback(fx.rows);
+/* 已知差异：自定义选项码 php 侧算表态、cardfold 不折（见夹具 _doc），这些 item 从期望里剔除。 */
+const ignores = new Set(fx.cardfold_ignores || []);
 
 t('表态折叠：每项取入账序最后一次，other 不覆盖', () => {
   const got = {};
   for (const v of [...f.agreed, ...f.holds]) got[v.item] = { choice: v.choice, fb: v.fb };
   const want = {};
-  for (const [k, v] of Object.entries(fx.expected.stance)) want[k] = { choice: v.choice, fb: v.fb };
+  for (const [k, v] of Object.entries(fx.expected.stance)) if (!ignores.has(k)) want[k] = { choice: v.choice, fb: v.fb };
   assert.deepStrictEqual(got, want);
+});
+
+t('已知差异仍在：cardfold 不折自定义码 item（差异收口时删夹具 cardfold_ignores）', () => {
+  const items = new Set([...f.agreed, ...f.holds].map((v) => v.item));
+  for (const k of ignores) assert.ok(!items.has(k), k + ' 被 cardfold 折了，差异已收口，删夹具 cardfold_ignores');
 });
 
 t('旁注：非空 other 全部保留按序，空白 other 丢弃', () => {
