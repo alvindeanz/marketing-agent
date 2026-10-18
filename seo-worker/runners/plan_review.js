@@ -300,6 +300,24 @@ async function runWith(ctx, judge) {
     card,
   });
   log('v2 已落库：plan #' + (res && res.plan_id) + ' v' + (res && res.version) + '，任务 ' + ((res && res.ids) || []).join(' ') + '，v1 收掉 ' + ((res && res.closed) || []).length + ' 条，确认卡 #' + (res && res.card_id) + '，任务层判定 job ' + (res && res.review_job_id));
+  /* 审批实体登记（2026-10-18）：方案落库即出 plan_approval Ask，WF 后台与邮件渠道任一侧
+     批准或驳回同事务生效。失败不挡落库，重跑或手工补登（ask_id 幂等）。 */
+  if (res && res.plan_id) {
+    try {
+      const askreg = require('../lib/askreg');
+      const reg = await askreg.registerPlanApprovalAsk({
+        api,
+        clientId: job.client_id,
+        planId: res.plan_id,
+        version: (res && res.version) || version,
+        summary: card,
+        log,
+      });
+      log('plan_approval Ask 已登记 ' + reg.ask_id + (reg.created ? '（新建）' : '（更新）'));
+    } catch (e) {
+      log('plan_approval Ask 登记失败（不挡方案落库，可补登）:: ' + e.message);
+    }
+  }
   log('CARD\n' + card);
   return { tokenUsage: 0 };
 }

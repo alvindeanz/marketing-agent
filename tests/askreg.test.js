@@ -73,10 +73,29 @@ t('confirmation card degrades to a single approve item plus note', () => {
   assert.deepStrictEqual(p.items[0].requires_text_when, ['reject']);
   assert.ok(p.lang_pack.texts.zh.intro.includes('kc.html'));
 });
+t('card url with an embedded card token is stripped to the bare link', () => {
+  const p = A.buildAsk({ task: confTask, cardUrl: 'https://agencyreport.example/kc.html?t=1464&k=' + 'a'.repeat(32), serviceToken: 'tok' });
+  assert.ok(p.lang_pack.texts.zh.intro.includes('kc.html'));
+  assert.ok(!JSON.stringify(p).includes('a'.repeat(32)), 'plaintext card token must not enter the payload');
+});
 t('direction card without a data json also degrades instead of failing', () => {
   const p = A.buildAsk({ task: dirTask, data: null, serviceToken: 'tok' });
   assert.deepStrictEqual(p.items.map((i) => i.item_id), ['approval', 'global_note']);
   assert.strictEqual(p.kind, 'direction');
+});
+
+console.log('buildPlanApprovalAsk');
+t('plan approval ask matches the manual precedent shape', () => {
+  const p = A.buildPlanApprovalAsk({ clientId: 55, planId: 69, version: 8, summary: '方案 v8 方向确认 · WebForger\n目标：...' });
+  assert.strictEqual(p.ask_id, 'ask_plan_approval_69');
+  assert.strictEqual(p.kind, 'plan_approval');
+  assert.strictEqual(p.default_policy, 'none');
+  assert.strictEqual(p.items.length, 1, 'exactly one approve item');
+  assert.strictEqual(p.items[0].item_id, 'plan_approve');
+  assert.deepStrictEqual(p.items[0].requires_text_when, ['reject']);
+  assert.strictEqual(p.deadline, undefined, 'approval gate has no expiry');
+  assert.deepStrictEqual(p.source_ref, { plan_id: 69 });
+  assert.ok(p.lang_pack.texts.zh.intro.includes('方向确认'));
 });
 
 console.log('registerCardAsk');

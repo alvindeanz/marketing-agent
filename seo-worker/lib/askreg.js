@@ -66,7 +66,9 @@ function buildAsk(opts) {
   const taskId = Number(task.id);
   const isDirection = DIRECTION_KINDS.indexOf(cardKind) !== -1;
   const data = isDirection ? opts.data || null : null;
-  const cardLine = opts.cardUrl ? '卡片全文：' + opts.cardUrl : '卡片全文随邮件送达。';
+  // 防御性剥参：带 ?t=&k= 的链接含明文卡 token，服务端整包 422；裸链接打开即可提交。
+  const bareUrl = String(opts.cardUrl || '').replace(/\?t=\d+&k=[0-9a-f]{32}\b.*$/, '');
+  const cardLine = bareUrl ? '卡片全文：' + bareUrl : '卡片全文随邮件送达。';
 
   const items = [];
   const itemTexts = {};
@@ -150,6 +152,55 @@ function buildAsk(opts) {
   return payload;
 }
 
+/* plan_approval 审批实体：方案 v2 落库即登记，任一渠道批准或驳回直接生效（Aiden 缺口 B）。
+   形态对齐手工先例（ask_plan_approval_67/69）：单 approve 题，item_id plan_approve，
+   default_policy none（审批类闸门不自动放行），不设 deadline。 */
+function buildPlanApprovalAsk(opts) {
+  const planId = Number(opts.planId);
+  const summary = String(opts.summary || '').slice(0, 1500);
+  return {
+    ask_id: 'ask_plan_approval_' + planId,
+    client_id: Number(opts.clientId),
+    kind: 'plan_approval',
+    audience: 'both',
+    rev: 1,
+    default_policy: 'none',
+    items: [
+      {
+        item_id: 'plan_approve',
+        type: 'approve',
+        options: ['approve', 'reject'],
+        required: true,
+        requires_text_when: ['reject'],
+      },
+    ],
+    lang_pack: {
+      primary: 'zh',
+      operator: 'zh',
+      texts: {
+        zh: {
+          title: '方案 v' + opts.version + ' 审批（plan #' + planId + '）',
+          intro: summary,
+          default_note: '审批类不自动放行，批准或驳回之前方案保持待批',
+          items: {
+            plan_approve: {
+              prompt: '是否批准这版方案',
+              options: { approve: '批准执行', reject: '驳回（请写明原因）' },
+            },
+          },
+        },
+      },
+    },
+    source_ref: { plan_id: planId },
+  };
+}
+
+async function registerPlanApprovalAsk(opts) {
+  const payload = buildPlanApprovalAsk(opts);
+  const res = await opts.api.postAsk(payload);
+  return { ask_id: payload.ask_id, created: !!(res && res.created), res };
+}
+
 /** 出卡后登记。抛错由调用方接住记日志，绝不反噬任务交付。 */
 async function registerCardAsk(opts) {
   const { api, task, workspace, cardUrl, log } = opts;
@@ -168,4 +219,13 @@ async function registerCardAsk(opts) {
   return { ask_id: payload.ask_id, created: !!(res && res.created), res };
 }
 
-module.exports = { buildAsk, registerCardAsk, findCardData, cardTokenRef, cleanNegatives, DIRECTION_KINDS };
+module.exports = {
+  buildAsk,
+  registerCardAsk,
+  buildPlanApprovalAsk,
+  registerPlanApprovalAsk,
+  findCardData,
+  cardTokenRef,
+  cleanNegatives,
+  DIRECTION_KINDS,
+};

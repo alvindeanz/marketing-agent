@@ -2319,7 +2319,9 @@ async function runOne(ctx, context, workspace, taskId) {
         const res = await publishFile(ctx.cfg, path.basename(workspace), '', f, path.join(rdir, f), log);
         if (res && res.url) {
           clientLinks += '客户版: ' + res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '') + '\n';
-          if (!cardAskUrl) cardAskUrl = res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '');
+          /* Ask 登记只收裸链接：?k= 参数就是明文卡 token，进 payload 会被 422 拒（令牌
+             已注入 HTML，裸链接打开即可提交）。 */
+          if (!cardAskUrl) cardAskUrl = res.url;
           log('task ' + taskId + '：客户版已发布 ' + res.url);
         }
       }
