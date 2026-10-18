@@ -59,3 +59,6 @@ review_principles.md 管「单个任务该不该做」，这份管「整份方�
 - [plan#16 v2] 方案被打回：盲写作废：本 draft 生成于 2026-09-03 上午 facts 导入之前（零客户记忆），已由带 facts 重跑的 v4 取代
 - [plan#22 v2] 方案被打回：盲写作废：本 draft 生成于 2026-09-03 上午 facts 导入之前（零客户记忆），已由带 facts 重跑的 v4 取代
 - [plan#18 v2] 方案被打回：盲写作废：本 draft 生成于 2026-09-03 上午 facts 导入之前（零客户记忆），已由带 facts 重跑的 v4 取代
+- [plan#67 v6] 方案被打回：网站近期做了大量的更新，对比3个月前的冷启动，现在已经有了更广泛，更加有快赢机会的关键词在站内，具体的内容需要参照 https://webforger.ai/apps/ https://webforger.ai/ https://webforger.ai/pricing/ 这三个页面来重新onboard的方式规划seo
+- [plan#65 v4] 方案被打回：方案重排为 v5：只保留 SEO 任务线并补 SEOForger/SemForger 订阅页任务，paid 止血任务移出方案单独走 SEM 确认卡逐条批准；S6 lead 指标按现实点击量重设；清扫任务缩为 /about/ 与 /features/ 残留核对；/best-ai-website-builder/ 与 /wix-vs-wordpress/ 两个高曝光页提前进 S2；lead 口径统一为
+- [plan#63 v2] 方案被打回：方案 v2 已被 v4 重排取代，按 v4 推进

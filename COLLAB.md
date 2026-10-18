@@ -30,6 +30,18 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 坑：①WF 回叠 2 分钟，同一 client 2 分钟内超 100 条回复会让续拉原地打转（协议固有限制），本地 24 小时 6 条封顶下不可达；②deploy.sh 的 worker 白名单不含 tools/，harness 从仓库直跑，回复一步要带 SEO_WORKER_CONFIG=/data/aira/seo-worker/config.json 才能取 /context 与 claudeBin，缺了只记一行跳过；③llm.js 对空 allowedTools 回落默认工具带（含 WebFetch、curl），客户模式必须显式传 'Read'；④client 55 在 WF 映射里是否 enabled 只能 WF 侧确认。
 - 待 Aira 对齐：seo-api.php 与 harness 的这几处改动是否认可（尤其新内部路由与 lib 新文件的归属），以及挂起消息的人工处置口径（看过后 unhold 重回折叠）。
 - 下一步：Aiden 部署 api 到 250（新表首个请求惰性建）；worker lib 随下次 deploy.sh worker 同步；harness 从仓库直跑。上线后回 ma-to-webforge 交接包（返回体字段、未知短码丢弃、节奏跟 harness 一三五、55 待 WF 确认）。
+- **部署回条（2026-10-18）**：api 已在 250，/board api_rev 实测 42a045a；GET /client_messages 200，GET /svc/v1/replies 无 token 401。标题里「未推未部署」以本条为准。
+- **端到端验收（2026-10-18，client 55，Aiden 本机跑，只碰 55）**：
+  - 入站通：WF 客户后台发 1 条（中文，问何时走 SEOForger onboard、要新方案），08:50:09Z 发出，08:50:14Z 落 seo_client_messages id 1，message_ref 24b2144a-744e-4ee5-b302-1f8d66f4db21，channel dashboard，codes [seo]。
+  - 本机 config：scratchpad 下最小 config 只放 apiBase、serviceToken、wakeSecret（config.js 必填项，本机不起 listener，占位值）、claudeBin=/usr/bin/claude，零模型覆盖键，载入后 clientReplyModel=opus、无任何 *Model=fable。
+  - 折叠通：harness 55 --dry 只折 55 的 1 组 1 条，零外发零 LLM；dry 同时预告「SEO 两闸未过、闸材料缺失将建产钥匙任务」。为免本轮顺带建任务排 job，实跑带 --skip-gates（55 零未结任务，闸无可挡之物），只做客户回复。
+  - 生成通：opus 一次 13s，prompt 24k 字符，工具带只给 Read。护栏通：本地自检零命中（复跑 checkLocalReply 也是 []），未挂起；fence 未触发（服务端对非布尔 false 拒收，能写入即 false）。出口通：cr1 state=out，message_ref 对上，入站行 replied=true。
+  - 回复内容：中文跟随来信，约 300 字，无内部名、无外链、无日期承诺；吸收了方案驳回理由的大意（站内词更广、快赢优先、只含 SEO、Ads 逐项确认）。风险一句：「新方案准备好后会第一时间发给您」是对外承诺，但 MA 不会自动重出方案（见下条），需人跟进排 plan job。
+  - WF 拉取：GET /svc/v1/replies 不写 audit，MA 侧无痕迹可验，需 WF 后台目测 cr1 是否已展示。
+  - 副作用：harness 收尾的 experience_sync 往 seo-worker/specs/plan_experience.md 待整理段追加了 plan#63/65/67 三条驳回理由（工作区未提交，按既有设计留给每周整理）。
+  - 55 方案现状（只读）：v1 至 v6（plan 62 至 67）全部非 active，最新 v6（67）2026-10-18 05:35Z 经 ask_plan_approval_67 由 WF agency 用户驳回（Ask closed），v4（65）10-17 同样驳回；65 条任务全部已结，零未结、零 draft、零 active。驳回已正确回传 MA，卡点不在 WF。
+  - 重生成路径：plan 只由人排 POST /jobs type=plan（看板按钮或 tools/onboard_chain.js）触发，harness 与 plan_reject_core 都不排 plan，属硬规矩 1 的设计，不是漏推。缺陷：lib/distill.js feedbackSection 只读 /context 的 active_plan.reject_reason，而 /context 只取 status='active'，被驳回方案的理由永远进不了这一节（本轮日志「no reject_reason available on active_plan」即此）；退路是任务账本里 killed 备注，但 ledgerSection 的正则截到首个换行，67 的理由在「具体的内容需要参照」后换行，三个参考 URL 和「按重新 onboard 的方式规划」会丢；plan_review 的 historyBlock 另截 160 字。归 Aira 排期。
+  - 条子已递：/mnt/share/aiden/to-aira-plan-reject-reason-lost-20261018.md（三处机制、55 plan 67 实证、复现与验收口径；实测补一条：historyBlock 同样截到首个换行）。
 
 ### 2026-10-17 AIDEN asks 车道字段 + harness 方案审批执行闸（同一认领窗口至 10-20；api 待部署，harness 是本地工具不走部署）
 
