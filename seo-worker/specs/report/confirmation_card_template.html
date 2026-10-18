@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>{{title}}</title>
+<style>
+:root{--bg:#f0f4f8;--surface:#fff;--surface2:#f6f9fc;--border:#e2e8f0;--primary:#0057b8;--primary-bg:#eff6ff;--green:#16a34a;--green-bg:#ecfdf5;--green-bd:#a7f3d0;--amber:#d97706;--amber-bg:#fffbeb;--amber-bd:#fcd34d;--grey:#475569;--text:#0f172a;--muted:#64748b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.75;font-size:15px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:0 20px}
+
+/* 第一屏 */
+header{background:var(--surface);border-bottom:3px solid var(--primary);padding:26px 0 24px}
+.badge{display:inline-block;padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.6px;background:var(--primary-bg);color:var(--primary);border:1px solid #bfdbfe;margin-bottom:11px}
+h1{font-size:1.42rem;font-weight:800;letter-spacing:-.3px;line-height:1.35}
+.period{font-size:13.5px;color:var(--muted);margin-top:3px}
+.oneline{margin:18px 0 20px;background:var(--primary-bg);border:1px solid #bfdbfe;border-left:5px solid var(--primary);border-radius:10px;padding:16px 20px}
+.oneline .lab{font-size:11px;font-weight:800;letter-spacing:.8px;color:var(--primary);display:block;margin-bottom:5px}
+.oneline .txt{font-size:19px;font-weight:800;color:#14396b;line-height:1.5;letter-spacing:-.2px}
+.bignums{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.bn{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:15px 16px;text-align:center}
+.bn .k{font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.3px;display:block;margin-bottom:4px}
+.bn .v{font-size:27px;font-weight:800;letter-spacing:-.8px;color:#14396b;line-height:1.2;font-variant-numeric:tabular-nums}
+.bn .u{font-size:13px;font-weight:700;color:var(--muted);margin-left:2px}
+.bn .s{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.55}
+.fineprint{margin-top:11px;font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 15px}
+.fineprint b{color:#334155}
+.fineprint p{margin-bottom:7px}
+.fineprint p:last-child{margin-bottom:0}
+.lights{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.lt{flex:1 1 150px;border-radius:9px;padding:11px 12px;line-height:1.5}
+.lt .n{display:block;font-size:13px;font-weight:800}
+.lt .st{display:block;font-size:11.5px;font-weight:700;margin-top:2px;opacity:.9}
+.lt.g{background:var(--green-bg);border:1px solid var(--green-bd);color:#065f46}
+.lt.h{background:#f1f5f9;border:1px solid #cbd5e1;color:#334155}
+.lt.a{background:var(--amber-bg);border:1px solid var(--amber-bd);color:#92400e}
+.legend{font-size:11.5px;color:var(--muted);margin-top:9px}
+
+/* 通用分节 */
+section{padding:28px 0;border-bottom:1px solid var(--border)}
+section:last-of-type{border-bottom:none}
+.shead{display:flex;align-items:center;margin-bottom:5px}
+.snum{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--primary-bg);color:var(--primary);font-size:12px;font-weight:800;margin-right:9px;flex:0 0 25px}
+h2{font-size:1.16rem;font-weight:800;letter-spacing:-.2px}
+.sdesc{color:var(--muted);font-size:13px;margin-bottom:16px;line-height:1.7}
+
+/* 决策卡 */
+.dec{background:var(--surface);border:1px solid var(--border);border-left:5px solid var(--primary);border-radius:10px;padding:17px 20px;margin-bottom:14px}
+.dec .q{font-size:15.5px;font-weight:800;line-height:1.55;margin-bottom:11px;color:#14396b}
+.dec .row{display:flex;gap:10px;margin-bottom:9px;font-size:13.5px;line-height:1.75}
+.dec .row .rl{flex:0 0 84px;font-size:11px;font-weight:800;letter-spacing:.4px;padding-top:4px}
+.dec .row.rec .rl{color:var(--green)}
+.dec .row.dl .rl{color:var(--amber)}
+.dec .row .rb{flex:1}
+.picks{margin-top:13px;border-top:1px solid var(--border);padding-top:12px}
+.picks .ph{font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px}
+.picks ul{list-style:none}
+.picks li{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px;line-height:1.6}
+.picks li:last-child{border-bottom:none}
+.picks input{margin-top:5px;width:16px;height:16px;flex:0 0 16px;accent-color:#0057b8}
+.picks .w{font-weight:700}
+.picks .m{color:var(--muted);font-size:12px}
+
+/* 反馈按钮 */
+.fb{margin-top:13px;border-top:1px solid var(--border);padding-top:12px}
+.fbrow{display:flex;gap:8px;flex-wrap:wrap}
+.fbb{font-family:inherit;font-size:13px;font-weight:700;line-height:1.4;padding:9px 15px;border-radius:8px;border:1px solid #bfdbfe;background:var(--primary-bg);color:var(--primary);cursor:pointer}
+.fbb:hover{background:#e0edff}
+.fbb.save{border-color:#cbd5e1;background:#f1f5f9;color:#334155;margin-top:10px}
+.fbb.done{background:var(--primary);border-color:var(--primary);color:#fff}
+.fbb.done.save{background:#334155;border-color:#334155;color:#fff}
+.fbb[disabled]{opacity:.65;cursor:default}
+.fbwrap{margin-top:10px;display:none}
+.fbwrap.open{display:block}
+.fbwrap textarea{width:100%;min-height:78px;font-family:inherit;font-size:13.5px;line-height:1.7;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical}
+.fbwrap textarea:focus{outline:none;border-color:#bfdbfe;background:#fff}
+.fbwrap .fbb{margin-top:8px}
+.fbmsg{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.65}
+.fbmsg.ok{color:#047857;font-weight:700}
+.fbmsg.err{color:#b45309;font-weight:700}
+.fbstamp{align-self:center;font-size:12px;color:#047857;font-weight:700;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:6px 10px}
+.fb.off .fbb{opacity:.5;cursor:default}
+
+/* 词族小卡 */
+.fam{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:15px 18px;margin-bottom:11px}
+.fam .ft{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap}
+.fam .fn{font-size:15px;font-weight:800;line-height:1.4}
+.fam .fs{font-size:11.5px;font-weight:800;padding:2px 10px;border-radius:20px;white-space:nowrap}
+.fs.g{background:var(--green-bg);color:#047857;border:1px solid var(--green-bd)}
+.fs.h{background:#f1f5f9;color:#334155;border:1px solid #cbd5e1}
+.fs.a{background:var(--amber-bg);color:#b45309;border:1px solid var(--amber-bd)}
+.fam .l{display:flex;gap:10px;font-size:13.5px;line-height:1.75;margin-bottom:6px}
+.fam .l .ll{flex:0 0 92px;font-size:11.5px;font-weight:800;color:var(--muted);padding-top:4px}
+.fam .l .lb{flex:1}
+details{margin-top:9px;border-top:1px solid var(--border);padding-top:9px}
+summary{font-size:12.5px;font-weight:700;color:var(--primary);cursor:pointer;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:none}
+details[open] summary::before{content:none}
+details .body{font-size:12.5px;color:#475569;line-height:1.8;margin-top:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:11px 14px}
+
+/* 尾部 */
+.box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 19px;font-size:13.5px;line-height:1.85}
+.box.green{background:var(--green-bg);border-color:var(--green-bd);color:#065f46}
+.box p{margin-bottom:10px}
+.box p:last-child{margin-bottom:0}
+ol.find{list-style:none;counter-reset:f}
+ol.find li{counter-increment:f;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 17px 13px 45px;position:relative;margin-bottom:9px;font-size:13.5px;line-height:1.75}
+ol.find li::before{content:counter(f);position:absolute;left:15px;top:14px;width:21px;height:21px;border-radius:50%;background:var(--primary-bg);color:var(--primary);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.gloss{font-size:12px;color:#475569;line-height:1.85;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:12px 16px}
+.gloss dt{font-weight:800;color:#334155;display:inline}
+.gloss dd{display:inline;margin:0}
+.gloss div{margin-bottom:4px}
+.gloss div:last-child{margin-bottom:0}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:20px 0 26px;font-size:12px;color:var(--muted);line-height:1.85}
+footer b{color:#334155}
+/* 席位表（2026-09-18 版式事故重写）：族名允许收缩换行（flex:1 1 auto + min-width:0），
+   brief 有硬性最小宽度，摆不下就整行折下去，任何宽度下都不得出现一字一行竖排。
+   本块必须位于 @media 之前，否则同权重的窄屏覆盖永远打不赢（9/17 那次修复就是这么变成死代码的）。 */
+details.seat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:0;margin-bottom:9px;margin-top:0}
+details.seat summary{display:flex;align-items:center;gap:10px;row-gap:6px;padding:12px 16px;cursor:pointer;flex-wrap:wrap;list-style:none}
+details.seat summary .fn{font-size:14.5px;font-weight:800;flex:1 1 auto;min-width:0}
+details.seat summary::marker{content:""}
+details.seat summary .brief{font-size:12.5px;color:var(--muted);flex:1 1 260px;min-width:220px;line-height:1.5}
+details.seat .l{padding:0 16px;margin-bottom:6px}
+details.seat .evi{font-size:12.5px;color:#475569;line-height:1.8;margin:8px 16px 13px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:11px 14px}
+details.seat[open]{padding-bottom:4px}
+@media(max-width:640px){
+  body{font-size:14px}
+  .wrap{padding:0 14px}
+  h1{font-size:1.2rem}
+  .oneline .txt{font-size:16.5px}
+  .bignums{grid-template-columns:1fr;gap:9px}
+  .bn{text-align:left;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .bn .k{margin-bottom:0}
+  .bn .v{font-size:23px}
+  .bn .s{flex:1 1 100%;margin-top:2px}
+  .lt{flex:1 1 100%}
+  .dec .row,.fam .l{flex-direction:column;gap:2px}
+  .dec .row .rl,.fam .l .ll{flex:none;padding-top:0}
+  .fbrow{flex-direction:column}
+  .fbb{width:100%}
+  /* 席位表窄屏堆叠（2026-09-17）：桌面三列 name/chip/brief，手机上长族名 flex:0 0 auto
+     吃满宽度、brief 只剩一条缝导致一字一行竖排。窄屏改成族名整行、状态胶囊次行、brief 整行。 */
+  details.seat summary{flex-wrap:wrap;row-gap:6px}
+  details.seat summary .fn{flex:1 1 100%}
+  details.seat summary .brief{flex:1 1 100%;margin-top:0}
+}
+
+/* v2 减法版补充 */
+.fineprint details summary{cursor:pointer;font-weight:700;color:#334155;list-style:none}
+.fineprint details summary::after{content:" 点开看完整口径";font-weight:400;color:var(--muted)}
+.fineprint details[open] summary::after{content:" 收起"}
+.glosswrap{border-top:none;padding-top:0;margin-top:0}
+.glosssum{font-size:1.0rem;font-weight:800;color:var(--text);cursor:pointer;list-style:none}
+.glosssum::after{content:" 点开查看";font-weight:400;font-size:12px;color:var(--muted)}
+.glosswrap[open] .glosssum::after{content:""}
+.gloss{margin-top:10px}
+
+/* 全局浮动留言 */
+.floatfb{position:fixed;right:18px;bottom:18px;z-index:50;font-family:inherit}
+.floatfb-btn{font-family:inherit;font-size:13px;font-weight:800;padding:11px 18px;border-radius:24px;border:none;background:var(--primary);color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,60,130,.28)}
+.floatfb-btn:hover{background:#0a4fa3}
+.floatfb-panel{display:none;position:absolute;right:0;bottom:52px;width:300px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:0 8px 30px rgba(15,23,42,.18)}
+.floatfb.open .floatfb-panel{display:block}
+.floatfb-title{font-size:12.5px;font-weight:800;color:#334155;margin-bottom:8px;line-height:1.5}
+.floatfb-panel textarea{width:100%;min-height:90px;font-family:inherit;font-size:13px;line-height:1.6;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);resize:vertical}
+.floatfb-panel textarea:focus{outline:none;border-color:#bfdbfe;background:#fff}
+.floatfb-panel .fbb{margin-top:8px;width:100%}
+
+/* 确认卡内容块（card_data v1 blocks：para / list / table / kv） */
+.cblk{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 17px;margin-bottom:11px;font-size:13.5px;line-height:1.75}
+.cblk .cbt{font-size:12px;font-weight:800;color:#334155;margin-bottom:8px}
+.cblk p{margin:0}
+.cblk ul{margin-left:18px}
+.cblk li{margin-bottom:4px}
+.cblk li:last-child{margin-bottom:0}
+.cblk .tblwrap{overflow-x:auto}
+.cblk table{border-collapse:collapse;width:100%;font-size:13px}
+.cblk th{background:var(--surface2);border:1px solid var(--border);padding:7px 10px;text-align:left;font-size:12px;color:#334155;white-space:nowrap}
+.cblk td{border:1px solid var(--border);padding:7px 10px;line-height:1.6}
+.cblk .kv > div{display:flex;gap:10px;padding:5px 0;border-bottom:1px dashed var(--border)}
+.cblk .kv > div:last-child{border-bottom:none}
+.cblk .kv dt{flex:0 0 160px;font-weight:700;color:#334155}
+.cblk .kv dd{flex:1;margin:0}
+.dec .cblk{background:var(--surface2);margin-top:12px;margin-bottom:0}
+@media(max-width:640px){
+  .cblk .kv > div{flex-direction:column;gap:2px}
+  .cblk .kv dt{flex:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">{{badge}}</span>
+    <h1>{{title}}</h1>
+    <div class="period">{{period_label}}</div>
+
+    <div class="oneline">
+      <span class="lab">{{oneline_lab}}</span>
+      <span class="txt">{{oneline}}</span>
+    </div>
+
+    <div class="fineprint">
+      <p><b>{{deadline_line}}</b></p>
+{{#has_fineprint}}      <details><summary>{{scope_line}}</summary>
+{{#fineprint_vm}}      <p>{{{.}}}</p>
+{{/fineprint_vm}}      </details>
+{{/has_fineprint}}    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+{{#has_blocks}}<section>
+  <div class="shead"><span class="snum">1</span><h2>{{s_blocks_title}}</h2></div>
+  <div class="sdesc">{{s_blocks_desc}}</div>
+
+{{#cblocks}}  <div class="cblk">
+{{#btitle}}    <div class="cbt">{{btitle}}</div>
+{{/btitle}}{{#is_para}}    <p>{{text}}</p>
+{{/is_para}}{{#is_list}}    <ul>
+{{#litems}}      <li>{{.}}</li>
+{{/litems}}    </ul>
+{{/is_list}}{{#is_table}}    <div class="tblwrap"><table>
+      <thead><tr>{{#columns}}<th>{{.}}</th>{{/columns}}</tr></thead>
+      <tbody>
+{{#trows}}        <tr>{{#cells}}<td>{{.}}</td>{{/cells}}</tr>
+{{/trows}}      </tbody>
+    </table></div>
+{{/is_table}}{{#is_kv}}    <div class="kv">
+{{#entries}}      <div><dt>{{k}}</dt><dd>{{v}}</dd></div>
+{{/entries}}    </div>
+{{/is_kv}}  </div>
+{{/cblocks}}</section>
+
+{{/has_blocks}}<section>
+  <div class="shead"><span class="snum">{{s_items_num}}</span><h2>{{s_items_title}}</h2></div>
+  <div class="sdesc">{{s_items_desc}}</div>
+
+{{#vitems}}  <div class="dec">
+    <div class="q">{{q}}</div>
+{{#situation}}    <div class="row"><span class="rl">情况</span><span class="rb">{{situation}}</span></div>
+{{/situation}}{{#recommendation}}    <div class="row rec"><span class="rl">我们的建议</span><span class="rb">{{recommendation}}</span></div>
+{{/recommendation}}{{#is_single}}    <div class="row dl"><span class="rl">不回复</span><span class="rb">{{policy_line}}</span></div>
+{{/is_single}}{{#iblocks}}    <div class="cblk">
+{{#btitle}}      <div class="cbt">{{btitle}}</div>
+{{/btitle}}{{#is_para}}      <p>{{text}}</p>
+{{/is_para}}{{#is_list}}      <ul>
+{{#litems}}        <li>{{.}}</li>
+{{/litems}}      </ul>
+{{/is_list}}{{#is_table}}      <div class="tblwrap"><table>
+        <thead><tr>{{#columns}}<th>{{.}}</th>{{/columns}}</tr></thead>
+        <tbody>
+{{#trows}}          <tr>{{#cells}}<td>{{.}}</td>{{/cells}}</tr>
+{{/trows}}        </tbody>
+      </table></div>
+{{/is_table}}{{#is_kv}}      <div class="kv">
+{{#entries}}        <div><dt>{{k}}</dt><dd>{{v}}</dd></div>
+{{/entries}}      </div>
+{{/is_kv}}    </div>
+{{/iblocks}}{{#is_single}}    <div class="fb" data-item="{{item_id}}">
+      <div class="fbrow">
+        <button type="button" class="fbb" data-choice="agree">{{btn_agree}}</button>
+        <button type="button" class="fbb" data-choice="hold">{{btn_hold}}</button>
+        <button type="button" class="fbb" data-role="toggle">{{btn_other}}</button>
+      </div>
+      <div class="fbwrap" data-role="wrap">
+        <textarea placeholder="{{hint}}"></textarea>
+        <button type="button" class="fbb" data-role="submit">提交反馈</button>
+      </div>
+      <div class="fbmsg" data-role="msg"></div>
+    </div>
+{{/is_single}}{{#is_multi}}    <div class="picks">
+      <div class="ph">{{mprompt}}</div>
+      <ul>
+{{#moptions}}        <li><label><input type="checkbox" data-kw="{{code}}"></label><span><span class="w">{{label}}</span>{{#note}} <span class="m">{{note}}</span>{{/note}}</span></li>
+{{/moptions}}      </ul>
+      <button type="button" class="fbb save" data-item="{{item_id}}" data-role="flag">{{save_label}}</button>
+      <div class="fbmsg" data-role="msg-flag"></div>
+    </div>
+{{/is_multi}}  </div>
+
+{{/vitems}}</section>
+
+</div>
+
+<div class="floatfb" id="floatfb">
+  <button type="button" class="floatfb-btn" data-role="float-open">留言给我们</button>
+  <div class="floatfb-panel" data-role="float-panel">
+    <div class="floatfb-title">整份确认的任何意见，写在这里直接发给我们</div>
+    <textarea data-role="float-text" placeholder="{{global_hint}}"></textarea>
+    <button type="button" class="fbb" data-role="float-send">发送留言</button>
+    <div class="fbmsg" data-role="float-msg"></div>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <b>{{title}}</b>，{{period_label}}。<br>
+    {{deadline_line}}<br>
+    {{attach_line}}
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  /* 双端点（2026-09-08）：对客页面在公网 agencyreport，看板 API 域外网整体 403（客户手机 5G 保存失败的教训），
+     也不该把内部 API 暴露公网。首选同域中继 /reports/card_feedback.php（等 agencyreport nginx 加
+     单路径转发 location，Aiden 领地），中继没落位或不可用时退回看板域直连（内网用户仍然能存）。 */
+  var API = '/reports/card_feedback.php';
+  var API_FALLBACK = 'https://always.horntech-dev.com/seo-api.php/card_feedback';
+  var params = new URLSearchParams(window.location.search);
+  var taskId = parseInt(params.get('t'), 10);
+  var token = params.get('k');
+  var live = !!(token && taskId);
+
+  function msgEl(scope, role) { return scope.querySelector('[data-role="' + role + '"]'); }
+
+  if (!live) {
+    Array.prototype.forEach.call(document.querySelectorAll('.fb, .picks, .floatfb'), function (n) {
+      n.classList.add('off');
+      Array.prototype.forEach.call(n.querySelectorAll('.fbb, .floatfb-btn'), function (b) { b.disabled = true; });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.fbmsg'), function (m) {
+      m.textContent = '当前是预览模式，按钮不能提交。客户请用我们发出的那条链接打开本页；团队同事的意见请走任务线程，本页按钮的记录会被当作客户意见处理。';
+    });
+    return;
+  }
+
+  function postTo(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    });
+  }
+
+  function post(item, choice, text) {
+    var body = JSON.stringify({ task_id: taskId, token: token, item: item, choice: choice, text: text || '' });
+    /* 中继 404/405/403 或网络错说明它还没落位或被挡，退回看板域再试一次。
+       两边都失败才算失败（外网用户在中继落位前会走到这里，页面上的邮件兜底文案接住）。 */
+    return postTo(API, body).then(function (res) {
+      if (res.status === 404 || res.status === 405 || res.status === 403) { return postTo(API_FALLBACK, body); }
+      return res;
+    }, function () { return postTo(API_FALLBACK, body); }).then(function (res) {
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+      return res.json().catch(function () { return {}; });
+    });
+  }
+
+  function stamp() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + ' 年 ' + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  /* 已反馈签章（2026-09-16）：按钮右侧显示该项最后一次表态的时间与 IP，
+     页面加载时向端点查一次现状回填，人工打开卡就能看到谁什么时候反馈过。 */
+  var CHOICE_LABEL = { agree: '同意按建议', hold: '保持观察', other: '有反馈意见', flag: '已保存勾选' };
+  function setStamp(itemName, choice, at, ip) {
+    var host = null;
+    var fb = document.querySelector('.fb[data-item="' + itemName + '"]');
+    if (fb) { host = fb.querySelector('.fbrow'); }
+    if (!host) {
+      var flagBtn = document.querySelector('[data-role="flag"][data-item="' + itemName + '"]');
+      if (flagBtn) { host = flagBtn.parentNode; }
+    }
+    if (!host) { return; }
+    var el = host.querySelector('.fbstamp');
+    if (!el) { el = document.createElement('span'); el.className = 'fbstamp'; host.appendChild(el); }
+    el.textContent = '已反馈：' + (CHOICE_LABEL[choice] || choice) + ' · ' + String(at || '').slice(0, 16) + (ip ? ' · IP ' + ip : '');
+  }
+  function loadStamps() {
+    var body = JSON.stringify({ task_id: taskId, token: token, status: 1 });
+    postTo(API, body).then(function (res) {
+      if (res.status === 404 || res.status === 405 || res.status === 403) { return postTo(API_FALLBACK, body); }
+      return res;
+    }, function () { return postTo(API_FALLBACK, body); }).then(function (res) {
+      if (!res.ok) { return; }
+      return res.json().then(function (d) {
+        ((d && d.items) || []).forEach(function (r) { setStamp(r.item, r.choice, r.at, r.ip); });
+      });
+    }).catch(function () { /* 签章查不到不影响卡本身 */ });
+  }
+  loadStamps();
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fb'), function (group) {
+    var item = group.getAttribute('data-item');
+    var msg = msgEl(group, 'msg');
+    var wrap = msgEl(group, 'wrap');
+    var toggle = msgEl(group, 'toggle');
+    var submit = msgEl(group, 'submit');
+    var buttons = group.querySelectorAll('.fbb[data-choice]');
+
+    function lock(active, label) {
+      Array.prototype.forEach.call(group.querySelectorAll('.fbb'), function (b) { b.classList.remove('done'); });
+      if (active) { active.classList.add('done'); }
+      msg.className = 'fbmsg ok';
+      msg.textContent = '已记录：' + label + '（' + stamp() + '）。想改主意就再点一次，以最后一次为准。';
+    }
+
+    function fire(btn, choice, text, label) {
+      btn.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在保存……';
+      post(item, choice, text).then(function (d) {
+        btn.disabled = false;
+        lock(btn, label);
+        if (d && d.at) { setStamp(item, choice, d.at, d.ip); }
+      }).catch(function () {
+        btn.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没保存成功，请过一会儿再点一次，或者直接回复邮件告诉我们。';
+      });
+    }
+
+    Array.prototype.forEach.call(buttons, function (btn) {
+      btn.addEventListener('click', function () {
+        fire(btn, btn.getAttribute('data-choice'), '', btn.textContent.trim());
+      });
+    });
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        wrap.classList.toggle('open');
+        if (wrap.classList.contains('open')) { wrap.querySelector('textarea').focus(); }
+      });
+    }
+
+    if (submit) {
+      submit.addEventListener('click', function () {
+        var box = wrap.querySelector('textarea');
+        var text = box.value.trim();
+        if (!text) {
+          fire(submit, 'hold', '', '保持不变，继续观察');
+          return;
+        }
+        fire(submit, 'other', text, '您的反馈已收到');
+      });
+    }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fbb[data-role="flag"]'), function (btn) {
+    var scope = btn.closest('.picks');
+    var msg = msgEl(scope, 'msg-flag');
+    btn.addEventListener('click', function () {
+      var picked = [];
+      Array.prototype.forEach.call(scope.querySelectorAll('input[type="checkbox"]'), function (cb) {
+        if (cb.checked) { picked.push(cb.getAttribute('data-kw')); }
+      });
+      btn.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在保存……';
+      post(btn.getAttribute('data-item'), 'flag', picked.join(', ')).then(function (d) {
+        btn.disabled = false;
+        btn.classList.add('done');
+        if (d && d.at) { setStamp(btn.getAttribute('data-item'), 'flag', d.at, d.ip); }
+        msg.className = 'fbmsg ok';
+        msg.textContent = picked.length
+          ? '已记录：您勾了 ' + picked.length + ' 个词（' + stamp() + '）。改了勾选再点一次保存，以最后一次为准。'
+          : '已记录：一个都不挡（' + stamp() + '）。改了勾选再点一次保存，以最后一次为准。';
+      }).catch(function () {
+        btn.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没保存成功，请过一会儿再点一次，或者直接回复邮件告诉我们。';
+      });
+    });
+  });
+
+  (function () {
+    var box = document.getElementById('floatfb');
+    if (!box) { return; }
+    var openBtn = box.querySelector('[data-role="float-open"]');
+    var panel = box.querySelector('[data-role="float-panel"]');
+    var text = box.querySelector('[data-role="float-text"]');
+    var send = box.querySelector('[data-role="float-send"]');
+    var msg = box.querySelector('[data-role="float-msg"]');
+    openBtn.addEventListener('click', function () { box.classList.toggle('open'); if (box.classList.contains('open')) { text.focus(); } });
+    send.addEventListener('click', function () {
+      var v = text.value.trim();
+      if (!v) { msg.className = 'fbmsg err'; msg.textContent = '留言是空的，写一句再发。'; return; }
+      send.disabled = true;
+      msg.className = 'fbmsg';
+      msg.textContent = '正在发送……';
+      post('global_note', 'other', v).then(function () {
+        send.disabled = false;
+        text.value = '';
+        msg.className = 'fbmsg ok';
+        msg.textContent = '已发给我们（' + stamp() + '）。还有想说的可以继续写。';
+      }).catch(function () {
+        send.disabled = false;
+        msg.className = 'fbmsg err';
+        msg.textContent = '这次没发出去，请过一会儿再试，或直接回复邮件。';
+      });
+    });
+  })();
+})();
+</script>
+</body>
+</html>

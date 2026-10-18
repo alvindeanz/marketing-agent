@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "card_data v1：卡产线统一数据契约（题与内容的单一事实源；确认卡自本版起只产本 JSON，HTML 由 render_confirmation.js 出，Ask 由 askreg 从同一份登记；契约细则见 card_data_v1.md）",
+  "type": "object",
+  "required": ["schema", "card_kind", "kind", "service", "cycle", "lang", "title", "oneline", "issued", "deadline", "default_policy", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "card_data/v1" },
+    "card_kind": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]{1,32}$",
+      "description": "与 seo_tasks.card_kind / source_ref.card_kind 同一命名域（服务端 32 字符护栏）"
+    },
+    "kind": {
+      "enum": ["confirmation", "direction"],
+      "description": "决定 WF 标签与 default_policy 兜底。v1 渲染器只接 confirmation；方向卡迁入前走各自渲染器加 askreg 适配"
+    },
+    "service": {
+      "enum": ["seo", "sem", null],
+      "description": "车道。产线必填，null 仅限混合方案卡；askreg 对缺省按 card_kind 映射表兜底"
+    },
+    "cycle": {
+      "enum": ["onboard", "monthly", "adhoc"],
+      "description": "只做标注和审计，桥不按它分支，触发逻辑不进本文件"
+    },
+    "lang": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Za-z]{2})?$",
+      "description": "v1 渲染器中文写死，本字段现阶段必须是 zh；语言跟随是产出侧 Phase 2"
+    },
+    "title": { "type": "string" },
+    "badge": { "type": "string", "description": "页眉徽章文案，缺省由渲染器按 card_kind 给" },
+    "oneline": { "type": "string", "maxLength": 60, "description": "一句话说清这份确认要定什么" },
+    "issued": { "type": "string", "pattern": "^\\d{4}-(0[1-9]|1[0-2])$", "description": "发卡月，与文件名里的 YYYY-MM 一致" },
+    "deadline": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "default_policy": {
+      "enum": ["none", "no_reply_follow_recommendation"],
+      "description": "产线必填，按卡类写（词表/mapping/博客卡 none；onsite 与 page-create 族软闸卡 no_reply_follow_recommendation）。到期文案由渲染层从本字段生成，数据里不写"
+    },
+    "attach_line": { "type": "string", "description": "页脚随附文件一行，缺省为 随附文件：无" },
+    "blocks": {
+      "type": "array",
+      "maxItems": 24,
+      "description": "内容块。被 items[].block_refs 引用的挂在题下，未被引用的是卡级块。全部纯文本，不收 HTML",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^b_[a-z0-9_]{1,30}$" },
+          "type": { "enum": ["para", "list", "table", "kv"] },
+          "title": { "type": "string" },
+          "text": { "type": "string", "description": "para 用" },
+          "items": { "type": "array", "minItems": 1, "maxItems": 40, "items": { "type": "string" }, "description": "list 用" },
+          "columns": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string" }, "description": "table 用" },
+          "rows": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 60,
+            "items": { "type": "array", "items": { "type": "string" } },
+            "description": "table 用，每行列数必须等于 columns 列数（渲染器强制）"
+          },
+          "entries": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 24,
+            "items": { "type": "object", "required": ["k", "v"], "properties": { "k": { "type": "string" }, "v": { "type": "string" } } },
+            "description": "kv 用"
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "题的唯一定义处。HTML 的 data-item 与 Ask 的 item_id 都只能出自这里",
+      "items": {
+        "type": "object",
+        "required": ["item_id", "type"],
+        "additionalProperties": false,
+        "properties": {
+          "item_id": { "type": "string", "pattern": "^[a-z0-9_]{1,60}$", "description": "两个通道共用的题标识，落 seo_card_feedback.item" },
+          "type": { "enum": ["single", "multi", "text"] },
+          "q": { "type": "string", "description": "题面。single/multi 必填" },
+          "situation": { "type": "string", "description": "single 必填：现状一段" },
+          "recommendation": { "type": "string", "description": "single 必填：我们的建议" },
+          "hint": { "type": "string", "description": "文本框占位。text 题（global_note）用它定浮动留言占位" },
+          "prompt": { "type": "string", "description": "multi 勾选区引导行" },
+          "save_label": { "type": "string", "description": "multi 保存按钮文案，缺省 保存勾选" },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["code", "label"],
+              "additionalProperties": false,
+              "properties": {
+                "code": { "type": "string", "description": "机器码，落账本与 Ask 的就是它。single 固定按序 agree/hold/other；multi 限 [a-z0-9_.:-] 16 字符内（asks_code_ok 与 choice 列宽同源），词条原文放 label" },
+                "label": { "type": "string", "description": "展示文案。data.json 是 code 到 label 的唯一解码表" },
+                "note": { "type": "string", "description": "multi 选项的备注小字" }
+              }
+            },
+            "description": "single 可省（渲染器补默认三态文案），multi 必填 1 到 40 项"
+          },
+          "default": { "enum": ["agree", "hold", "other"], "description": "single 的建议选项，登记进 Ask 的 default_value" },
+          "required": { "type": "boolean", "description": "登记进 Ask，缺省 true" },
+          "requires_text_when": { "type": "array", "items": { "type": "string" }, "description": "选这些码必须附文字，须是选项码子集。single 缺省 [\"other\"]" },
+          "block_refs": { "type": "array", "items": { "type": "string" }, "description": "引用 blocks[].id，HTML 挂题下，WF 渲染为题内可折叠块" }
+        }
+      }
+    },
+    "html_extra": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "只给 HTML 渲染层的版式性内容。红线：任何题、任何客户作答要依据的事实不得只放这里。v1 只开两个键，扩键先改 card_data_v1.md",
+      "properties": {
+        "scope_line": { "type": "string", "maxLength": 80, "description": "折叠层一行摘要，带 fineprint 时必填" },
+        "fineprint": { "type": "array", "minItems": 1, "items": { "type": "string" }, "description": "口径说明折叠段，允许 <b>/<i>" }
+      }
+    }
+  }
+}

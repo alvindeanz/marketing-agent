@@ -1528,3 +1528,10 @@ Alvin 提的四项客户栏改造：
 - 发现并落账三条机制债（DEFECTS 2026-10-11 三行）：卡折叠不摘红、返修链不消解旧版、apply 完成不对账人工单。
 - 2026-10-11 AIRA (c)：Alvin 三裁定落地：①月报/报告归报告栏目不占任务列表（specs 新增「交付收口口径」节，rev 5e103ac 两机同版；板上 #1154/#1084/#1089/#1139 finish）；②博客出完稿即收口开始计时，不监控发送/发布（#1031/#1032/#1087 finish，#595 监控单 kill）；③Citymed 只做简单页面优化+博客，不碰服务器侧（#1086 kill，scope 写进 clients/citymed/CLAUDE.md）。
 - 2026-10-11 AIRA (d)：在途客户卡口径统一（Alvin 定：在途的、卡在客户的留，其余摘）。done 在途卡计入待发卡红点（列表徽章同口径）；令牌判卡收紧为本任务 own-token；月报/报告草稿/内部验收类前后端都不算卡（Ideal #1078 误钉实证）。rev b94d2ac 已部署 250。长期解法仍是显式发卡状态字段（2026-09-20 旧账未还）。
+
+### 2026-10-19 AIRA (a) card_data v1 定稿与确认卡产线三件（specs 层，未接 execute）
+
+- 干了什么：按 Aiden 确认卡架构条子（to-aira-confirmation-architecture-20261019.md）与我的回条，落 specs 五件：`card_data_v1.schema.json` + `card_data_v1.md`（卡产线统一数据契约，含回条两修订：options 一律 {code,label} 短码进账 label 展示、码统一压 [a-z0-9_.:-]{1,16} 与 asks_code_ok / choice 列宽同源；default_policy 产线必填按卡类写，kind 只在 askreg 兜底，保 page-create 软闸不被「confirmation 一律 none」误伤）；`confirmation_card_spec.md`（收编 group_first/group_next/group_hold/mapping_overall/new_terms/global_note 事实标准为规格）；`confirmation_card_template.html`（CSS 与令牌反馈控件从 direction_card_template 原样复用，multi 勾选 data-kw 落 code）；`render_confirmation.js`（零 LLM，validate 含纯文本守卫、选项码护栏、html_extra 白名单、192KB 余量、guardCommon 复用；data-item 只能出自 items[] 是结构性保证）。
+- 测试：新增 tests/confirmation_render.test.js（单一事实源、码护栏、policy 文案生成、纯文本、widget 注入、卡级/题下块分流等 10 组）；node tests/ 全套 34 件全绿（blog、shopifylink 本机这次也绿）。php 本机未装，但本批零 PHP 改动（seo-api.php 未碰）。
+- 坑（Aiden 领地，报告不动手）：asks_code_ok 不收空格与中文，buildAsk 现有 negatives 映射（词条原文当码，只挡逗号与 60 长）登记新方向卡时会 422 整包拒，5223a4b 后没出新方向卡所以还没炸；适配函数转 items[] 时顺带转码（codes 进账、label 进 lang_pack）。冻结期我未碰 askreg.js / cardfold.js。
+- 下一步/认领：execute 接线（agent 产 data.json、调渲染器、harness.js:365 detail 改指向）等 Aiden askreg 读 v1 的口子好了联调；blog_confirmation / onsite_confirm 挂 v1 信封与 card_kind_of 补映射排下批；SEM onboard 挂点与入场三件套进 specs 并行。本批未部署（specs 与渲染器随 execute 接线一起上 worker）。
