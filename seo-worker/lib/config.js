@@ -57,6 +57,9 @@ const DEFAULTS = {
   // 叙述回合（2026-10-16 Alvin 批）：频道出身任务收口后的对话语境进展说明。
   // 纯叙述不是判断，sonnet 足够；瘦简报下单条成本分钱级。别抬到 opus。
   narrationModel: 'sonnet',
+  // Marketing Inbox 对客户回复（2026-10-18）：harness 子步骤里的受限调用（工具带只给 Read、材料全装进 prompt），
+  // 对外文字要稳，给 opus。见 lib/clientreply.js。
+  clientReplyModel: 'opus',
   // 任务判定（闸A）：一批任务该不该做，按 specs/review_principles.md 判。
   // 2026-09-17 Alvin 定降 opus：这是 fable 定好 plan 框架之内的单任务 go/no-go，边界清楚；
   // 判断漂了由季度 planReview（仍 fable）重规划纠回。全流水线最高频调用，premium 从高频挪走。
@@ -210,6 +213,7 @@ function load() {
   cfg.triageModel = String(cfg.triageModel || DEFAULTS.triageModel);
   cfg.rulingModel = String(cfg.rulingModel || DEFAULTS.rulingModel);
   cfg.chatModel = String(cfg.chatModel || DEFAULTS.chatModel);
+  cfg.clientReplyModel = String(cfg.clientReplyModel || DEFAULTS.clientReplyModel);
   cfg.reviewModel = String(cfg.reviewModel || DEFAULTS.reviewModel);
   cfg.planReviewModel = String(cfg.planReviewModel || DEFAULTS.planReviewModel);
   cfg.threadModel = String(cfg.threadModel || DEFAULTS.threadModel);

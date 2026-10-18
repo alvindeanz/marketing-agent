@@ -7,7 +7,10 @@
 //   3. 队列空了收阻塞：执行失败两次 / 方案里「需要人定」段 / 待判（fable 没判）/ 判决过期 / 待人工验证项
 //   4. 阻塞写回看板（任务 attention=1，note 尾部加 [harness] 段）并追加到 PJ 的 TODO.md 批注段
 //   5. 打印放行卡链接清单，人只看卡点放行
-// 用法：SEO_AGENT_TOKEN=<admin jwt> node tools/harness.js <client_id> [--dry] [--no-todo]
+//   0. 开头先折叠 WebForger 后台客户留言（foldClientMessages，见该函数注释）
+// 用法：SEO_AGENT_TOKEN=<admin jwt> node tools/harness.js <client_id> [--dry] [--no-todo] [--no-client-replies]
+//   客户消息回复一步要读 worker config（serviceToken 取 /context、claudeBin）：从仓库直跑时带
+//   SEO_WORKER_CONFIG=/data/aira/seo-worker/config.json，缺了只记一行跳过，消息留到下轮。
 // 硬规矩不破：放行（apply）永远不在这里点；不做也不在这里判（drop 只按 fable 判决）。
 
 const fs = require('fs');
@@ -233,9 +236,53 @@ async function foldCards(sprint) {
   }
 }
 
+/* 0.1 客户消息折叠（2026-10-18 WebForger Marketing Inbox）：WF 后台客户留言经零 LLM 搬运落
+   seo_client_messages，这里在人起跑的正常轮内收口：读未回复（seo_client_replies 无覆盖它的
+   message_ref）、按对话聚合、每组一次受限 opus（工具带只给 Read，材料全装进 prompt，cwd 空目录）
+   产出对客户回复、本地护栏自检（WF marketingGuards 移植加严），过检写出口，不过挂起待人工。
+   不排 job、不 wake、不碰 chat.js（硬规矩 1）；--dry 只列不调模型；--no-client-replies 整段跳过。
+   失败不挡本轮其余步骤。逻辑在 lib/clientreply.js（依赖注入，tests/clientreply.test.js 整路跑）。 */
+async function foldClientMessages(bc) {
+  if (argv.includes('--no-client-replies')) { log('客户消息折叠：--no-client-replies 跳过'); return; }
+  const { foldClientMessages: fold } = require('../lib/clientreply');
+  let cfg = null; let api = null;
+  const ensureCfg = () => {
+    if (cfg) return cfg;
+    cfg = require('../lib/config').load(); // 需 worker config（serviceToken 读 /context、claudeBin）
+    const { Api } = require('../lib/api');
+    api = new Api(cfg);
+    return cfg;
+  };
+  const sum = await fold({
+    cid, call, log, dry: DRY, clientName: bc && bc.name,
+    getContext: async (id) => { ensureCfg(); return api.getContext(id); },
+    buildBriefing: (ctx) => require('../lib/distill').buildPlanningBriefing(ctx, { log }),
+    runLLM: async (prompt) => {
+      const c = ensureCfg();
+      const os = require('os');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ma-client-reply-'));
+      try {
+        /* allowedTools 必须显式给 'Read'：llm.js 对空串回落默认工具带（含 WebFetch 与 curl），客户来信模式不许。 */
+        const r = await require('../lib/llm').runClaude(c, { prompt, cwd: dir, model: c.clientReplyModel, allowedTools: 'Read',
+          timeoutMs: 10 * 60 * 1000, label: 'client-reply', log });
+        return r.stdout;
+      } finally {
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* 空目录清不掉无碍 */ }
+      }
+    },
+  });
+  if (sum.written.length || sum.held.length || sum.errors.length) {
+    console.log('\n## 客户消息回复（写出口 ' + sum.written.length + '，挂起待人工 ' + sum.held.length + '，模型失败 ' + sum.errors.length + '）');
+    for (const w of sum.written) console.log('- ' + w.reply_id + ' 回复对话 ' + w.thread + (w.replay ? '（重放）' : ''));
+    for (const h of sum.held) console.log('- 挂起 对话 ' + h.thread + '：' + h.reason + '（人工看过后 POST /client_messages/{id}/unhold 重回折叠）');
+    for (const e of sum.errors) console.log('- 失败 对话 ' + e.thread + '：' + e.error);
+  }
+}
+
 async function main() {
   const bc = await boardClient();
   if (!bc) throw new Error('board 上没有 client ' + cid);
+  try { await foldClientMessages(bc); } catch (e) { log('客户消息折叠出错（不影响本轮其余步骤）：' + String(e.message).slice(0, 200)); }
   /* 无日历锚的客户 current_sprint 是 null，'S'+null 会拼出字面量 Snull 写进折叠产出的任务
      （Ideal #851 实证，2026-09-27），本期口径解析不了直接隐身。没锚就空标签，视同本期。 */
   const sprintEarly = /^S\d/.test(String(bc.current_sprint)) ? String(bc.current_sprint)

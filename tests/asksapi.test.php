@@ -90,8 +90,9 @@ t('源码只存 sha256，明文比对命中，错的不命中',function()use($TO
         is_true(!isset($row['token'])&&!isset($row['plain']),'token 表不许出现明文字段');
         is_true(is_array($row['client_ids'])&&$row['client_ids'],'必须绑定 client_ids');
     }
-    eq($TOKENS[0]['client_ids'],[55],'webforger 这枚只绑 55');
-    eq($TOKENS[0]['scopes'],['asks:read','answers:write'],'scopes');
+    /* 2026-10-18 Marketing Inbox 扩绑：狗粮三站，原两条 scope 不动只追加 */
+    eq($TOKENS[0]['client_ids'],[55,52,53],'webforger 这枚绑狗粮三站 55/52/53');
+    eq($TOKENS[0]['scopes'],['asks:read','answers:write','messages:write','replies:read'],'scopes');
 });
 
 section('答案校验 asks_validate_answers');

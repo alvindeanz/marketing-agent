@@ -5851,6 +5851,7 @@ if($m==='GET'&&$ROUTE==='/card_feedback'){
      POST /asks              worker token 或 admin：登记/upsert Ask（ask_id 幂等），body.asks[] 即批量回填
      POST /asks/{ask_id}/void        worker 或 admin：作废（测试 Ask 清理、源头撤销），svc 读不再可见
      GET  /asks/{ask_id}/answers     worker 或 admin：该 Ask 的账本行（含 channel/actor/幂等键），审计用
+     POST /svc/v1/messages、GET /svc/v1/replies 与 harness 侧内部路由：见块尾 INBOX 子块（2026-10-18）
    /svc/ 前缀只认集成 token（JWT、WORKER_TKN、READONLY_TKN 一律 403）；集成 token 打其他路由一律 403，
    闸门由 $ROUTE 计算后紧跟的 asks_svc_gate() 执行（见 ASKS-API HOOK）。
    时间口径：seo_asks 全表与 seo_card_feedback.answered_at 存 UTC；seo_card_feedback.created_at 仍是库钟（NZ），
@@ -5861,7 +5862,9 @@ if($m==='GET'&&$ROUTE==='/card_feedback'){
 function asks_integration_tokens(){return [
     ['id'=>'webforger-20261016','integration'=>'webforger',
      'sha256'=>'7b587d5d7ae5a0cdcf9403639b97db5e38f4e4b399daf46a9552be1304de837a',
-     'client_ids'=>[55],'scopes'=>['asks:read','answers:write']],
+     /* 2026-10-18 Marketing Inbox 扩绑：狗粮三站 55 WebForger、52 HornTech NZ、53 HornTech AU；明文不换，
+        原两条 scope 不动，追加 messages:write（POST /svc/v1/messages）与 replies:read（GET /svc/v1/replies）。 */
+     'client_ids'=>[55,52,53],'scopes'=>['asks:read','answers:write','messages:write','replies:read']],
 ];}
 
 /* ASKS-PURE-START（纯函数块，零数据库零 HTTP，tests/asksapi.test.php 按标记抠出来 eval） */
@@ -6546,6 +6549,351 @@ if($m==='GET'&&preg_match('#^/asks/([A-Za-z0-9_-]{4,64})/answers$#D',$ROUTE,$mm)
         'answered_at'=>$r['answered_at'],'created_at'=>$r['created_at']];
     res(200,['ask_id'=>$a['ask_id'],'state'=>$a['state'],'rows'=>$out]);
 }
+
+/* ---------- BEGIN INBOX（2026-10-18 AIDEN 跨认领：WebForger 客户后台 Marketing Inbox 的 MA 侧，见 COLLAB 10-18） ----------
+   不进 seo_inbox：inbox_refs_norm 白名单重建会冲掉 message_ref 一类字段（09-22 ctomi 同型事故），决策流按 kind
+   过滤也会被新 kind 污染。另建两表，惰性 DDL 同 ensure_asks_schema 套路，禁 ENUM：
+     seo_client_messages  入站。idempotency_key 唯一索引，重放返回首次结果不增行。
+     seo_client_replies   出口。message_ref 指回入站行，兼作已回复标记（covers_refs 记一条回复覆盖的全部入站）。
+   路由：
+     POST /svc/v1/messages                     集成 token（messages:write）：WF 转发客户消息，只落库
+     GET  /svc/v1/replies?client_id=&since=    集成 token（replies:read）：WF 增量拉回复
+     GET  /client_messages?client_id=          worker 或 admin：harness 折叠读消息与近期回复（零 LLM）
+     POST /client_replies                      worker 或 admin：harness 写过本地自检的回复
+     POST /client_messages/{id}/hold|unhold    worker 或 admin：自检不过挂起待人工 / 人工解挂重回折叠
+   硬规矩 1：本块任何路径都不调 chat_job_queue、fire_wake，不排任何 job；LLM 只发生在人起跑的 harness 轮内。
+   时间：两表时间列一律 gmdate 写 UTC（不用 NOW()、CURRENT_TIMESTAMP 这类库钟，seo_asks.created_at 的老坑），对外 ISO8601 Z。
+   游标协议（WF pullReplies 取回后把 since 直接推到 server_time，且只处理前 100 条）：按出口表入库时间 created_at
+   升序（同秒按 id），单次至多 100 条；有截断时 server_time 写最后一条的入库时间，否则写当前时间；since 按 created_at
+   过滤（>=，WF 自带 2 分钟回叠，reply_id 去重），不按模型产出时间 model_at。 */
+
+/* INBOX-PURE-START（纯函数块，零数据库零 HTTP，tests/inboxapi.test.php 按标记抠出来 eval；依赖 ASKS-PURE 的 asks_utc、asks_iso、asks_actor 与 ASK_SERVICES） */
+define('INBOX_PAGE_MAX',100);
+define('INBOX_BODY_MAX',100000);
+define('INBOX_REPLY_MAX',2000);
+define('INBOX_REF_RE','/^[A-Za-z0-9_.:-]{1,80}$/D');
+/* 标签短码：只认 ASK_SERVICES（seo、sem）。形状对但不认识的、形状不对的一律丢弃并带回丢弃清单，不报错。 */
+function inbox_codes($v){
+    $kept=[];$dropped=[];
+    foreach((is_array($v)?array_values($v):[]) as $c){
+        if(is_string($c)&&in_array($c,ASK_SERVICES,true)){if(!in_array($c,$kept,true))$kept[]=$c;continue;}
+        $dropped[]=mb_substr(is_string($c)?$c:json_encode($c),0,40,'UTF-8');
+    }
+    return [$kept,array_slice($dropped,0,20)];
+}
+/* fence_triggered 安全侧口径（同 WF normalizeReply）：只有布尔 false 才是未触发，字符串 "false"、0、缺省都按触发。 */
+function inbox_fence($v){return $v===false?false:true;}
+/* expects_reply：只有布尔 true 才算真。 */
+function inbox_expects($v){return $v===true;}
+function inbox_ref_ok($v){return is_string($v)&&preg_match(INBOX_REF_RE,$v)===1;}
+/* POST /svc/v1/messages 的载荷规整。返回 [row, error, dropped_codes]。 */
+function inbox_norm_message($in){
+    if(!is_array($in))return [null,'body must be object',[]];
+    $key=$in['idempotency_key']??null;
+    if(!is_string($key)||!preg_match('/^wf:[A-Za-z0-9_.:-]{1,150}$/D',$key))return [null,'bad idempotency_key',[]];
+    if(!inbox_ref_ok($in['message_ref']??null))return [null,'bad message_ref',[]];
+    if(!inbox_ref_ok($in['thread_ref']??null))return [null,'bad thread_ref',[]];
+    $sent=asks_utc(is_string($in['sent_at']??null)?$in['sent_at']:'');
+    if($sent===null)return [null,'bad sent_at',[]];
+    $ch=$in['channel']??null;
+    if(!in_array($ch,['dashboard','email'],true))return [null,'bad channel',[]];
+    list($actor,$aerr)=asks_actor($in['actor']??null);
+    if($aerr)return [null,$aerr,[]];
+    if(array_key_exists('codes',$in)&&!is_array($in['codes']))return [null,'codes must be array',[]];
+    list($codes,$dropped)=inbox_codes($in['codes']??[]);
+    $body=$in['body']??null;
+    if(!is_string($body))return [null,'body must be string',[]];
+    if(mb_strlen($body,'UTF-8')>INBOX_BODY_MAX)return [null,'body over '.INBOX_BODY_MAX.' chars',[]];
+    $att=$in['attachments']??0;
+    if(!is_int($att)||$att<0||$att>1000)return [null,'bad attachments',[]];
+    return [['idempotency_key'=>$key,'message_ref'=>$in['message_ref'],'thread_ref'=>$in['thread_ref'],'channel'=>$ch,
+        'actor'=>$actor,'codes'=>$codes,'codes_dropped'=>$dropped,'body'=>$body,'attachments'=>$att,'sent_at'=>$sent],null,$dropped];
+}
+/* POST /client_replies 的载荷规整。$known 是本 client 已入站的 message_ref => thread_ref。
+   message_ref、covers、retag 引用的消息都必须已入站（harness 只用入站时存下的值，这里再兜一道）。
+   fence_triggered 为真的回复不许进出口（本地挂起待人工，不让 WF 扣下计熔断）。返回 [row, error]。 */
+function inbox_norm_reply($in,$known){
+    if(!is_array($in))return [null,'body must be object'];
+    $key=$in['idempotency_key']??null;
+    if(!is_string($key)||!preg_match('/^[A-Za-z0-9_.:-]{8,150}$/D',$key))return [null,'bad idempotency_key'];
+    $ref=$in['message_ref']??null;
+    if(!inbox_ref_ok($ref)||!array_key_exists($ref,$known))return [null,'message_ref not inbound'];
+    $covers=[$ref];
+    if(array_key_exists('covers',$in)){
+        if(!is_array($in['covers'])||count($in['covers'])>50)return [null,'covers must be array of at most 50'];
+        foreach($in['covers'] as $c){
+            if(!inbox_ref_ok($c)||!array_key_exists($c,$known))return [null,'covers ref not inbound'];
+            if(!in_array($c,$covers,true))$covers[]=$c;
+        }
+    }
+    $body=$in['body']??null;
+    if(!is_string($body)||trim($body)==='')return [null,'body required'];
+    if(mb_strlen($body,'UTF-8')>INBOX_REPLY_MAX)return [null,'body over '.INBOX_REPLY_MAX.' chars'];
+    list($codes,)=inbox_codes(is_array($in['codes']??null)?$in['codes']:[]);
+    $retag=[];
+    if(array_key_exists('retag',$in)){
+        if(!is_array($in['retag'])||count($in['retag'])>50)return [null,'retag must be array of at most 50'];
+        foreach($in['retag'] as $x){
+            $xr=is_array($x)?($x['message_ref']??null):null;
+            if(!inbox_ref_ok($xr)||!array_key_exists($xr,$known))return [null,'retag ref not inbound'];
+            list($xc,)=inbox_codes(is_array($x['codes']??null)?$x['codes']:[]);
+            $retag[]=['message_ref'=>$xr,'codes'=>$xc];
+        }
+    }
+    if(inbox_fence($in['fence_triggered']??null))return [null,'fence_triggered reply must be held locally, not written'];
+    $modelAt=null;
+    if(isset($in['model_at'])&&is_string($in['model_at'])&&$in['model_at']!=='')$modelAt=asks_utc($in['model_at']);
+    return [['idempotency_key'=>$key,'message_ref'=>$ref,'thread_ref'=>(string)$known[$ref],'covers'=>$covers,'body'=>$body,
+        'codes'=>$codes,'retag'=>$retag,'expects_reply'=>inbox_expects($in['expects_reply']??null),'fence_triggered'=>false,
+        'model_at'=>$modelAt],null];
+}
+function inbox_reply_id($id){return 'cr'.(int)$id;}
+/* 出口行投影成 WF MaReply（白名单键）。回复不带附件，attachments 出空数组（WF 读数组长度）。 */
+function inbox_reply_view($r){
+    $codes=json_decode((string)($r['codes']??''),true);
+    $retag=json_decode((string)($r['retag']??''),true);
+    $ref=$r['message_ref']??null;
+    return ['reply_id'=>inbox_reply_id($r['id']),'message_ref'=>($ref===null||$ref==='')?null:(string)$ref,
+        'body'=>(string)$r['body'],'codes'=>is_array($codes)?array_values($codes):[],'retag'=>is_array($retag)?array_values($retag):[],
+        'expects_reply'=>(int)($r['expects_reply']??0)===1,'fence_triggered'=>(int)($r['fence_triggered']??0)===1,
+        'attachments'=>[],'created_at'=>asks_iso($r['created_at']??null)];
+}
+/* 游标分页：$rows 已按 created_at, id 升序且多取一条（LIMIT max+1）。返回 [rows, server_time ISO, truncated]。
+   截断时 server_time 必须是最后一条的入库时间（WF 会把 since 推到它），否则用当前时间。 */
+function inbox_page($rows,$max,$nowUtc){
+    $trunc=count($rows)>$max;
+    if($trunc)$rows=array_slice($rows,0,$max);
+    $st=($trunc&&$rows)?(string)$rows[count($rows)-1]['created_at']:(string)$nowUtc;
+    return [$rows,asks_iso($st),$trunc];
+}
+/* 已回复集合：出口行（state=out）的 message_ref 加 covers_refs 并集。 */
+function inbox_replied_set($replies){
+    $s=[];
+    foreach($replies as $r){
+        if((string)($r['state']??'out')!=='out')continue;
+        if(($r['message_ref']??'')!=='')$s[(string)$r['message_ref']]=true;
+        $cv=json_decode((string)($r['covers_refs']??''),true);
+        if(is_array($cv))foreach($cv as $c)if(is_string($c))$s[$c]=true;
+    }
+    return $s;
+}
+/* 入站行投影（内部视图，给 harness）。replied 看已回复集合，held 看挂起戳。 */
+function inbox_message_view($m,$replied){
+    $codes=json_decode((string)($m['codes']??''),true);
+    return ['id'=>(int)$m['id'],'message_ref'=>(string)$m['message_ref'],'thread_ref'=>(string)$m['thread_ref'],
+        'channel'=>(string)$m['channel'],'codes'=>is_array($codes)?$codes:[],'body'=>(string)$m['body'],
+        'attachments'=>(int)$m['attachments'],'sent_at'=>asks_iso($m['sent_at']??null),'received_at'=>asks_iso($m['received_at']??null),
+        'held'=>($m['held_at']??null)!==null&&$m['held_at']!=='','held_reason'=>$m['held_reason']??null,
+        'replied'=>isset($replied[(string)$m['message_ref']])];
+}
+/* INBOX-PURE-END */
+
+/* INBOX-DB-START（读写函数，PDO 由调用方给，tests/inboxapi.test.php 配假 PDO 跑幂等重放与游标） */
+function inbox_msg_by_key($pdo,$key){
+    $q=$pdo->prepare("SELECT id,client_id,message_ref FROM seo_client_messages WHERE idempotency_key=?");
+    $q->execute([$key]);
+    $r=$q->fetch();
+    return $r?:null;
+}
+/* 入站一条。同幂等键已在：返回 ['replay', 首行]，不增行；并发撞唯一键同样回查重放。返回 [kind, row]。 */
+function inbox_msg_insert($pdo,$cid,$row,$nowUtc){
+    $old=inbox_msg_by_key($pdo,$row['idempotency_key']);
+    if($old)return ['replay',$old];
+    try{
+        $pdo->prepare("INSERT INTO seo_client_messages(client_id,idempotency_key,message_ref,thread_ref,channel,actor,codes,codes_dropped,body,attachments,source,sent_at,received_at)VALUES(?,?,?,?,?,?,?,?,?,?,'webforger',?,?)")
+            ->execute([(int)$cid,$row['idempotency_key'],$row['message_ref'],$row['thread_ref'],$row['channel'],$row['actor'],
+                json_encode($row['codes']),$row['codes_dropped']?json_encode($row['codes_dropped'],JSON_UNESCAPED_UNICODE):null,
+                $row['body'],(int)$row['attachments'],$row['sent_at'],$nowUtc]);
+        return ['created',['id'=>(int)$pdo->lastInsertId(),'client_id'=>(int)$cid,'message_ref'=>$row['message_ref']]];
+    }catch(PDOException $e){
+        if((string)$e->getCode()==='23000'){$old=inbox_msg_by_key($pdo,$row['idempotency_key']);if($old)return ['replay',$old];}
+        throw $e;
+    }
+}
+/* 出口行，按入库时间升序多取一条供截断判定。LIMIT 直接拼整数（PDO 模拟预处理会把绑定的 LIMIT 参数加引号）。 */
+function inbox_replies_rows($pdo,$cid,$sinceUtc,$max){
+    $sql="SELECT * FROM seo_client_replies WHERE client_id=? AND state='out'".($sinceUtc!==null?" AND created_at>=?":"")." ORDER BY created_at,id LIMIT ".((int)$max+1);
+    $q=$pdo->prepare($sql);
+    $q->execute($sinceUtc!==null?[(int)$cid,$sinceUtc]:[(int)$cid]);
+    return $q->fetchAll();
+}
+function inbox_reply_by_key($pdo,$key){
+    $q=$pdo->prepare("SELECT id,client_id,message_ref FROM seo_client_replies WHERE idempotency_key=?");
+    $q->execute([$key]);
+    $r=$q->fetch();
+    return $r?:null;
+}
+/* 写一条出口回复，幂等同入站。返回 [kind, row]。 */
+function inbox_reply_insert($pdo,$cid,$row,$by,$nowUtc){
+    $old=inbox_reply_by_key($pdo,$row['idempotency_key']);
+    if($old)return ['replay',$old];
+    try{
+        $pdo->prepare("INSERT INTO seo_client_replies(client_id,idempotency_key,message_ref,thread_ref,covers_refs,body,codes,retag,expects_reply,fence_triggered,state,created_by,model_at,created_at)VALUES(?,?,?,?,?,?,?,?,?,?,'out',?,?,?)")
+            ->execute([(int)$cid,$row['idempotency_key'],$row['message_ref'],$row['thread_ref'],json_encode($row['covers']),
+                $row['body'],json_encode($row['codes']),json_encode($row['retag']),$row['expects_reply']?1:0,0,
+                mb_substr((string)$by,0,64,'UTF-8'),$row['model_at'],$nowUtc]);
+        return ['created',['id'=>(int)$pdo->lastInsertId(),'client_id'=>(int)$cid,'message_ref'=>$row['message_ref']]];
+    }catch(PDOException $e){
+        if((string)$e->getCode()==='23000'){$old=inbox_reply_by_key($pdo,$row['idempotency_key']);if($old)return ['replay',$old];}
+        throw $e;
+    }
+}
+/* INBOX-DB-END */
+
+/* 两表惰性 DDL，information_schema 逐列比对幂等。新列禁 ENUM，时间列全 UTC（写入方给值，不设库钟默认）。 */
+function ensure_client_inbox_schema(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_client_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT NOT NULL,
+        idempotency_key VARCHAR(191) NOT NULL,
+        UNIQUE KEY uq_cmsg_idem (idempotency_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    asks_cols_ensure('seo_client_messages',[
+        'message_ref'=>"VARCHAR(80) NOT NULL DEFAULT ''",
+        'thread_ref'=>"VARCHAR(80) NOT NULL DEFAULT ''",
+        'channel'=>"VARCHAR(16) NOT NULL DEFAULT ''",
+        'actor'=>"VARCHAR(80) NOT NULL DEFAULT ''",
+        'codes'=>"VARCHAR(255) NOT NULL DEFAULT '[]'",
+        'codes_dropped'=>"VARCHAR(1024) DEFAULT NULL",
+        'body'=>"MEDIUMTEXT",
+        'attachments'=>"INT NOT NULL DEFAULT 0",
+        'source'=>"VARCHAR(24) NOT NULL DEFAULT 'webforger'",
+        'sent_at'=>"DATETIME DEFAULT NULL",
+        'received_at'=>"DATETIME DEFAULT NULL",
+        'held_at'=>"DATETIME DEFAULT NULL",
+        'held_reason'=>"VARCHAR(255) DEFAULT NULL",
+    ]);
+    asks_index_ensure('seo_client_messages','idx_cmsg_client','KEY idx_cmsg_client (client_id, id)');
+    asks_index_ensure('seo_client_messages','idx_cmsg_ref','KEY idx_cmsg_ref (client_id, message_ref)');
+    db()->exec("CREATE TABLE IF NOT EXISTS seo_client_replies (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        client_id INT NOT NULL,
+        idempotency_key VARCHAR(191) NOT NULL,
+        UNIQUE KEY uq_crep_idem (idempotency_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    asks_cols_ensure('seo_client_replies',[
+        'message_ref'=>"VARCHAR(80) DEFAULT NULL",
+        'thread_ref'=>"VARCHAR(80) NOT NULL DEFAULT ''",
+        'covers_refs'=>"TEXT",
+        'body'=>"MEDIUMTEXT",
+        'codes'=>"VARCHAR(255) NOT NULL DEFAULT '[]'",
+        'retag'=>"MEDIUMTEXT",
+        'expects_reply'=>"TINYINT NOT NULL DEFAULT 0",
+        'fence_triggered'=>"TINYINT NOT NULL DEFAULT 0",
+        'state'=>"VARCHAR(16) NOT NULL DEFAULT 'out'",
+        'created_by'=>"VARCHAR(64) NOT NULL DEFAULT ''",
+        'model_at'=>"DATETIME DEFAULT NULL",
+        'created_at'=>"DATETIME DEFAULT NULL",
+    ]);
+    asks_index_ensure('seo_client_replies','idx_crep_cursor','KEY idx_crep_cursor (client_id, state, created_at, id)');
+    asks_index_ensure('seo_client_replies','idx_crep_ref','KEY idx_crep_ref (client_id, message_ref)');
+}
+/* 本 client 已入站的 message_ref => thread_ref（POST /client_replies 校引用用）。 */
+function inbox_known_refs($cid){
+    $q=db()->prepare("SELECT message_ref,thread_ref FROM seo_client_messages WHERE client_id=?");
+    $q->execute([(int)$cid]);
+    $k=[];
+    foreach($q->fetchAll() as $r)$k[(string)$r['message_ref']]=(string)$r['thread_ref'];
+    return $k;
+}
+
+/* POST /svc/v1/messages：WF 转发的客户消息。只落库：不解析不执行正文，不排 job，不 fire_wake。
+   同 idempotency_key 重放 200 返回首次 message_id 不增行；该键属于别的 client 时 409。未知短码丢弃并记录。 */
+if($m==='POST'&&$ROUTE==='/svc/v1/messages'){
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    $tk=auth_integration('messages:write',$cid);
+    list($row,$err,$dropped)=inbox_norm_message($i);
+    if($err)res(422,['error'=>$err]);
+    ensure_client_inbox_schema();
+    list($kind,$r)=inbox_msg_insert(db(),$cid,$row,gmdate('Y-m-d H:i:s'));
+    if($kind==='replay'){
+        if((int)$r['client_id']!==$cid)res(409,['error'=>'idempotency_key already used by another client']);
+        res(200,['accepted'=>true,'replay'=>true,'message_id'=>(int)$r['id']]);
+    }
+    if($dropped){
+        error_log('seo-api inbox: client '.$cid.' message '.$row['message_ref'].' dropped unknown codes '.json_encode($dropped));
+    }
+    audit('integration:'.$tk['id'],'seo_client_message',$row['message_ref'],['id'=>$r['id'],'client_id'=>$cid,'thread_ref'=>$row['thread_ref'],
+        'codes'=>$row['codes'],'codes_dropped'=>$dropped,'attachments'=>$row['attachments']]);
+    res(200,['accepted'=>true,'replay'=>false,'message_id'=>(int)$r['id']]);
+}
+
+/* GET /svc/v1/replies?client_id=&since=：出口增量。见块头游标协议。 */
+if($m==='GET'&&$ROUTE==='/svc/v1/replies'){
+    $cid=(int)($_GET['client_id']??0);
+    auth_integration('replies:read',$cid);
+    $since=null;
+    if(isset($_GET['since'])&&$_GET['since']!==''){$since=asks_utc((string)$_GET['since']);if($since===null)res(400,['error'=>'bad since']);}
+    ensure_client_inbox_schema();
+    list($rows,$st,)=inbox_page(inbox_replies_rows(db(),$cid,$since,INBOX_PAGE_MAX),INBOX_PAGE_MAX,gmdate('Y-m-d H:i:s'));
+    res(200,['client_id'=>$cid,'server_time'=>$st,'replies'=>array_map('inbox_reply_view',$rows)]);
+}
+
+/* GET /client_messages?client_id=&limit=：harness 折叠用的内部视图（近 limit 条入站，默认 200，带 replied/held）
+   加近 50 条出口回复（本地频控与上下文用）。零 LLM，不排 job。 */
+if($m==='GET'&&$ROUTE==='/client_messages'){
+    asks_auth_internal();
+    $cid=need_client();
+    $lim=max(1,min(500,(int)($_GET['limit']??200)));
+    ensure_client_inbox_schema();
+    $rq=db()->prepare("SELECT id,message_ref,covers_refs,body,codes,expects_reply,state,created_at FROM seo_client_replies WHERE client_id=? ORDER BY id DESC LIMIT 500");
+    $rq->execute([$cid]);
+    $reps=$rq->fetchAll();
+    $replied=inbox_replied_set($reps);
+    $mq=db()->prepare("SELECT * FROM seo_client_messages WHERE client_id=? ORDER BY id DESC LIMIT ".$lim);
+    $mq->execute([$cid]);
+    $msgs=array_reverse($mq->fetchAll());
+    $out=[];foreach($msgs as $x)$out[]=inbox_message_view($x,$replied);
+    $rout=[];
+    foreach(array_reverse(array_slice($reps,0,50)) as $r){
+        $v=inbox_reply_view($r);
+        $rout[]=['reply_id'=>$v['reply_id'],'message_ref'=>$v['message_ref'],'body'=>$v['body'],'codes'=>$v['codes'],
+            'expects_reply'=>$v['expects_reply'],'state'=>(string)$r['state'],'created_at'=>$v['created_at']];
+    }
+    res(200,['client_id'=>$cid,'server_time'=>asks_iso(gmdate('Y-m-d H:i:s')),'messages'=>$out,'replies'=>$rout]);
+}
+
+/* POST /client_replies：harness 写一条过了本地自检的回复进出口。引用必须已入站，fence 为真拒收，幂等同入站。 */
+if($m==='POST'&&$ROUTE==='/client_replies'){
+    $u=asks_auth_internal();
+    $i=input();
+    $cid=(int)($i['client_id']??0);
+    if($cid<=0)res(400,['error'=>'client_id required']);
+    ensure_client_inbox_schema();
+    list($row,$err)=inbox_norm_reply($i,inbox_known_refs($cid));
+    if($err)res(422,['error'=>$err]);
+    list($kind,$r)=inbox_reply_insert(db(),$cid,$row,$u['username'],gmdate('Y-m-d H:i:s'));
+    if($kind==='replay'){
+        if((int)$r['client_id']!==$cid)res(409,['error'=>'idempotency_key already used by another client']);
+        res(200,['ok'=>true,'replay'=>true,'reply_id'=>inbox_reply_id($r['id'])]);
+    }
+    audit($u['username'],'seo_client_reply',inbox_reply_id($r['id']),['client_id'=>$cid,'message_ref'=>$row['message_ref'],
+        'covers'=>$row['covers'],'codes'=>$row['codes'],'retag_n'=>count($row['retag']),'expects_reply'=>$row['expects_reply']]);
+    res(200,['ok'=>true,'replay'=>false,'reply_id'=>inbox_reply_id($r['id'])]);
+}
+
+/* POST /client_messages/{id}/hold {reason} 与 /unhold：本地自检不过（含围栏触发）挂起，折叠跳过；人工看过后解挂重回折叠。 */
+if($m==='POST'&&preg_match('#^/client_messages/([1-9][0-9]{0,9})/(hold|unhold)$#D',$ROUTE,$mm)){
+    $u=asks_auth_internal();
+    ensure_client_inbox_schema();
+    $q=db()->prepare("SELECT id,client_id,message_ref FROM seo_client_messages WHERE id=?");
+    $q->execute([(int)$mm[1]]);
+    $x=$q->fetch();
+    if(!$x)res(404,['error'=>'message not found']);
+    if($mm[2]==='hold'){
+        $why=mb_substr(trim((string)(input()['reason']??'')),0,255,'UTF-8');
+        db()->prepare("UPDATE seo_client_messages SET held_at=?,held_reason=? WHERE id=?")->execute([gmdate('Y-m-d H:i:s'),$why!==''?$why:'held',(int)$x['id']]);
+    }else{
+        db()->prepare("UPDATE seo_client_messages SET held_at=NULL,held_reason=NULL WHERE id=?")->execute([(int)$x['id']]);
+    }
+    audit($u['username'],'seo_client_message_'.$mm[2],(string)$x['message_ref'],['id'=>(int)$x['id'],'client_id'=>(int)$x['client_id']]);
+    res(200,['ok'=>true,'id'=>(int)$x['id'],'state'=>$mm[2]==='hold'?'held':'open']);
+}
+/* ---------- END INBOX ---------- */
 /* ====================== END ASKS-API ====================== */
 
 // GET /plans?client_id=
