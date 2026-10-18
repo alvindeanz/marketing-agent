@@ -6097,7 +6097,7 @@ function asks_project($ask,$fold,$profileLang,$nowUtc,$offset,$updatedUtc){
         'rev'=>(int)$ask['rev'],
         'state'=>asks_state((string)$ask['state'],$ask['deadline']??null,$nowUtc,$ask['items'],$fold),
         'deadline'=>asks_iso($ask['deadline']??null),'default_policy'=>(string)$ask['default_policy'],
-        'lang'=>$lang,'text'=>$text,'items'=>$items,'updated_at'=>asks_iso($updatedUtc)];
+        'lang'=>$lang,'text'=>$text,'items'=>$items,'created_at'=>asks_iso($ask['created_at']??null),'updated_at'=>asks_iso($updatedUtc)];
 }
 /* 幂等键：渠道键加 # 加 item_id，一个 item 一行，唯一索引兜底。 */
 function asks_idem_key($key,$itemId){return $key.'#'.$itemId;}

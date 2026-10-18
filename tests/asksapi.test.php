@@ -201,9 +201,9 @@ t('旁注：非空 other 全部按序保留',function()use($FX){
 section('投影与白名单 asks_project');
 
 t('只出白名单键，source_ref、task/plan 编号、卡指纹、operator 中文版都不出',function()use($ASK,$FX){
-    $ask=$ASK+['state'=>'open'];$ask['lang_pack']=$ASK['lang_pack'];
+    $ask=$ASK+['state'=>'open','created_at'=>'2026-10-14 21:30:00'];$ask['lang_pack']=$ASK['lang_pack'];
     $p=asks_project($ask,asks_fold_effective($FX['rows']),'en','2026-10-16 03:00:00',46800,'2026-10-15 08:12:05');
-    eq(array_keys($p),['ask_id','kind','audience','service','rev','state','deadline','default_policy','lang','text','items','updated_at'],'顶层键');
+    eq(array_keys($p),['ask_id','kind','audience','service','rev','state','deadline','default_policy','lang','text','items','created_at','updated_at'],'顶层键');
     eq(array_keys($p['items'][0]),['item_id','type','required','requires_text_when','prompt','situation','recommendation','hint','options','effective_answer','last_note'],'item 键');
     $js=json_encode($p,JSON_UNESCAPED_UNICODE);
     foreach(['source_ref','task_id','plan_id','1413','sha256:','card_token','output_url','内部中文','关键词方向','actor','idempotency','wfu_'] as $bad)
@@ -212,6 +212,10 @@ t('只出白名单键，source_ref、task/plan 编号、卡指纹、operator 中
     eq($p['items'][0]['options'][0],['code'=>'agree','label'=>'Agree'],'选项码加标签');
     eq($p['deadline'],'2026-10-30T00:00:00Z','deadline ISO');
     eq($p['updated_at'],'2026-10-15T08:12:05Z','updated_at ISO');
+    eq($p['created_at'],'2026-10-14T21:30:00Z','created_at ISO');
+    is_true(preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/',$p['created_at'])===1,'created_at 是 ISO8601 UTC');
+    $p0=asks_project($ASK+['state'=>'open'],[],'en','2026-10-16 03:00:00',46800,null);
+    is_true(array_key_exists('created_at',$p0)&&$p0['created_at']===null,'缺 created_at 兜底 null');
 });
 t('effective_answer：表态取最后一次，multi 拆 values，存量行按 actor 推渠道，库钟换 UTC',function()use($ASK,$FX){
     $ask=$ASK+['state'=>'open'];
