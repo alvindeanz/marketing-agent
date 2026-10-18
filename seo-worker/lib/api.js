@@ -36,6 +36,11 @@ class Api {
     return res && res.job ? res.job : null;
   }
 
+  /** POST /asks -> 出卡登记待答实体（auth_worker，ask_id 幂等 upsert；失败不挡出卡，调用方兜） */
+  async postAsk(body) {
+    return this.req('POST', '/asks', body);
+  }
+
   /** POST /worker_heartbeat -> 自报存活与熔断状态（2026-10-14 ros 熔断静默教训），server 落表供看板红条 */
   async postHeartbeat(body) {
     return this.req('POST', '/worker_heartbeat', Object.assign({ worker: this.workerId }, body || {}));

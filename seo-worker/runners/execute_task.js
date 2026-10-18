@@ -2290,6 +2290,7 @@ async function runOne(ctx, context, workspace, taskId) {
   // 两个链接绝不能混（2026-08-31 #145 内部壳被当客户版发给人，DEFECTS 有案）。
   let clientLinks = '';
   let lintLines = '';
+  let cardAskUrl = '';
   if (!prepare) {
     try {
       /* 扫描目录补 seo-agent-output/（2026-09-21，ideal #798 实证：agent 把卡写去那里，
@@ -2318,6 +2319,7 @@ async function runOne(ctx, context, workspace, taskId) {
         const res = await publishFile(ctx.cfg, path.basename(workspace), '', f, path.join(rdir, f), log);
         if (res && res.url) {
           clientLinks += '客户版: ' + res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '') + '\n';
+          if (!cardAskUrl) cardAskUrl = res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '');
           log('task ' + taskId + '：客户版已发布 ' + res.url);
         }
       }
@@ -2380,6 +2382,26 @@ async function runOne(ctx, context, workspace, taskId) {
       ': result posted' +
       (prepare ? ', task left for review, nothing on the site has changed' : '')
   );
+
+  /* 出卡登记 Ask（2026-10-18）：卡类任务交付后把卡登记成待答实体，WF 后台与邮件卡页
+     同题同账。放在 result 之后：登记失败不挡出卡，下轮重跑幂等补登（契约 §4）。
+     prepare 泳道不出卡，不登记。 */
+  if (!prepare && String(task.card_kind || '').trim()) {
+    try {
+      const askreg = require('../lib/askreg');
+      const reg = await askreg.registerCardAsk({
+        api,
+        task,
+        workspace,
+        cardUrl: cardAskUrl,
+        serviceToken: ctx.cfg.serviceToken,
+        log,
+      });
+      if (reg) log('task ' + taskId + ': Ask 已登记 ' + reg.ask_id + (reg.created ? '（新建）' : '（更新）'));
+    } catch (e) {
+      log('task ' + taskId + ': Ask 登记失败（不挡出卡，重跑可补登）:: ' + e.message);
+    }
+  }
 
   // Facts come after the result, so a facts problem can never cost the result.
   await recordFacts(ctx, taskId, output);

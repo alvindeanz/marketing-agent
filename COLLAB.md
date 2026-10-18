@@ -20,7 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
-### 2026-10-18 AIRA 修方案驳回理由三处截断（Aiden 条子 to-aira-plan-reject-reason-lost-20261018.md，worker 侧修，不碰 seo-api）
+### 2026-10-18 AIRA 出卡登记 Ask 落地（接 Aiden 契约 to-aira-asks-contract-20261016.md，回条第 1 件收口）
+
+- 干了什么：lib/askreg.js（buildAsk 纯函数 + registerCardAsk）：方向卡（keyword_direction/creative_direction）从本轮 data.json 映射 decisions[] 单选（agree/hold/other，other 必附文本）+ negatives 多选（词条即选项码，含逗号或超 60 字整段降级不出）+ global_note；确认卡与缺 data 场景降级单题 approve（reject 必附原因）+ global_note，item_id 沿用 decisions[].item/negatives/global_note 使存量账本行无迁移挂上。card_token_ref 按 injectCardToken 同源 md5 再 sha256 取前 16 位，payload 全文不含明文卡 token（测试断言）。lang_pack primary 显式 zh（渲染器中文写死，语言跟随是 Phase 2 产出侧的活），intro 带客户版卡链接。audience 统一 both（agency 代答与 55 双视角场景）。deadline 出卡锚点加 14 天。
+- 挂点：execute_task.js 通用收尾在 postTaskResult 之后登记（失败不挡出卡只记日志，重跑幂等补登）；客户版发布循环顺手捕获带令牌的卡 URL。api.js 加 postAsk。博客确认卡产线有独立收尾路径，本期未接（待办）。
+- 回填：ask_t1464_keyword_confirmation（client 55 onboard 闸卡）手工登记，卡 HTML 补发布带令牌，deadline 取卡内截止 10-23。
+- 测试：tests/askreg.test.js 9 条全绿（含指纹不泄明文、负词含逗号降级、无 card_kind 零登记）。
 
 - 干了什么：①distill.js 新增 lastRejectedFromTasks：被拒方案不是 /context 的 active_plan，但 plan_reject_core 把完整理由写进了 killed 任务 result_note，从账本反推最近一次驳回（只取比现役方案新的，老驳回已被吸收），feedbackSection 在 active_plan 无理由时用它兜底，全文（2000 预算）进简报；②ledgerSection 砍单理由改整段多行收取（压单行，剥 actor 前缀，截到下一个 [tag]，预算 180→220）；③plan_review historyBlock 同样多行收取加剥前缀，同一方案驳回理由全文只给一次（预算 480），其余行写「理由同上」，省出的行数让更多任务进 30 行上限。
 - 不动的：seo-api.php（Aiden 窗口至 10-20，且账本反推不需要新接口）；limits.tasks 60 上限不改（lastRejectedFromTasks 扫全量任务，不受行数截断影响）。
