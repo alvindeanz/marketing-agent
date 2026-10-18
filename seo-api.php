@@ -6023,8 +6023,17 @@ function asks_row_channel($r){
    other 不覆盖表态，非空文本进 notes；空文本 other 跳过（写入层已转 hold，这里兜底）；空 item 归 _card。
    与 cardfold 的已知差异：cardfold 只认 agree/hold/flag，approve/reject 与自定义码它不折（见夹具 _doc）。
    返回 [item => ['stance'=>行或null, 'notes'=>[行...]]]。 */
-function asks_fold_effective($rows){
-    usort($rows,function($a,$b){return (int)$a['id']-(int)$b['id'];});
+/* 2026-10-19 待审：给了 $offset（库钟减 UTC 秒）就按作答时刻排序（answered_at 优先，否则 created_at 换 UTC，同刻按 id），
+   与 cardfold 的 byAnsweredAt 同口径；不给 $offset 维持 Phase 1 入账序。WF 发件缓冲补发晚到时不再抢先于更晚的卡页作答。 */
+function asks_fold_effective($rows,$offset=null){
+    if($offset===null){
+        usort($rows,function($a,$b){return (int)$a['id']-(int)$b['id'];});
+    }else{
+        usort($rows,function($a,$b)use($offset){
+            $x=(string)asks_row_at_utc($a,$offset);$y=(string)asks_row_at_utc($b,$offset);
+            return $x===$y?((int)$a['id']-(int)$b['id']):strcmp($x,$y);
+        });
+    }
     $out=[];
     foreach($rows as $r){
         $item=trim((string)($r['item']??''));
@@ -6444,7 +6453,7 @@ function asks_profile_lang($cid){
 function asks_view($ask,$profileLang){
     $off=asks_db_offset();
     $rows=asks_ledger_rows($ask);
-    $fold=asks_fold_effective($rows);
+    $fold=asks_fold_effective($rows,$off);
     $upd=(string)($ask['updated_at']??'');
     foreach($rows as $r){
         $u=asks_db_to_utc((string)$r['created_at'],$off);

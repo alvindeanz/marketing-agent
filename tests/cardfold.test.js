@@ -62,9 +62,60 @@ t('空输入不炸，hasAny false', () => {
   assert.strictEqual(summariseFold(f), '无有效表态');
 });
 
-t('未知 choice 忽略不炸', () => {
+t('未知 choice 不炸也不静默：不算表态，原样进 texts 并点名 attention（2026-10-19 口径，旧口径是静默忽略）', () => {
   const f = foldCardFeedback([{ item: 'x', choice: 'maybe', fb: '' }]);
-  assert.strictEqual(f.agreed.length + f.holds.length + f.texts.length, 0);
+  assert.strictEqual(f.agreed.length + f.holds.length, 0);
+  assert.strictEqual(f.texts.length, 1);
+  assert.ok(f.texts[0].text.includes('maybe'));
+  assert.deepStrictEqual(f.attention, [{ item: 'x', reason: 'unknown_code', choice: 'maybe' }]);
+  assert.strictEqual(f.hasStance, true);
+});
+
+/* 防御性映射回归（2026-10-19，问题 A：WF 对确认卡答 approve 曾被折成「无有效表态」并收口，驳回理由丢失）。 */
+t('回归：WF 答 approve 不得再被折成无有效表态，视同 agree 可落地', () => {
+  const f = foldCardFeedback([{ id: 1, item: 'approval', choice: 'approve', fb: '' }]);
+  assert.strictEqual(f.agreed.length, 1);
+  assert.strictEqual(f.agreed[0].choice, 'agree');
+  assert.strictEqual(f.agreed[0].mapped_from, 'approve');
+  assert.notStrictEqual(summariseFold(f), '无有效表态');
+  assert.strictEqual(f.attention.length, 0);
+});
+t('回归：reject 视同 hold，驳回理由必须进 texts，并点名 attention', () => {
+  const f = foldCardFeedback([{ id: 1, item: 'approval', choice: 'reject', fb: '首页不要动 title' }]);
+  assert.strictEqual(f.holds.length, 1);
+  assert.strictEqual(f.holds[0].mapped_from, 'reject');
+  assert.strictEqual(f.texts.length, 1);
+  assert.ok(f.texts[0].text.includes('首页不要动 title'));
+  assert.deepStrictEqual(f.attention, [{ item: 'approval', reason: 'reject' }]);
+  const g = foldCardFeedback([{ id: 2, item: 'approval', choice: 'reject', fb: '' }]);
+  assert.ok(g.texts[0].text.includes('未附理由'), '空理由也要留痕');
+});
+t('只有空码行：hasAny 为真但 hasStance 为假，调用方据此不许收口', () => {
+  const f = foldCardFeedback([{ id: 1, item: 'x', choice: '', fb: '' }]);
+  assert.strictEqual(f.hasAny, true);
+  assert.strictEqual(f.hasStance, false);
+});
+t('v1 勾选行按解码表还原词面，codes 留原值；旧 HTML 词面行原样；两种形态同卡混合也对', () => {
+  const decode = { new_terms: { gutter_clean: 'gutter cleaning auckland', t2: '排水沟清理' } };
+  const f = foldCardFeedback([{ id: 1, item: 'new_terms', choice: 'flag', fb: 'gutter_clean, t2' }], { decode });
+  assert.strictEqual(f.agreed[0].fb, 'gutter cleaning auckland, 排水沟清理');
+  assert.deepStrictEqual(f.agreed[0].codes, ['gutter_clean', 't2']);
+  const legacy = foldCardFeedback([{ id: 1, item: 'keep_terms', choice: 'flag', fb: 'harvey norman, noel leeming' }], { decode: { keep_terms: { harvey_norman: 'harvey norman' } } });
+  assert.strictEqual(legacy.agreed[0].fb, 'harvey norman, noel leeming', '旧卡落的是词面，不在码表里，原样');
+  const mixed = foldCardFeedback([{ id: 1, item: 'keep_terms', choice: 'flag', fb: 'harvey_norman, noel leeming' }], { decode: { keep_terms: { harvey_norman: 'harvey norman' } } });
+  assert.strictEqual(mixed.agreed[0].fb, 'harvey norman, noel leeming');
+  const nodec = foldCardFeedback([{ id: 1, item: 'new_terms', choice: 'flag', fb: 'gutter_clean,t2' }]);
+  assert.strictEqual(nodec.agreed[0].fb, 'gutter_clean,t2', '无解码表时 fb 字节不变');
+});
+t('带 at_utc 的行按作答时刻排序（WF 补发晚到不抢先），缺 at_utc 退回 id 序', () => {
+  const rows = [
+    { id: 10, item: 'g', choice: 'agree', fb: '', at_utc: '2026-10-20T01:00:00Z' },
+    { id: 11, item: 'g', choice: 'hold', fb: '', at_utc: '2026-10-19T23:00:00Z' },
+  ];
+  assert.strictEqual(foldCardFeedback(rows, { byAnsweredAt: true }).agreed.length, 1, '按作答时刻 agree 在后');
+  assert.strictEqual(foldCardFeedback(rows).holds.length, 1, '不开开关仍是 id 序');
+  const partial = [rows[0], { id: 11, item: 'g', choice: 'hold', fb: '' }];
+  assert.strictEqual(foldCardFeedback(partial, { byAnsweredAt: true }).holds.length, 1, '有行缺 at_utc 整体退回 id 序');
 });
 
 /* 到期时钟锚点（2026-09-20 出卡日起算）。 */

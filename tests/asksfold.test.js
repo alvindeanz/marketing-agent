@@ -25,14 +25,17 @@ t('表态折叠：每项取入账序最后一次，other 不覆盖', () => {
   assert.deepStrictEqual(got, want);
 });
 
-t('已知差异仍在：cardfold 不折自定义码 item（差异收口时删夹具 cardfold_ignores）', () => {
+t('已知差异仍在：cardfold 不把自定义码当表态，而是进 texts 加 attention 点名（2026-10-19 防御性映射；php 侧是展示层，原码照算表态）', () => {
   const items = new Set([...f.agreed, ...f.holds].map((v) => v.item));
-  for (const k of ignores) assert.ok(!items.has(k), k + ' 被 cardfold 折了，差异已收口，删夹具 cardfold_ignores');
+  for (const k of ignores) {
+    assert.ok(!items.has(k), k + ' 被 cardfold 当表态折了');
+    assert.ok(f.attention.some((a) => a.item === k && a.reason === 'unknown_code'), k + ' 应点名 attention');
+  }
 });
 
-t('旁注：非空 other 全部保留按序，空白 other 丢弃', () => {
+t('旁注：非空 other 全部保留按序，空白 other 丢弃（自定义码进 texts 的条目按 cardfold_ignores 剔除后比）', () => {
   const got = {};
-  for (const x of f.texts) (got[x.item] = got[x.item] || []).push(x.text);
+  for (const x of f.texts) if (!ignores.has(x.item)) (got[x.item] = got[x.item] || []).push(x.text);
   assert.deepStrictEqual(got, fx.expected.notes);
 });
 

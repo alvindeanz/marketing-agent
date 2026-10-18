@@ -57,7 +57,9 @@ async function runClient(c) {
     if (quiet < QUIET_H) { out.push('#' + card.id + ' 最后反馈仅 ' + quiet.toFixed(1) + 'h，未满安静期 ' + QUIET_H + 'h，下轮再看'); continue; }
     const f = foldCardFeedback(rows);
     if (!f.hasAny) continue;
-    const needsFollowUp = f.agreed.length > 0 || f.texts.length > 0;
+    /* 2026-10-19：驳回、未识别码或无可折叠表态一律走点名分支，不在 cron 里按「纯保持观察」收口
+       （WF 答 approve/reject 曾被这里当纯 hold 关卡）。 */
+    const needsFollowUp = f.agreed.length > 0 || f.texts.length > 0 || f.attention.length > 0 || !f.hasStance;
     const summary = summariseFold(f);
     if (needsFollowUp) {
       // 折叠要建跟进任务（建任务连带排判定 = LLM），cron 只点名不动手。
