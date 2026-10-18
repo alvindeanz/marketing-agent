@@ -68,10 +68,17 @@ function ledgerSection(tasks, limits) {
       let shown = t.status || 'nostatus';
       let tail = '';
       const note = String(t.result_note || '');
-      const km = note.match(/\[(killed|dropped|merged)\]([^\n]{0,220})/);
+      const km = note.match(/\[(killed|dropped|merged)\]([\s\S]{0,600})/);
       if (shown === 'done' && km) {
         shown = km[1];
-        if (km[1] === 'killed') tail = ' :: ' + truncate(km[2].replace(/^[：:\s]+/, ''), 180);
+        /* 砍单理由常是多行（驳回理由里带 URL 清单和重启指引），截到首个换行会把后面的
+           全丢掉（2026-10-18 Aiden 条子：plan 67 三个 URL 没一个进简报）。整段收进来
+           压成单行，actor 前缀（wf:agency:wfu_<hex>： 这类）先剥掉，预算留给理由本身。 */
+        if (km[1] === 'killed') {
+          const seg = km[2].split(/\n(?=\[)/)[0];
+          const r = seg.replace(/^[：:\s]+/, '').replace(/^[\w.:-]{1,80}：\s*/, '');
+          tail = ' :: ' + truncate(r.replace(/\s*\n+\s*/g, ' ').trim(), 220);
+        }
       }
       return [
         '#' + t.id,
@@ -87,21 +94,51 @@ function ledgerSection(tasks, limits) {
   );
 }
 
+/* 被拒方案永远不会是 /context 回的 active_plan（那条 SQL 只取 status='active'），所以
+   「刚被驳回、等重出」这个最需要反馈的场景下 active_plan 上拿不到理由。但 plan_reject_core
+   收尸时把完整驳回理由写进了该方案每条 killed 任务的 result_note（…方案 #N 被打回：…），
+   从任务账本反推就能拿回全文，不需要新接口、离线可复算（2026-10-18 Aiden 条子：三处截断）。
+   只取比现役方案新的驳回：老驳回已被后来批准的方案吸收，不反复喂。 */
+function lastRejectedFromTasks(tasks, activePlanId) {
+  let best = null;
+  for (const t of Array.isArray(tasks) ? tasks : []) {
+    const note = String(t.result_note || '');
+    const m = note.match(/\[killed\][^\n]{0,120}?方案 #(\d+) 被打回[：:]([\s\S]{0,2400})/);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    if (activePlanId && pid <= Number(activePlanId)) continue;
+    if (best && pid <= best.id) continue;
+    const reason = m[2].split(/\n(?=\[)/)[0].trim();
+    if (reason) best = { id: pid, reason };
+  }
+  return best;
+}
+
 /** Feedback from a plan a human rejected. Do not repeat a rejected idea. */
 function feedbackSection(context, log) {
   const plan = context && context.active_plan;
-  const reason = plan && (plan.reject_reason || plan.rejection_reason);
+  let reason = plan && (plan.reject_reason || plan.rejection_reason);
+  let head = '';
+  if (reason) {
+    head = [
+      plan.id ? 'plan #' + plan.id : null,
+      plan.version ? 'version ' + plan.version : null,
+      plan.status ? 'status ' + plan.status : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+  } else {
+    const last = lastRejectedFromTasks(context && context.tasks, plan && plan.id);
+    if (last) {
+      reason = last.reason;
+      head = 'plan #' + last.id + ', status rejected, reason recovered from the task ledger';
+      if (log) log('briefing: reject_reason for plan #' + last.id + ' recovered from killed task notes');
+    }
+  }
   if (!reason) {
     if (log) log('briefing: no reject_reason available on active_plan, section skipped');
     return null;
   }
-  const head = [
-    plan.id ? 'plan #' + plan.id : null,
-    plan.version ? 'version ' + plan.version : null,
-    plan.status ? 'status ' + plan.status : null,
-  ]
-    .filter(Boolean)
-    .join(', ');
   return (
     'PREVIOUS PLAN FEEDBACK' +
     (head ? ' (' + head + ')' : '') +
@@ -598,6 +635,7 @@ function buildPlanningBriefing(context, opts = {}) {
 
 module.exports = {
   buildPlanningBriefing,
+  lastRejectedFromTasks,
   capabilitiesSection,
   contentRegistrySection,
   factsSection,

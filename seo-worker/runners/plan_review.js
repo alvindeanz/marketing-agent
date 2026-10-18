@@ -60,15 +60,28 @@ function globalRulesDigest(cfg) {
 /** 本客户历史方案的处置记录：被 drop / merge / 人推翻的任务，告诉模型这家以前哪些路走不通。 */
 function historyBlock(tasks, currentPlanId) {
   const rows = [];
+  const seenReject = new Set();
   for (const t of tasks || []) {
     if (Number(t.plan_id) === Number(currentPlanId)) continue;
     const note = String(t.result_note || '');
-    const closed = (note.match(/\[(dropped|merged|killed)\][^\n]*/) || [])[0] || '';
+    /* 砍单备注常是多行（驳回理由带 URL），截到首个换行会丢后半段；同一方案的驳回理由会在
+       每条被收掉的任务上重复出现，全文只给一次，其余行引用，省下的预算能让更多任务进历史
+       （2026-10-18 Aiden 条子）。完整理由另有简报的 PREVIOUS PLAN FEEDBACK 节兜底。 */
+    let closed = ((note.match(/\[(dropped|merged|killed)\]([\s\S]{0,600})/) || [])[0] || '').split(/\n(?=\[)/)[0];
+    let budget = 160;
+    if (closed) {
+      closed = closed.replace(/^(\[killed\]\s*)[\w.:-]{1,80}：\s*/, '$1').replace(/\s*\n+\s*/g, ' ').trim();
+      const pm = closed.match(/方案 #(\d+) 被打回/);
+      if (pm) {
+        if (seenReject.has(pm[1])) closed = '[killed] 方案 #' + pm[1] + ' 被打回（理由同上）';
+        else { seenReject.add(pm[1]); budget = 480; }
+      }
+    }
     const override = t.review_override ? '人推翻为 ' + t.review_override + '：' + String(t.review_override_note || '') : '';
     // 已落地的也要给：模型不知道某页 5 天前刚整页重写，就会按旧数据再排一次重写（2026-08-29 Ben's AU #61 vs #133）。
     const applied = String(t.status) === 'done' && !closed ? (note.match(/\[applied\][^\n]*/) || [])[0] || '' : '';
     if (!closed && !override && !applied) continue;
-    rows.push('- #' + t.id + ' ' + truncate(String(t.title || ''), 60) + ' | ' + (applied ? '已落地 ' + truncate(applied, 160) : truncate(closed || override, 160)));
+    rows.push('- #' + t.id + ' ' + truncate(String(t.title || ''), 60) + ' | ' + (applied ? '已落地 ' + truncate(applied, 160) : truncate(closed || override, budget)));
     if (rows.length >= MAX_HISTORY) break;
   }
   return rows.join('\n');

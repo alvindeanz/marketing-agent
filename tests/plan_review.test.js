@@ -123,6 +123,22 @@ t('model failure stores nothing', async () => {
   assert.strictEqual(posted.id, undefined);
 });
 
+console.log('historyBlock');
+const REJECT_NOTE = '[killed] wf:agency:wfu_c6cb3371bf19c5acc2ee00d23e93c05a：方案 #67 被打回：网站近期做了大量的更新，具体的内容需要参照\nhttps://webforger.ai/apps/\nhttps://webforger.ai/pricing/\n这三个页面来重新onboard的方式规划seo\n[2026-10-18] 后续备注不该进历史行';
+t('killed note keeps the lines after the first newline and strips the actor prefix', () => {
+  const out = R.historyBlock([{ id: 1450, plan_id: 67, title: 'T', result_note: REJECT_NOTE, status: 'done' }], 0);
+  assert.ok(out.includes('https://webforger.ai/apps/'), 'URL from line 2 must survive');
+  assert.ok(out.includes('重新onboard的方式规划seo'), 'closing instruction must survive');
+  assert.ok(!out.includes('wfu_c6cb3371'), 'actor prefix stripped');
+  assert.ok(!out.includes('后续备注不该进历史行'), 'stops at the next [tag] segment');
+});
+t('same plan rejection reason shows in full once, later rows reference it', () => {
+  const tasks = [1450, 1451, 1452].map((id) => ({ id, plan_id: 67, title: 'T' + id, result_note: REJECT_NOTE, status: 'done' }));
+  const out = R.historyBlock(tasks, 0);
+  assert.strictEqual(out.split('https://webforger.ai/apps/').length - 1, 1, 'full reason exactly once');
+  assert.strictEqual(out.split('理由同上').length - 1, 2, 'other rows reference it');
+});
+
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

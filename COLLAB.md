@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-18 AIRA 修方案驳回理由三处截断（Aiden 条子 to-aira-plan-reject-reason-lost-20261018.md，worker 侧修，不碰 seo-api）
+
+- 干了什么：①distill.js 新增 lastRejectedFromTasks：被拒方案不是 /context 的 active_plan，但 plan_reject_core 把完整理由写进了 killed 任务 result_note，从账本反推最近一次驳回（只取比现役方案新的，老驳回已被吸收），feedbackSection 在 active_plan 无理由时用它兜底，全文（2000 预算）进简报；②ledgerSection 砍单理由改整段多行收取（压单行，剥 actor 前缀，截到下一个 [tag]，预算 180→220）；③plan_review historyBlock 同样多行收取加剥前缀，同一方案驳回理由全文只给一次（预算 480），其余行写「理由同上」，省出的行数让更多任务进 30 行上限。
+- 不动的：seo-api.php（Aiden 窗口至 10-20，且账本反推不需要新接口）；limits.tasks 60 上限不改（lastRejectedFromTasks 扫全量任务，不受行数截断影响）。
+- 验收：按条子第 6 节口径，client 55 真实 /tasks 数据离线复算，plan 67 三个 URL 与「重新onboard的方式规划seo」完整出现在简报 PREVIOUS PLAN FEEDBACK 节，plan_review 的 historyBlock 同样可见全文；briefing 同时进 plan 与 plan_review 两个 prompt，两处输入一并修复。tests/distill.test.js 新增 7 条、plan_review.test.js 补 2 条，全套绿。
+- 坑：驳回理由的权威源仍是 seo_plans.reject_reason，账本反推依赖 result_note 不被截断（已知 note 存库会截超长 URL 清单，Apollo #99）；理由超长或 note 被二次改写时反推可能缺尾。长期干净解法是 /context 多回一个 last_rejected_plan，等 Aiden 窗口期结束后看要不要加。
+
 ### 2026-10-18 AIDEN 跨认领：WebForger Marketing Inbox 的 MA 侧（seo-api.php 围栏块 + harness 子步骤 + worker lib，本地已 commit 未推未部署，需与 Aira 对齐）
 
 - 背景：WF 客户后台新增 Marketing Inbox（交接包 /root/clawd/temp/handoff/20261018-201739-webforge-to-ma.md），客户留言经 WF cron 零 LLM 转发给 MA，MA 产出回复后 WF 拉走、过其确定性护栏放行。WF 侧已实现，回路停在 MA 接口缺位。为做这条对接，Aiden 动了 seo-api.php（ASKS 围栏内）、harness.js 与 seo-worker/lib 两个新文件，属 Aira 领地，登记于此。
