@@ -20,6 +20,20 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-19 AIRA (b) 确认卡产线批三接线：execute 产 data.json 落盘渲染发卡（rev 本条随提交；未部署，待与 cardfold 分支合并后一起上）
+
+- 背景：Aiden 桥侧 9970484 的 askreg 读 v1 口子已在 main，本批接 execute 侧，闸材料任务全链路 v1 化。回条追加版 /mnt/share/aiden/to-aiden-confirmation-architecture-reply-20261019.md。
+- 干了什么（runners/execute_task.js + tools/harness.js + specs 三处小修）：
+  1. 确认卡产线接线：通用 execute agent 只读（ALLOWED_TOOLS 无 Write），「agent 产 data.json」落地形态是模型回复输出 ```card_data 围栏块，execute 抽块、过 render_confirmation.validate、落盘 reports/<card_kind>_<客户>_<YYYY-MM>.data.json（YYYY-MM 取 data.issued，文件名月份==issued 由构造保证）、renderCard 出同名 HTML，走既有注令牌/lint/发布通路（发布扫描点名放行 runner 落盘的卡文件）。askreg findCardData 读同一份 data.json 登记 Ask，单源闭环。
+  2. 任务识别读 specs/card_kinds.json（与 card_kind_of/askreg 同一份注册表）：ops 首个命中 kind=confirmation 且 ops 非空的卡类；blog/onsite（ops 空）不走这里。prepare 泳道不出卡。契约+规格全文+schema 注入 prompt（SOP_FILE 同款随 worker 走，不让 agent 读部署机绝对路径）。
+  3. 三层防线：校验不过喂回自修一轮（只重出块），仍不过 job 判红留人（缺卡的交付会让闸静默死锁）；回复无块 = 静默补 fact 路径，不出卡不登记，与 askreg「无合规 data 不登记」同向。自修结果写回交付 .md，附件块与落盘 data.json 一致。
+  4. harness.js 闸材料 detail 确认卡路径一行改指 card_data v1 契约（不再写「产出确认卡 HTML」）。
+  5. specs 三处小修：card_data_v1.md「防御性映射两处同步落」改为只落 cardfold（PHP 是展示层不映射，同步的是排序口径；与 Aiden 分歧收口，他的理由成立）；schema items[].required 补缺省说明（text 题 askreg 缺省 false，Aiden 发现）；confirmation_card_spec.md 产线接口节按实现重写。
+- 测试：新增 tests/execute_confirmation_wiring.test.js（任务识别/块抽取/落盘渲染/契约注入 5 组，夹具直接用 Aiden 的跨端钉子 card_data_t1464.json）；node tests/ 全套 35 件全绿。php 本机未装，本批零 PHP 改动。
+- 待办欠账（点名）：confirmation_card_spec 闭环规则「任何 hold/other 打 attention 不自动收口」对泛折叠分支仍未实现（Aiden 分支只覆盖驳回/未识别码/无表态三种），归我排期，等 cardfold 分支合并后在 harness foldCards 按 card_kind 分流补。
+- cardfold-v1-review 分支评审结论：OK 可合并（回条第 6 节详述，含一条非阻塞观察：先 reject 后改 agree 的卡仍会因 attention 不自动收口，判定为正确行为留痕）。
+- 部署：未部署。建议顺序不变（api 先含 card_kinds.json，worker 在 cardfold 分支合并后与本批一起上），等用户确认。
+
 ### 2026-10-19 AIDEN 跨认领：确认卡架构 v1 桥侧（seo-api.php ASKS 围栏块 + askreg.js + 卡类注册表；api 待部署，worker 待部署）
 
 - 背景：架构条子 /mnt/share/aiden/to-aira-confirmation-architecture-20261019.md，Aira 回条 /mnt/share/aiden/to-aiden-confirmation-architecture-reply-20261019.md，用户放行桥侧整批。回条结论：主轴同意，两条修订全部采纳，五问按回条口径落。
@@ -41,6 +55,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 测试：node tests/ 全套除 blog.test.js、shopifylink.test.js 外全绿，这两件改动前基线即红（与本批无关，环境相关）；askreg 12 条（原 10 条按新口径重写），asksapi.test.php 40 条（新增 8 条含跨端契约），php -l 过。
 - 待部署：api（250，deploy.sh api，含 card_kinds.json）；worker（ros 与 mac，askreg 与 card_kinds.json）。部署后 1464 重登一次补 block_refs。
 
+### 2026-10-19 AIRA (a) card_data v1 定稿与确认卡产线三件（specs 层，未接 execute）
+
+- 干了什么：按 Aiden 确认卡架构条子（to-aira-confirmation-architecture-20261019.md）与我的回条，落 specs 五件：`card_data_v1.schema.json` + `card_data_v1.md`（卡产线统一数据契约，含回条两修订：options 一律 {code,label} 短码进账 label 展示、码统一压 [a-z0-9_.:-]{1,16} 与 asks_code_ok / choice 列宽同源；default_policy 产线必填按卡类写，kind 只在 askreg 兜底，保 page-create 软闸不被「confirmation 一律 none」误伤）；`confirmation_card_spec.md`（收编 group_first/group_next/group_hold/mapping_overall/new_terms/global_note 事实标准为规格）；`confirmation_card_template.html`（CSS 与令牌反馈控件从 direction_card_template 原样复用，multi 勾选 data-kw 落 code）；`render_confirmation.js`（零 LLM，validate 含纯文本守卫、选项码护栏、html_extra 白名单、192KB 余量、guardCommon 复用；data-item 只能出自 items[] 是结构性保证）。
+- 测试：新增 tests/confirmation_render.test.js（单一事实源、码护栏、policy 文案生成、纯文本、widget 注入、卡级/题下块分流等 10 组）；node tests/ 全套 34 件全绿（blog、shopifylink 本机这次也绿）。php 本机未装，但本批零 PHP 改动（seo-api.php 未碰）。
+- 坑（Aiden 领地，报告不动手）：asks_code_ok 不收空格与中文，buildAsk 现有 negatives 映射（词条原文当码，只挡逗号与 60 长）登记新方向卡时会 422 整包拒，5223a4b 后没出新方向卡所以还没炸；适配函数转 items[] 时顺带转码（codes 进账、label 进 lang_pack）。冻结期我未碰 askreg.js / cardfold.js。
+- 下一步/认领：execute 接线（agent 产 data.json、调渲染器、harness.js:365 detail 改指向）等 Aiden askreg 读 v1 的口子好了联调；blog_confirmation / onsite_confirm 挂 v1 信封与 card_kind_of 补映射排下批；SEM onboard 挂点与入场三件套进 specs 并行。本批未部署（specs 与渲染器随 execute 接线一起上 worker）。
 ### 2026-10-18 AIRA 出卡登记 Ask 落地（接 Aiden 契约 to-aira-asks-contract-20261016.md，回条第 1 件收口）
 
 - 干了什么：lib/askreg.js（buildAsk 纯函数 + registerCardAsk）：方向卡（keyword_direction/creative_direction）从本轮 data.json 映射 decisions[] 单选（agree/hold/other，other 必附文本）+ negatives 多选（词条即选项码，含逗号或超 60 字整段降级不出）+ global_note；确认卡与缺 data 场景降级单题 approve（reject 必附原因）+ global_note，item_id 沿用 decisions[].item/negatives/global_note 使存量账本行无迁移挂上。card_token_ref 按 injectCardToken 同源 md5 再 sha256 取前 16 位，payload 全文不含明文卡 token（测试断言）。lang_pack primary 显式 zh（渲染器中文写死，语言跟随是 Phase 2 产出侧的活），intro 带客户版卡链接。audience 统一 both（agency 代答与 55 双视角场景）。deadline 出卡锚点加 14 天。
@@ -1549,10 +1569,3 @@ Alvin 提的四项客户栏改造：
 - 发现并落账三条机制债（DEFECTS 2026-10-11 三行）：卡折叠不摘红、返修链不消解旧版、apply 完成不对账人工单。
 - 2026-10-11 AIRA (c)：Alvin 三裁定落地：①月报/报告归报告栏目不占任务列表（specs 新增「交付收口口径」节，rev 5e103ac 两机同版；板上 #1154/#1084/#1089/#1139 finish）；②博客出完稿即收口开始计时，不监控发送/发布（#1031/#1032/#1087 finish，#595 监控单 kill）；③Citymed 只做简单页面优化+博客，不碰服务器侧（#1086 kill，scope 写进 clients/citymed/CLAUDE.md）。
 - 2026-10-11 AIRA (d)：在途客户卡口径统一（Alvin 定：在途的、卡在客户的留，其余摘）。done 在途卡计入待发卡红点（列表徽章同口径）；令牌判卡收紧为本任务 own-token；月报/报告草稿/内部验收类前后端都不算卡（Ideal #1078 误钉实证）。rev b94d2ac 已部署 250。长期解法仍是显式发卡状态字段（2026-09-20 旧账未还）。
-
-### 2026-10-19 AIRA (a) card_data v1 定稿与确认卡产线三件（specs 层，未接 execute）
-
-- 干了什么：按 Aiden 确认卡架构条子（to-aira-confirmation-architecture-20261019.md）与我的回条，落 specs 五件：`card_data_v1.schema.json` + `card_data_v1.md`（卡产线统一数据契约，含回条两修订：options 一律 {code,label} 短码进账 label 展示、码统一压 [a-z0-9_.:-]{1,16} 与 asks_code_ok / choice 列宽同源；default_policy 产线必填按卡类写，kind 只在 askreg 兜底，保 page-create 软闸不被「confirmation 一律 none」误伤）；`confirmation_card_spec.md`（收编 group_first/group_next/group_hold/mapping_overall/new_terms/global_note 事实标准为规格）；`confirmation_card_template.html`（CSS 与令牌反馈控件从 direction_card_template 原样复用，multi 勾选 data-kw 落 code）；`render_confirmation.js`（零 LLM，validate 含纯文本守卫、选项码护栏、html_extra 白名单、192KB 余量、guardCommon 复用；data-item 只能出自 items[] 是结构性保证）。
-- 测试：新增 tests/confirmation_render.test.js（单一事实源、码护栏、policy 文案生成、纯文本、widget 注入、卡级/题下块分流等 10 组）；node tests/ 全套 34 件全绿（blog、shopifylink 本机这次也绿）。php 本机未装，但本批零 PHP 改动（seo-api.php 未碰）。
-- 坑（Aiden 领地，报告不动手）：asks_code_ok 不收空格与中文，buildAsk 现有 negatives 映射（词条原文当码，只挡逗号与 60 长）登记新方向卡时会 422 整包拒，5223a4b 后没出新方向卡所以还没炸；适配函数转 items[] 时顺带转码（codes 进账、label 进 lang_pack）。冻结期我未碰 askreg.js / cardfold.js。
-- 下一步/认领：execute 接线（agent 产 data.json、调渲染器、harness.js:365 detail 改指向）等 Aiden askreg 读 v1 的口子好了联调；blog_confirmation / onsite_confirm 挂 v1 信封与 card_kind_of 补映射排下批；SEM onboard 挂点与入场三件套进 specs 并行。本批未部署（specs 与渲染器随 execute 接线一起上 worker）。

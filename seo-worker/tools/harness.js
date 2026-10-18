@@ -362,7 +362,7 @@ async function main() {
           '二，按裁定产出：',
           '- 静默路径：产出「静默锁定提案」文档，列 keywords.locked 与 seo.mapping 两条 fact 的建议值，',
           '  每条附证据链（哪次客户确认、哪份文件、哪条既有 fact），放行卡说明人确认后落 fact 即开闸。不直接写 fact。',
-          '- 确认卡路径：按通用模式（mapping 意见 + 快赢排序）产出词表与 mapping 一次过确认卡 HTML，进发卡流程。',
+          '- 确认卡路径：按通用模式（mapping 意见 + 快赢排序）产出词表与 mapping 一次过确认卡的 card_data v1 数据块（契约与规格由产线注入 prompt，回复末尾输出 ```card_data 围栏块），不手写 HTML；渲染、发布与 Ask 登记由产线自动完成。',
           '两条路径产出都停 review 等人放行，不自动生效。',
         ].join('\n');
         const r = await call('POST', '/tasks', {

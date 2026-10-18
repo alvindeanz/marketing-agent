@@ -40,10 +40,10 @@ onboard 两闸（词表确认、mapping 确认）的客户卡。客户在卡上�
 
 ## 产线接口
 
-1. execute（闸材料任务，ops=keyword-confirmation,mapping-confirmation）产出 `<card_kind>_<客户>_<YYYY-MM>.data.json` 落 reports/，不再产手写 HTML。
-2. 渲染：`node specs/report/render_confirmation.js <data.json> > <同名>.html`，lint 与发布走现有通路。
-3. 登记：askreg 读同一份 data.json 建 Ask（桥侧，冻结解除后接）。登记失败不挡出卡，幂等补登，既有行为不变。
-4. harness 建单 detail 指向本规格（tools/harness.js 闸材料任务那行），随 execute 接线一起改。
+1. execute（闸材料任务，ops=keyword-confirmation,mapping-confirmation，经 specs/card_kinds.json 识别）：agent 只读不写文件，模型在回复里输出 ```card_data 围栏块（契约、本规格全文、schema 由 execute 注入 prompt），execute 落盘为 `<card_kind>_<客户>_<YYYY-MM>.data.json` 进 reports/（YYYY-MM 取 data.issued，文件名月份 == issued 由构造保证）。校验不过喂回自修一轮，仍不过 job 判红留人。走静默补 fact 路径时无 card_data 块，不出卡不登记。不再产手写 HTML。
+2. 渲染：execute 调 renderCard 出同名 .html，注令牌、lint、发布与其他客户版产物同通路。人工重渲走 CLI：`node specs/report/render_confirmation.js <data.json> > <同名>.html`。
+3. 登记：askreg 读同一份 data.json 建 Ask（9970484 起全卡类生效）。登记失败不挡出卡，幂等补登；无合规 data 不登记也不降级。
+4. harness 建单 detail 指向本契约（tools/harness.js 闸材料任务那行，已随批三改）。
 
 ## 闭环规则
 

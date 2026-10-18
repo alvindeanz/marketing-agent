@@ -103,7 +103,7 @@
             "description": "single 可省（渲染器补默认三态文案），multi 必填 1 到 40 项"
           },
           "default": { "enum": ["agree", "hold", "other"], "description": "single 的建议选项，登记进 Ask 的 default_value" },
-          "required": { "type": "boolean", "description": "登记进 Ask，缺省 true" },
+          "required": { "type": "boolean", "description": "登记进 Ask 是否必答。缺省随题型：single/multi true，text（global_note）false，否则 Ask 永远凑不齐答完；与 askreg 适配层一致" },
           "requires_text_when": { "type": "array", "items": { "type": "string" }, "description": "选这些码必须附文字，须是选项码子集。single 缺省 [\"other\"]" },
           "block_refs": { "type": "array", "items": { "type": "string" }, "description": "引用 blocks[].id，HTML 挂题下，WF 渲染为题内可折叠块" }
         }

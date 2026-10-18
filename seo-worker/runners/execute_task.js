@@ -182,6 +182,104 @@ function buildPrompt(brief, task, workspace) {
   ].join('\n');
 }
 
+/* ===== 确认卡产线（2026-10-19 card_data v1 批三接线，契约 specs/report/confirmation_card_spec.md）=====
+   闸材料任务的 agent 只读（ALLOWED_TOOLS 无 Write），所以「agent 产 data.json」的真实形态是：
+   模型在回复里输出 ```card_data 围栏块，这里落盘为 reports/<card_kind>_<客户>_<YYYY-MM>.data.json，
+   并用零 LLM 渲染器出同名 HTML（题只出自 items[]，agent 不写 HTML）。同一份 data.json 随后被
+   askreg.findCardData 读走登记 Ask（6 小时新鲜窗），HTML 卡与 WF 后台同题同账。 */
+
+/** 本任务是不是走通用路径的确认卡产线任务；是则返回 card_kind，否则空串。
+    判定读 specs/card_kinds.json（card_kind_of 同一份注册表）：ops 按出现顺序首个命中
+    kind=confirmation 且 ops 非空的卡类。博客卡、落地页卡（ops 空）各有产线，不走这里。 */
+function confirmationCardKind(task) {
+  let kinds = null;
+  try {
+    kinds = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'specs', 'card_kinds.json'), 'utf8')).kinds;
+  } catch (e) { kinds = null; }
+  if (!kinds || typeof kinds !== 'object') {
+    // 注册表读不到退内置两行，与 askreg/card_kind_of 的兜底精神一致
+    kinds = {
+      keyword_confirmation: { ops: ['keyword-confirmation'], kind: 'confirmation' },
+      mapping_confirmation: { ops: ['mapping-confirmation'], kind: 'confirmation' },
+    };
+  }
+  const explicit = String((task && task.card_kind) || '').trim();
+  if (explicit) {
+    const k = kinds[explicit];
+    return k && k.kind === 'confirmation' && Array.isArray(k.ops) && k.ops.length ? explicit : '';
+  }
+  for (const op of taskOps(task)) {
+    for (const name of Object.keys(kinds)) {
+      const k = kinds[name];
+      if (k && k.kind === 'confirmation' && Array.isArray(k.ops) && k.ops.indexOf(op) !== -1) return name;
+    }
+  }
+  return '';
+}
+
+/** 注进 prompt 的确认卡数据契约：硬性字段 + 规格全文 + schema。规格随 worker 走
+    （SOP_FILE 同款），不让 agent 去读部署机的绝对路径。 */
+function cardDataContract(cardKind) {
+  const dir = path.join(__dirname, '..', 'specs', 'report');
+  let spec = '';
+  let schema = '';
+  try { spec = fs.readFileSync(path.join(dir, 'confirmation_card_spec.md'), 'utf8'); } catch (e) { /* 缺规格下面一行会暴露 */ }
+  try { schema = fs.readFileSync(path.join(dir, 'card_data_v1.schema.json'), 'utf8'); } catch (e) { /* 同上 */ }
+  if (!spec || !schema) throw new Error('确认卡规格或 schema 缺失（specs/report/），确认卡任务拒绝执行');
+  const ym = new Date().toISOString().slice(0, 7);
+  return [
+    '',
+    'CONFIRMATION CARD DATA（确认卡路径的硬性产出契约）',
+    '本任务裁定走确认卡路径时，不要写任何 HTML，题目清单也不要只留在报告正文里。',
+    '在 OPS_CHECK 那一行之前输出一个围栏块，围栏语言标注必须是 card_data：',
+    '```card_data',
+    '{ ...card_data v1 JSON... }',
+    '```',
+    '硬性字段：schema 写 "card_data/v1"；card_kind 写 "' + cardKind + '"；kind 写 "confirmation"；',
+    'service 写 "seo"；cycle 写 "onboard"；lang 写 "zh"；issued 写 "' + ym + '"；default_policy 写 "none"；',
+    'deadline 写 YYYY-MM-DD（建议今天加 10 天，客户在新西兰）。',
+    'items、选项码、blocks 的约定按下面的规格与 schema 来，不合规渲染器会拒绝整卡。',
+    '裁定走静默补 fact 路径时不要输出 card_data 块。',
+    '',
+    '===== 确认卡规格（confirmation_card_spec.md）=====',
+    spec,
+    '===== card_data v1 JSON Schema（card_data_v1.schema.json）=====',
+    schema,
+  ].join('\n');
+}
+
+const CARD_DATA_RE = /```card_data\s*\n([\s\S]*?)\n```/;
+
+/** 回复里的 card_data 块。没有块返回 null（静默路径合法形态）；块坏 JSON 抛错（喂回自修）。 */
+function extractCardData(output) {
+  const m = CARD_DATA_RE.exec(String(output || ''));
+  if (!m) return null;
+  try {
+    return JSON.parse(m[1]);
+  } catch (e) {
+    throw new Error('card_data 块不是合法 JSON：' + e.message);
+  }
+}
+
+/** 落盘 + 渲染。校验不过原样抛（错误信息是自修输入）。返回文件名供发布段识别。 */
+function materialiseConfirmationCard(data, cardKind, workspace, log) {
+  const render = require('../specs/report/render_confirmation.js');
+  if (String((data && data.card_kind) || '') !== cardKind) {
+    throw new Error('card_data.card_kind 是 ' + ((data && data.card_kind) || '(空)') + '，本任务要求 ' + cardKind);
+  }
+  render.validate(data);
+  const rdir = path.join(workspace, 'reports');
+  fs.mkdirSync(rdir, { recursive: true });
+  // 文件名 YYYY-MM 取 data.issued，规格「文件名月份 == issued」由构造保证
+  const stem = cardKind + '_' + path.basename(workspace) + '_' + String(data.issued);
+  const dataFile = path.join(rdir, stem + '.data.json');
+  const htmlFile = path.join(rdir, stem + '.html');
+  fs.writeFileSync(dataFile, JSON.stringify(data, null, 1), 'utf8');
+  fs.writeFileSync(htmlFile, render.renderCard(data), 'utf8');
+  if (log) log('确认卡产线：' + path.basename(dataFile) + ' 与同名 HTML 已落 reports/（data.json 单源，askreg 同读）');
+  return { dataFile, htmlFile, html: path.basename(htmlFile) };
+}
+
 /**
  * The prepare prompt. The agent gets the full capability manifest, the sections
  * for the operations this task needs, the risk notes, and a pointer to the
@@ -2125,6 +2223,8 @@ async function runOne(ctx, context, workspace, taskId) {
     );
   }
   const prepare = ops.length > 0;
+  // 确认卡产线任务识别（批三接线）。prepare 泳道不出卡，与 Ask 登记同一条件。
+  const confKind = prepare ? '' : confirmationCardKind(task);
 
   log(
     'task ' +
@@ -2161,6 +2261,9 @@ async function runOne(ctx, context, workspace, taskId) {
   } else {
     file = path.join(outDir, 'task-' + taskId + '-' + stamp + '.md');
     prompt = buildPrompt(buildBrief(context, { includeTasks: false }), task, workspace);
+    /* 确认卡产线任务（analysis 模式，两闸 op 不在能力清单所以永远落这支）：
+       把 card_data 契约、规格全文、schema 注进 prompt，模型只产数据不写 HTML。 */
+    if (confKind) prompt += '\n' + cardDataContract(confKind);
   }
 
   const res = await runClaude(cfg, {
@@ -2288,6 +2391,56 @@ async function runOne(ctx, context, workspace, taskId) {
   // 客户版产物：分析任务若在 workspace/reports/ 里产出了给客户看的 HTML（如关键词方向卡），
   // 必须发布成公网 URL 并写进 note「客户版:」行。内部预览是给放行人看的壳，
   // 两个链接绝不能混（2026-08-31 #145 内部壳被当客户版发给人，DEFECTS 有案）。
+  /* 确认卡产线落盘与渲染（批三接线）。模型选了确认卡路径（回复带 card_data 块）才走：
+     校验不过按三层防线喂回自修一轮，仍不过 job 判红留人（卡是任务的全部意义，缺卡的
+     「交付」会让闸继续死锁还不报错）。没有块 = 静默补 fact 路径（或模型漏块，放行人
+     在卡上看不到客户版链接自然拦住），不出卡不登记，与 askreg「无合规 data 不登记」同向。 */
+  let cardHtmlName = '';
+  if (confKind) {
+    let parsed = null;
+    let parseErr = '';
+    try { parsed = extractCardData(output); } catch (e) { parseErr = e.message; }
+    if (parsed || parseErr) {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          if (parseErr) throw new Error(parseErr);
+          cardHtmlName = materialiseConfirmationCard(parsed, confKind, workspace, log).html;
+          break;
+        } catch (e) {
+          if (attempt >= 1) {
+            throw new Error('task ' + taskId + ': card_data 自修一轮仍不过校验，打回重出：' + e.message);
+          }
+          log('task ' + taskId + ': card_data 校验未过，喂回自修一轮：' + e.message);
+          const fixRes = await runClaude(cfg, {
+            prompt: [
+              '你刚交付的确认卡 card_data 块没有通过渲染器校验，问题：',
+              '- ' + e.message,
+              '',
+              '只输出修正后的完整 card_data 围栏块（```card_data 开头，``` 结尾），不要其他任何内容。',
+              '只修上述问题涉及的字段，其余内容一字不动。',
+              '',
+              '===== 原块开始 =====',
+              (CARD_DATA_RE.exec(output) || [output.slice(-4000)])[0],
+              '===== 原块结束 =====',
+            ].join('\n'),
+            cwd: workspace, log, model: cfg.claudeModel, allowedTools: 'Read', label: 'task ' + taskId + ' card-fix',
+          });
+          parseErr = '';
+          try {
+            parsed = extractCardData(String(fixRes.stdout || '').trim());
+            if (!parsed) parseErr = '自修回复里没有 card_data 块';
+          } catch (e2) { parseErr = e2.message; }
+          if (parsed && !parseErr && CARD_DATA_RE.test(output)) {
+            // 自修结果写回交付文件，附件里的块与落盘的 data.json 一致
+            output = output.replace(CARD_DATA_RE, '```card_data\n' + JSON.stringify(parsed, null, 1) + '\n```');
+            fs.writeFileSync(file, output, 'utf8');
+          }
+        }
+      }
+    } else {
+      log('task ' + taskId + ': 闸材料任务回复无 card_data 块（静默补 fact 路径），不出确认卡不登记 Ask');
+    }
+  }
   let clientLinks = '';
   let lintLines = '';
   let cardAskUrl = '';
@@ -2300,7 +2453,8 @@ async function runOne(ctx, context, workspace, taskId) {
       for (const rdir of scanDirs) {
         if (!fs.existsSync(rdir)) continue;
         for (const f of fs.readdirSync(rdir)) {
-          if (!f.endsWith('.html') || output.indexOf(f) === -1) continue;
+          // 产线渲染的确认卡 HTML 是 runner 落的盘，文件名不在模型 output 里，点名放行
+          if (!f.endsWith('.html') || (output.indexOf(f) === -1 && f !== cardHtmlName)) continue;
           if (Date.now() - fs.statSync(path.join(rdir, f)).mtimeMs >= 6 * 3600 * 1000) continue;
           if (fresh.some((x) => x.f === f)) continue;
           fresh.push({ rdir, f });
@@ -2470,6 +2624,11 @@ module.exports = {
   buildTargetHeader,
   extractFacts,
   recordFacts,
+  // 确认卡产线（批三接线）
+  confirmationCardKind,
+  cardDataContract,
+  extractCardData,
+  materialiseConfirmationCard,
   ALLOWED_TOOLS,
   CHANGE_PLAN_PREFIX,
   // blog mode

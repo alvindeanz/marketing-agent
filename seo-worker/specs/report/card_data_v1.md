@@ -38,7 +38,7 @@
 
 ## 与账本、折叠的关系
 
-写入处不归一：账本存客户实际点的码，审计要原样。折叠处的防御性映射（approve 视同 agree、reject 视同 hold 且理由进 texts、未识别码进 texts 打 attention、「hasAny 但无表态」不许静默收口）在桥侧 cardfold.js 与 PHP asks_fold_effective 同步落，共用夹具，归 Aiden（2026-10-19 冻结期后）。
+写入处不归一：账本存客户实际点的码，审计要原样。折叠处的防御性映射（approve 视同 agree、reject 视同 hold 且理由进 texts、未识别码进 texts 打 attention、「hasAny 但无表态」不许静默收口）只落桥侧 cardfold.js（决策层），归 Aiden。PHP asks_fold_effective 是 WF 展示与 Ask 状态层，不做码映射（plan_approval 的面板必须原样显示 approve/reject），两边同步的是排序口径（作答时刻优先，同刻按入账 id），不是码映射。（2026-10-19 与 Aiden 对齐，取代本句旧版「两处同步落映射」。）
 
 ## 兼容与迁移
 
