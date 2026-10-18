@@ -1,0 +1,12 @@
+{
+  "_doc": "卡类注册表（2026-10-19 Aiden，确认卡架构 v1 桥侧）。card_kind 的唯一登记处：seo-api.php card_kind_of（ops 到 card_kind）与 seo-worker/lib/askreg.js（service/kind/default_policy 兜底）读同一份。新增卡类只改这里：加一条，ops 写会出这张卡的 op 名；ops 为空表示该卡不由任务 ops 推导（博客确认卡、落地页确认卡由产线代码直接出卡，card_kind 列不落值）。card_kind_of 的命中规则：任务 ops 按出现顺序逐个查，首个命中即返回，与 2026-10-19 前的手工映射行为一致。部署：deploy.sh api 随 seo-api.php 同传 250；worker 随 specs/ 白名单同步。",
+  "version": 1,
+  "kinds": {
+    "keyword_direction": { "ops": ["keyword-direction"], "service": "sem", "kind": "direction" },
+    "creative_direction": { "ops": ["creative-direction"], "service": "sem", "kind": "direction" },
+    "keyword_confirmation": { "ops": ["keyword-confirmation"], "service": "seo", "kind": "confirmation" },
+    "mapping_confirmation": { "ops": ["mapping-confirmation"], "service": "seo", "kind": "confirmation" },
+    "blog_confirmation": { "ops": [], "service": "seo", "kind": "confirmation" },
+    "onsite_confirm": { "ops": [], "service": "seo", "kind": "confirmation" }
+  }
+}

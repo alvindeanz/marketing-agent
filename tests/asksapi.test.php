@@ -204,8 +204,8 @@ section('投影与白名单 asks_project');
 t('只出白名单键，source_ref、task/plan 编号、卡指纹、operator 中文版都不出',function()use($ASK,$FX){
     $ask=$ASK+['state'=>'open','created_at'=>'2026-10-14 21:30:00'];$ask['lang_pack']=$ASK['lang_pack'];
     $p=asks_project($ask,asks_fold_effective($FX['rows']),'en','2026-10-16 03:00:00',46800,'2026-10-15 08:12:05');
-    eq(array_keys($p),['ask_id','kind','audience','service','rev','state','deadline','default_policy','lang','text','items','created_at','updated_at'],'顶层键');
-    eq(array_keys($p['items'][0]),['item_id','type','required','requires_text_when','prompt','situation','recommendation','hint','options','effective_answer','last_note'],'item 键');
+    eq(array_keys($p),['ask_id','kind','audience','service','rev','state','deadline','default_policy','lang','text','blocks','items','created_at','updated_at'],'顶层键（2026-10-19 加 blocks）');
+    eq(array_keys($p['items'][0]),['item_id','type','required','requires_text_when','prompt','situation','recommendation','hint','options','block_refs','effective_answer','last_note'],'item 键（2026-10-19 加 block_refs）');
     $js=json_encode($p,JSON_UNESCAPED_UNICODE);
     foreach(['source_ref','task_id','plan_id','1413','sha256:','card_token','output_url','内部中文','关键词方向','actor','idempotency','wfu_'] as $bad)
         is_true(strpos($js,$bad)===false,"投影泄露了 $bad");
@@ -464,6 +464,88 @@ t('admin 口径不变：不传 require_draft 时非 draft 也能批/驳，exclud
     $r=plan_reject_core($d,60,'alvin','stale');
     eq($r['ok']??null,true,'admin 驳回不开事务不查状态');eq($d->t['plans'][60]['status'],'rejected','现役也能驳');
     eq($d->inTransaction(),false,'核心不自己开事务');
+});
+
+section('card_data v1 桥侧（2026-10-19）：内容块、block_refs、解码表、卡类注册表');
+
+$BLK=[
+    ['id'=>'b_groups','type'=>'table','title'=>'目标词分组','columns'=>['词','承接页'],'rows'=>[['shopify alternative','/shopify-alternative/'],['wix vs wordpress','/wix-vs-wordpress/']]],
+    ['id'=>'b_note','type'=>'para','text'=>'首页保品牌，见 https://agencyreport.horntech-dev.com/x.html'],
+    ['id'=>'b_list','type'=>'list','items'=>['一','二']],
+    ['id'=>'b_kv','type'=>'kv','entries'=>[['k'=>'窗口','v'=>'近四周']]],
+];
+t('四种块全过且逐字段重建（多余键丢弃）',function()use($BLK){
+    $in=$BLK;$in[0]['html']='<b>x</b>';$in[1]['extra']=1;
+    list($b,$e)=asks_blocks_norm($in);
+    eq($e,null,'不该报错');eq(count($b),4,'块数');
+    eq(array_keys($b[0]),['id','type','title','columns','rows'],'table 键白名单');
+    eq(array_keys($b[1]),['id','type','text'],'para 键白名单');
+    eq(asks_blocks_norm(null),[[],null],'null 即空');
+});
+t('坏块整段拒：HTML 标签、行宽不等、超列、未知类型、重复 id、坏 id',function()use($BLK){
+    $x=$BLK;$x[1]['text']='<script>alert(1)</script>';is_true(asks_blocks_norm($x)[1]!==null,'HTML 标签');
+    $x=$BLK;$x[0]['rows'][]=['只有一格'];is_true(strpos(asks_blocks_norm($x)[1],'row width')!==false,'行宽');
+    $x=$BLK;$x[0]['columns']=array_fill(0,9,'c');is_true(asks_blocks_norm($x)[1]!==null,'超 8 列');
+    $x=$BLK;$x[2]['type']='chart';is_true(strpos(asks_blocks_norm($x)[1],'bad type')!==false,'未知类型');
+    $x=$BLK;$x[3]['id']='b_groups';is_true(strpos(asks_blocks_norm($x)[1],'duplicate')!==false,'重复 id');
+    $x=$BLK;$x[3]['id']='groups';is_true(strpos(asks_blocks_norm($x)[1],'bad id')!==false,'坏 id');
+});
+t('登记：block_refs 落 items，块进 lang_pack 规整，引用不存在的块整包拒',function()use($REG,$BLK){
+    $x=$REG;$x['items'][0]['block_refs']=['b_groups'];$x['lang_pack']['texts']['en']['blocks']=$BLK;
+    list($r,$e)=asks_norm_register($x);
+    eq($e,null,'不该报错');eq($r['items'][0]['block_refs'],['b_groups'],'block_refs');eq($r['items'][1]['block_refs'],[],'缺省空');
+    eq(count($r['lang_pack']['texts']['en']['blocks']),4,'块已规整入包');
+    $y=$x;$y['items'][1]['block_refs']=['b_missing'];
+    is_true(strpos(asks_norm_register($y)[1],'b_missing')!==false,'悬空引用');
+    $y=$x;$y['items'][1]['block_refs']=['Bad'];eq(asks_norm_register($y)[1],'item d2 bad block_ref','坏引用');
+    $y=$x;$y['lang_pack']['texts']['en']['blocks'][1]['text']='<i>x</i>';
+    is_true(strpos(asks_norm_register($y)[1],'lang_pack.texts.en.blocks')!==false,'块坏整包拒');
+});
+t('投影：blocks 按对外语言出，item 带 block_refs；存量行无块回空数组',function()use($REG,$BLK,$ASK){
+    $x=$REG;$x['items'][0]['block_refs']=['b_groups'];$x['lang_pack']['texts']['en']['blocks']=$BLK;
+    list($r,)=asks_norm_register($x);
+    $ask=$r+['state'=>'open'];
+    $p=asks_project($ask,[],'en','2026-10-16 03:00:00',46800,null);
+    eq(count($p['blocks']),4,'块数');eq($p['blocks'][0]['rows'][0][0],'shopify alternative','表格内容');
+    eq($p['items'][0]['block_refs'],['b_groups'],'item 引用');
+    $p0=asks_project($ASK+['state'=>'open'],[],'en','2026-10-16 03:00:00',46800,null);
+    eq($p0['blocks'],[],'存量无块');eq($p0['items'][0]['block_refs'],[],'存量无引用');
+    $bad=$ask;$bad['lang_pack']['texts']['en']['blocks'][0]['type']='chart';
+    eq(asks_project($bad,[],'en','2026-10-16 03:00:00',46800,null)['blocks'],[],'库里坏块整段不出');
+});
+t('解码表：item => code => label，按对外语言取，缺 label 回 null',function()use($REG){
+    $x=$REG;$x['lang_pack']['texts']['en']['items']['negatives']=['options'=>['kw_12'=>'free website builder','kw_31'=>'wordpress hosting']];
+    $d=asks_decode_table($x,'en');
+    eq($d['d1'],['agree'=>'Agree','hold'=>'Hold','other'=>'Other'],'single');
+    eq($d['negatives'],['kw_12'=>'free website builder','kw_31'=>'wordpress hosting','kw_40'=>null],'multi');
+    eq($d['global_note'],[],'text 无码');
+});
+t('作答时刻：answered_at 优先，否则库钟换 UTC',function(){
+    eq(asks_row_at_utc(['answered_at'=>'2026-10-18 09:42:10','created_at'=>'2026-10-18 22:42:10'],46800),'2026-10-18 09:42:10','WF 行');
+    eq(asks_row_at_utc(['answered_at'=>null,'created_at'=>'2026-10-18 22:42:10'],46800),'2026-10-18 09:42:10','卡页行');
+});
+t('卡类注册表：仓库里的 card_kinds.json 解出的 op 映射与内置兜底逐字一致，命中规则同旧',function(){
+    $reg=json_decode(file_get_contents(__DIR__.'/../seo-worker/specs/card_kinds.json'),true);
+    $m=asks_card_kind_op_map_from($reg);
+    is_true(is_array($m),'注册表应可解');
+    ksort($m);$f=asks_card_kind_fallback();ksort($f);
+    eq($m,$f,'注册表与兜底表');
+    eq(asks_card_kind_pick('page-meta-update, keyword-confirmation,mapping-confirmation',$m),'keyword_confirmation','首个命中');
+    eq(asks_card_kind_pick('blog-draft',$m),null,'博客与落地页卡不由 ops 推导');
+    eq(asks_card_kind_op_map_from(['kinds'=>['a_kind'=>['ops'=>['x']],'b_kind'=>['ops'=>['x']]]]),null,'一个 op 两种卡判坏');
+    eq(asks_card_kind_op_map_from(null),null,'缺表');
+});
+
+t('跨端契约：askreg 为 1464 出的 rev 2 登记体（tests/fixtures/ask_t1464_rev2.json）服务端整包接受',function(){
+    $in=json_decode(file_get_contents(__DIR__.'/fixtures/ask_t1464_rev2.json'),true);
+    list($r,$e)=asks_norm_register($in);
+    eq($e,null,'不该报错');
+    eq($r['rev'],2,'rev');eq($r['service'],'seo','车道');eq($r['default_policy'],'none','不默认同意');
+    eq(array_column($r['items'],'item_id'),['group_first','group_next','group_hold','mapping_overall','global_note'],'题与 HTML 卡同批');
+    eq($r['items'][1]['block_refs'],['b_next_rank','b_next_lowcomp','b_next_new'],'块引用');
+    $p=asks_project($r+['state'=>'open'],[],'zh','2026-10-20 00:00:00',46800,null);
+    eq(count($p['blocks']),8,'八个内容块出投影');
+    eq(asks_decode_table($r,'zh')['mapping_overall']['agree'],'同意，按这份分工执行','解码表');
 });
 
 echo "\n$pass passed, $fail failed\n";

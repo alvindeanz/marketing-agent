@@ -151,10 +151,12 @@ api)
   sshpass -p "$BT_PASS" scp -o StrictHostKeyChecking=no seo-api.php "$BT:/tmp/seo-api.php.new"
   sshpass -p "$BT_PASS" scp -o StrictHostKeyChecking=no static/seo-agent.html "$BT:/tmp/seo-agent.html.new"
   sshpass -p "$BT_PASS" scp -o StrictHostKeyChecking=no seo-worker/specs/release_policy.json "$BT:/tmp/release_policy.json.new"
+  # 卡类注册表（2026-10-19）：card_kind_of 读 $BT_DIR/card_kinds.json，缺位时 PHP 退回内置表，行为不变
+  sshpass -p "$BT_PASS" scp -o StrictHostKeyChecking=no seo-worker/specs/card_kinds.json "$BT:/tmp/card_kinds.json.new"
   "${SSH_BT[@]}" "php -l /tmp/seo-api.php.new" || { echo "php -l 失败，线上未动"; exit 1; }
   echo "[2/3] 备份并落位"
   "${SSH_BT[@]}" "cp $BT_DIR/seo-api.php $BT_DIR/seo-api.php.bak-$TS && cp $BT_DIR/seo-agent.html $BT_DIR/seo-agent.html.bak-$TS \
-    && mv /tmp/seo-api.php.new $BT_DIR/seo-api.php && mv /tmp/seo-agent.html.new $BT_DIR/seo-agent.html && mv /tmp/release_policy.json.new $BT_DIR/release_policy.json"
+    && mv /tmp/seo-api.php.new $BT_DIR/seo-api.php && mv /tmp/seo-agent.html.new $BT_DIR/seo-agent.html && mv /tmp/release_policy.json.new $BT_DIR/release_policy.json && mv /tmp/card_kinds.json.new $BT_DIR/card_kinds.json"
   echo "[3/3] 哈希比对 + DEPLOYED 记录"
   for f in seo-api.php static/seo-agent.html; do
     L=$(md5 -q "$f" 2>/dev/null || md5sum "$f" | cut -d' ' -f1)

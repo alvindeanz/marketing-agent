@@ -1,0 +1,350 @@
+{
+ "schema": "card_data/v1",
+ "card_kind": "keyword_confirmation",
+ "kind": "confirmation",
+ "service": "seo",
+ "cycle": "onboard",
+ "lang": "zh",
+ "title": "WebForger 关键词与页面分工",
+ "oneline": "目标词和承接页按站点近期更新一次重排，请逐组确认或调整。",
+ "issued": "2026-10",
+ "deadline": "2026-10-30",
+ "default_policy": "none",
+ "blocks": [
+  {
+   "id": "b_scope",
+   "type": "para",
+   "title": "数字怎么看",
+   "text": "现状一栏是该词在 Google 搜索里的平均位次，取自本站 Google 搜索后台最近四周（2026 年 9 月 19 日至 10 月 16 日），数字越小越靠前，第 1 至 10 位即第一页；这些词大多是最近一个月才出现的，所以不拿更早的数字比。月搜索量取自第三方关键词库 2026 年 10 月的估算值，是量级参考不是实测。站点目前自然搜索点击还很少，下面的分组看的是离第一页的距离和竞争难度。所有承接页链接均于 2026 年 10 月 18 日实测可正常打开，没有跳转。"
+  },
+  {
+   "id": "b_first",
+   "type": "table",
+   "title": "先打这一批（5 个）",
+   "columns": [
+    "目标词",
+    "现状",
+    "承接页",
+    "一句话动作"
+   ],
+   "rows": [
+    [
+     "wordpress site rescue",
+     "第 10.1 位 （wordpress rescue 第 9.9 位，wordpress rescue service 第 37.9 位。搜索量很小（美国月均约 10 次），但搜的人就是要找人接手旧站）",
+     "/rescue/",
+     "title 现在用缩写 WP Rescue，改成写全 WordPress Site Rescue，H1 下补一句服务说明和预览入口。词小，但每一次点击都离询盘最近。"
+    ],
+    [
+     "embed google reviews",
+     "第 10.8 位 （近四周被看到 66 次；how to embed google reviews 第 3.5 位，embed google reviews on website 第 30.9 位。月搜索量美国 720）",
+     "/blog/how-to-embed-google-reviews-on-your-website/",
+     "已在第一页边缘。现在的 title 接近 100 个字符，搜索结果里显示不全，压到 60 字符以内并把 embed google reviews 放在开头；正文已有的 Google Reviews 应用页链接保留，挪到第三条路线（Step 5）开头更显眼的位置。"
+    ],
+    [
+     "ai generated website",
+     "第 16.1 位 （近四周被看到 68 次；ai generate website 第 24.4 位。月搜索量美国 880，澳洲 110）",
+     "/ai-website-builder/",
+     "Google 已经把这个搜索交给这页，离第一页只差几位。title 开头保留 AI Website Builder，描述和首屏导语写进 AI generated website 的说法，并讲清生成之后有人打磨、先看预览再付款。"
+    ],
+    [
+     "shopify alternative",
+     "暂无完整位次 （ai shopify alternative 第 15.3 位（近四周 3 次，样本薄）。月搜索量美国 590，shopify alternatives 3,600，竞争度在这批词里偏低）",
+     "/shopify-alternative/",
+     "页面已在线、title 已含精确说法，Shopify 应用费文章也已链过来，缺的是理由。把应用页“应用全包，不按应用另收月费”的对比写进首屏下方（首年托管包含，第二年起按档收维护费，口径和定价页一致），并链到应用总页。 我们补充：量和竞争度都合适，先占位"
+    ],
+    [
+     "wordpress alternative",
+     "暂无完整位次 （wp alternative 第 9.3 位，wordpress replacement 第 19 位，replace my wordpress site with something easier 第 19 位。月搜索量美国 390，wordpress alternatives 720）",
+     "/alternatives-wordpress/",
+     "这是“WordPress 维护成本”这条主叙事的落点页，首页已有链接。单数和 replacement 的说法归这页，小标题里补 WordPress replacement，把首页那段维护账单对比的数字同步过来。 我们补充：主叙事落点，先占位"
+    ]
+   ]
+  },
+  {
+   "id": "b_next_rank",
+   "type": "table",
+   "title": "随后推进：已有位次，往前推（7） · 页面都在线，改字段和内链即可",
+   "columns": [
+    "目标词",
+    "现状",
+    "承接页",
+    "一句话动作"
+   ],
+   "rows": [
+    [
+     "shopify plus pricing",
+     "第 14.9 位 （is shopify plus worth it 第 18.2 位。月搜索量美国 1,600 / 40，后者竞争度很低）",
+     "/blog/is-shopify-plus-worth-it/",
+     "Google 现在把价格类搜索交给这篇文章。文章保留这两个词，开头写清 Shopify Plus 起价；正文已有的替代页链接保留。 我们的调整：pricing 归文章，替代页照旧接 shopify plus alternative 与 shopify plus cost"
+    ],
+    [
+     "shopify app pricing",
+     "第 12.1 位 （近四周被看到 9 次，这篇文章整页近四周平均第 8.1 位。月搜索量美国 30）",
+     "/blog/shopify-app-costs-what-a-small-store-pays-2026/",
+     "词小，但读者正是在算应用月费的店主。文中每类应用旁链到对应的 WebForger 应用页，结尾链到应用总页。"
+    ],
+    [
+     "app for announcements",
+     "第 10.8 位 （近四周被看到 16 次；announcements app 第 5.8 位。announcement bar 月搜索量美国 170，竞争度很低）",
+     "/apps/announcements/",
+     "title 补上 announcement bar 的说法，首屏写清它是站点自带、不另收费。"
+    ],
+    [
+     "wix alternatives",
+     "第 11 位 （样本薄（近四周 2 次）。月搜索量美国 720，澳洲 320，竞争度低）",
+     "/blog/honest-list-wix-alternatives-2026/",
+     "复数、清单式的搜索归这篇清单文章，正文已链到 Wix 替代页。1 月随年份翻新把标题里的 2026 换成 2027。"
+    ],
+    [
+     "wix alternative",
+     "第 57.2 位 （这是 wix ai alternative 的位次（近四周 12 次）。wix alternative 月搜索量美国 210）",
+     "/alternatives-wix/",
+     "单数和带 AI 的说法归这页。title 现在是 Wix Alternative 加服务说明，补进 AI 字样，正文链回清单文章。"
+    ],
+    [
+     "wordpress alternatives",
+     "第 16.1 位 （这是整篇文章近四周的平均位次（7 次展示）。月搜索量美国 720）",
+     "/blog/wordpress-alternatives-without-the-maintenance-tax-2026/",
+     "复数、清单式的搜索归这篇清单文章，和 Wix 那对同一个分法；正文开头链到 WordPress 替代页。1 月把标题年份换成 2027。"
+    ],
+    [
+     "best ai website builder",
+     "第 44.2 位 （近四周被看到 342 次，全站曝光最多；best ai website builders 第 52.5 位。月搜索量美国 3,600，新西兰 720）",
+     "/best-ai-website-builder/",
+     "和下面暂不投入的 best website builder for small business 同是测评型搜索，留下它是因为站上已有专门的对比页、近四周已被看到 342 次。前排是测评站，需要时间；按实际搜索改 title 和首屏结论，1 月把年份换成 2027。"
+    ]
+   ]
+  },
+  {
+   "id": "b_next_lowcomp",
+   "type": "table",
+   "title": "随后推进：低竞争，页面已有，补说法（4） · 现在位次靠后，但这几个词竞争度低",
+   "columns": [
+    "目标词",
+    "现状",
+    "承接页",
+    "一句话动作"
+   ],
+   "rows": [
+    [
+     "framer alternatives",
+     "第 67.2 位 （framer alternative 第 64.6 位。两者月搜索量美国 260 / 110，竞争度在全表最低）",
+     "/alternatives-framer/",
+     "竞争很低却排在第七页，说明页面没讲到点上。title 与首屏按“想要网站、不想学设计工具”的买家重写；页面近期被 Haverhill 本地设计公司类搜索带偏，不追那类词。"
+    ],
+    [
+     "lovable alternative",
+     "暂无位次 （ai website builder like lovable 第 53 位。月搜索量美国 260，竞争度低）",
+     "/alternatives-lovable/",
+     "首屏写清“要的是网站不是应用”的区别，补进 like Lovable 的说法。"
+    ],
+    [
+     "wix vs wordpress",
+     "第 32.6 位 （近四周被看到 230 次，全站第二。月搜索量美国 1,600）",
+     "/wix-vs-wordpress/",
+     "保持第三方对比页的写法，不改成推销页。两张替代页和申请入口的链接已在页内，结论段补一句“两样都不想自己维护”的分流说明，把这些链接收拢到一处。"
+    ],
+    [
+     "ai store builder",
+     "暂无位次 （ai ecommerce builder 第 43.8 位，ai ecommerce website builder 第 73.5 位。ai store builder 月搜索量美国 2,900）",
+     "/ai-ecommerce-builder/",
+     "title 现在只写 AI Ecommerce Builder，补进 AI Store Builder 的说法，首屏写明 Ecommerce 档 $1,999 含全部应用。"
+    ]
+   ]
+  },
+  {
+   "id": "b_next_new",
+   "type": "table",
+   "title": "随后推进：页面有、还没被搜到（4） · 新上的订阅页和应用页，先把词放到位",
+   "columns": [
+    "目标词",
+    "现状",
+    "承接页",
+    "一句话动作"
+   ],
+   "rows": [
+    [
+     "seo automation",
+     "暂无位次 （这页目前在搜索里还没有展示。月搜索量美国 1,900）",
+     "/seoforger/",
+     "title 已含 AI SEO Automation，正文按买家要交给谁、交付什么、每月多少钱展开，从首页和定价页链入。"
+    ],
+    [
+     "google ads automation",
+     "暂无位次 （同上，还没有展示。月搜索量美国 210，竞争度低）",
+     "/semforger/",
+     "title 现在写的是 AI Google Ads Management，补进 Google Ads Automation 的说法，正文同上展开。"
+    ],
+    [
+     "done for you website",
+     "暂无位次 （月搜索量美国 210，澳洲 50，竞争度很低。同页顺带 one time payment website builder（美国、澳洲各约 20））",
+     "/pricing/",
+     "搜这个词的人要的是“谁来做、多少钱”，定价页的 H1 正好回答。描述和第一个小标题写进 done for you website，“一次付清，首年托管包含”一段带上 one time payment 的说法。 我们的调整：从首页移到定价页，首页保品牌"
+    ],
+    [
+     "rental booking software",
+     "暂无位次 （月搜索量美国 320，竞争度中等偏低）",
+     "/apps/rental-booking/",
+     "title 补上 rental booking software 的说法，正文写清适合哪类出租生意、建站即自带。"
+    ]
+   ]
+  },
+  {
+   "id": "b_hold",
+   "type": "table",
+   "title": "暂不投入（9 项）",
+   "columns": [
+    "目标词",
+    "现状",
+    "暂不投入的原因"
+   ],
+   "rows": [
+    [
+     "ai website builder",
+     "第 52.0 位 （近四周被看到 111 次）",
+     "原词表里的头词，月搜索量美国 27,100，前排是大平台和测评站，竞争度全表最高一档。页面照常维护、月报照常列出，但这一轮不当主攻，先拿上面的 ai generated website。"
+    ],
+    [
+     "ai website generator",
+     "第 37.8 位",
+     "竞争度比 ai website builder 还高，由同一页自然覆盖，不单独发力。"
+    ],
+    [
+     "best website builder for small business",
+     "暂无位次",
+     "月搜索量美国 5,400，但前排几乎全是测评媒体，短期看不到回报。"
+    ],
+    [
+     "product review app、google reviews widget",
+     "第 29.6 位 / 暂无",
+     "搜这些词的人多半在 Shopify 或 WordPress 应用市场里找插件，WebForger 的应用只在自己的站上用，意图对不上。两张应用页由上面的文章和总页链过去。"
+    ],
+    [
+     "shopify bundles app、shopify subscriptions app",
+     "暂无位次",
+     "同上，是在 Shopify 应用市场里找插件的搜索。"
+    ],
+    [
+     "starshipit",
+     "暂无位次",
+     "这是物流合作方的品牌词，搜的人要去对方网站登录。澳洲月搜索量 4,400 看着大，但不是我们的客人。"
+    ],
+    [
+     "wordpress maintenance",
+     "暂无位次",
+     "月搜索量美国 2,900，但搜的人在找维护服务商。WordPress 这条线先用上面的 wordpress alternative 去接，之后可用一篇文章去碰。"
+    ],
+    [
+     "原词表中的 4 个长尾",
+     "暂无位次 （另有 ai website builder for small business 月均约 40 次，同样处理）",
+     "wordpress alternative for small business、website builder with hosting included、wordpress maintenance alternative 在关键词库里查不到搜索量；ai website management 月均约 90 次但竞争度很高，站上也没有展示。这几个说法会留在正文里，不再当目标词。"
+    ],
+    [
+     "第三方对比与本地设计公司类搜索",
+     "第 31 至 69 位",
+     "例如 wordpress vs squarespace、framer web design haverhill。前者是测评站的主场，后者是别人家的本地生意，都不追。"
+    ]
+   ]
+  },
+  {
+   "id": "b_mapping_notes",
+   "type": "list",
+   "title": "页面分工的几处说明",
+   "items": [
+    "首页、定价页、应用总页：这三页近四周在搜索里几乎只靠品牌和品牌错拼带来展示（首页 111 次、平均第 4.5 位；定价页 17 次；应用总页 19 次），没有可抢的非品牌词。所以它们的新内容由下游页去接：应用总页的卖点落到 11 张应用页和 Shopify 两页，定价页接 done for you website。首页 title 里也有 AI Website Builder，但近四周没有一个搜索在首页和 AI Website Builder 页之间来回换，首页保品牌，不动 title。",
+    "其余 9 张应用页：Product Reviews、Google Reviews 是插件意图，见暂不投入；Booking、Shipping、Subscriptions、Bundles、Leads Flux、Campaigns、Members 近四周几乎没有展示，也没有找到不是“Shopify 插件”意图的可测搜索，这一轮不定词，只做收口：每页链回应用总页和申请入口。",
+    "三张 Shopify 页：9 月 9 日定下的分工照旧，Shopify Alternative 页接小店的 shopify alternative，Shopify Plus 替代页接成长期品牌的 shopify plus alternative。唯一的调整是 shopify plus pricing：Google 现在把它交给 Shopify Plus 值不值得那篇文章，排第 14.9 位，我们顺着它，文章接这个词并链到替代页；9 月 9 日分给替代页的 shopify plus alternative 和 shopify plus cost 不变。",
+    "Wix 和 WordPress 各两页：同一个分法，因为复数说法的搜索结果前排几乎都是清单文章，站上正好各有一篇清单文章已在承接。复数、清单式的 wix alternatives、wordpress alternatives 归两篇清单文章；单数、replacement 和带 AI 的说法归 Wix 替代页和 WordPress 替代页。两对页面之间互链。Shopify 没有清单文章，单复数都归 Shopify Alternative 页。",
+    "Google 评价：教程文章接 embed google reviews，Google Reviews 应用页不追这个说法，只接文章送过来的人。",
+    "应用总页：应用总页的卖点“应用全包，不按应用另收月费”目前没有对应的可测搜索，所以不给它单独定词。它的作用是收口：Shopify 应用费文章已经链回它，这次给 Shopify Alternative 页补上指向它的链接，再由它送到申请入口。"
+   ]
+  },
+  {
+   "id": "b_after",
+   "type": "kv",
+   "title": "确认后怎么做",
+   "entries": [
+    {
+     "k": "确认后怎么做",
+     "v": "从先打这一批开始，五张页面的标题、描述和导语改动做成变更清单，逐项放行后上线；上线 2 至 4 周后在搜索后台核对位次，再推下一组。"
+    },
+    {
+     "k": "之后怎么看",
+     "v": "每月报告按这三组列出各词的位次和曝光，申请数按后台表单记录如实计数。"
+    }
+   ]
+  }
+ ],
+ "items": [
+  {
+   "item_id": "group_first",
+   "type": "single",
+   "q": "先打这一批（5 个）这样定行不行",
+   "situation": "前三个已经排在第 10 到 16 位，改字段就有机会进第一页；后两个是主叙事的落点页。五个词各对一张页面，互不相争。",
+   "recommendation": "按表里的一句话动作先改这五张页面的标题、描述、导语和内链，不新建页面、不改网址。",
+   "hint": "哪个词或哪张承接页想换，直接写。",
+   "default": "agree",
+   "block_refs": [
+    "b_first"
+   ]
+  },
+  {
+   "item_id": "group_next",
+   "type": "single",
+   "q": "随后推进的 15 个词这样排行不行",
+   "situation": "先打这一批上线后接着做：先推已经有位次的，再补低竞争的说法，最后是刚上线、还没被搜到的订阅页和应用页。标了「我们的调整」的两处，理由写在行内。",
+   "recommendation": "按已有位次、低竞争、新页面三档顺序推进。",
+   "hint": "不同意某个词的归属或顺序，直接写。",
+   "default": "agree",
+   "block_refs": [
+    "b_next_rank",
+    "b_next_lowcomp",
+    "b_next_new"
+   ]
+  },
+  {
+   "item_id": "group_hold",
+   "type": "single",
+   "q": "暂不投入的 9 项这样处理行不行",
+   "situation": "这一轮看过、决定先不发力的搜索，含原词表里的头词 ai website builder 和 4 个查不到搜索量的长尾。页面不删不改，之后数据变了随时可以放回来。",
+   "recommendation": "这一轮不当主攻，原因逐条见表。",
+   "hint": "想把哪一项放回来，直接写。",
+   "default": "agree",
+   "block_refs": [
+    "b_hold"
+   ]
+  },
+  {
+   "item_id": "mapping_overall",
+   "type": "single",
+   "q": "对这份词和页面分工，您的整体看法",
+   "situation": "首页、定价页、应用总页只靠品牌带来展示，新内容由下游页去接；Shopify、Wix、WordPress 各组页面的分法见说明。",
+   "recommendation": "按这份分工执行，确认后先做变更清单，逐项放行后上线。",
+   "hint": "有调整意见直接写。",
+   "default": "agree",
+   "options": [
+    {
+     "code": "agree",
+     "label": "同意，按这份分工执行"
+    },
+    {
+     "code": "hold",
+     "label": "先不动"
+    },
+    {
+     "code": "other",
+     "label": "有调整意见"
+    }
+   ],
+   "block_refs": [
+    "b_mapping_notes",
+    "b_after"
+   ]
+  },
+  {
+   "item_id": "global_note",
+   "type": "text",
+   "hint": "其他想说的，写在这里。"
+  }
+ ]
+}

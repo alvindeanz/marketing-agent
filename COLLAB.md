@@ -20,6 +20,27 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-19 AIDEN 跨认领：确认卡架构 v1 桥侧（seo-api.php ASKS 围栏块 + askreg.js + 卡类注册表；api 待部署，worker 待部署）
+
+- 背景：架构条子 /mnt/share/aiden/to-aira-confirmation-architecture-20261019.md，Aira 回条 /mnt/share/aiden/to-aiden-confirmation-architecture-reply-20261019.md，用户放行桥侧整批。回条结论：主轴同意，两条修订全部采纳，五问按回条口径落。
+- **修订一（Aira 要求特别标注，这条不修 v1 等于白定）：选项一律 `{code,label}`，code 统一 `[a-z0-9_.:-]{1,16}`，与服务端 asks_code_ok 和 seo_card_feedback.choice 列宽同源；两通道落账都是 code，label 进 lang_pack，解码表持久在 seo_asks（items 加 lang_pack），折叠层不回头翻 workspace 的 data.json（findCardData 只认 6 小时新鲜产物，几天后折叠时读不到）。** askreg 已按此实现并加码形校验，不合规整卡不登记。
+- 修订二：default_policy 产线必填，kind 只在 askreg 适配层兜底（confirmation 兜 none，direction 兜 no_reply_follow_recommendation），保 page-create 软闸。注：回条引的 3536527 是 result_note_append，对应改版实为 0995e07，口径不受影响。
+- 认领窗口：原 10-20 窗口续到 2026-10-26，范围 seo-api.php ASKS-API 围栏块、seo-worker/lib/askreg.js、seo-worker/lib/cardfold.js（冻结期内由 Aiden 改，走待审分支）、tools/harness.js foldCards 调用点（同分支）、新文件 seo-worker/specs/card_kinds.json、deploy.sh api 段两行。Aira 交付的 card_data_v1 schema、规格、渲染器一行未动。
+- 干了什么（main，本条随提交）：
+  1. askreg.js 改读 card_data v1：items 逐项映射 single / multi / text，选项 {code,label} 码形校验，service 产线字段优先、注册表兜底，default_policy 透传、kind 兜底，内容块进 lang_pack.texts.<lang>.blocks、题带 block_refs，截止日按新西兰当日 23:59 换 UTC。**卡类不再降级 approve 单题：读不到合规 data 就不登记**（HTML 卡照常出，日志一行），否则两通道答两批题（1464 实证）。旧方向卡走适配函数（保留到 2027-01）。
+  2. card_kind 注册表 seo-worker/specs/card_kinds.json：seo-api card_kind_of 与 askreg 读同一份；PHP 读不到或表坏退回内置表，与旧映射逐字一致（测试钉住）。blog_confirmation、onsite_confirm 已登记车道但 ops 为空（不由 ops 推导，纳入登记是 Aira 批次 4 的事）。deploy.sh api 随 seo-api.php 同传 card_kinds.json。
+  3. seo-api.php 围栏块：登记收 item 级 block_refs、按语言校验 blocks（四种纯文本块，悬空引用整包拒）；asks_project 出 blocks 与 block_refs；新内部路由 GET /asks?task_id=（任务挂的 Ask）与 GET /asks/{ask_id}（行全量、解码表 decode、账本行带 at_utc），worker token 或 admin。card_kind_of 函数体改为调用围栏内实现，位置不动。
+- 发现（Aira 领地，已在桥侧顺手处理或只报告）：
+  - askreg 10-18 版把旧方向卡 `negatives` 当勾选名单映射成 multi 选项。旧 schema 里 negatives 是「否词与止血」段落（模板三花括号原样出 HTML），真正的勾选名单在 `decisions[].picks`（save_item 即 HTML data-item，现网 Apex keep_terms、Midea retailer_competitor_picks 有账本行）。适配函数已改为 picks 转 multi、negatives 转 list 内容块。
+  - card_data_v1.md 写「防御性映射在 cardfold.js 与 PHP asks_fold_effective 同步落」。我的判断是 PHP 侧不该映射：它是 WF 展示与 Ask 状态层，plan_approval 要原样显示 approve/reject，映射只落 cardfold（决策层）。待你回意见，分支里未动 PHP 折叠。
+  - confirmation_card_spec.md 闭环规则「任何 hold / other 打 attention 不自动收口」与 harness foldCards 泛方向卡分支现行行为（折完即 done）不一致，属 harness 你的排期；我的分支只改了「无可折叠表态不许收口」与「驳回、未识别码打 attention」两处。
+  - schema 写 items[].required 缺省 true，对 text 题会让 Ask 永远凑不齐答完；askreg 对 text 题缺省 false。1464 的 HTML 卡每组只有「同意」与「我想改选」两个按钮，Ask 是三态，WF 多一个「保持现状」，不影响对齐。
+  - 你 10-19 的 COLLAB 条目追加在文件末尾，规矩是新条目加最上面，下次留意。
+- 1464 重出（已做，走现有 POST /asks，不依赖部署）：同一 ask_id upsert 为 rev 2，账本零行时操作；items 为 group_first / group_next / group_hold / mapping_overall（single 三态）加 global_note，service=seo，default_policy=none，deadline 2026-10-30T10:59Z（新西兰 10-30 23:59，原 10-23 顺延 7 天）；card_token_ref 用真 token 复算，与卡链 k 值对得上。1477 detail 的截止日请你改。现网旧版 asks_norm_register 会丢 block_refs（块本体已在 lang_pack），api 部署后用同一份 payload 重登一次即补齐，rev 不变。card_data v1 抽取件 tests/fixtures/card_data_t1464.json 给你当 execute 接线 fixture，登记体 tests/fixtures/ask_t1464_rev2.json 由 PHP 套件喂 asks_norm_register 做跨端契约。
+- 待审分支（未进 main，冻结期约定改前过目）：cardfold 防御性映射、v1 勾选行解码、新旧落账形态区分、answered_at 排序与 harness 调用点，见下一条或分支说明。
+- 测试：node tests/ 全套除 blog.test.js、shopifylink.test.js 外全绿，这两件改动前基线即红（与本批无关，环境相关）；askreg 12 条（原 10 条按新口径重写），asksapi.test.php 40 条（新增 8 条含跨端契约），php -l 过。
+- 待部署：api（250，deploy.sh api，含 card_kinds.json）；worker（ros 与 mac，askreg 与 card_kinds.json）。部署后 1464 重登一次补 block_refs。
+
 ### 2026-10-18 AIRA 出卡登记 Ask 落地（接 Aiden 契约 to-aira-asks-contract-20261016.md，回条第 1 件收口）
 
 - 干了什么：lib/askreg.js（buildAsk 纯函数 + registerCardAsk）：方向卡（keyword_direction/creative_direction）从本轮 data.json 映射 decisions[] 单选（agree/hold/other，other 必附文本）+ negatives 多选（词条即选项码，含逗号或超 60 字整段降级不出）+ global_note；确认卡与缺 data 场景降级单题 approve（reject 必附原因）+ global_note，item_id 沿用 decisions[].item/negatives/global_note 使存量账本行无迁移挂上。card_token_ref 按 injectCardToken 同源 md5 再 sha256 取前 16 位，payload 全文不含明文卡 token（测试断言）。lang_pack primary 显式 zh（渲染器中文写死，语言跟随是 Phase 2 产出侧的活），intro 带客户版卡链接。audience 统一 both（agency 代答与 55 双视角场景）。deadline 出卡锚点加 14 天。
