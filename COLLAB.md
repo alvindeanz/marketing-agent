@@ -49,6 +49,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
   - 55 方案现状（只读）：v1 至 v6（plan 62 至 67）全部非 active，最新 v6（67）2026-10-18 05:35Z 经 ask_plan_approval_67 由 WF agency 用户驳回（Ask closed），v4（65）10-17 同样驳回；65 条任务全部已结，零未结、零 draft、零 active。驳回已正确回传 MA，卡点不在 WF。
   - 重生成路径：plan 只由人排 POST /jobs type=plan（看板按钮或 tools/onboard_chain.js）触发，harness 与 plan_reject_core 都不排 plan，属硬规矩 1 的设计，不是漏推。缺陷：lib/distill.js feedbackSection 只读 /context 的 active_plan.reject_reason，而 /context 只取 status='active'，被驳回方案的理由永远进不了这一节（本轮日志「no reject_reason available on active_plan」即此）；退路是任务账本里 killed 备注，但 ledgerSection 的正则截到首个换行，67 的理由在「具体的内容需要参照」后换行，三个参考 URL 和「按重新 onboard 的方式规划」会丢；plan_review 的 historyBlock 另截 160 字。归 Aira 排期。
   - 条子已递：/mnt/share/aiden/to-aira-plan-reject-reason-lost-20261018.md（三处机制、55 plan 67 实证、复现与验收口径；实测补一条：historyBlock 同样截到首个换行）。
+  - Aira 回条：d56ce82 已修已部（/mnt/share/aiden/to-aiden-plan-reject-reason-fixed-20261018.md，账本反推兜底，权威源仍是 seo_plans.reject_reason，/context 回 last_rejected_plan 待 10-20 后议）。
+- **55 方案推进轮（2026-10-18 晚，Aiden 本机，只碰 55）**：
+  - 本地 pull 到 d56ce82。入站无新消息，本轮零客户回复产出（cr1 仍是唯一出口行）。
+  - harness 55 全轮（不带 --skip-gates，同一份零模型覆盖键本机 config）：SEO 两闸未过且闸材料缺失，自动建产钥匙任务 #1464（判定 job 7713 do，执行 job 7714 约 13 分钟）。#1464 走确认卡路径，产出词表与 mapping 一次过确认卡（agencyreport webforger/keyword_mapping_confirmation_2026-10.html，lint PASS），引用了 67 的驳回原话；任务按只读交付 auto-accept 已 done。harness 不排 plan，experience_sync 本轮无新增。
+  - 人工排 plan：POST /jobs type=plan 得 job 7715（ros 认领），自动接 plan_review 7716、review_plan 7717，全部 done。三个 job 日志都出现「reject_reason for plan #67 recovered from killed task notes」，旧特征「no reject_reason available on active_plan」不再出现。
+  - 产物：v7 plan 68 被过闸取代，v8 plan 69 为 draft（authored_by plan_review），11 条任务 1477 至 1487。正文开头直接回应 67 驳回：按 /、/pricing/、/apps/ 三页实测重新 onboard，锁词与分工以 #1464 确认卡为准，S1 先回收确认卡（#1477）加四张商业页加 /about/ 与 /features/ 旧价核对。review_plan 判定 do 4、later 6（多为等 #1477 锁词）、drop 1。
+  - 卡点：ask_plan_approval_69 不存在（GET /asks/ask_plan_approval_69/answers 404）。worker 代码里没有任何 plan_approval 登记（grep 零命中），63、65、67 的审批卡都是人手 POST /asks 登记的；出卡登记自动化按 10-16 落点归 Aira 未接。v8 要给用户在 WF 批，需人登记 ask_plan_approval_69（source_ref.plan_id=69、一个 approve 题、requires_text_when 含 reject、default_policy none），本轮未代登。#1464 的确认卡是否已登记成 WF 侧 Ask 同样待查。
+  - 69 审批卡已手动登记（现行正规流程，同 63/65/67）：admin POST /asks 返回 created rev 1 lang zh，ask_plan_approval_69 state open；集成 token GET /svc/v1/asks?client_id=55 读回可见（open、plan_approval、zh、标题「SEO 方案 v8 审批」），截止 2026-10-25，default_policy none，service seo，audience both。同一读回里 55 名下没有任何关键词或 mapping 确认卡 Ask，#1464 的卡确认未桥到 WF。
+  - 条子已递：/mnt/share/aiden/to-aira-plan-ask-autoregister-20261018.md（plan_approval 自动登记缺失加 69 载荷样例；#1464 确认卡未桥到 WF 是 v8 S1 执行卡点；#1464 产出驳回归属日期写错备查）。
 
 ### 2026-10-17 AIDEN asks 车道字段 + harness 方案审批执行闸（同一认领窗口至 10-20；api 待部署，harness 是本地工具不走部署）
 
