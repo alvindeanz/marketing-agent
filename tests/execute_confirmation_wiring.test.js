@@ -17,6 +17,7 @@ assert.strictEqual(X.confirmationCardKind({ card_kind: 'keyword_confirmation', o
 assert.strictEqual(X.confirmationCardKind({ card_kind: 'blog_confirmation', ops: '' }), '', '博客卡 ops 空，有自己的产线');
 assert.strictEqual(X.confirmationCardKind({ ops: 'blog-draft' }), '', '非卡任务不误判');
 assert.strictEqual(X.confirmationCardKind({ ops: 'keyword-direction' }), '', '方向卡不走确认卡产线');
+assert.strictEqual(X.confirmationCardKind({ ops: 'sem-onboard-confirmation' }), 'sem_onboard', 'SEM 入场卡走通用确认卡产线（批⑤）');
 
 // 2) card_data 块抽取：无块 null（静默路径合法）、好块回对象、坏 JSON 抛错
 assert.strictEqual(X.extractCardData('纯报告，没有块。\nOPS_CHECK: readonly'), null);
@@ -51,6 +52,15 @@ assert(contract.includes('card_data/v1'), 'schema 注入');
 assert(contract.includes('card_kind 写 "keyword_confirmation"'));
 assert(contract.includes('issued 写 "' + new Date().toISOString().slice(0, 7) + '"'));
 assert(contract.includes('静默补 fact 路径时不要输出'), '静默路径的豁免写明');
+assert(contract.includes('service 写 "seo"'), '词表卡 service 按注册表为 seo');
+
+// 5b) sem_onboard 契约：service 按注册表为 sem，注入的是 SEM 入场规格不是词表规格
+const semContract = X.cardDataContract('sem_onboard');
+assert(semContract.includes('service 写 "sem"'), 'sem_onboard 契约 service 必须是 sem');
+assert(semContract.includes('SEM-ONBOARD-CARD-V1'), 'SEM 入场规格全文注入');
+assert(semContract.includes('card_kind 写 "sem_onboard"'));
+assert(semContract.includes('card_data/v1'), 'schema 同样注入');
+assert(!semContract.includes('CONFIRMATION-CARD-V1'), '不该把词表规格也混进去');
 
 fs.rmSync(ws, { recursive: true, force: true });
 console.log('execute_confirmation_wiring: all ok');

@@ -300,11 +300,12 @@ async function main() {
      SEO 泳道，词表/mapping 闸不适用，更不该起产钥匙任务（#1175 被 killed 后靠两条「不适用」
      facts 手工关闸，这里是结构化修复）。services 空或 seo/both 照旧走闸。 */
   let svcPaidOnly = false;
+  let clientServices = '';
   try {
     const profR = await call('GET', '/profile?client_id=' + cid);
-    const svc = String((profR.profile && profR.profile.services) || '').toLowerCase();
-    svcPaidOnly = (svc === 'paid' || svc === 'sem');
-    if (svcPaidOnly) log('paid-only 客户（services=' + svc + '），SEO 闸不适用，不起钥匙任务');
+    clientServices = String((profR.profile && profR.profile.services) || '').toLowerCase();
+    svcPaidOnly = (clientServices === 'paid' || clientServices === 'sem');
+    if (svcPaidOnly) log('paid-only 客户（services=' + clientServices + '），SEO 闸不适用，不起钥匙任务');
   } catch (e) { log('profile 读取失败（' + e.message + '），按非 paid-only 走闸'); }
   if (svcPaidOnly) {
     seoGateOk = true;
@@ -383,6 +384,62 @@ async function main() {
   } else {
     log('注意：--skip-gates 跳过词表与 mapping 确认闸，理由自负');
   }
+  /* SEM 入场闸（2026-10-19 批⑤首件，Alvin 定「没有 onboard 卡就不会有 plan」）：有搜索广告
+     泳道的客户（services=sem/paid/both）开投前必须有入场最小集三样 confirmed facts：预算
+     （ads.budget 前缀）、目标（ads.target 或 ads.goal 前缀）、转化口径（ads.conversion 或
+     ads.tracking 前缀），规格 specs/report/sem_onboard_card_spec.md。闸关时 paid 任务 held（钥匙与卡反馈落地豁免，镜像
+     SEO 闸），板上无钥匙时自动建 sem_onboard 产卡任务（镜像 SEO 闸材料缺失死锁修复）。
+     存量不补课（PLAN.md 批 0 原则）：板上已有 done 的 paid 任务视为在投历史，闸直接放行，
+     铁律仍以客户 CLAUDE.md 为准。--skip-gates 同样强制全过。 */
+  let semGateOk = true;
+  if (['sem', 'paid', 'both'].includes(clientServices) && !argv.includes('--skip-gates')) {
+    const allT = await tasks();
+    const paidHistory = allT.some((t) => String(t.module || '') === 'paid' && String(t.status) === 'done'
+      && !/sem-onboard-confirmation/.test(String(t.ops || '')));
+    if (paidHistory) {
+      log('SEM 入场闸：存量 paid 客户（板上有已完成 paid 任务），不补课直接放行');
+    } else {
+      const fr2 = await call('GET', '/facts?client_id=' + cid);
+      const cf2 = (fr2.facts || []).filter((f) => String(f.status || '') === 'confirmed');
+      const NEG2 = /(未定|待定|未确认|尚未|缺|没有|not set|tbd)/i;
+      const hasFact = (re) => cf2.some((f) => re.test(String(f.fact_key)) && !NEG2.test(String(f.value)));
+      const okBudget = hasFact(/^ads\.budget/);
+      const okTarget = hasFact(/^ads\.(target|goal)/);
+      const okConv = hasFact(/^ads\.(conversion|tracking)/);
+      semGateOk = okBudget && okTarget && okConv;
+      if (!semGateOk) {
+        log('SEM 入场闸未过：' + (okBudget ? '' : '预算未确认（缺 ads.budget* confirmed）；')
+          + (okTarget ? '' : '目标未确认（缺 ads.target*/goal* confirmed）；')
+          + (okConv ? '' : '转化口径未确认（缺 ads.conversion*/tracking* confirmed）；')
+          + 'paid 任务本轮 held（流程：入场卡→客户确认→SEM plan→开投）。');
+        const hasSemKey = allT.some((t) => {
+          if (['killed', 'blocked'].includes(String(t.status))) return false;
+          if (/\[卡反馈折叠/.test(String(t.result_note || ''))) return false;
+          return /sem_onboard/.test(String(t.card_kind || '')) || /sem-onboard-confirmation/.test(String(t.ops || ''));
+        });
+        if (!hasSemKey && !DRY) {
+          const detail = [
+            '本客户有搜索广告泳道但入场最小集三样未确认（预算、目标、转化口径），板上没有 sem_onboard 入场卡或产卡任务（闸材料缺失死锁，harness 自动建单）。',
+            '你的产出是 SEM 入场确认卡的 card_data v1 数据块（规格 SEM-ONBOARD-CARD-V1 与契约由产线注入 prompt，回复末尾输出 ```card_data 围栏块），不手写 HTML；渲染、发布与 Ask 登记由产线自动完成。',
+            '起草前先做账户考古：读客户工作区 notes/ 下的 ads_account_archaeology 类材料当建议值依据；材料缺失按规格「考古材料缺失」条款处理，保守起步并点名缺口，不编数据。',
+            '追踪红线：转化口径题的现状必须实测（GA4 与广告账户转化事件近况），追踪不可用时建议一律是「先修统计再开投」。',
+            '本卡没有静默补 fact 路径：入场信息是客户独有的，必须客户亲答。产出停 review 等人放行，不自动生效。',
+          ].join('\n');
+          const r = await call('POST', '/tasks', {
+            client_id: cid, title: 'SEM onboard 闸材料：搜索广告入场确认卡起草与产出',
+            detail, module: 'paid', owner_type: 'agent', priority: 'P1',
+            ops: 'sem-onboard-confirmation',
+            sprint: /^S\d/.test(String(sprintEarly || '')) ? sprintEarly : '',
+          });
+          log('SEM 闸材料缺失：已建入场产卡任务 #' + r.id + '（判定已排 job ' + (r.review_job_id || '?') + '），下轮拍板执行');
+        } else if (!hasSemKey && DRY) {
+          log('[dry] SEM 闸材料缺失：将建 sem_onboard 入场产卡任务');
+        }
+      } else {
+        log('SEM 入场闸通过：预算、目标、转化口径三样已确认');
+      }
+    }
+  }
   /* 「本期」口径（2026-09-24 Alvin 拍板，取代 2026-09-17「未结任务最小期」）：
      日历本期 + 过期未结（欠账）。旧口径把指针钉在最老欠账上，一单人工尾巴锁死整期，
      后面的机器活全在下一期干等（sungait S1 #616 实证：跑五六轮清不完）。新口径：
@@ -428,12 +485,21 @@ async function main() {
     if (!seoGateOk && String(t.module || '') !== 'paid'
       && !/keyword-confirmation|mapping-confirmation/.test(String(t.ops || ''))
       && !/卡反馈落地|onboard 闸材料/.test(String(t.title || ''))) return false; // SEO 任务被 SEO 闸 held
+    if (!semGateOk && String(t.module || '') === 'paid'
+      && !/sem-onboard-confirmation/.test(String(t.ops || ''))
+      && !/卡反馈落地|onboard 闸材料/.test(String(t.title || ''))) return false; // paid 任务被 SEM 入场闸 held
     return true;
   };
   if (!seoGateOk && !IDS) {
     const held = (await tasks()).filter((t) => inSprintScope(t) && String(t.module || '') !== 'paid'
       && ['proposed', 'approved', 'blocked'].includes(t.status)).length;
     if (held) log('SEO 闸未过，本期 ' + held + ' 个 SEO 任务 held，仅推进 paid 卡');
+  }
+  if (!semGateOk && !IDS) {
+    const heldPaid = (await tasks()).filter((t) => inSprintScope(t) && String(t.module || '') === 'paid'
+      && ['proposed', 'approved', 'blocked'].includes(t.status)
+      && !/sem-onboard-confirmation/.test(String(t.ops || ''))).length;
+    if (heldPaid) log('SEM 入场闸未过，本期 ' + heldPaid + ' 个 paid 任务 held，入场卡照常推进');
   }
   {
     const heldPlan = (await tasks()).filter((t) => (IDS ? IDS.includes(t.id) : inSprintScope(t))

@@ -221,11 +221,16 @@ function confirmationCardKind(task) {
     （SOP_FILE 同款），不让 agent 去读部署机的绝对路径。 */
 function cardDataContract(cardKind) {
   const dir = path.join(__dirname, '..', 'specs', 'report');
+  /* service 与规格文件按注册表走（sem_onboard 起），不写死 seo：注册表读不到按 seo + 通用确认卡规格兜底 */
+  let reg = null;
+  try { reg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'specs', 'card_kinds.json'), 'utf8')).kinds[cardKind]; } catch (e) { reg = null; }
+  const svc = (reg && (reg.service === 'seo' || reg.service === 'sem')) ? reg.service : 'seo';
+  const specFile = (reg && /^[a-z0-9_]+\.md$/.test(String(reg.spec || ''))) ? reg.spec : 'confirmation_card_spec.md';
   let spec = '';
   let schema = '';
-  try { spec = fs.readFileSync(path.join(dir, 'confirmation_card_spec.md'), 'utf8'); } catch (e) { /* 缺规格下面一行会暴露 */ }
+  try { spec = fs.readFileSync(path.join(dir, specFile), 'utf8'); } catch (e) { /* 缺规格下面一行会暴露 */ }
   try { schema = fs.readFileSync(path.join(dir, 'card_data_v1.schema.json'), 'utf8'); } catch (e) { /* 同上 */ }
-  if (!spec || !schema) throw new Error('确认卡规格或 schema 缺失（specs/report/），确认卡任务拒绝执行');
+  if (!spec || !schema) throw new Error('确认卡规格或 schema 缺失（specs/report/' + specFile + '），确认卡任务拒绝执行');
   const ym = new Date().toISOString().slice(0, 7);
   return [
     '',
@@ -236,12 +241,12 @@ function cardDataContract(cardKind) {
     '{ ...card_data v1 JSON... }',
     '```',
     '硬性字段：schema 写 "card_data/v1"；card_kind 写 "' + cardKind + '"；kind 写 "confirmation"；',
-    'service 写 "seo"；cycle 写 "onboard"；lang 写 "zh"；issued 写 "' + ym + '"；default_policy 写 "none"；',
+    'service 写 "' + svc + '"；cycle 写 "onboard"；lang 写 "zh"；issued 写 "' + ym + '"；default_policy 写 "none"；',
     'deadline 写 YYYY-MM-DD（建议今天加 10 天，客户在新西兰）。',
     'items、选项码、blocks 的约定按下面的规格与 schema 来，不合规渲染器会拒绝整卡。',
     '裁定走静默补 fact 路径时不要输出 card_data 块。',
     '',
-    '===== 确认卡规格（confirmation_card_spec.md）=====',
+    '===== 确认卡规格（' + specFile + '）=====',
     spec,
     '===== card_data v1 JSON Schema（card_data_v1.schema.json）=====',
     schema,
