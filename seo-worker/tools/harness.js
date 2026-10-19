@@ -411,15 +411,18 @@ async function main() {
       const fr2 = await call('GET', '/facts?client_id=' + cid);
       const cf2 = (fr2.facts || []).filter((f) => String(f.status || '') === 'confirmed');
       const NEG2 = /(未定|待定|未确认|尚未|缺|没有|not set|tbd)/i;
+      /* 只认规格定义的三个决定型键（sem_onboard_card_spec 的 fold 键，允许带日期后缀变体）。
+         宽前缀会被记录型 fact 骗过：55 实证 ads.conversion_actions（账户配置记录）喂过了
+         ads.conversion 前缀——和 SEO 闸 2026-09-17 lock_state 同族坑，决定与记录必须分键。 */
       const hasFact = (re) => cf2.some((f) => re.test(String(f.fact_key)) && !NEG2.test(String(f.value)));
-      const okBudget = hasFact(/^ads\.budget/);
-      const okTarget = hasFact(/^ads\.(target|goal)/);
-      const okConv = hasFact(/^ads\.(conversion|tracking)/);
+      const okBudget = hasFact(/^ads\.budget_monthly/);
+      const okTarget = hasFact(/^ads\.target_goal/);
+      const okConv = hasFact(/^ads\.conversion_basis/);
       semGateOk = okBudget && okTarget && okConv;
       if (!semGateOk) {
-        log('SEM 入场闸未过：' + (okBudget ? '' : '预算未确认（缺 ads.budget* confirmed）；')
-          + (okTarget ? '' : '目标未确认（缺 ads.target*/goal* confirmed）；')
-          + (okConv ? '' : '转化口径未确认（缺 ads.conversion*/tracking* confirmed）；')
+        log('SEM 入场闸未过：' + (okBudget ? '' : '预算未确认（缺 ads.budget_monthly confirmed）；')
+          + (okTarget ? '' : '目标未确认（缺 ads.target_goal confirmed）；')
+          + (okConv ? '' : '转化口径未确认（缺 ads.conversion_basis confirmed）；')
           + 'paid 任务本轮 held（流程：入场卡→客户确认→SEM plan→开投）。');
         const hasSemKey = allT.some((t) => {
           if (['killed', 'blocked'].includes(String(t.status))) return false;
