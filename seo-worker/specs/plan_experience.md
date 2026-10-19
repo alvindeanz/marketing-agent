@@ -62,3 +62,4 @@ review_principles.md 管「单个任务该不该做」，这份管「整份方�
 - [plan#67 v6] 方案被打回：网站近期做了大量的更新，对比3个月前的冷启动，现在已经有了更广泛，更加有快赢机会的关键词在站内，具体的内容需要参照 https://webforger.ai/apps/ https://webforger.ai/ https://webforger.ai/pricing/ 这三个页面来重新onboard的方式规划seo
 - [plan#65 v4] 方案被打回：方案重排为 v5：只保留 SEO 任务线并补 SEOForger/SemForger 订阅页任务，paid 止血任务移出方案单独走 SEM 确认卡逐条批准；S6 lead 指标按现实点击量重设；清扫任务缩为 /about/ 与 /features/ 残留核对；/best-ai-website-builder/ 与 /wix-vs-wordpress/ 两个高曝光页提前进 S2；lead 口径统一为
 - [plan#63 v2] 方案被打回：方案 v2 已被 v4 重排取代，按 v4 推进
+- [task#1519 ] fable 判 do（客户8项全同意，测试提交不过不花钱，前提已按实测修正），人改 drop：入场卡 agree 的实施不走跟进任务：决定 facts 已折叠直落（5430168），实施一律经 SEM plan 批准后执行。本任务两次被常设 do 判决复活推进 execute/apply（job 8086/8088 已人工终止，change plan 已隔离），人工推翻收口。材料价值保留：task-1519 交付文档与 change-plan 草稿作 SEM plan 输入。

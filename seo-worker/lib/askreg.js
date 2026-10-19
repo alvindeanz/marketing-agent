@@ -288,6 +288,9 @@ function buildAsk(opts) {
 function buildPlanApprovalAsk(opts) {
   const planId = Number(opts.planId);
   const summary = String(opts.summary || '').slice(0, 1500);
+  /* 泳道标识（2026-10-19 plans service 上线后）：审批卡标题带 SEO/SEM，客户看得出批的是哪条线。
+     只收 sem，其余一律按 seo，与服务端 IFNULL 兜底同口径。 */
+  const lane = String(opts.service || '').trim().toLowerCase() === 'sem' ? 'SEM' : 'SEO';
   return {
     ask_id: 'ask_plan_approval_' + planId,
     client_id: Number(opts.clientId),
@@ -309,7 +312,7 @@ function buildPlanApprovalAsk(opts) {
       operator: 'zh',
       texts: {
         zh: {
-          title: '方案 v' + opts.version + ' 审批（plan #' + planId + '）',
+          title: lane + ' 方案 v' + opts.version + ' 审批（plan #' + planId + '）',
           intro: summary,
           default_note: '审批类不自动放行，批准或驳回之前方案保持待批',
           items: {

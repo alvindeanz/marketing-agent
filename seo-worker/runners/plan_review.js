@@ -326,6 +326,7 @@ async function runWith(ctx, judge) {
         clientId: job.client_id,
         planId: res.plan_id,
         version: (res && res.version) || version,
+        service: laneOf(plan),
         summary: card,
         log,
       });
