@@ -389,15 +389,24 @@ async function main() {
      （ads.budget 前缀）、目标（ads.target 或 ads.goal 前缀）、转化口径（ads.conversion 或
      ads.tracking 前缀），规格 specs/report/sem_onboard_card_spec.md。闸关时 paid 任务 held（钥匙与卡反馈落地豁免，镜像
      SEO 闸），板上无钥匙时自动建 sem_onboard 产卡任务（镜像 SEO 闸材料缺失死锁修复）。
-     存量不补课（PLAN.md 批 0 原则）：板上已有 done 的 paid 任务视为在投历史，闸直接放行，
+     存量不补课（PLAN.md 批 0 原则）：豁免看「active plan 下有 paid 任务」或「交付过 paid 方向卡」，
+     即正在按现役方案跑 paid 或已有方向卡节奏的客户；历史 done 的 paid 杂活不算（55 实证误伤：
+     板上 6 条旧 paid 修正任务触发豁免，产卡任务没建——闸的目的是喂 SEM plan，不是考古杂活史）。
      铁律仍以客户 CLAUDE.md 为准。--skip-gates 同样强制全过。 */
   let semGateOk = true;
   if (['sem', 'paid', 'both'].includes(clientServices) && !argv.includes('--skip-gates')) {
     const allT = await tasks();
-    const paidHistory = allT.some((t) => String(t.module || '') === 'paid' && String(t.status) === 'done'
-      && !/sem-onboard-confirmation/.test(String(t.ops || '')));
+    if (!PLAN_STATUS) { try { await loadPlanStatus(); } catch (e) { PLAN_STATUS = {}; log('SEM 闸：/plans 拉取失败（' + e.message + '），豁免只看方向卡史'); } }
+    const paidHistory = allT.some((t) => {
+      if (String(t.module || '') !== 'paid') return false;
+      if (/sem-onboard-confirmation/.test(String(t.ops || ''))) return false;
+      const underActivePlan = planPid(t) > 0 && PLAN_STATUS && PLAN_STATUS[planPid(t)] === 'active';
+      const directionDone = String(t.status) === 'done'
+        && (/keyword-direction|creative-direction/.test(String(t.ops || '')) || /direction/.test(String(t.card_kind || '')));
+      return underActivePlan || directionDone;
+    });
     if (paidHistory) {
-      log('SEM 入场闸：存量 paid 客户（板上有已完成 paid 任务），不补课直接放行');
+      log('SEM 入场闸：存量 paid 客户（active plan 含 paid 任务或有方向卡交付史），不补课直接放行');
     } else {
       const fr2 = await call('GET', '/facts?client_id=' + cid);
       const cf2 = (fr2.facts || []).filter((f) => String(f.status || '') === 'confirmed');

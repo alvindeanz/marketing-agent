@@ -6107,15 +6107,18 @@ function asks_project($ask,$fold,$profileLang,$nowUtc,$offset,$updatedUtc){
             'last_note'=>$f['notes']?asks_answer_view(end($f['notes']),$offset):null];
     }
     $svc=$ask['service']??null;
-    /* 卡内内容块（2026-10-19）：登记时已校验，这里再过一遍白名单重建（存量行与手工回填同样受控），坏块整段不出。 */
-    list($blocks,$berr)=asks_blocks_norm($tx['blocks']??[]);
-    if($berr)$blocks=[];
-    return ['ask_id'=>(string)$ask['ask_id'],'kind'=>(string)$ask['kind'],'audience'=>(string)$ask['audience'],
+    /* 卡内内容块（2026-10-19）：登记时已严格校验，这里宽松重建（存量行与手工回填兜底）：
+       坏块单块降级记名，不再整卡清空（Aiden 2026-10-19 指出的静默风险）。 */
+    list($blocks,$bdrop)=asks_blocks_lenient($tx['blocks']??[]);
+    $ret=['ask_id'=>(string)$ask['ask_id'],'kind'=>(string)$ask['kind'],'audience'=>(string)$ask['audience'],
         'service'=>($svc===null||$svc==='')?null:(string)$svc,
         'rev'=>(int)$ask['rev'],
+        'schema_rev'=>ASKS_SCHEMA_REV,
         'state'=>asks_state((string)$ask['state'],$ask['deadline']??null,$nowUtc,$ask['items'],$fold),
         'deadline'=>asks_iso($ask['deadline']??null),'default_policy'=>(string)$ask['default_policy'],
         'lang'=>$lang,'text'=>$text,'blocks'=>$blocks,'items'=>$items,'created_at'=>asks_iso($ask['created_at']??null),'updated_at'=>asks_iso($updatedUtc)];
+    if($bdrop)$ret['blocks_dropped']=$bdrop;
+    return $ret;
 }
 
 /* 内容块规整（2026-10-19 card_data v1 blocks 出口）：只收 para / list / table / kv 四种，字段全是纯文本，
@@ -6187,11 +6190,36 @@ function asks_blocks_norm($in){
     return [$out,null];
 }
 
+/* 投影端宽松版（2026-10-19 Aiden 指出：asks_project 原来一个坏块整卡 blocks 静默清空，WF 收不到
+   任何降级信号）。坏块逐个跳过并记名，好块照出；登记端仍走上面的严格版整包拒，两端分工不变。
+   返回 [blocks, dropped]，dropped 是 ["<块id或#序号>: 原因", ...]，投影里以 blocks_dropped 出，
+   WF 按 fallback 记日志。 */
+define('ASKS_SCHEMA_REV',1);
+function asks_blocks_lenient($in){
+    if($in===null||$in===[])return [[],[]];
+    if(!is_array($in))return [[],['blocks: not an array']];
+    $out=[];$dropped=[];$seen=[];
+    foreach(array_values($in) as $k=>$b){
+        list($one,$err)=asks_blocks_norm([$b]);
+        if($err||!is_array($one)||!isset($one[0])){
+            $id=(is_array($b)&&is_string($b['id']??null)&&$b['id']!=='')?$b['id']:('#'.$k);
+            $dropped[]=$id.': '.($err?:'bad block');
+            continue;
+        }
+        $blk=$one[0];
+        if(isset($seen[$blk['id']])){$dropped[]=$blk['id'].': duplicate id';continue;}
+        $seen[$blk['id']]=true;
+        $out[]=$blk;
+    }
+    return [$out,$dropped];
+}
+
 /* 卡类注册表（2026-10-19）：card_kinds.json 是 card_kind 的唯一登记处，card_kind_of 与 worker askreg 读同一份。
    asks_card_kind_op_map_from 把注册表解成 op => card_kind；表坏或缺回 null，由调用方退回内置表。 */
 function asks_card_kind_fallback(){
     return ['keyword-direction'=>'keyword_direction','creative-direction'=>'creative_direction',
-            'keyword-confirmation'=>'keyword_confirmation','mapping-confirmation'=>'mapping_confirmation'];
+            'keyword-confirmation'=>'keyword_confirmation','mapping-confirmation'=>'mapping_confirmation',
+            'sem-onboard-confirmation'=>'sem_onboard'];
 }
 function asks_card_kind_op_map_from($reg){
     if(!is_array($reg)||!is_array($reg['kinds']??null)||!$reg['kinds'])return null;

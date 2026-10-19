@@ -34,7 +34,7 @@ SEO 的 plan 八成输入可自采，所以 plan 先出词表卡后把关；SEM 
 | `promo_state` | single | 当前促销活动现状与季节排期（ads.creative.promo_state） |
 | `global_note` | text | 整卡自由留言（浮动控件，必配） |
 
-single 一律三态 agree/hold/other（other 必附文字，渲染器缺省已含）；hard_rules 的 multi 选项码按 card_data_v1.md 规则，每条铁律一个码，铁律原文进 label。可按客户情况省题：没有促销的客户 promo_state 可并入 global_note 提示，但 budget_monthly、target_goal、conversion_basis 三题是最小集，不许省，SEM plan 闸只认这三样的 confirmed facts。
+single 一律三态 agree/hold/other（other 必附文字，渲染器缺省已含）；hard_rules 的 multi 选项码按 card_data_v1.md 规则，每条铁律一个码，铁律原文进 label，**且固定以 `none` 码收尾（label「以上都不适用，我们没有这类限制」）**：这题必答且空勾选两端都拒收，没有 none 码时客户若觉得起草铁律无一适用将无法作答，整卡卡死到过期（2026-10-19 Aiden 指出）。勾了 none 又勾其他码按其他码算，fold 落账时 none 单独出现落 ads.rules = 无客户限制。可按客户情况省题：没有促销的客户 promo_state 可并入 global_note 提示，但 budget_monthly、target_goal、conversion_basis 三题是最小集，不许省，SEM plan 闸只认这三样的 confirmed facts。
 
 ## 内容要求
 

@@ -204,7 +204,7 @@ section('投影与白名单 asks_project');
 t('只出白名单键，source_ref、task/plan 编号、卡指纹、operator 中文版都不出',function()use($ASK,$FX){
     $ask=$ASK+['state'=>'open','created_at'=>'2026-10-14 21:30:00'];$ask['lang_pack']=$ASK['lang_pack'];
     $p=asks_project($ask,asks_fold_effective($FX['rows']),'en','2026-10-16 03:00:00',46800,'2026-10-15 08:12:05');
-    eq(array_keys($p),['ask_id','kind','audience','service','rev','state','deadline','default_policy','lang','text','blocks','items','created_at','updated_at'],'顶层键（2026-10-19 加 blocks）');
+    eq(array_keys($p),['ask_id','kind','audience','service','rev','schema_rev','state','deadline','default_policy','lang','text','blocks','items','created_at','updated_at'],'顶层键（2026-10-19 加 blocks 与 schema_rev；blocks_dropped 只在有坏块时出现）');
     eq(array_keys($p['items'][0]),['item_id','type','required','requires_text_when','prompt','situation','recommendation','hint','options','block_refs','effective_answer','last_note'],'item 键（2026-10-19 加 block_refs）');
     $js=json_encode($p,JSON_UNESCAPED_UNICODE);
     foreach(['source_ref','task_id','plan_id','1413','sha256:','card_token','output_url','内部中文','关键词方向','actor','idempotency','wfu_'] as $bad)
@@ -490,6 +490,17 @@ t('坏块整段拒：HTML 标签、行宽不等、超列、未知类型、重复
     $x=$BLK;$x[3]['id']='b_groups';is_true(strpos(asks_blocks_norm($x)[1],'duplicate')!==false,'重复 id');
     $x=$BLK;$x[3]['id']='groups';is_true(strpos(asks_blocks_norm($x)[1],'bad id')!==false,'坏 id');
 });
+t('投影宽松版：坏块单块降级记名，好块照出，不整卡清空（2026-10-19 Aiden）',function()use($BLK){
+    $x=$BLK;$x[1]['text']='坏块：含 <x> 标签';
+    list($b,$d)=asks_blocks_lenient($x);
+    eq(count($b),3,'好块照出');eq(count($d),1,'坏块记名');
+    is_true(strpos($d[0],'b_note')===0,'降级名单带块 id');
+    eq($b[0]['id'],'b_groups','顺序保持');
+    $x=$BLK;$x[3]['id']='b_groups';
+    list($b2,$d2)=asks_blocks_lenient($x);
+    eq(count($b2),3,'重复 id 后者降级');is_true(strpos($d2[0],'duplicate')!==false,'重复记因');
+    eq(asks_blocks_lenient(null),[[],[]],'null 即空且零降级');
+});
 t('登记：block_refs 落 items，块进 lang_pack 规整，引用不存在的块整包拒',function()use($REG,$BLK){
     $x=$REG;$x['items'][0]['block_refs']=['b_groups'];$x['lang_pack']['texts']['en']['blocks']=$BLK;
     list($r,$e)=asks_norm_register($x);
@@ -511,7 +522,10 @@ t('投影：blocks 按对外语言出，item 带 block_refs；存量行无块回
     $p0=asks_project($ASK+['state'=>'open'],[],'en','2026-10-16 03:00:00',46800,null);
     eq($p0['blocks'],[],'存量无块');eq($p0['items'][0]['block_refs'],[],'存量无引用');
     $bad=$ask;$bad['lang_pack']['texts']['en']['blocks'][0]['type']='chart';
-    eq(asks_project($bad,[],'en','2026-10-16 03:00:00',46800,null)['blocks'],[],'库里坏块整段不出');
+    $pb=asks_project($bad,[],'en','2026-10-16 03:00:00',46800,null);
+    eq(count($pb['blocks']),3,'库里坏块单块降级，其余照出（2026-10-19 改，原为整段清空）');
+    is_true(strpos($pb['blocks_dropped'][0],'b_groups')===0,'降级名单带块 id');
+    eq($p0['schema_rev']??null,1,'投影带 schema_rev');
 });
 t('解码表：item => code => label，按对外语言取，缺 label 回 null',function()use($REG){
     $x=$REG;$x['lang_pack']['texts']['en']['items']['negatives']=['options'=>['kw_12'=>'free website builder','kw_31'=>'wordpress hosting']];
