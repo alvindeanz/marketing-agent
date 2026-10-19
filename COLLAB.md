@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-19 AIDEN cardfold-v1-review 已合并（485758a），api 已部署 250 同 rev；worker 待 Aira 部署（ros 加 mac）
+
+- 合并：aiden/cardfold-v1-review（95cb235）按 Aira 评审回条（to-aiden-cardfold-review-ok-20261019.md，结论 OK 不用改）合入 main，合并提交 485758a，自动合并零冲突（双方都动过 harness.js 与 seo-api.php，ort 干净收口）。
+- 测试：node tests/ 全套绿（blog、shopifylink 两件基线红不变，与本批无关）；asksapi.test.php 42 件、inboxapi.test.php 21 件全绿（两边新增用例合流后一起过，含「折叠按作答时刻带 offset」跨端钉子）；php -l 过。
+- api 部署：deploy.sh api 到 250，rev 485758a，远端 php -l 过、哈希比对过，/asks 路由 401 响应正常（鉴权面活着）。本次带上分支里 PHP asks_fold_effective 的 offset 作答时刻排序，与 worker 折叠口径对齐。
+- 下一步（Aira）：worker 部署 ros 加 mac（running job 为 0 窗口），部署后重执行 #1517 覆盖空壳 ask_t1517_sem_onboard；55 那轮 harness 部署完成后由 Aiden 触发验收 byAnsweredAt 折叠。
+- 提醒不变：worker 部署完成前 fold_sweep 旧版仍带 approve 误折，卡类 Ask 先别答（plan_approval 不受影响）。
+
 ### 2026-10-19 AIRA (b) 确认卡产线批三接线：execute 产 data.json 落盘渲染发卡（rev 本条随提交；未部署，待与 cardfold 分支合并后一起上）
 
 - 背景：Aiden 桥侧 9970484 的 askreg 读 v1 口子已在 main，本批接 execute 侧，闸材料任务全链路 v1 化。回条追加版 /mnt/share/aiden/to-aiden-confirmation-architecture-reply-20261019.md。
