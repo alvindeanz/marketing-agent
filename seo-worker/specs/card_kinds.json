@@ -1,12 +1,24 @@
 {
-  "_doc": "卡类注册表（2026-10-19 Aiden，确认卡架构 v1 桥侧）。card_kind 的唯一登记处：seo-api.php card_kind_of（ops 到 card_kind）与 seo-worker/lib/askreg.js（service/kind/default_policy 兜底）读同一份。新增卡类只改这里：加一条，ops 写会出这张卡的 op 名；ops 为空表示该卡不由任务 ops 推导（博客确认卡、落地页确认卡由产线代码直接出卡，card_kind 列不落值）。spec 字段（可选）指 specs/report/ 下该卡类的规格文件，产线契约注入用，缺省 confirmation_card_spec.md；读注册表的其他端（card_kind_of、askreg）忽略此键。card_kind_of 的命中规则：任务 ops 按出现顺序逐个查，首个命中即返回，与 2026-10-19 前的手工映射行为一致。部署：deploy.sh api 随 seo-api.php 同传 250；worker 随 specs/ 白名单同步。",
+  "_doc": "卡类注册表（2026-10-19 Aiden，确认卡架构 v1 桥侧）。card_kind 的唯一登记处：seo-api.php card_kind_of（ops 到 card_kind）与 seo-worker/lib/askreg.js（service/kind/default_policy 兜底）读同一份。新增卡类只改这里：加一条，ops 写会出这张卡的 op 名；ops 为空表示该卡不由任务 ops 推导（博客确认卡、落地页确认卡由产线代码直接出卡，card_kind 列不落值）。spec 字段（可选）指 specs/report/ 下该卡类的规格文件，产线契约注入用，缺省 confirmation_card_spec.md；读注册表的其他端（card_kind_of、askreg）忽略此键。fold_facts 字段（可选，2026-10-19 批⑤二件）：{ item_id: fact 键或键数组 }，折叠端（harness foldCards 经 lib/cardfold specFactsFromFold）据此把 agree 与 multi 勾选零模型直落成 confirmed facts，不再经跟进任务的 agent 落账；hold 不落，other/驳回走 texts/attention 留人；带 fold_facts 的卡只在有 texts 时建跟进任务且不带实施性 ops。card_kind_of 的命中规则：任务 ops 按出现顺序逐个查，首个命中即返回，与 2026-10-19 前的手工映射行为一致。部署：deploy.sh api 随 seo-api.php 同传 250；worker 随 specs/ 白名单同步。",
   "version": 1,
   "kinds": {
     "keyword_direction": { "ops": ["keyword-direction"], "service": "sem", "kind": "direction" },
     "creative_direction": { "ops": ["creative-direction"], "service": "sem", "kind": "direction" },
     "keyword_confirmation": { "ops": ["keyword-confirmation"], "service": "seo", "kind": "confirmation" },
     "mapping_confirmation": { "ops": ["mapping-confirmation"], "service": "seo", "kind": "confirmation" },
-    "sem_onboard": { "ops": ["sem-onboard-confirmation"], "service": "sem", "kind": "confirmation", "spec": "sem_onboard_card_spec.md" },
+    "sem_onboard": {
+      "ops": ["sem-onboard-confirmation"], "service": "sem", "kind": "confirmation", "spec": "sem_onboard_card_spec.md",
+      "fold_facts": {
+        "budget_monthly": "ads.budget_monthly",
+        "target_goal": "ads.target_goal",
+        "conversion_basis": "ads.conversion_basis",
+        "landing_scope": "ads.landing_scope",
+        "hard_rules": "ads.rules",
+        "creative_framework": "ads.creative.framework",
+        "brand_style": ["ads.creative.brand_style", "ads.creative.asset_sources"],
+        "promo_state": "ads.creative.promo_state"
+      }
+    },
     "blog_confirmation": { "ops": [], "service": "seo", "kind": "confirmation" },
     "onsite_confirm": { "ops": [], "service": "seo", "kind": "confirmation" }
   }

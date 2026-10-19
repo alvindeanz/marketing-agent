@@ -2,7 +2,7 @@
 /* 卡反馈折叠的纯逻辑单测。用例底稿是 Sammichelle #306 的真实反馈序列
    （2026-09-13：同项反复表态、测试提交、other 里埋新需求）。跑法：node tests/cardfold.test.js */
 const assert = require('assert');
-const { foldCardFeedback, summariseFold } = require('../seo-worker/lib/cardfold');
+const { foldCardFeedback, summariseFold, specFactsFromFold } = require('../seo-worker/lib/cardfold');
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -134,6 +134,61 @@ t('sent_at 早于附件时取 sent_at（人工提前标发仍有效）', () => {
 t('sent_at 与附件都没有的旧卡不起钟（#145 兜底）', () => {
   assert.strictEqual(cardClockAnchor({ sent_at: null, deliverables: [] }), null);
   assert.strictEqual(cardClockAnchor({}), null);
+});
+
+/* ---- 规格 fact 直落（批⑤二件，#1517/#1519 底稿）---- */
+
+const FM = {
+  budget_monthly: 'ads.budget_monthly',
+  hard_rules: 'ads.rules',
+  brand_style: ['ads.creative.brand_style', 'ads.creative.asset_sources'],
+};
+const CTX = { askId: 'ask_t1517_sem_onboard', rev: 1, itemTexts: { budget_monthly: { recommendation: '统计修好之前不放量，起步每月 NZ$900。' } }, cardUrl: 'https://x/card.html' };
+
+t('直落：agree 带卡上 recommendation 原文与 ask 署名', () => {
+  const f = foldCardFeedback([r('budget_monthly', 'agree')]);
+  const out = specFactsFromFold(f, FM, CTX);
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].fact_key, 'ads.budget_monthly');
+  assert.ok(out[0].value.includes('NZ$900'));
+  assert.ok(out[0].value.includes('ask_t1517_sem_onboard'));
+});
+
+t('直落：映射外的 item 不落，hold 不落', () => {
+  const f = foldCardFeedback([r('target_goal', 'agree'), r('budget_monthly', 'hold')]);
+  assert.strictEqual(specFactsFromFold(f, FM, CTX).length, 0);
+});
+
+t('直落：multi 勾选落词面，none 单独出现落无客户限制', () => {
+  const dec = { hard_rules: { no_free: '广告不说 free', none: '以上都不适用' } };
+  const f1 = foldCardFeedback([r('hard_rules', 'flag', 'no_free')], { decode: dec });
+  const o1 = specFactsFromFold(f1, FM, CTX);
+  assert.strictEqual(o1[0].fact_key, 'ads.rules');
+  assert.ok(o1[0].value.includes('广告不说 free'));
+  const f2 = foldCardFeedback([r('hard_rules', 'flag', 'none')], { decode: dec });
+  assert.ok(specFactsFromFold(f2, FM, CTX)[0].value.includes('无客户限制'));
+  const f3 = foldCardFeedback([r('hard_rules', 'flag', 'none,no_free')], { decode: dec });
+  assert.ok(!specFactsFromFold(f3, FM, CTX)[0].value.includes('无客户限制'));
+});
+
+t('直落：一个 item 映射多键时每键各落一条同值', () => {
+  const f = foldCardFeedback([r('brand_style', 'agree')]);
+  const out = specFactsFromFold(f, FM, CTX);
+  assert.deepStrictEqual(out.map((x) => x.fact_key), ['ads.creative.brand_style', 'ads.creative.asset_sources']);
+  assert.strictEqual(out[0].value, out[1].value);
+});
+
+t('直落：无 recommendation 时回退指卡链接，不编内容', () => {
+  const f = foldCardFeedback([r('brand_style', 'agree')]);
+  const out = specFactsFromFold(f, FM, { ...CTX, itemTexts: {} });
+  assert.ok(out[0].value.includes('https://x/card.html'));
+  assert.ok(out[0].value.includes('brand_style'));
+});
+
+t('直落：没有映射表或空折叠回空数组', () => {
+  const f = foldCardFeedback([r('budget_monthly', 'agree')]);
+  assert.deepStrictEqual(specFactsFromFold(f, null, CTX), []);
+  assert.deepStrictEqual(specFactsFromFold(foldCardFeedback([]), FM, CTX), []);
 });
 
 console.log(pass + ' pass, ' + fail + ' fail');

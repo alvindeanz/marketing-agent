@@ -77,6 +77,43 @@ function foldCardFeedback(rows, opts) {
   };
 }
 
+/* 规格 fact 直落（2026-10-19 批⑤二件）：确认卡的决定 facts 由折叠处零模型直写，
+   不再指望跟进任务里的 agent 落账（#1519 把「落账」做成带 campaign-create 的实施越界，
+   见 DEFECTS 2026-10-19）。只折 agree 与 multi 勾选：hold 不落（对应闸该关就关），
+   other/驳回仍走 texts/attention 通道留人。
+   factMap 来自 specs/card_kinds.json 该卡类的 fold_facts：{ item_id: fact 键或键数组 }。
+   ctx: { askId, rev, itemTexts, cardUrl }，itemTexts 是 lang_pack texts 主语言的 items 表，
+   agree 的 fact 值带卡上 recommendation 原文（客户同意的就是这段话）。
+   multi 的 none 码单独出现按规格落「无客户限制」；none 混其他码按其他码算（调用方 decode 后
+   fb 已是词面，codes 留原码供判断）。 */
+function specFactsFromFold(f, factMap, ctx) {
+  if (!factMap || typeof factMap !== 'object') return [];
+  const c = ctx || {};
+  const itemTexts = c.itemTexts && typeof c.itemTexts === 'object' ? c.itemTexts : {};
+  const tag = [c.askId || '', c.rev ? 'rev ' + c.rev : ''].filter(Boolean).join(' ');
+  const suffix = tag ? '（卡 ' + tag + ' 客户作答）' : '（卡上客户作答）';
+  const out = [];
+  for (const a of (f && f.agreed) || []) {
+    const keys = factMap[a.item];
+    if (!keys) continue;
+    const list = Array.isArray(keys) ? keys : [keys];
+    let value;
+    if (a.choice === 'flag') {
+      const codes = (a.codes || []).filter((x) => x && x !== 'none');
+      value = codes.length
+        ? '客户勾选适用项' + suffix + '：' + (a.fb || codes.join(', '))
+        : '无客户限制' + suffix;
+    } else {
+      const rec = String((itemTexts[a.item] || {}).recommendation || '').trim();
+      value = rec
+        ? '客户确认同意卡上建议' + suffix + '：' + rec
+        : '客户确认同意卡上建议' + suffix + '，建议原文见卡 ' + (c.cardUrl || '') + ' 的 ' + a.item + ' 项';
+    }
+    for (const k of list) out.push({ fact_key: k, value });
+  }
+  return out;
+}
+
 /* 折叠结果压成一段中文摘要，写 facts 和任务 note 用。 */
 function summariseFold(f) {
   const seg = [];
@@ -99,4 +136,4 @@ function cardClockAnchor(task) {
   return times[0];
 }
 
-module.exports = { foldCardFeedback, summariseFold, cardClockAnchor, decodeFlag };
+module.exports = { foldCardFeedback, summariseFold, cardClockAnchor, decodeFlag, specFactsFromFold };

@@ -20,7 +20,7 @@ SEO 的 plan 八成输入可自采，所以 plan 先出词表卡后把关；SEM 
 
 转化口径题的 situation 必须是 GA4 与 Ads 转化事件的**实测现状**（哪些事件在收数、最近有没有记录），不是转述配置。追踪不可用时卡照出，但该题的 recommendation 必须是「先修好统计再开投」，正文写明要修什么；此时预算题的建议值照常给，但注明以追踪修复为前提。
 
-## item 约定（按序；fold 落的 fact 键写在括号里，折叠跟进任务按此落账）
+## item 约定（按序；fold 落的 fact 键写在括号里，折叠端按 card_kinds.json 的 fold_facts 零模型直落，不经跟进任务）
 
 | item_id | 型 | 问什么（fact 键） |
 |---|---|---|
@@ -54,6 +54,6 @@ single 一律三态 agree/hold/other（other 必附文字，渲染器缺省已�
 
 ## 闭环规则
 
-- 全部 single 为 agree（multi 已保存即算答过）：折叠跟进任务按上表落 fact 键，放行链确认后 SEM plan 闸开。
+- 全部 single 为 agree（multi 已保存即算答过）：折叠处按上表直落 fact 键（零模型，harness foldCards 经 specFactsFromFold），SEM plan 闸即开；不建跟进任务（2026-10-19 改：原「跟进任务落账」路径被 agent 做成实施越界，废止）。有 other 文本才建跟进任务，且只处置文本不做实施。
 - 任何 hold / other：卡任务打 attention 留人跟进，不自动收口。
 - 存量 paid 客户不补课（PLAN.md 批 0 原则）：已有在投历史的客户不被本闸拦，铁律仍以客户 CLAUDE.md 为准，迁移成 fact 键随下一张素材卡顺带做。

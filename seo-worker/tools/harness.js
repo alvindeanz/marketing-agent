@@ -15,7 +15,30 @@
 
 const fs = require('fs');
 const path = require('path');
-const { foldCardFeedback, summariseFold, cardClockAnchor } = require('../lib/cardfold');
+const { foldCardFeedback, summariseFold, cardClockAnchor, specFactsFromFold } = require('../lib/cardfold');
+/* 卡类注册表（批⑤二件）：fold_facts 直落映射的唯一来源。读不到不挡折叠，只是退回无直落行为。 */
+const CARD_KINDS = (() => { try { return require('../specs/card_kinds.json').kinds || {}; } catch (e) { return {}; } })();
+function foldFactMap(card) {
+  const ck = String(card.card_kind || '');
+  if (ck && CARD_KINDS[ck] && CARD_KINDS[ck].fold_facts) return CARD_KINDS[ck].fold_facts;
+  const ops = String(card.ops || '');
+  for (const k of Object.keys(CARD_KINDS)) {
+    const e = CARD_KINDS[k];
+    if (e.fold_facts && Array.isArray(e.ops) && e.ops.some((o) => o && ops.indexOf(o) !== -1)) return e.fold_facts;
+  }
+  return null;
+}
+/* lang_pack 主语言的 items 表（agree 直落要引卡上 recommendation 原文）；形状异常一律回空表 */
+function askItemTexts(ask) {
+  try {
+    let lp = ask && ask.lang_pack;
+    if (typeof lp === 'string') lp = JSON.parse(lp);
+    if (!lp || typeof lp !== 'object') return {};
+    const texts = lp.texts || {};
+    const prim = lp.primary && texts[lp.primary] ? texts[lp.primary] : texts[Object.keys(texts)[0]];
+    return (prim && typeof prim.items === 'object' && prim.items) || {};
+  } catch (e) { return {}; }
+}
 const API = process.env.SEO_API_BASE || 'https://always.horntech-dev.com/seo-api.php';
 const TOKEN = process.env.SEO_AGENT_TOKEN || '';
 const TODO = process.env.MA_TODO || '/data/aira/projects/MA/memory/TODO.md';
@@ -93,7 +116,7 @@ async function cardLedger(card) {
     const list = ((await call('GET', '/asks?task_id=' + card.id)).asks || []).filter((a) => a.state !== 'void');
     if (list.length) {
       const d = await call('GET', '/asks/' + encodeURIComponent(list[list.length - 1].ask_id));
-      if (d && Array.isArray(d.rows)) return { rows: d.rows, decode: d.decode || null, viaAsk: true };
+      if (d && Array.isArray(d.rows)) return { rows: d.rows, decode: d.decode || null, viaAsk: true, ask: d.ask || null };
     }
   } catch (e) { /* 退回旧路径 */ }
   return { rows: (await call('GET', '/card_feedback?task_id=' + card.id)).rows || [], decode: null, viaAsk: false };
@@ -104,7 +127,7 @@ async function foldCards(sprint) {
   for (const card of all.filter((t) => t.card_feedback_at)) {
     /* 2026-10-19 card_data v1 桥侧：卡有 Ask 就从 GET /asks/{id} 取账本（两通道并集、带 at_utc）与持久解码表，
        勾选行还原词面、按作答时刻折叠；没有 Ask 或 api 未部署（路由 404）退回旧 /card_feedback，行为同前。 */
-    const { rows, decode, viaAsk } = await cardLedger(card);
+    const { rows, decode, viaAsk, ask } = await cardLedger(card);
     const f = foldCardFeedback(rows, { decode, byAnsweredAt: viaAsk });
     if (!f.hasAny) { if (!DRY) await call('PATCH', '/tasks/' + card.id, { card_feedback_done: 1 }); continue; }
     /* 有行但没有任何可折叠表态（全是空码一类）：不许写「无有效表态」收口，点名留人。 */
@@ -118,6 +141,22 @@ async function foldCards(sprint) {
     const summary = summariseFold(f) + (proxyBy.length ? '。含 agency 代确认（' + proxyBy.join('、') + '，渠道见卡反馈记录）' : '');
     log('#' + card.id + ' 卡反馈折叠：' + summary);
     if (DRY) continue;
+    /* 规格 fact 直落（批⑤二件，2026-10-19）：注册表带 fold_facts 的确认卡，决定 facts 在此
+       零模型写库（agree 带卡上 recommendation 原文，multi 勾选带词面，none 单独=无客户限制）。
+       hold 不落（闸该关就关）；other/驳回照旧走 texts/attention。之前指望跟进任务的 agent 落账，
+       #1519 把落账做成了带 campaign-create 的实施越界（DEFECTS 2026-10-19），此路废止。 */
+    const fm = foldFactMap(card);
+    let specFacts = [];
+    if (fm) {
+      specFacts = specFactsFromFold(f, fm, {
+        askId: viaAsk && ask ? ask.ask_id : '', rev: viaAsk && ask ? ask.rev : '',
+        itemTexts: viaAsk && ask ? askItemTexts(ask) : {}, cardUrl: card.output_url || '',
+      });
+      for (const sf of specFacts) {
+        await call('POST', '/facts', { client_id: cid, fact_key: sf.fact_key, value: sf.value, source: 'client', status: 'confirmed' });
+      }
+      if (specFacts.length) log('#' + card.id + ' 规格 fact 直落 ' + specFacts.length + ' 键：' + specFacts.map((x) => x.fact_key).join('、'));
+    }
     // 博客确认卡（publish_blog）不走泛方向卡折叠：agree 的凭证要留在 seo_card_feedback 表里，
     // 供博客任务 apply 时查（runBlogPublish 硬闸）。agree = 发布凭证 = 放行凭证（2026-09-17
     // Alvin 定，撤销 09-15「发布留人工前端」的旧否决）：这里直接 POST /tasks/release 排 apply，
@@ -184,9 +223,13 @@ async function foldCards(sprint) {
       continue;
     }
     let followId = null;
-    if (f.agreed.length || f.texts.length) {
+    /* fold_facts 直落的卡：agree 已成 facts，跟进任务只在有文本反馈时建（处置话，不做实施）。
+       没这张映射的旧卡行为不变。 */
+    if (fm ? f.texts.length > 0 : (f.agreed.length || f.texts.length)) {
       const lines = [];
-      if (f.agreed.length) {
+      if (fm) {
+        lines.push('本卡决定 facts 已由折叠直落（' + (specFacts.length ? specFacts.map((x) => x.fact_key).join('、') : '无 agree 项') + '）。本任务只处置下方客户文本反馈：是纠偏改写对应 fact，是新需求单独立项。不做任何投放实施，不得携带 ads 实施类 ops（campaign/ad/gtm/conversion 一类），实施一律走 SEM plan。');
+      } else if (f.agreed.length) {
         lines.push('客户已同意的项，按卡内建议落地（放行按 release_policy 分档，卡：' + (card.output_url || '#' + card.id) + '）：');
         for (const a of f.agreed) lines.push('- ' + a.item + (a.choice === 'flag' && a.fb ? '（勾选：' + a.fb.slice(0, 200) + '）' : ''));
       }
@@ -197,8 +240,9 @@ async function foldCards(sprint) {
       }
       lines.push('来源：方向卡 #' + card.id + ' 的客户反馈折叠，表态历史见该任务 note。');
       /* 客户表态即批文（2026-09-21 Alvin 批）：跟进任务带 [backing] 指向折叠 fact，
-         L0 定档时 external/structural 凭它直落，花钱/不可逆照停。 */
-      if (f.agreed.length) lines.push('[backing] cards.t' + card.id + '.outcome');
+         L0 定档时 external/structural 凭它直落，花钱/不可逆照停。
+         fold_facts 直落的卡不挂 backing：跟进只是处置文本，不许凭批文直落任何实施。 */
+      if (!fm && f.agreed.length) lines.push('[backing] cards.t' + card.id + '.outcome');
       const r = await call('POST', '/tasks', {
         client_id: cid,
         /* 链式折叠防叠词：跟进任务自己也可能带卡再被折叠（753 -> 759 就叠出过双前缀），先剥旧前缀再加 */
