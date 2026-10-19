@@ -299,6 +299,17 @@ function provenanceHeader(dossier) {
   return '<!-- plan generated with discover spec ' + spec + ', dossier date ' + date + ' -->';
 }
 
+/**
+ * POST /plans 的请求体。service 泳道（2026-10-19）：job.payload.service 透传，缺省不带，
+ * 服务端缺省落 seo；值由 POST /jobs 入口和 POST /plans 双重白名单校验。
+ */
+function planPostBody(job, body) {
+  const out = { client_id: job.client_id, body, authored_by: AUTHORED_BY };
+  const svc = job && job.payload && job.payload.service;
+  if (typeof svc === 'string' && svc.trim() !== '') out.service = svc.trim().toLowerCase();
+  return out;
+}
+
 /** Store the prose plan, then the tasks. Task failures never fail the job. */
 async function persist(ctx, text, dossier, capability, blogQuota) {
   const { job, api, log } = ctx;
@@ -311,11 +322,7 @@ async function persist(ctx, text, dossier, capability, blogQuota) {
 
   let plan;
   try {
-    plan = await api.postPlan({
-      client_id: job.client_id,
-      body,
-      authored_by: AUTHORED_BY,
-    });
+    plan = await api.postPlan(planPostBody(job, body));
   } catch (e) {
     // Nothing was persisted, so dump the whole plan into the job log before
     // failing. The work is expensive, it does not get thrown away.
@@ -539,6 +546,7 @@ async function run(ctx) {
 
 module.exports = {
   run,
+  planPostBody,
   buildPrompt,
   extractJsonBlock,
   validateTasks,

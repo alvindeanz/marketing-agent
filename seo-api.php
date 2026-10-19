@@ -1410,6 +1410,30 @@ function ensure_task_origin(){
     if(!$col)db()->exec("ALTER TABLE seo_tasks ADD COLUMN origin VARCHAR(40) NOT NULL DEFAULT 'sprint'");
 }
 
+/* seo_plans.service（2026-10-19 plans 泳道 supersede，Aira 条子 to-aiden-plans-lane-supersede-20261019.md）：
+   方案所属服务泳道 seo / sem，批准时只顶同客户同泳道的现役方案（见 PLAN-CORE）。VARCHAR(8) 加 PHP 白名单
+   （plan_service_norm），不用 ENUM，躲非严格模式静默截断坑，与 seo_tasks.origin 同套路。
+   ADD COLUMN 带 NOT NULL DEFAULT 'seo'，存量行在同一条 ALTER 里落 seo，无需另跑回填；读侧另按
+   IFNULL(NULLIF(service,''),'seo') 兜底，空值视同 seo 泳道。取值白名单与读侧口径在 PLAN-CORE 块的 plan_service_norm。
+   每请求在路由前调一次（$ROUTE 之后），保证 DDL 不落进任何事务（ALTER 会隐式提交）。
+   多 worker / 多请求并发首建：后到的 ALTER 撞 1060 重复列，吞掉后复查一次列在即可。 */
+function ensure_plan_service(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    try{
+        $col=db()->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_plans' AND COLUMN_NAME='service'")->fetch();
+        if($col)return;
+        db()->exec("ALTER TABLE seo_plans ADD COLUMN service VARCHAR(8) NOT NULL DEFAULT 'seo'");
+    }catch(Exception $e){
+        $col=db()->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_plans' AND COLUMN_NAME='service'")->fetch();
+        if(!$col)throw $e;
+    }
+}
+/* sprint 锚点取方案的排序：生效优先，同为生效时 seo 泳道优先，再取最新。SEM 方案批准后不许把
+   SEO 任务的半月档锚点挪走（55 的 plan 69 S1 在跑）。 */
+define('PLAN_ANCHOR_ORDER',"FIELD(status,'active') DESC,(IFNULL(NULLIF(service,''),'seo')='seo') DESC,id DESC");
+
 /* 批五 1（2026-10-10 Alvin 定「chat 产线完成了就该直接归档」）：chat 来源任务收口即归档。
    archived=1 不进任务视图、不进侧栏徽章、不进「已结束」计数，审计走 GET /tasks?include_archived=1。
    sprint 任务永不归档：排期账要留着对。列刚建时跑一次性迁移：
@@ -1478,7 +1502,7 @@ function archive_closed_chat_tasks($cid=null){
    非法的折算成客户当期标签（半月制指针），客户无锚折不出就空。写入口统一过这里：
    task_insert（单条）、tasks_bulk_insert（plan 批量）、PATCH /tasks/{id}（改期）。 */
 function client_current_sprint_label($cid){
-    $pq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC,id DESC LIMIT 1");
+    $pq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY ".PLAN_ANCHOR_ORDER." LIMIT 1");
     $pq->execute([(int)$cid]);
     $pr=$pq->fetch();
     $pq->closeCursor();
@@ -2271,6 +2295,8 @@ if($ROUTE==='')$ROUTE='/';
 /* BEGIN ASKS-API HOOK（2026-10-16 AIDEN）：集成 token 闸门，函数定义在 ASKS-API 围栏块（/card_feedback 三路由之后）。 */
 asks_svc_gate();
 /* END ASKS-API HOOK */
+/* plans 泳道列惰性建（2026-10-19）：多处读方案的 SQL 带 service，放路由前统一保证，且在任何事务之外。 */
+ensure_plan_service();
 
 /* brand_regex 排在最后，是后加的列（见 ensure_metrics_schema）。留空表示
    "让 worker 自己从客户名或域名推"，不是"这个客户没有品牌词"。 */
@@ -3838,14 +3864,18 @@ if($m==='POST'&&$ROUTE==='/plans'){
     $body=(string)($i['body']??'');
     if(!$cid)res(400,['error'=>'client_id required']);
     if(trim($body)==='')res(400,['error'=>'body required']);
+    /* service 泳道（2026-10-19）：缺省或空 = seo；只收 seo / sem，其他值 400，不静默改写。 */
+    $svc=plan_service_norm($i['service']??null);
+    if($svc===null)res(400,['error'=>'service must be seo or sem']);
+    /* version 仍按客户全局递增（跨泳道不重号），泳道靠 service 区分。 */
     $v=db()->prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM seo_plans WHERE client_id=?");
     $v->execute([$cid]);
     $ver=(int)$v->fetch()['n'];
-    $s=db()->prepare("INSERT INTO seo_plans(client_id,version,body,status,authored_by)VALUES(?,?,?,'draft',?)");
-    $s->execute([$cid,$ver,$body,(string)($i['authored_by']??'seo-worker')]);
+    $s=db()->prepare("INSERT INTO seo_plans(client_id,version,body,status,authored_by,service)VALUES(?,?,?,'draft',?,?)");
+    $s->execute([$cid,$ver,$body,(string)($i['authored_by']??'seo-worker'),$svc]);
     $id=(int)db()->lastInsertId();
-    audit('seo-worker','seo_plan_draft',(string)$id,['client_id'=>$cid,'version'=>$ver,'bytes'=>strlen($body)]);
-    res(200,['ok'=>true,'id'=>$id,'version'=>$ver]);
+    audit('seo-worker','seo_plan_draft',(string)$id,['client_id'=>$cid,'version'=>$ver,'service'=>$svc,'bytes'=>strlen($body)]);
+    res(200,['ok'=>true,'id'=>$id,'version'=>$ver,'service'=>$svc]);
 }
 
 // POST /tasks/bulk -> agent files proposed tasks. All or nothing: validate the
@@ -3928,9 +3958,16 @@ if($m==='GET'&&$ROUTE==='/context'){
         }
     }
 
-    $pl=db()->prepare("SELECT * FROM seo_plans WHERE client_id=? AND status='active' ORDER BY version DESC,id DESC LIMIT 1");
+    /* active_plan 保持 SEO 口径（blogcadence / distill / triage 都按 SEO 方案读）：多泳道并存时取 seo 泳道，
+       只有 sem 方案生效时才回 sem 的。各泳道现役方案另出 active_plans（键 seo / sem，无则不出键）。 */
+    $pl=db()->prepare("SELECT * FROM seo_plans WHERE client_id=? AND status='active' ORDER BY (IFNULL(NULLIF(service,''),'seo')='seo') DESC,version DESC,id DESC");
     $pl->execute([$cid]);
-    $plan=$pl->fetch();
+    $plan=false;$activePlans=[];
+    foreach($pl->fetchAll() as $pr){
+        if($plan===false)$plan=$pr;
+        $ln=plan_service_norm($pr['service']??null)?:'seo';
+        if(!isset($activePlans[$ln]))$activePlans[$ln]=$pr;
+    }
 
     ensure_task_archived();
     $tk=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND archived=0 ORDER BY FIELD(owner_type,'agent','agency','client'),FIELD(priority,'P0','P1','P2','P3'),id");
@@ -3957,6 +3994,7 @@ if($m==='GET'&&$ROUTE==='/context'){
         'client'=>$cl->fetch()?:null,
         'profile'=>$profile?:null,
         'active_plan'=>$plan?:null,
+        'active_plans'=>(object)$activePlans,
         'tasks'=>$tasks,
         'facts'=>['confirmed'=>$confirmed,'pending'=>$pending],
         'latest_snapshots'=>$snaps?$snaps:new stdClass()
@@ -5396,7 +5434,8 @@ if($m==='GET'&&$ROUTE==='/clients'){
        三、待发卡剔 done 态（收口单的卡链接是历史痕迹不是待办，幽灵永不消）、剔停人单
           （note 里引用过确认链接就被令牌正则误认成卡）。 */
     $todayB=new DateTime('today',new DateTimeZone('Pacific/Auckland'));$curBy=[];
-    foreach(db()->query("SELECT client_id,created_at FROM seo_plans WHERE status='active'")->fetchAll() as $p){
+    /* 多泳道并存时 seo 泳道锚点优先（ORDER 让 seo 行最后写入覆盖），与 PLAN_ANCHOR_ORDER 同口径。 */
+    foreach(db()->query("SELECT client_id,created_at FROM seo_plans WHERE status='active' ORDER BY (IFNULL(NULLIF(service,''),'seo')='seo') ASC,id ASC")->fetchAll() as $p){
         $nB=semimonth_index($todayB->format('Y-m-d'))-semimonth_index(sprint_anchor_norm($p['created_at']))+1;
         $curBy[(int)$p['client_id']]=max(1,min($nB,6));
     }
@@ -5547,7 +5586,7 @@ if($m==='GET'&&$ROUTE==='/overview'){
         $snaps[]=$r;
     }
 
-    $ap=db()->prepare("SELECT id,version FROM seo_plans WHERE client_id=? AND status='active' ORDER BY version DESC,id DESC LIMIT 1");
+    $ap=db()->prepare("SELECT id,version FROM seo_plans WHERE client_id=? AND status='active' ORDER BY (IFNULL(NULLIF(service,''),'seo')='seo') DESC,version DESC,id DESC LIMIT 1");
     $ap->execute([$cid]);
     $active=$ap->fetch();
     $dp=db()->prepare("SELECT COUNT(*) AS n FROM seo_plans WHERE client_id=? AND status='draft'");
@@ -7174,7 +7213,8 @@ if($m==='POST'&&preg_match('#^/plans/(\d+)/review_result$#',$ROUTE,$mm)){
         $vq=$p->prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM seo_plans WHERE client_id=?");
         $vq->execute([$cid]);
         $ver=(int)$vq->fetch()['n'];
-        $p->prepare("INSERT INTO seo_plans(client_id,version,body,status,authored_by)VALUES(?,?,?,'draft','plan_review')")->execute([$cid,$ver,$body]);
+        /* v2 继承 v1 的泳道（存量空值视同 seo），过闸不换泳道。 */
+        $p->prepare("INSERT INTO seo_plans(client_id,version,body,status,authored_by,service)VALUES(?,?,?,'draft','plan_review',?)")->execute([$cid,$ver,$body,plan_service_norm($v1['service']??null)?:'seo']);
         $v2id=(int)$p->lastInsertId();
         list($clean,$err)=tasks_bulk_clean($cid,$v2id,$i['tasks']??null);
         if($err)throw new Exception($err);
@@ -7214,16 +7254,26 @@ if($m==='GET'&&$ROUTE==='/plans'){
    $opt：client_id（给了就校方案归属）、require_draft（true 时非 draft 拒；admin 路由不传，保持原来不查状态）、
    exclude_task_ids（仅批准）。返回 ['ok'=>true,...] 或 ['err'=>not_found|wrong_client|not_draft,'msg'=>...]。
    tests/asksapi.test.php 按标记抠出来配假 PDO 跑。 */
+/* 方案泳道取值（2026-10-19）：缺省、null、空串 = seo（存量行口径）；seo / sem 原样（大小写与首尾空白规整）；
+   其他值返回 null，写入口据此 400。读侧拿到库里的值也过这里，库里万一有脏值按 seo 兜底由调用方 ?: 'seo' 决定。 */
+function plan_service_norm($v){
+    if($v===null)return 'seo';
+    if(!is_string($v))return null;
+    $v=strtolower(trim($v));
+    if($v==='')return 'seo';
+    return in_array($v,['seo','sem'],true)?$v:null;
+}
 function plan_core_load($p,$pid,$opt){
-    $g=$p->prepare("SELECT id,client_id,status FROM seo_plans WHERE id=? FOR UPDATE");
+    $g=$p->prepare("SELECT id,client_id,status,service FROM seo_plans WHERE id=? FOR UPDATE");
     $g->execute([(int)$pid]);
     $plan=$g->fetch();
     if(!$plan)return [null,['err'=>'not_found','msg'=>'Plan not found']];
+    $plan['service']=plan_service_norm($plan['service']??null)?:'seo';
     if(isset($opt['client_id'])&&(int)$plan['client_id']!==(int)$opt['client_id'])return [null,['err'=>'wrong_client','msg'=>'plan does not belong to this client']];
     if(!empty($opt['require_draft'])&&$plan['status']!=='draft')return [null,['err'=>'not_draft','msg'=>'plan is '.$plan['status'].', only a draft can be decided','status'=>$plan['status']]];
     return [$plan,null];
 }
-/* 批准：现役方案降 superseded，本方案转 active，proposed 任务转 approved（exclude 的留在 proposed）。
+/* 批准：同泳道（同客户同 service）现役方案降 superseded，本方案转 active，proposed 任务转 approved（exclude 的留在 proposed）。
    收件箱与被取代方案的任务收口在 plan_approve_finish，提交后调。 */
 function plan_approve_core($p,$pid,$by,$opt=[]){
     $pid=(int)$pid;
@@ -7236,11 +7286,14 @@ function plan_approve_core($p,$pid,$by,$opt=[]){
     /* 被取代的现役方案：它还没开工的任务（proposed / approved / blocked）一起收掉，
        理由指向新方案。已在 review / in_progress 的留着，那是做到一半的活。
        v2 里要保留的内容，plan_review 已经按 from 吸收进新任务了。 */
-    $sq=$p->prepare("SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>?");
-    $sq->execute([$plan['client_id'],$pid]);
+    /* 泳道隔离（2026-10-19）：只顶同 service 的现役方案，批 sem 不碰 seo（55 的 plan 69），反向同理。
+       存量空值按 seo 计。并发：本方案行已 FOR UPDATE，同泳道两条批准并发的行为与改造前客户级完全一致（只是范围收窄到泳道）；
+       跨泳道两条批准各改各的行，WHERE 互斥，谁先谁后结果相同。 */
+    $sq=$p->prepare("SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>? AND IFNULL(NULLIF(service,''),'seo')=?");
+    $sq->execute([$plan['client_id'],$pid,$plan['service']]);
     $supersededIds=array_map('intval',array_column($sq->fetchAll(),'id'));
-    $p->prepare("UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>?")
-      ->execute([$plan['client_id'],$pid]);
+    $p->prepare("UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>? AND IFNULL(NULLIF(service,''),'seo')=?")
+      ->execute([$plan['client_id'],$pid,$plan['service']]);
     $p->prepare("UPDATE seo_plans SET status='active',approved_by=?,reject_reason=NULL WHERE id=?")
       ->execute([$by,$pid]);
     if($excl){
@@ -8287,7 +8340,7 @@ if($m==='GET'&&$ROUTE==='/board'){
     $cs=db()->query("SELECT p.client_id,c.name,p.domain,p.platform,p.status FROM seo_profiles p INNER JOIN clients c ON c.id=p.client_id WHERE p.status='active' ORDER BY c.name");
     foreach($cs->fetchAll() as $c){
         $cid=(int)$c['client_id'];
-        $pq=db()->prepare("SELECT id,created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
+        $pq=db()->prepare("SELECT id,created_at FROM seo_plans WHERE client_id=? ORDER BY ".PLAN_ANCHOR_ORDER." LIMIT 1");
         $pq->execute([$cid]);
         $pr=$pq->fetch();
         $pq->closeCursor();
@@ -8397,7 +8450,7 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     $s->execute([$cid]);
     /* sprint 锚点：生效 plan 的生成日（没有生效的取最新一份）。前端按两周一档推算 S1..S6 的日历区间，
        「本期」按今天落在哪一档定，逾期的照显示，做完了就等下一档，不再按「最小未完成 S 号」跳。 */
-    $pq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY FIELD(status,'active') DESC, id DESC LIMIT 1");
+    $pq=db()->prepare("SELECT created_at FROM seo_plans WHERE client_id=? ORDER BY ".PLAN_ANCHOR_ORDER." LIMIT 1");
     $pq->execute([$cid]);
     $pr=$pq->fetch();
     $pq->closeCursor();
@@ -8553,6 +8606,12 @@ if($m==='POST'&&$ROUTE==='/jobs'){
     $d=$dup->fetch();
     if($d)res(409,['error'=>'Job already queued or running','job_id'=>(int)$d['id']]);
     $payload=$payloadIn;
+    /* plan job 可带 payload.service（seo / sem，缺省 seo），worker plan runner 透传到 POST /plans 落库。入口先挡脏值。 */
+    if($type==='plan'&&is_array($payload)&&array_key_exists('service',$payload)){
+        $ps=plan_service_norm($payload['service']);
+        if($ps===null)res(400,['error'=>'payload.service must be seo or sem']);
+        $payload['service']=$ps;
+    }
     $s=db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,?,?,'queued',?)");
     $s->execute([$cid,$type,$payload===null?null:(is_string($payload)?$payload:json_encode($payload,JSON_UNESCAPED_UNICODE)),$u['username']]);
     $id=(int)db()->lastInsertId();

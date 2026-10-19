@@ -139,6 +139,28 @@ t('same plan rejection reason shows in full once, later rows reference it', () =
   assert.strictEqual(out.split('理由同上').length - 1, 2, 'other rows reference it');
 });
 
+console.log('plans 泳道（2026-10-19）');
+t('laneActivePlan：草稿只认同泳道现役，存量无 service 视同 seo', () => {
+  const seo69 = { id: 69, version: 8 };
+  const sem70 = { id: 70, version: 9, service: 'sem' };
+  const ctx = { active_plan: seo69, active_plans: { seo: seo69, sem: sem70 } };
+  assert.strictEqual(R.laneActivePlan(ctx, { id: 75, service: 'sem' }).id, 70, 'sem 草稿对 sem 现役');
+  assert.strictEqual(R.laneActivePlan(ctx, { id: 76, service: 'seo' }).id, 69, 'seo 草稿对 seo 现役');
+  assert.strictEqual(R.laneActivePlan(ctx, { id: 77 }).id, 69, '无 service 视同 seo');
+  assert.strictEqual(R.laneActivePlan({ active_plan: seo69, active_plans: { seo: seo69 } }, { service: 'sem' }), null, 'sem 无现役');
+  assert.strictEqual(R.laneActivePlan({ active_plan: seo69 }, { service: 'sem' }), null, '旧 api 无 active_plans：sem 草稿不误认 seo 现役');
+  assert.strictEqual(R.laneActivePlan({ active_plan: seo69 }, {}).id, 69, '旧 api：seo 草稿退回 active_plan');
+  const tasks = [{ id: 11, plan_id: 69, status: 'approved', title: 'S' }, { id: 13, plan_id: 70, status: 'approved', title: 'M' }];
+  const out = R.activeOpenBlock(tasks, (R.laneActivePlan(ctx, { service: 'sem' }) || {}).id, 75);
+  assert.ok(out.includes('#13') && !out.includes('#11'), 'sem 草稿的待收任务只列 sem 现役的');
+});
+t('plan.planPostBody：payload.service 透传，缺省不带（服务端落 seo）', () => {
+  const P = require(path.join(W, 'runners', 'plan'));
+  assert.deepStrictEqual(P.planPostBody({ client_id: 55, payload: { service: ' SEM' } }, 'b'), { client_id: 55, body: 'b', authored_by: 'seo-worker', service: 'sem' });
+  assert.ok(!('service' in P.planPostBody({ client_id: 55, payload: {} }, 'b')), '缺省不带');
+  assert.ok(!('service' in P.planPostBody({ client_id: 55 }, 'b')), '无 payload 不带');
+});
+
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

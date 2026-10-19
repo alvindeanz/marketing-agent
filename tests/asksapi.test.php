@@ -330,14 +330,16 @@ class FakeStmt{
     function rowCount(){return $this->n;}
     function execute($a=[]){
         $d=$this->db;$q=$this->sql;$T=&$d->t;$d->log[]=$q;
-        if($q==="SELECT id,client_id,status FROM seo_plans WHERE id=? FOR UPDATE"){
-            $p=$T['plans'][$a[0]]??null;$this->rows=$p?[['id'=>$p['id'],'client_id'=>$p['client_id'],'status'=>$p['status']]]:[];return true;}
+        if($q==="SELECT id,client_id,status,service FROM seo_plans WHERE id=? FOR UPDATE"){
+            /* 存量行没有 service 键（或空串）= 库里列缺省前的旧行，原样回 null / 空，看核心是否按 seo 兜底 */
+            $p=$T['plans'][$a[0]]??null;$this->rows=$p?[['id'=>$p['id'],'client_id'=>$p['client_id'],'status'=>$p['status'],'service'=>$p['service']??null]]:[];return true;}
         if($q==="SELECT COUNT(*) AS n FROM seo_tasks WHERE plan_id=? AND status='proposed'"){
             $n=0;foreach($T['tasks'] as $x)if($x['plan_id']==$a[0]&&$x['status']==='proposed')$n++;$this->rows=[['n'=>$n]];return true;}
-        if($q==="SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>?"){
-            foreach($T['plans'] as $x)if($x['client_id']==$a[0]&&$x['status']==='active'&&$x['id']!=$a[1])$this->rows[]=['id'=>$x['id']];return true;}
-        if($q==="UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>?"){
-            foreach($T['plans'] as &$x)if($x['client_id']==$a[0]&&$x['status']==='active'&&$x['id']!=$a[1])$x['status']='superseded';return true;}
+        /* 泳道谓词 IFNULL(NULLIF(service,''),'seo')=? 按 SQL 语义模拟：缺键与空串都算 seo */
+        if($q==="SELECT id FROM seo_plans WHERE client_id=? AND status='active' AND id<>? AND IFNULL(NULLIF(service,''),'seo')=?"){
+            foreach($T['plans'] as $x)if($x['client_id']==$a[0]&&$x['status']==='active'&&$x['id']!=$a[1]&&fx_lane($x)===$a[2])$this->rows[]=['id'=>$x['id']];return true;}
+        if($q==="UPDATE seo_plans SET status='superseded' WHERE client_id=? AND status='active' AND id<>? AND IFNULL(NULLIF(service,''),'seo')=?"){
+            foreach($T['plans'] as &$x)if($x['client_id']==$a[0]&&$x['status']==='active'&&$x['id']!=$a[1]&&fx_lane($x)===$a[2])$x['status']='superseded';return true;}
         if($q==="UPDATE seo_plans SET status='active',approved_by=?,reject_reason=NULL WHERE id=?"){
             $T['plans'][$a[1]]['status']='active';$T['plans'][$a[1]]['approved_by']=$a[0];$T['plans'][$a[1]]['reject_reason']=null;return true;}
         if(strpos($q,"UPDATE seo_tasks SET status='approved' WHERE plan_id=? AND status='proposed'")===0){
@@ -363,6 +365,7 @@ class FakeStmt{
 }
 $FDB=null;
 function db(){global $FDB;return $FDB;}
+function fx_lane($x){$v=(string)($x['service']??'');return $v===''?'seo':$v;}
 /* task_close 替身：真函数在 seo-api.php 主体（改 status=done、追 note、排叙述），这里只记结束类型。 */
 function task_close($tid,$kind,$reason='',$by=''){
     global $FDB;$t=&$FDB->t['tasks'][$tid];
@@ -464,6 +467,71 @@ t('admin 口径不变：不传 require_draft 时非 draft 也能批/驳，exclud
     $r=plan_reject_core($d,60,'alvin','stale');
     eq($r['ok']??null,true,'admin 驳回不开事务不查状态');eq($d->t['plans'][60]['status'],'rejected','现役也能驳');
     eq($d->inTransaction(),false,'核心不自己开事务');
+});
+
+section('plans 泳道 supersede（2026-10-19，批 sem 不顶 seo，55 的 plan 69 护栏）');
+
+t('plan_service_norm：缺省、null、空串归 seo；seo/sem 规整；其他值 null',function(){
+    eq(plan_service_norm(null),'seo','null');eq(plan_service_norm(''),'seo','空串');eq(plan_service_norm('  '),'seo','空白');
+    eq(plan_service_norm('SEM '),'sem','大小写与空白');eq(plan_service_norm('seo'),'seo','seo');
+    eq(plan_service_norm('ads'),null,'非白名单');eq(plan_service_norm(['sem']),null,'非字符串');eq(plan_service_norm(1),null,'数字');
+});
+/* 夹具仿 55 现状：69 是 seo 现役（存量行无 service 键，即列缺省前的旧行），68 是更早的 sem 现役（显式 sem）。 */
+function fx_lane_db(){
+    global $FDB;$FDB=new FakeDB();
+    $FDB->t['plans']=[
+        69=>['id'=>69,'client_id'=>55,'status'=>'active','approved_by'=>'alvin','reject_reason'=>null],
+        68=>['id'=>68,'client_id'=>55,'status'=>'active','approved_by'=>'alvin','reject_reason'=>null,'service'=>'sem'],
+        70=>['id'=>70,'client_id'=>55,'status'=>'draft','approved_by'=>'','reject_reason'=>null,'service'=>'sem'],
+        71=>['id'=>71,'client_id'=>55,'status'=>'draft','approved_by'=>'','reject_reason'=>null,'service'=>'seo'],
+        72=>['id'=>72,'client_id'=>55,'status'=>'draft','approved_by'=>'','reject_reason'=>null,'service'=>''],
+        80=>['id'=>80,'client_id'=>56,'status'=>'active','approved_by'=>'alvin','reject_reason'=>null],
+    ];
+    $FDB->t['tasks']=[
+        11=>['id'=>11,'plan_id'=>69,'status'=>'approved'],12=>['id'=>12,'plan_id'=>69,'status'=>'in_progress'],
+        13=>['id'=>13,'plan_id'=>68,'status'=>'approved'],
+        14=>['id'=>14,'plan_id'=>70,'status'=>'proposed'],15=>['id'=>15,'plan_id'=>71,'status'=>'proposed'],
+    ];
+    return $FDB;
+}
+t('批 sem 方案只顶旧 sem，seo 现役 69（存量无 service）原地 active，它的任务不收',function(){
+    $d=fx_lane_db();$d->beginTransaction();
+    $r=plan_approve_core($d,70,'alvin',['client_id'=>55,'require_draft'=>true]);$d->commit();
+    eq($r['ok']??false,true,'批准成功');eq($r['plan']['service'],'sem','核心读出泳道 sem');
+    eq($d->t['plans'][70]['status'],'active','sem 新方案生效');
+    eq($d->t['plans'][68]['status'],'superseded','旧 sem 被顶');
+    eq($d->t['plans'][69]['status'],'active','seo 现役 69 不动');
+    eq($r['superseded'],[68],'收尾清单只有 68');
+    eq(plan_approve_finish(70,55,$r['superseded'],'alvin'),[13],'只收 68 的未开工任务');
+    eq([$d->t['tasks'][11]['status'],$d->t['tasks'][12]['status']],['approved','in_progress'],'69 的任务原样');
+    eq($d->t['plans'][80]['status'],'active','别的客户不受影响');
+});
+t('批 seo 方案顶旧 seo（存量无 service 的 69），sem 现役原地不动',function(){
+    $d=fx_lane_db();$d->beginTransaction();
+    $r=plan_approve_core($d,71,'alvin',['client_id'=>55,'require_draft'=>true]);$d->commit();
+    eq($r['plan']['service'],'seo','泳道 seo');
+    eq($d->t['plans'][71]['status'],'active','新 seo 生效');
+    eq($d->t['plans'][69]['status'],'superseded','旧 seo 69 被顶');
+    eq($d->t['plans'][68]['status'],'active','sem 现役 68 不动');
+    eq($r['superseded'],[69],'收尾清单只有 69');
+    eq(plan_approve_finish(71,55,$r['superseded'],'alvin'),[11],'只收 69 的未开工任务，做到一半的留着');
+    eq($d->t['tasks'][13]['status'],'approved','sem 任务不收');
+});
+t('存量无 service 值（空串）的草稿视同 seo：批它顶 seo 现役，不碰 sem',function(){
+    $d=fx_lane_db();$d->beginTransaction();
+    $r=plan_approve_core($d,72,'alvin',['client_id'=>55]);$d->commit();
+    eq($r['plan']['service'],'seo','空串归 seo');
+    eq($d->t['plans'][69]['status'],'superseded','seo 现役被顶');
+    eq($d->t['plans'][68]['status'],'active','sem 不动');
+});
+t('经 Ask 通道（asks_answers_commit）批 sem 方案同样不碰 seo 现役',function()use($PREG,$CTX){
+    $d=fx_lane_db();$d->t['asks']['ask_plan70']=['state'=>'open'];
+    list($ask,)=asks_norm_register(array_merge($PREG,['ask_id'=>'ask_plan70','source_ref'=>['type'=>'plan','plan_id'=>70]]));
+    $ask['source_ref']=json_encode($ask['source_ref']);$ask['state']='open';
+    list($c,$o)=asks_answers_commit($d,$ask,[['item'=>'approve','choice'=>'approve','fb'=>'']],$CTX);
+    eq($c,200,'应 200');
+    eq($d->t['plans'][70]['status'],'active','sem 生效');eq($d->t['plans'][69]['status'],'active','69 不动');
+    eq($o['plan']['superseded'],[68],'只顶旧 sem');
 });
 
 section('card_data v1 桥侧（2026-10-19）：内容块、block_refs、解码表、卡类注册表');

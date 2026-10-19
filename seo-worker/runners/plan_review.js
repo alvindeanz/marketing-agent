@@ -94,6 +94,22 @@ function activeOpenBlock(tasks, activePlanId, currentPlanId) {
   return rows.map(taskLine).join('\n');
 }
 
+/* 与待审草稿同泳道的现役方案（2026-10-19 plans 泳道 supersede）：批准只顶同 service 的现役方案，
+   所以「批准时会被收掉的未开工任务」也只能从同泳道现役方案里取。/context 新出 active_plans（键 seo / sem）；
+   旧 api 没有这个字段时，seo 草稿退回 active_plan（旧口径即 seo），sem 草稿视为无同泳道现役。
+   存量方案 service 为空一律按 seo。 */
+function laneOf(plan) {
+  const s = String((plan && plan.service) || '').trim().toLowerCase();
+  return s === 'sem' ? 'sem' : 'seo';
+}
+function laneActivePlan(context, draft) {
+  const lane = laneOf(draft);
+  const map = context && context.active_plans;
+  if (map && typeof map === 'object') return map[lane] || null;
+  const ap = context && context.active_plan;
+  return ap && laneOf(ap) === lane ? ap : null;
+}
+
 function taskLine(t) {
   return '- #' + t.id + ' [' + (t.sprint || '?') + '][' + (t.priority || 'P2') + '][' + (t.module || '?') + '][' + (t.owner_type || '?') + ']' +
     (t.ops ? '[ops ' + t.ops + ']' : '') + ' ' + t.title + '\n  ' + truncate(String(t.detail || '').replace(/\s+/g, ' '), 600);
@@ -259,7 +275,7 @@ async function runWith(ctx, judge) {
     clientRules: clientRulesBlock(cfg, workspace, log),
     globalRules: globalRulesDigest(cfg),
     history: historyBlock(context.tasks || [], planId),
-    activeOpen: activeOpenBlock(context.tasks || [], context.active_plan && context.active_plan.id, planId),
+    activeOpen: activeOpenBlock(context.tasks || [], (laneActivePlan(context, plan) || {}).id, planId),
     briefing: briefing.text,
     planBody: String(plan.body || ''),
     tasks: v1Tasks,
@@ -326,4 +342,4 @@ async function run(ctx) {
   return runWith(ctx, (opts) => judgeWithModel(ctx, opts));
 }
 
-module.exports = { run, runWith, judgeWithModel, buildPrompt, cleanOutput, renderCard, globalRulesDigest, historyBlock, activeOpenBlock, EXPERIENCE_FILE, CHANGE_TYPES };
+module.exports = { run, runWith, judgeWithModel, buildPrompt, cleanOutput, renderCard, globalRulesDigest, historyBlock, activeOpenBlock, laneOf, laneActivePlan, EXPERIENCE_FILE, CHANGE_TYPES };

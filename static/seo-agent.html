@@ -150,6 +150,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap}
 .badge.draft{background:#1e3a5f;color:#60a5fa}
 .badge.active{background:#052e16;color:#22c55e}
+.badge.lane{background:#161b26;color:#94a3b8;border:1px solid #334155}
+.badge.lane.sem{color:#f59e0b;border-color:#78350f}
 .badge.superseded{background:#1e2433;color:#64748b;border:1px solid #334155}
 .badge.rejected{background:#450a0a;color:#f87171}
 .badge.proposed{background:#422006;color:#fb923c}
@@ -3277,13 +3279,14 @@ async function loadPlans(){
   const d=await api('/plans?client_id='+curId);
   if(fail(d,'方案载入失败'))return;
   const plans=d.plans||[];
-  const active=plans.filter(p=>p.status==='active')[0];
+  /* 泳道（2026-10-19）：seo / sem 各自可有一份生效方案，批准只顶同泳道。存量无 service 视同 seo。 */
+  const actives=plans.filter(p=>p.status==='active').sort((a,b)=>(planLane(a)==='seo'?0:1)-(planLane(b)==='seo'?0:1));
   const box=document.getElementById('activePlanBox');
-  if(active){
-    document.getElementById('planMeta').textContent='当前生效 v'+active.version+' · 批准人 '+(active.approved_by||'-');
-    box.innerHTML='<div class="plan-row"><span class="badge active">active</span><span class="pr-main">v'+active.version+
+  if(actives.length){
+    document.getElementById('planMeta').textContent=actives.map(a=>'当前生效 '+planLane(a).toUpperCase()+' v'+a.version+' · 批准人 '+(a.approved_by||'-')).join('；');
+    box.innerHTML=actives.map(active=>'<div class="plan-row"><span class="badge active">active</span>'+laneBadge(active)+'<span class="pr-main">v'+active.version+
       ' · 作者 '+esc(active.authored_by||'-')+' · '+esc(active.created_at||'')+'</span></div>'+
-      '<div class="plan-body">'+mdRender(active.body)+'</div>';
+      '<div class="plan-body">'+mdRender(active.body)+'</div>').join('');
   }else{
     document.getElementById('planMeta').textContent='暂无生效方案';
     box.innerHTML='<div class="plan-body"><span class="muted">还没有生效的方案。先跑一次「规划方案」，再在下方批准草稿。</span></div>';
@@ -3296,13 +3299,15 @@ async function loadPlans(){
            '<button class="btn tiny red" onclick="rejectPlan('+p.id+')">打回</button>';
     }
     const rr=p.reject_reason?'<div class="plan-meta" style="width:100%;margin-top:4px">打回理由：'+esc(p.reject_reason)+'</div>':'';
-    return '<div class="plan-row"><span class="badge '+p.status+'">'+p.status+'</span>'+
+    return '<div class="plan-row"><span class="badge '+p.status+'">'+p.status+'</span>'+laneBadge(p)+
       '<span class="pr-main">v'+p.version+' · 作者 '+esc(p.authored_by||'-')+' · '+esc(p.created_at||'')+'</span>'+
       acts+
       '<button class="btn tiny ghost" onclick="togglePlanBody('+p.id+')">查看</button>'+
       '<div class="plan-body hidden" id="pb_'+p.id+'" style="width:100%;margin-top:8px">'+mdRender(p.body)+'</div>'+rr+'</div>';
   }).join(''):'<div class="lane-empty">暂无其他版本。</div>';
 }
+function planLane(p){return String((p&&p.service)||'').trim().toLowerCase()==='sem'?'sem':'seo'}
+function laneBadge(p){const l=planLane(p);return '<span class="badge lane '+l+'">'+l.toUpperCase()+'</span>'}
 function togglePlanBody(id){document.getElementById('pb_'+id).classList.toggle('hidden')}
 
 /* 批准前先过一遍该方案下的 proposed 任务，取消勾选的留在 proposed */
@@ -3315,7 +3320,7 @@ async function approvePlan(id){
   apprTasks.forEach(t=>{apprPick[t.id]=true});
   document.getElementById('apprHint').textContent=apprTasks.length
     ?('批准后该方案生效，下面 '+apprTasks.length+' 个待定任务会转为 approved。取消勾选的保持 proposed。')
-    :'该方案下没有待定任务，批准后仅方案本身生效。该客户其他生效方案会被置为 superseded。';
+    :'该方案下没有待定任务，批准后仅方案本身生效。该客户同泳道（SEO / SEM）的其他生效方案会被置为 superseded，另一泳道不受影响。';
   renderApprList();
   document.getElementById('apprBg').classList.add('show');
 }

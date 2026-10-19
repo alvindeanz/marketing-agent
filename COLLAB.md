@@ -20,6 +20,28 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-19 AIDEN plans 泳道 supersede：批准只顶同客户同 service 泳道（api 待 Aiden 部署；worker 两处小改随 Aira 下次 worker 部署走）
+
+- 背景：Aira 条子 /mnt/share/aiden/to-aiden-plans-lane-supersede-20261019.md，Alvin 拍板开工。原 plan_approve 的 supersede 是客户级，批 55 的 SEM plan 会把 SEO plan 69（v8，S1 在跑）殉葬。
+- schema 口径（给 buildPlanApprovalAsk 接线用）：
+  1. 列 seo_plans.service，VARCHAR(8) NOT NULL DEFAULT 'seo'，取值只收 seo / sem（PHP 白名单 plan_service_norm：缺省、null、空串归 seo，大小写与首尾空白规整，其他值写入口 400）。不用 ENUM，躲非严格模式静默截断，故不进 CLAUDE.md 部署节 ENUM 清单。
+  2. 惰性 DDL：ensure_plan_service()，information_schema 查列，缺则 ADD COLUMN；每请求在 $ROUTE 之后、任何路由与事务之前调一次（ALTER 隐式提交，不能落进 plan_approve 事务）。并发首建撞 1060 重复列吞掉复查。
+  3. 存量兜底：ADD COLUMN 带 DEFAULT 'seo'，现有全部方案（含 55 的 plan 69）在同一条 ALTER 里落 seo，无需另跑回填；读侧 SQL 另以 IFNULL(NULLIF(service,''),'seo') 兜底，空值视同 seo。
+  4. 透传路径：POST /jobs type=plan 的 payload.service（入口白名单校验）→ worker runners/plan.js planPostBody 带上 → POST /plans 的 body.service 落库（缺省 seo，回包带 service）。plan_review 出的 v2 在 POST /plans/{id}/review_result 服务端继承 v1 的 service，worker 不用传。GET /plans 与 GET /plans/{id} 是 SELECT *，行里直接带 service。
+  5. 批准语义：plan_approve_core 只 supersede 同 client 同 service 的 active 方案，被顶方案的未开工任务收尾同样只在该泳道。admin 路由与 /svc/v1/answers 的 plan_approval 共用核心，两通道一致（ASKS-API 围栏未进）。
+  6. /context：active_plan 保持 SEO 口径（多泳道并存时取 seo 泳道，只有 sem 生效才回 sem；blogcadence、distill、triage 都按它读），新增 active_plans（键 seo / sem，无则无键）。plan_review 的「批准时会被收掉的现役未开工任务」改取同泳道现役（laneActivePlan）。
+  7. sprint 锚点（/tasks、/board、client_current_sprint_label、侧栏待做计数、仪表盘现役版本）多泳道并存时一律 seo 泳道优先，SEM 方案批准不挪 SEO 任务的半月档。
+- plan 69 为什么安全：它是存量行，ALTER 时按列缺省落 seo（就算是空值读侧也归 seo），SEM plan 批准时 supersede 的 WHERE 带 service='sem' 谓词，69 不在命中集合；sprint 锚点也 seo 优先，69 的 S1 档期不被挪。
+- 前端：static/seo-agent.html 方案页每行加 SEO / SEM 泳道徽章，生效区改为逐泳道列出（原来只显示第一份 active），批准提示改为「同泳道其他生效方案置 superseded，另一泳道不受影响」。
+- 测试：asksapi.test.php 47 件全绿（新增 5 件：plan_service_norm 取值、批 sem 不顶 seo 现役 69、批 seo 顶旧 seo 不碰 sem、存量空值视同 seo、Ask 通道批 sem 同样隔离；假库 SQL 同步泳道谓词）；chatapi 24、inboxapi 21 全绿；plan_review.test.js 13 件全绿（新增 laneActivePlan 与 planPostBody 两件）；node tests/ 全套除 blog.test.js、shopifylink.test.js 两件基线红外全绿；php -l 过。
+- 坑：
+  - version 仍按客户全局递增（跨泳道不重号），看 vN 别以为同泳道连号。
+  - POST /jobs 的「同客户同类型只许一个 queued/running」对 plan 不分泳道，SEO 与 SEM 的 plan job 不能同时排，要排先等前一个跑完。
+  - plan runner 的 prompt 与简报仍是 SEO 90 天规划口径，payload.service=sem 只决定落库泳道，不改写作口径；SEM plan 若走 plan job 需 Aira 另配 prompt，若手工直落请走 POST /plans 带 service=sem。
+  - SEM 任务的 sprint 档期目前随 seo 泳道锚点计，要独立锚点再议。
+  - /board 客户列表的方案版本仍是 MAX(version) 不分泳道，仅展示，未改。
+- 下一步：api 待 Aiden 部署（deploy.sh api，部署后首个请求惰性建列）；worker 改动（runners/plan.js planPostBody、runners/plan_review.js laneActivePlan）随 Aira 下一次 worker 部署走，未部署前旧 worker 不传 service，服务端缺省 seo，行为与今天一致；Aira 接 buildPlanApprovalAsk 带 service 标识（读方案行 service，缺省 seo）。55 的 SEM plan 必须在 api 部署后入库并带 service=sem，否则落 seo 泳道会顶 69。
+
 ### 2026-10-19 AIDEN cardfold-v1-review 已合并（485758a），api 已部署 250 同 rev；worker 待 Aira 部署（ros 加 mac）
 
 - 合并：aiden/cardfold-v1-review（95cb235）按 Aira 评审回条（to-aiden-cardfold-review-ok-20261019.md，结论 OK 不用改）合入 main，合并提交 485758a，自动合并零冲突（双方都动过 harness.js 与 seo-api.php，ort 干净收口）。
