@@ -86,12 +86,33 @@ function humanDecisions(note) {
    （lib/cardfold.js），agree 项与文本反馈立跟进任务，POST /tasks 自动排闸A，
    后续走既有 判决 -> 放行 -> 执行 链。到期兜底同在这里：发出超过 --card-grace-days
    （默认 14 天）零反馈的方向卡，按卡上「未回复按建议执行」承诺视同同意。 */
+/* 卡的账本来源（2026-10-19）：GET /asks?task_id= 找该卡最新一张非 void Ask，有就走 GET /asks/{id}，
+   否则（无 Ask、旧卡、api 未部署）走 /card_feedback。任何一步失败都退回旧路径，不让折叠因新接口缺位而停。 */
+async function cardLedger(card) {
+  try {
+    const list = ((await call('GET', '/asks?task_id=' + card.id)).asks || []).filter((a) => a.state !== 'void');
+    if (list.length) {
+      const d = await call('GET', '/asks/' + encodeURIComponent(list[list.length - 1].ask_id));
+      if (d && Array.isArray(d.rows)) return { rows: d.rows, decode: d.decode || null, viaAsk: true };
+    }
+  } catch (e) { /* 退回旧路径 */ }
+  return { rows: (await call('GET', '/card_feedback?task_id=' + card.id)).rows || [], decode: null, viaAsk: false };
+}
+
 async function foldCards(sprint) {
   const all = await tasks();
   for (const card of all.filter((t) => t.card_feedback_at)) {
-    const rows = (await call('GET', '/card_feedback?task_id=' + card.id)).rows || [];
-    const f = foldCardFeedback(rows);
+    /* 2026-10-19 card_data v1 桥侧：卡有 Ask 就从 GET /asks/{id} 取账本（两通道并集、带 at_utc）与持久解码表，
+       勾选行还原词面、按作答时刻折叠；没有 Ask 或 api 未部署（路由 404）退回旧 /card_feedback，行为同前。 */
+    const { rows, decode, viaAsk } = await cardLedger(card);
+    const f = foldCardFeedback(rows, { decode, byAnsweredAt: viaAsk });
     if (!f.hasAny) { if (!DRY) await call('PATCH', '/tasks/' + card.id, { card_feedback_done: 1 }); continue; }
+    /* 有行但没有任何可折叠表态（全是空码一类）：不许写「无有效表态」收口，点名留人。 */
+    if (!f.hasStance) {
+      log('#' + card.id + ' 卡反馈有行但无可折叠表态，点名留人，不收口');
+      if (!DRY) await call('PATCH', '/tasks/' + card.id, { attention: 1, card_feedback_done: 1, result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] 有反馈行但无可折叠表态，未收口，请人看账本（GET /asks/{id} 或 /card_feedback）。' });
+      continue;
+    }
     /* 表态来源署名（2026-09-21 Alvin 定）：代确认与客户亲点同效力不同留痕，批文 fact 里点名 */
     const proxyBy = [...new Set(rows.filter((r) => String(r.actor || '').indexOf('agency:') === 0).map((r) => String(r.actor).slice(7)))];
     const summary = summariseFold(f) + (proxyBy.length ? '。含 agency 代确认（' + proxyBy.join('、') + '，渠道见卡反馈记录）' : '');
@@ -207,6 +228,13 @@ async function foldCards(sprint) {
     /* 折叠即收口（2026-09-16 Alvin 定）：卡的使命是收客户表态，表态已折叠、跟进任务
        已接棒（或明确无跟进），卡任务当场置 done(accepted)，不再杵在泳道里等人批。
        博客确认卡不走这里（挂在博客任务上，由发布流程收口）。 */
+    /* 驳回或未识别码（防御性映射点名的项）：跟进照建，卡不自动收口，打 attention 留人。 */
+    if (f.attention.length) {
+      const why = f.attention.map((x) => x.item + (x.reason === 'reject' ? ' 驳回' : ' 未识别码 ' + x.choice)).join('、');
+      log('#' + card.id + ' 折叠含需人看的项（' + why + '），不自动收口');
+      await call('PATCH', '/tasks/' + card.id, { attention: 1, result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + summary + (followId ? '，跟进 #' + followId : '') + '\n[attention] 含 ' + why + '，未自动收口，请人确认。', card_feedback_done: 1 });
+      continue;
+    }
     await call('PATCH', '/tasks/' + card.id, { status: 'done', result_note: String(card.result_note || '') + '\n\n[卡反馈折叠 ' + stamp() + '] ' + summary + (followId ? '，跟进 #' + followId : '，无需跟进') + '\n[accepted] 客户表态已折叠，卡使命完成，自动收口。', card_feedback_done: 1 });
   }
   // 到期视同同意：锚点是出卡时间（2026-09-20 Alvin 定：卡出即经社媒送达客户，出卡日起算，

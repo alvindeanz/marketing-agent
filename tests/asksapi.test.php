@@ -562,5 +562,14 @@ t('跨端契约：askreg 为 1464 出的 rev 2 登记体（tests/fixtures/ask_t1
     eq(asks_decode_table($r,'zh')['mapping_overall']['agree'],'同意，按这份分工执行','解码表');
 });
 
+t('折叠按作答时刻（带 offset）：WF 补发晚入账但早作答，不覆盖更晚的卡页表态；不带 offset 维持入账序',function(){
+    $rows=[
+        ['id'=>1,'item'=>'g','choice'=>'hold','fb'=>'','created_at'=>'2026-10-20 14:00:00','answered_at'=>null],
+        ['id'=>2,'item'=>'g','choice'=>'agree','fb'=>'','created_at'=>'2026-10-20 15:00:00','answered_at'=>'2026-10-19 23:00:00'],
+    ];
+    eq(asks_fold_effective($rows)['g']['stance']['choice'],'agree','入账序 agree 在后');
+    eq(asks_fold_effective($rows,46800)['g']['stance']['choice'],'hold','作答序：卡页 01:00Z 晚于 WF 23:00Z');
+});
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail?1:0);
