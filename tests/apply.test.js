@@ -468,6 +468,15 @@ t('lintPlan：选择题打回，但「需要人定：无」是 prompt 要求的�
   assert.deepStrictEqual(E.lintPlan(base + '**需要人定**：无。'), [], 'markdown 粗体装饰不卡豁免(job635)');
   assert.deepStrictEqual(E.lintPlan(base + '- `需要人定`：暂无'), [], '反引号装饰不卡豁免');
 });
+t('lintPlan：选择题第一性边界（2026-10-19 ticket #41，#1354 四连败两处误杀）', () => {
+  const base = '## 2. API 调用序列\n- 预期响应：200\n涉及文件：a\n';
+  assert.deepStrictEqual(E.lintPlan(base + '需要人定\n无'), [], '标题行加下一行「无」的章节排版是合法空声明');
+  assert.deepStrictEqual(E.lintPlan(base + '### 需要人定\n\n无。'), [], 'markdown 标题加空行加「无。」同样豁免');
+  assert.deepStrictEqual(E.lintPlan(base + '标题后缀按兜底规则处置（写死，不需要人定）'), [], '「不需要人定」是自决声明不是选择题');
+  assert.deepStrictEqual(E.lintPlan(base + '需要人定\n- 等客户：年底促销的日期与力度'), [], '标题行下逐条等客户是合法形态');
+  assert.ok(E.lintPlan(base + '需要人定\n- 预算上限请人拍板').some((x) => x.indexOf('选择题') > -1), '标题下留非客户独有的开放项照旧打回');
+  assert.ok(E.lintPlan(base + '是否需要人定再议').some((x) => x.indexOf('选择题') > -1), '句中开放式「需要人定」照旧打回');
+});
 t('放行卡：提取、超长打回、夹带 curl 或接口路径打回', () => {
   const card = '- 改什么：/childcare/ 面包屑，旧标题 → 新标题\n- 为什么：页面已改版\n- 风险与回滚：改回原值\n- 需要人定：无';
   const plan = '# 标题\n\n## 0. 放行卡\n\n' + card + '\n\n## 1. 变更目标与现状\n\n取证\n## 2. API 调用序列\n涉及文件：a';
