@@ -482,7 +482,10 @@ async function main() {
     } else {
       const fr2 = await call('GET', '/facts?client_id=' + cid);
       const cf2 = (fr2.facts || []).filter((f) => String(f.status || '') === 'confirmed');
-      const NEG2 = /(未定|待定|未确认|尚未|缺|没有|not set|tbd)/i;
+      /* 负词守卫锚定值开头（2026-10-19 二修）：守卫拦的是「未定」「待定」这类占位值，
+         它们就是整个值或值的开头。在全文里搜会把正经长答案误杀：55 实证直落的
+         ads.budget_monthly 建议原文含「看有没有申请进来」，一个「没有」整条被毙，闸关。 */
+      const NEG2 = /^\s*(未定|待定|未确认|尚未|缺|没有|not set|tbd)/i;
       /* 只认规格定义的三个决定型键（sem_onboard_card_spec 的 fold 键，允许带日期后缀变体）。
          宽前缀会被记录型 fact 骗过：55 实证 ads.conversion_actions（账户配置记录）喂过了
          ads.conversion 前缀——和 SEO 闸 2026-09-17 lock_state 同族坑，决定与记录必须分键。 */
