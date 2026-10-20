@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-20 AIRA apply 博客捷径误杀修复：混合 ops 缺链接落回方案泳道吃无方案续接（#1510 两败根治，修复序⑤的 apply 路由子项）
+
+- 根因链（#1510 实证，job 8006/8011/8016）：卡反馈落地单 execute 时 ops 为空走 analysis 模式只产报告，OPS_CHECK 回填 ops 夹带 blog-edit；放行后追 apply，捷径按「ops 含 blog 类且无方案文件」接单，解析不出文章链接直接硬死，截胡了方案泳道本来就有的无方案续接自愈（loadChangePlanOrChain chain=execute，2026-10-10 #814 机制）。8078/8084 同族。
+- 修法（runners/apply_task.js）：新增纯函数 blogShortcutRoute(ops, blogUrlOk)：有链接走捷径发布；纯 blog ops 缺链接照旧硬死（真博客单缺链接是数据病，续排会重复发草稿）；混合 ops 缺链接判 'plan' 落回方案泳道，无方案文件自然走续接补 execute（此时 ops 已在身上走 prepare 模式出变更方案），每任务一次熔断与失败两次留人都不变。发布凭证闸等生意闸一律没动。
+- 没一起修的（仍在修复序⑤）：askreg 重登不升 rev、fold 建跟进任务 ops 按卡类收窄、op 按能力清单归属平台解析。本条只拆了 apply 路由这一刀。
+- 测试：tests/apply.test.js 新增 blogShortcutRoute 六态用例，60 件全绿；node tests/ 全套绿。
+- 部署：worker（ros + mac）随本 commit 由 Aira 跑 deploy.sh worker。部署后重放 #1510 验证链路：release -> apply 落方案泳道 -> chain execute 出方案 -> 闸A/放行官 -> apply 落地。
+
 ### 2026-10-20 AIRA 任务归档扫帚三类 + 看板状态切片与 CSV 对账导出（api + 前端，Alvin 拍板「板面只留活账」）
 
 - 背景：55 号两轮 harness 验证后板上 106 条任务 91 条 done（83 条是 replan 换版的 merged/killed/dropped 收口噪音），批五 1 的「sprint 任务永不归档」口径被 Alvin 2026-10-20 的新口径取代：板面只留活账，审计与对账走 include_archived=1。

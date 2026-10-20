@@ -531,6 +531,19 @@ t('planItems：显式空数组是无变更声明，不走 ops 兜底（批二 B�
 /* ---------- 博客任务的契约路由（2026-10-13 #1246 教训） ---------- */
 section('博客任务的契约路由（#1246）');
 
+t('blogShortcutRoute：混合 ops 缺链接落方案泳道，纯博客缺链接硬死，有链接走捷径（#1510）', () => {
+  // #1510 实况：analysis 回填的混合 ops，无文章链接，以前被捷径判死，现在该落方案泳道吃无方案续接
+  assert.strictEqual(A.blogShortcutRoute(['page-advanced-update', 'content-edit', 'blog-edit'], false), 'plan');
+  // 纯 blog ops 缺链接：数据病，照旧硬死，续排 execute 会重复发草稿
+  assert.strictEqual(A.blogShortcutRoute(['blog-draft'], false), 'reject');
+  assert.strictEqual(A.blogShortcutRoute(['blog-edit', 'blog-publish'], false), 'reject');
+  // 有链接：不管混不混都走捷径发布
+  assert.strictEqual(A.blogShortcutRoute(['blog-edit', 'content-edit'], true), 'publish');
+  assert.strictEqual(A.blogShortcutRoute(['blog-draft'], true), 'publish');
+  // 没有 blog ops 根本不该进捷径（调用方已挡，这里兜底）
+  assert.strictEqual(A.blogShortcutRoute(['page-meta-update'], false), 'plan');
+});
+
 t('带变更方案的任务进博客捷径直接抛错（第二道保险，routing 不该放进来）', () => {
   const fs2 = require('fs');
   const os2 = require('os');

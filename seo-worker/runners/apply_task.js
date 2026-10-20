@@ -50,6 +50,18 @@ function changePlanPath(workspace, taskId) {
   return path.join(workspace, OUTPUT_DIRNAME, CHANGE_PLAN_PREFIX + taskId + '.md');
 }
 
+/* 无方案文件时博客捷径的路由判定（纯函数给单测）。'publish' 走捷径发布；'reject' 纯 blog
+   ops 缺链接硬死（真博客单缺链接是数据病，续排 execute 会重复发草稿）；'plan' 落回方案泳道
+   （2026-10-20 #1510 两败实证：analysis 模式产报告后 OPS_CHECK 回填 ops 夹带 blog-edit，
+   放行追 apply 被按「博客单缺链接」判死，截胡了方案泳道的无方案续接自愈。混合 ops 缺链接
+   的不是博客发布单，放它去 loadChangePlanOrChain 续排 execute 补方案，这回 ops 已在任务
+   身上走 prepare 模式，每任务一次熔断与失败两次留人都不变）。 */
+function blogShortcutRoute(ops, blogUrlOk) {
+  if (!ops.some((op) => BLOG_OPS.indexOf(op) !== -1)) return 'plan';
+  if (blogUrlOk) return 'publish';
+  return ops.every((op) => BLOG_OPS.indexOf(op) !== -1) ? 'reject' : 'plan';
+}
+
 /* 闸类拦截错误（2026-10-15）：方案契约校验是零 spawn 的确定性失败，不是环境病。
    err.gate 标记沿 runner_host IPC 透传到 listener，熔断分诊对其 skip（lib/fuse_policy）。 */
 function gateError(message) {
@@ -1722,11 +1734,15 @@ async function runOne(ctx, context, workspace, taskId) {
   const planOnDisk = fs.existsSync(changePlanPath(workspace, taskId));
   if (hasBlogOps && !planOnDisk) {
     outputUrl = resolveBlogUrl(task, profile) || outputUrl;
-    if (!wf.isBlogUrl(outputUrl, profile.domain)) {
+    const route = blogShortcutRoute(ops, wf.isBlogUrl(outputUrl, profile.domain));
+    if (route === 'publish') {
+      log('task ' + taskId + '：博客发布模式，目标 ' + wf.publicUrlOf(outputUrl));
+      return runBlogPublish(ctx, task, workspace, profile, outputUrl);
+    }
+    if (route === 'reject') {
       throw new Error('task ' + taskId + '：博客任务，但 output_url 和 note 里都找不到平台文章链接，无法定位目标文章，不发布');
     }
-    log('task ' + taskId + '：博客发布模式，目标 ' + wf.publicUrlOf(outputUrl));
-    return runBlogPublish(ctx, task, workspace, profile, outputUrl);
+    log('task ' + taskId + '：ops 带 blog 类但无文章链接且非纯博客单（' + ops.join(',') + '），不走博客捷径，落回方案泳道');
   }
   if (hasBlogOps && planOnDisk) {
     log('task ' + taskId + '：带变更方案的博客任务，契约在方案，不走博客捷径，照方案泳道执行');
@@ -1970,6 +1986,7 @@ async function run(ctx) {
 
 module.exports = {
   loadChangePlanOrChain,
+  blogShortcutRoute,
   planStructuralCalls,
   shopseoUndeclaredOps,
   wfagentUndeclaredOps,
