@@ -828,13 +828,20 @@ function publishGate(post) {
    平台文章链接（2026-09-17 #138/#139 口径），捷径与方案泳道同用。note 没有再读 detail
    （2026-10-20 ticket #43 Ben's NZ #1544：频道开的改稿单链接只写在任务描述里，output_url
    与 note 都空，写回定位不到目标文章）。找不到回空串。execute 的 revise 识别同一口径。 */
+/* URL 尾巴清洗：note/detail 里的链接常被 markdown 反引号或标点包裹，正则按「非空白」吃进来
+   会连包裹符一起吞（2026-10-20 Kuddles #853：尾部反引号进了 URL，slug 解析失败 apply 摔死；
+   与 ticket #43 的中文标点截断同族，这次收口在出口统一清洗，三处来源一个口径）。 */
+function urlTrim(u) {
+  return String(u || '').replace(/[`'"<>）】。，、；;,.]+$/, '');
+}
+
 function resolveBlogUrl(task, profile) {
-  const direct = String(task.output_url || '');
+  const direct = urlTrim(String(task.output_url || ''));
   if (wf.isBlogUrl(direct, profile.domain)) return direct;
-  const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
+  const noteUrls = (String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || []).map(urlTrim);
   const noteHit = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
   if (noteHit) return noteHit;
-  const detailUrls = String(task.detail || '').match(/https?:\/\/[^\s)\]，。]+/g) || [];
+  const detailUrls = (String(task.detail || '').match(/https?:\/\/[^\s)\]，。]+/g) || []).map(urlTrim);
   return detailUrls.find((u) => wf.isBlogUrl(u, profile.domain)) || '';
 }
 

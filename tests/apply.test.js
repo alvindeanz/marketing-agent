@@ -820,6 +820,13 @@ t('resolveBlogUrl：output_url 优先，卡链接兜底到 note，找不到回�
       detail: '对象：#118 草稿，预览 https://www.apolloenergy.nz/blog/solar-post/?preview=cfb8d41a，只改稿不发布。',
     }, profile),
     'https://www.apolloenergy.nz/blog/solar-post/?preview=cfb8d41a');
+  // markdown 反引号或标点包裹的链接要剥壳（2026-10-20 Kuddles #853：尾部反引号进 URL，slug 解析失败）
+  assert.strictEqual(
+    A6.resolveBlogUrl({ output_url: '', result_note: '文章地址 `https://www.apolloenergy.nz/blog/educator-top-up/` 已核' }, profile),
+    'https://www.apolloenergy.nz/blog/educator-top-up/');
+  assert.strictEqual(
+    A6.resolveBlogUrl({ output_url: 'https://www.apolloenergy.nz/blog/solar-post/`', result_note: '' }, profile),
+    'https://www.apolloenergy.nz/blog/solar-post/');
   // note 里的平台链接仍然优先于 detail
   assert.strictEqual(
     A6.resolveBlogUrl({

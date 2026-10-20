@@ -595,15 +595,29 @@ async function main() {
       + heldPlan.map((t) => '#' + t.id + '(方案' + planPid(t) + '/' + planStateOf(t) + ')').join(' '));
   }
 
-  // 0.4 later 存量挪期（2026-09-17）：apply_verdicts 的挪期分支只管新落的判决，规则上线前
-  // 已判 later 的 review 态任务会一直留在本期占泳道（run_20260917-0324 七条实证）。这里补扫：
-  // 本期 review+later 一律挪下一期，产出与判决保留，到期随下期自然进放行流程。只在整期
-  // 口径下扫（--ids 指定任务时不动别的任务）。
+  // 0.4 later 存量挪期（2026-09-17）+ 永动锁刹车（2026-10-20 Apex #662 教训：review 态 later
+  // 不在任何重判集合里，挪期扫帚每轮往后踢一期，判决理由早失效也没人回头看，Oak 两条烂到 42 天）。
+  // 刹车规则：同一单累计挪期 ≥2 次、或判龄 ≥14 天、或判决已 stale 的，不再挪，盖 [later-expired]
+  // 章进 detail（哈希失效，判决作废），拉回本期，交本轮放行官重验前置条件（理由不成立即放行，
+  // 仍成立则重新 later 并写明到期条件）。被历轮挪去未来期的烂尾单一并拉回。新鲜 later 照旧挪下期。
+  // 只在整期口径下扫（--ids 指定任务时不动别的任务）。
   if (!IDS) {
     const allNow = await tasks();
-    const laterStuck = allNow.filter((t) => t.status === 'review' && inSprintScope(t)
+    const laterAll = allNow.filter((t) => t.status === 'review'
       && String(t.review_effective || t.review_verdict || '') === 'later');
-    for (const t of laterStuck) {
+    for (const t of laterAll) {
+      const moved = (String(t.result_note || '').match(/\[later\] (存量挪期|判定延后)/g) || []).length;
+      const ageDays = t.reviewed_at ? Math.floor((Date.now() - Date.parse(String(t.reviewed_at).replace(' ', 'T'))) / 86400000) : 0;
+      const rotten = t.review_stale || moved >= 2 || ageDays >= 14;
+      if (rotten) {
+        if (DRY) { log('#' + t.id + ' later 烂尾（挪期 ' + moved + ' 次/判龄 ' + ageDays + ' 天/stale ' + !!t.review_stale + '），would 盖章拉回 S' + curNum + ' 重判'); continue; }
+        const body = { sprint: 'S' + curNum, result_note: String(t.result_note || '') + '\n[later-expired ' + stamp() + '] 挪期 ' + moved + ' 次/判龄 ' + ageDays + ' 天，旧判决作废拉回本期，放行官重验前置条件。' };
+        if (!t.review_stale) body.detail = String(t.detail || '') + '\n[later-expired ' + stamp() + '] 判决作废重验（挪期 ' + moved + ' 次/判龄 ' + ageDays + ' 天）。';
+        await call('PATCH', '/tasks/' + t.id, body);
+        log('#' + t.id + ' later 烂尾，盖章拉回 S' + curNum + ' 交放行官重验');
+        continue;
+      }
+      if (!inSprintScope(t)) continue; // 新鲜 later 且本来就排未来期的不动
       // 挪到本期之后那一期：欠账里的 later 挪回任务自己的下一期还是 <= 本期，会原地打转
       const next = 'S' + Math.min(curNum + 1, 9);
       if (DRY) { log('#' + t.id + ' later 存量，would 挪 ' + next); continue; }
