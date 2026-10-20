@@ -30,7 +30,7 @@ pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert �
 
 ## 部署
 
-`./deploy.sh check|api|worker`，凭据在 .deploy-env（gitignored，含 ROS_PASS/BT_PASS）。先 commit 再部署。api 先传 /tmp 远端 php -l 过了才落位；worker 备份、rsync 校验和白名单同步、双端哈希清单比对、node --check 加 require 加载校验、重启 systemd、失败自动回滚，DEPLOYED 文件记 rev。runner_host.js 顶层直接跑 main，不可 require；新 job 类型必须同时登记 runner_host 的 KNOWN_TYPES、seo-api 的 ensure_job_types、两边的 lanes 表；并且任何往惰性 ENUM 列写新值的入口都要先调对应的 ensure（agent_jobs.type 是 `ensure_job_types()`，seo_tasks.module 是 `ensure_task_module()`）：ENUM 没扩就插，MariaDB 非严格模式会静默截成空串（2026-08-29 plan_review job 195；2026-08-31 任务 module=paid 丢失）。加任何 ENUM 新值 = 改 PHP 校验 + ensure 函数 + 本条清单，三处。
+`./deploy.sh check|api|worker`，凭据在 .deploy-env（gitignored，含 ROS_PASS/BT_PASS）。先 commit 再部署。api 先传 /tmp 远端 php -l 过了才落位；worker 备份、rsync 校验和白名单同步、双端哈希清单比对、node --check 加 require 加载校验、重启 systemd、失败自动回滚，DEPLOYED 文件记 rev。runner_host.js 顶层直接跑 main，不可 require；新 job 类型必须同时登记 runner_host 的 KNOWN_TYPES、seo-api 的 ensure_job_types、两边的 lanes 表；并且任何往惰性 ENUM 列写新值的入口都要先调对应的 ensure（agent_jobs.type 是 `ensure_job_types()`，seo_tasks.module 是 `ensure_task_module()`）：ENUM 没扩就插，MariaDB 非严格模式会静默截成空串（2026-08-29 plan_review job 195；2026-08-31 任务 module=paid 丢失）。加任何 ENUM 新值 = 改 PHP 校验 + ensure 函数 + 本条清单，三处。登记新 op = 能力清单（specs/capabilities/<平台>.md）+ release_policy.json 风险表 + 跑一次 `SEO_AGENT_TOKEN=... node seo-worker/tools/capability_broadcast.js --op <name> --apply`（零 LLM 广播：盖章失效全舰队旧的「缺执行器」判决，下轮自动重判；泛断言命中先人眼核再决定 --wide），三步缺一不可（#813 修清单 #1310 原样复发的教训）。
 
 ## 历史出处
 

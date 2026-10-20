@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-20 AIRA 能力广播工具 capability_broadcast + op 登记清单补第三步（Alvin 追问「舰队怎么获取最新能力」，#1310 假缺口二次复发实证）
+
+- 第一性（review_glue_failures_2026-10-20.md 第三部分）：能力分发早就有（worker 部署双机同版 + execute 注入清单），死循环根因是缓存失效缺位：任务文本里的能力断言是写入时为真的缓存，清单更新后没人叫醒它们，放行官简报又没有清单段，照着旧文本再拆假人工单（#813 修清单 #1310 原样复发）。
+- 新件：seo-worker/tools/capability_broadcast.js（零 LLM，admin API，不需部署）：登记新 op 后跑，扫全舰队未结任务的能力断言，强命中（点名 op 或「缺执行器 X」标准措辞）盖 [capability-update] 章进 detail，判决哈希失效下轮自动重判；泛断言（没点名 op 的「平台无此能力」类）只列出，--wide 才盖，必须人眼核（首发实测：泛命中 8 条里混着 Ben's 的 paid 预算单，证明不能默认盖）。匹配纯件 lib/capclaim.js，单测 tests/capability_broadcast.test.js 7 件（用例取自 #1310/#663/#1274 真实事故文本）。
+- CLAUDE.md 部署节 op 登记清单从两步改三步：清单 + 政策表 + 广播，缺一不可。
+- 首发实弹 page-create：盖章 Louvresky #813（当年教训本尊，仍卡着）与 Sanmichelle #1354，下轮重判自动吃新事实。
+- 后续（改造序⑤批随 worker 部署）：放行官与闸A 简报注入平台 op 清单、能力断言只认清单、capgap 拆单标准措辞扩到放行官、清单/政策表/执行器三向一致性测试。
+- 测试：新测 7 件全绿，node --check 过；工具与 lib 均不在部署白名单外新增风险（tools 本就从仓库跑，lib/capclaim 随下次 worker 部署一起走，不部署也不影响线上 worker）。
+
 ### 2026-10-20 AIRA CLAUDE.md 新增硬规矩 9「关节与闸的第一性纪律」（Alvin 拍板，影响两人所有后续开发）
 
 - 起因：Alvin 两连问「大量任务卡在 agent 不可预计的流程问题，框架是不是有问题」「是不是有些闸根本没必要」。近一个月 DEFECTS 37 行归类：22 行是关节病（申报与现实脱节），6 行才是判断病。论证全文与逐条归类在 /data/aira/projects/MA/memory/review_glue_failures_2026-10-20.md（两部分：关节范式 + 闸的可逆性分级）。
