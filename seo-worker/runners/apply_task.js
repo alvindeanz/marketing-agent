@@ -110,6 +110,8 @@ const SHOPSEO_SHAPE_TO_OP = [
   [/shopseo\s[^\n]*\barticle\s+set-handle\b/, 'article-meta-update'],
   [/shopseo\s[^\n]*\btheme\s+(set-text|copy)\b/, 'theme-text-edit'],
   [/shopseo\s[^\n]*\bcollection\s+set-template\b/, 'collection-template-assign'],
+  [/shopseo\s[^\n]*\barticle\s+set-template\b/, 'article-template-assign'],
+  [/shopseo\s[^\n]*\bproduct\s+set-template\b/, 'product-template-assign'],
 ];
 function shopseoUndeclaredOps(plan, declaredOps) {
   const declared = (declaredOps || []).map((o) => String(o).toLowerCase());

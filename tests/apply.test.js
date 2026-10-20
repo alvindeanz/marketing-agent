@@ -647,6 +647,10 @@ t('publish/create/redirect/set-handle 命中，已申报的不报，meta 小改�
   assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, ['article-publish', 'collection-create', 'redirect-add']), []);
   assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme copy a b', ['theme-template-create']), []);
   assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme set-text k --jq .a --value v', []), ['theme-text-edit']);
+  // set-template 三族（2026-10-20 ticket #42 补齐：product 1.10.0 新增，article 1.8.0 就有但形状表漏登）
+  assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop badger product set-template mower-21 --suffix mower-faq', []), ['product-template-assign']);
+  assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop badger product set-template mower-21 --suffix mower-faq', ['product-template-assign']), []);
+  assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x article set-template post-1 --suffix alt', []), ['article-template-assign']);
 });
 
 console.log('闸类拦截标记：契约校验失败不喂熔断（2026-10-15 redirect-add 误伤教训）');
