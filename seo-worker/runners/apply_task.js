@@ -1193,11 +1193,13 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
   /* agent 泳道钢板：模型报 success 只是必要条件，零模型对账硬读账户全符才算数。
      对账不过：任务留 review 转人，条目账本保持模型上报值供人比对差异。 */
   let auditLine = '';
+  let auditOk = false;
   if (agentOps.length && status === 'success') {
     let audit;
     try { audit = auditAgentItems(customerId, itemsA, null); }
     catch (e) { audit = { ok: false, checked: 0, unaudited: 0, failures: [{ entity: '(audit)', why: '对账器异常：' + String(e.message).slice(0, 120) }] }; }
     if (audit.ok) {
+      auditOk = true;
       auditLine = '对账: 零模型硬读 ' + audit.checked + ' 项全符' + (audit.unaudited ? '（另 ' + audit.unaudited + ' 行无资源名未硬审）' : '');
       log('task ' + taskId + ': agent 泳道对账通过，硬读 ' + audit.checked + ' 项');
     } else {
@@ -1253,6 +1255,17 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
       note: head + '\n无变更方案验收：前提核验见方案第 1 节，affected 为空是预期。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
     });
     log('task ' + taskId + ': no-change plan verified and accepted');
+    return { taskId, status: 'success', logFile };
+  }
+  /* 运行时 noop（2026-10-20 webforger #1523）：条件幂等方案（预期零写入、读到被改回的行才改齐）
+     实测零行需改时 affected 合法为空。与「本方案无 API 调用」不同：方案文本带写入步骤，不能靠文本
+     判定，收口凭据是上面的零模型对账硬读账户全符（auditOk 要求 checked>0 且零失败）。只对 ads 的
+     agent 泳道生效：白名单泳道与其他平台泳道没有条目硬审，affected 为空照旧按失败处理。 */
+  if (status === 'success' && !affected.length && agentOps.length && auditOk) {
+    await api.completeTask(taskId, {
+      note: head + '\n运行时零写入收口：条件幂等方案实测终态已达成，无行需改，' + auditLine + '。' + summarize(String(j.note || ''), 300) + ' 执行记录 ' + path.basename(logFile),
+    });
+    log('task ' + taskId + ': runtime-noop verified by hard audit, marked done');
     return { taskId, status: 'success', logFile };
   }
   const why = status === 'success' ? 'affected 为空，无法证明改了什么，按失败处理' : summarize(String(j.note || '') || output, 300);
