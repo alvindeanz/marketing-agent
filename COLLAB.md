@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-20 AIRA Shopify 三家加测轮（Alvin 指令「接着跑一批 shopify 端 harness 验新规则」）：Badger(5) + Sunseeker(4) + Ctomi(11) 串行，零轮中修复
+
+- 选样依据：排除当日已跑的 Oak/Midea、不进 sprint 的 Playmate、执行面归 Aiden 的 Sungait；按 review 超龄与 attention 密度选三家。全程 17:05-17:36 约 31 分钟，三家 rc=0，队列排空。
+- 新规则实测记分（全部首见于 Shopify 侧）：①挪期刹车 Sunseeker #920（判龄 21 天）盖章拉回，放行官重验 accepted 零写入收口即归档，并由 capgap-split 自动拆出人工工单 #1565（不再只写「进运营清理队列」）；②ops 回填从严 Ctomi #540 回填含未登记 op（article-set-cover-alt）整包拒收保持空 ops，任务照常被放行官验收 done（#1510 毒载荷同族防线立功）；③未申报 op 拦截 Sunseeker #1424 auto-apply 中止（方案正文含 product-template-assign 命令但任务 ops 未申报），零写入带明确修法，死得明白不是裸摔；④冷却闸+熔断 Badger #1428 同页冷却拦到 2026-11-11 且自动落地 2 次熔断转人工（闸命中台账素材）；⑤卡时效刷新三家共 8 张超龄卡自动重拉；⑥shopseo 1.10.0 set-template 闭环 Badger #1496 实测发现前提已被 #1536 修好，出无变更方案，补排放行官（job 8619）独立复测线上后 release 即验收归档。
+- 判断类停人均合理：Sunseeker #1493 客户自行下架两款 Gen 2 PDP（301 到 X5），execute 零写入停手等客户不纠正客户改动。
+- 坑：harness 的 SEO_AGENT_TOKEN 要 admin JWT（ma_skill.jwt），worker serviceToken 会 401 Bad token。
+- 遗留：Sunseeker #1424 方案需剔除越权模板命令重出（任务书写明不碰 FAQ/模板）；#434/#436/#437 旧 hold-human 等客户口径（Gen 2 命名/UTM/品牌列表）；#441 facts 更新后待重判，下轮自动。
+
 ### 2026-10-20 AIRA 四客户验证轮（Alvin 指令：串行 2 轮 x WF+Shopify，验当日全部更新）+ 永动锁刹车与 URL 剥壳两修（eb74b5a，worker 两机已部署）
 
 - 轮次：R1 Louvresky(16)+Oak(1)，R2 Kuddles(47)+Midea(3)，另有前菜 Apex(44) 两轮（建页死锁拆除，三页 placeholder+noindex 上线 200）。
