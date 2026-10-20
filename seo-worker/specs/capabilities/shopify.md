@@ -42,6 +42,7 @@
 | theme-template-create | agent_prepare | 复制现有集合模板为新模板（theme copy，拒绝覆盖已存在的），配合 collection-template-assign 使用 |
 | collection-template-assign | agent_apply | 指派集合 template_suffix，模板不存在则拒绝（防店面 500） |
 | article-template-assign | agent_apply | 指派文章 template_suffix，模板不存在则拒绝（防店面 500）（shopseo 1.8.0 article set-template） |
+| product-template-assign | agent_apply | 指派商品 template_suffix，模板不存在则拒绝（防店面 500）（shopseo 1.10.0 product set-template） |
 | collection-metafield-update | agent_apply | 写集合自定义 metafield；--expect-sha256 只改不建、现值哈希不符零写入；--clear 真删（shopseo 1.8.0 collection set-metafield / restore-metafield） |
 | theme-code-update | agent_apply | 整替主题既有 .liquid 代码文件（layout/snippets/sections/templates），只改不建、--expect-sha256 必填现值不符零写入、写前快照、写后回读整文件哈希核对；影响全站渲染，方案必须带 diff 与影响面清单（shopseo 1.9.0 theme put-code / restore-code） |
 <!-- PLANNING_VIEW_END -->
@@ -67,6 +68,7 @@
 - theme-code-update [risk_class: reversible]：shopseo theme put-code（1.9.0 起，Badger #1427/#1428 收编）。整文件替换主题既有 .liquid 代码文件，只认 layout/ snippets/ sections/ templates/ 四目录（模板 JSON 字段编辑走 theme-text-edit）；只改不建（asset 不存在拒绝）；--expect-sha256 必填，现值整文件哈希不符零写入；写前快照、写后回读整文件哈希核对、统一 diff 预览。影响全站渲染：方案必须带 diff 与影响面清单（哪些页面哪些字段会变），操作员要求先过人的（如 Badger ticket #40「落地前先列影响面」）按 hold 处理。回滚 shopseo theme restore-code <快照> --key <asset-key>。
 - product-tags-update [risk_class: reversible]：shopseo product set-tags --add/--remove（1.6.0 起）。追加去重（大小写不敏感比对，保留现有顺序与写法）；**tags 决定 smart collection 成员归属，加减 tag 等于把商品挪进挪出集合页，dry-run 阶段必须说明预期的归属变化**；载荷白名单只含 id/tags，写后回读核对且守护 title/handle/body_html 不变；回滚 = --remove 加回来的 tag（失败输出里直接给命令），整体恢复用快照。
 - article-template-assign [risk_class: reversible]：shopseo article set-template（1.8.0 起，Dareu #1348 收编）。指派文章 template_suffix，模板（templates/article.<suffix>.json 或 .liquid）必须已存在于 main theme，否则拒绝（防店面 500）；写前快照，回滚 = 用快照旧值再 set-template。
+- product-template-assign [risk_class: reversible]：shopseo product set-template（1.10.0 起，MA ticket #42 / Badger #1536 收编：PDP 误挂共用模板的修错要我方代落地，article/collection 都有独缺 product）。指派商品 template_suffix，模板（templates/product.<suffix>.json 或 .liquid）必须已存在于 main theme，否则拒绝（防店面 500）；载荷白名单只含 id/template_suffix，写前快照，写后回读核对且守护 handle/title/body_html 不变；回滚 = 用快照旧值再 set-template（失败输出里直接给命令）。
 - 文章封面 alt：shopseo article set-cover-alt，语义归 article-meta-update，不另立 op（2026-09-24 三问教训：这行曾被当 capability-gap 排了人工单 #861）。
 - 文章封面图更换：shopseo article set-cover（1.3.1 起，--src https 图址，可带 --alt），语义同归 article-meta-update，不另立 op（2026-09-30 Sunseeker #932 实证：agent 曾以 article-set-cover-image 报 capability-gap 停手，缺的是 CLI 不是能力）。
 - 文章 slug：shopseo article set-handle（1.3.2 起，仅 DRAFT，已发布拒绝：Shopify 不自动 301，动在售 slug 走人工评估加 redirect）；article create 也收 --handle 直接建成短 slug。语义归 article-meta-update，不另立 op（2026-09-30 Badger #884 发布前阻断项实证）。

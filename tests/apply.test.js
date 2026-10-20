@@ -795,6 +795,43 @@ t('resolveBlogUrl：output_url 优先，卡链接兜底到 note，找不到回�
   assert.strictEqual(A6.resolveBlogUrl({ output_url: '', result_note: '没链接' }, profile), '');
   // 别家域名的博客链接不算数
   assert.strictEqual(A6.resolveBlogUrl({ output_url: 'https://other.com/blog/p/', result_note: '' }, profile), '');
+  // detail 兜底（2026-10-20 ticket #43：频道开的改稿单链接只在任务描述里，中文标点截断）
+  assert.strictEqual(
+    A6.resolveBlogUrl({
+      output_url: '',
+      result_note: '改好的正文已存到 body.html',
+      detail: '对象：#118 草稿，预览 https://www.apolloenergy.nz/blog/solar-post/?preview=cfb8d41a，只改稿不发布。',
+    }, profile),
+    'https://www.apolloenergy.nz/blog/solar-post/?preview=cfb8d41a');
+  // note 里的平台链接仍然优先于 detail
+  assert.strictEqual(
+    A6.resolveBlogUrl({
+      output_url: '',
+      result_note: '目标页面: https://www.apolloenergy.nz/blog/from-note/',
+      detail: '预览 https://www.apolloenergy.nz/blog/from-detail/',
+    }, profile),
+    'https://www.apolloenergy.nz/blog/from-note/');
+});
+
+t('冷却闸人工豁免：policy.cooldown_waiver 点名任务号放行，其余照拦，facts 读失败不豁免', async () => {
+  const A7 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const apiWith = (facts) => ({ listFacts: async () => ({ facts }) });
+  // 点名命中：豁免
+  assert.strictEqual(await A7.cooldownWaiver(apiWith([
+    { fact_key: 'policy.cooldown_waiver', value: '1536, 1600', status: 'confirmed' },
+  ]), 5, 1536, null), true);
+  // 没点名：不豁免
+  assert.strictEqual(await A7.cooldownWaiver(apiWith([
+    { fact_key: 'policy.cooldown_waiver', value: '1600', status: 'confirmed' },
+  ]), 5, 1536, null), false);
+  // retracted 的豁免 fact 不算数
+  assert.strictEqual(await A7.cooldownWaiver(apiWith([
+    { fact_key: 'policy.cooldown_waiver', value: '1536', status: 'retracted' },
+  ]), 5, 1536, null), false);
+  // 没有豁免 fact：不豁免
+  assert.strictEqual(await A7.cooldownWaiver(apiWith([]), 5, 1536, null), false);
+  // facts 读失败：宁严不松
+  assert.strictEqual(await A7.cooldownWaiver({ listFacts: async () => { throw new Error('boom'); } }, 5, 1536, null), false);
 });
 
 console.log('闸改版 2026-10-15（redirect 出客户闸、page-create 软闸、发布权委托）');

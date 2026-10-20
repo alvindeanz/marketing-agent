@@ -152,6 +152,10 @@ function buildPrompt(brief, task, workspace) {
     '     the whole point of the deliverable is changes that must be executed later, and',
     '     those changes map to registered operation names you saw in the brief or the',
     '     capability manifest. Never invent an op name.',
+    '     Blog ops (2026-10-20 ticket #43): a revision of an UNPUBLISHED blog draft is',
+    '     blog-draft (that op covers both creating and revising drafts, the draft lane',
+    '     patches in place without publishing); blog-edit is only for posts that are',
+    '     already published.',
     '   OPS_CHECK: capability-gap[cli|api|scope] <one short line, what execution ability is missing>',
     '     changes are needed but no registered operation covers them. The bracket tag is the',
     '     three-question verdict (2026-09-24 rule) and decides who the gap goes to, so get it right:',
@@ -1514,10 +1518,17 @@ async function runBlogTask(ctx, context, workspace, task) {
   let currentBody = '';
   let outputUrl = String(task.output_url || '');
   /* 2026-09-16：确认卡机制后 output_url 常是卡链接，不再指向草稿。修订轮识别草稿
-     加 note 兜底：output_url 不是博客地址时，从 result_note 里找平台预览/正文链接。 */
+     加 note 兜底：output_url 不是博客地址时，从 result_note 里找平台预览/正文链接。
+     note 没有再读 detail（2026-10-20 ticket #43：频道开的改稿单链接只写在任务描述里，
+     与 apply 的 resolveBlogUrl 同一口径），否则改稿单掉进新建分支会另起一篇重复稿。 */
   if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
     const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
     const alt = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
+    if (alt) { outputUrl = alt; }
+  }
+  if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
+    const detailUrls = String(task.detail || '').match(/https?:\/\/[^\s)\]，。]+/g) || [];
+    const alt = detailUrls.find((u) => wf.isBlogUrl(u, profile.domain));
     if (alt) { outputUrl = alt; }
   }
   if (outputUrl && wf.isBlogUrl(outputUrl, profile.domain)) {

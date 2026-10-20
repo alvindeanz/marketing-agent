@@ -811,12 +811,17 @@ function publishGate(post) {
    publish_blog=agree 落在确认卡任务上，按本任务查永远是空，两次误拦烧光重试额度）。
    候选顺序：本任务 → detail/note 里引用的确认页任务号，取到 publish_blog 行即停。 */
 /* 任务的目标博客 URL：output_url 优先；预览 token 失效被换成卡链接时从 note 兜底找
-   平台文章链接（2026-09-17 #138/#139 口径），捷径与方案泳道同用。找不到回空串。 */
+   平台文章链接（2026-09-17 #138/#139 口径），捷径与方案泳道同用。note 没有再读 detail
+   （2026-10-20 ticket #43 Ben's NZ #1544：频道开的改稿单链接只写在任务描述里，output_url
+   与 note 都空，写回定位不到目标文章）。找不到回空串。execute 的 revise 识别同一口径。 */
 function resolveBlogUrl(task, profile) {
   const direct = String(task.output_url || '');
   if (wf.isBlogUrl(direct, profile.domain)) return direct;
   const noteUrls = String(task.result_note || '').match(/https?:\/\/[^\s)\]]+/g) || [];
-  return noteUrls.find((u) => wf.isBlogUrl(u, profile.domain)) || '';
+  const noteHit = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
+  if (noteHit) return noteHit;
+  const detailUrls = String(task.detail || '').match(/https?:\/\/[^\s)\]，。]+/g) || [];
+  return detailUrls.find((u) => wf.isBlogUrl(u, profile.domain)) || '';
 }
 
 async function requireBlogPublishConsent(api, task, record) {
@@ -1599,6 +1604,28 @@ function cooldownGate(workspace, taskOps_, taskId, motherId) {
   return { blocked: false };
 }
 
+/* 冷却闸人工豁免（2026-10-20 ticket #42，Badger #1536 实证：修错误内容被 #1287 改共用
+   模板的触碰记录拦到窗尾，闸此前没有任何豁免通路，修错只能等三周或进工单）。
+   「这是修错不是优化」「这两页不在测量」是人的判断，机器不自判：凭证 = 看板 facts 页
+   人工落的 policy.cooldown_waiver，值为任务号列表（空格/逗号分隔），点名哪单豁免哪单。
+   豁免跳过同页冷却与全站独占窗两种拦截，落地照记台账；facts 读失败按无豁免处理，
+   闸宁严不松。任务落完后 fact 可撤可留，残留任务号对已 done 的单无副作用。 */
+async function cooldownWaiver(api, clientId, taskId, log) {
+  try {
+    const fr = await api.listFacts(clientId);
+    const f = (fr.facts || []).find((x) => String(x.fact_key) === 'policy.cooldown_waiver'
+      && String(x.status || '') !== 'retracted');
+    if (!f) return false;
+    const ids = (String(f.value || '').match(/\d+/g) || []).map(Number);
+    if (ids.indexOf(Number(taskId)) === -1) return false;
+    if (log) log('冷却闸豁免：policy.cooldown_waiver 点名 #' + taskId + '（人工批），放行落地，台账照记');
+    return true;
+  } catch (e) {
+    if (log) log('冷却豁免 facts 读取失败（' + e.message + '），按无豁免处理');
+    return false;
+  }
+}
+
 /* 冷却闸只保护活页（2026-09-30，Sunseeker #932 实证：给未发布草稿修封面被自己草稿期的
    触碰记录拦了一个月）。命中同页冷却时逐个探目标页，全都不是 200 就没有测量窗可言，放行。
    网络失败按保守处理（当作活页照拦），冷却闸宁严不松是它的本性。 */
@@ -1636,6 +1663,7 @@ async function runOne(ctx, context, workspace, taskId) {
   const gateOps = taskOps(task);
   if (!gateOps.some((op) => BLOG_OPS.indexOf(op) !== -1)) {
     const gate = await cooldownGateLive(workspace, gateOps, taskId, log, splitMotherId(task.detail));
+    if (gate.blocked && await cooldownWaiver(api, job.client_id, taskId, log)) gate.blocked = false;
     if (gate.blocked) {
       const msg = '[cooldown-until ' + gate.until + '] 落地暂缓：' + gate.why + '。' + gate.until + ' 后重放行即可，方案与判决保留。';
       try { await api.postTaskResult(taskId, { output_url: String(task.output_url || ''), note: msg, attention: false }); } catch (e) { log('task ' + taskId + ': cooldown note write failed :: ' + e.message); }
@@ -1932,6 +1960,7 @@ module.exports = {
   gateError,
   cooldownGate,
   cooldownGateLive,
+  cooldownWaiver,
   planTargetUrls,
   appendLedger,
   run,
