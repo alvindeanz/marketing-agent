@@ -22,6 +22,11 @@ pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert �
 6. 客户内容与话术不编造事实，缺的信息占位标注待提供。
 7. 测试先行于推送：node tests/ 全套加 php -l 全绿才 push，见 COLLAB.md。
 8. **可扩充 workers 是设计地基（2026-09-18 Alvin 定）**：一切新机制默认要经得起「N 个 worker 任意来去（重启/断网/被杀）系统照常」。三条硬约束：①无单实例假设（如 reap 早期「库里 running 必是上一世孤儿」那种，一律按 worker 身份收窄或超时清扫）；②共享状态要么 DB 原子（claim 走 CAS `UPDATE WHERE status=queued`+rowCount，同客户互斥走服务端 running 排除）、要么按 worker 隔离（fuse/logs/pending_terminal 各 worker 本地，注意 FUSE_FILE 默认是绝对 NFS 路径不自动隔离）；③绝对路径依赖走 NFS 单一事实源不做双份。写任何新代码前先问「两个 worker 同时跑这段会怎样」。宿主机形态：ros 是 systemd 服务；Mac worker 是 tmux 常驻非 launchd（macOS TCC 按二进制对网络卷授权，launchd 归因下 bash/coreutils 写全被拦，tmux 继承终端授权，2026-09-18 Connie 实测矩阵），重启机器后人工跑 /data/aira/start-seo-worker.sh。
+9. **关节与闸的第一性纪律（2026-10-20 Alvin 定，论证全文与台账归类见 /data/aira/projects/MA/memory/review_glue_failures_2026-10-20.md）**：
+   - **关节红线**：stage 之间的路由与收口判定禁止用申报元数据的字符串匹配。路由看载荷存在性（方案文件、草稿链接、items 账本、卡 data.json，封闭集），收口看零模型对账证据（硬读回来的现实）。ops 只做风险申报词汇（release_policy、行为闸用），不做路由器。runner 里新增「死错误」（裸 throw 收尾、无下一步）要自辩：要么链到下一步（chain、转人工带原因、降级），要么说明为什么是数据病或安全病只能死（参照 #1510 修法 blogShortcutRoute 与无方案续接）。
+   - **可逆性定闸级**：错误可逆且回滚已验证（写前快照 + changeset + 回读对账）的走「放行 + 抽查 + 回滚」，不可逆的才事前硬拦。生意闸（spend、不可逆、合同外、客户关系）永远硬；客户闸（锁词、mapping、发布凭证、结构确认）保留并统一到期视同同意口径；质量与防呆类默认软。降软的前提是 spotcheck 抽查器在跑，顺序不能反。
+   - **闸四件套**：新闸必须同时写明管什么动作、豁免面、误杀出口（人工豁免杆或降级路径）、命中台账（立功与误杀都记），缺一不许合；守卫正则必须用 agent 真实产出回放测试（ticket #41/#42、冷却闸血缘、凭证闸无条件触发，四次学费同一课）。
+   - **闸年检**：每月按命中台账复盘，窗口内零立功且有误杀的闸自动降一级（硬到软、软到提示、提示到拆除）；立过功的留，不许凭感觉拆。方案评审在北极星三问外加第四问：本方案新增几个申报-现实契约点、几道闸，新增的要自辩。
 
 ## 部署
 
