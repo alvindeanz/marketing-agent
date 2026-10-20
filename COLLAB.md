@@ -20,6 +20,17 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-20 AIRA 任务归档扫帚三类 + 看板状态切片与 CSV 对账导出（api + 前端，Alvin 拍板「板面只留活账」）
+
+- 背景：55 号两轮 harness 验证后板上 106 条任务 91 条 done（83 条是 replan 换版的 merged/killed/dropped 收口噪音），批五 1 的「sprint 任务永不归档」口径被 Alvin 2026-10-20 的新口径取代：板面只留活账，审计与对账走 include_archived=1。
+- api（seo-api.php）：
+  1. archive_closed_chat_tasks 改名 archive_closed_tasks 并扩成三类扫帚：chat 单收口即归档（原规则不动）；note 带 [merged]/[dropped]/[killed] 的无产出收口单收口即归档；有产出 done 单（done/accepted）收口满 30 天归档。豁免：待反馈卡（卡令牌在身未见 [卡反馈折叠]，与 /clients 徽章 cardish 同口径）、attention=1。挂原有三个读入口（GET /tasks、/board、/clients 徽章），幂等。
+  2. PATCH /tasks/{id} 加 archived 键（0/1）翻案：误归档拉回视野，或手动压档。注意扫帚是读入口触发，手动压档后仍满足扫帚条件的单会被再次归档，翻回来要连带改条件。
+- 前端（static/seo-agent.html）：任务工具栏加状态切片下拉（全部/等我/在跑/排期/等外部/已完成/已归档）加「导出 CSV」。切片非 all 时是平面对账视图（跳过 sprint 口径与进行中/已结束互斥，只留时间窗）；已归档切进切出重拉 include_archived=1。导出带 BOM，字段含 output_url。顺手修 HS_ORDER 漏 queued（服务端真实会发，漏了排序比较 NaN 乱序）。
+- 测试：node tests/ 全套 34 件全绿（含此前基线红的 blog、shopifylink 两件，现绿）；php -l 过（250 远端）；asksapi 47、chatapi 24、inboxapi 21 全绿（250 /tmp/aira_test，fixtures 与 specs 要一起拷，相对路径）。
+- 坑：seo_tasks.archived PDO 读回是字符串，前端 '0' 是真值，判定走 isArch() 统一 Number 比较。
+- 部署：本条随 commit 由 Aira 跑 deploy.sh api。worker 无改动。
+
 ### 2026-10-19 AIDEN plans 泳道 supersede：批准只顶同客户同 service 泳道（api 待 Aiden 部署；worker 两处小改随 Aira 下次 worker 部署走）
 
 - 背景：Aira 条子 /mnt/share/aiden/to-aiden-plans-lane-supersede-20261019.md，Alvin 拍板开工。原 plan_approve 的 supersede 是客户级，批 55 的 SEM plan 会把 SEO plan 69（v8，S1 在跑）殉葬。

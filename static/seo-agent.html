@@ -538,6 +538,19 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn" id="og_all" onclick="setOriginScope('all')">全部来源</button>
             <button class="btn ghost" id="og_sprint" onclick="setOriginScope('sprint')">Sprint</button>
             <button class="btn ghost" id="og_chat" onclick="setOriginScope('chat')">Chat</button>
+            <span style="display:inline-block;width:1px;height:16px;background:#2b3546;margin:0 6px;vertical-align:middle"></span>
+            <!-- 状态切片与导出（2026-10-20 Alvin 定：人工把任意切片拉出来对账）。
+                 已归档是服务端另一份账（include_archived=1），切进切出会重拉。 -->
+            <select class="tb-select" id="hsScopeSel" onchange="setHsScope(this.value)">
+              <option value="all">全部状态</option>
+              <option value="wait_me">等我</option>
+              <option value="running">在跑</option>
+              <option value="queued">排期</option>
+              <option value="wait_ext">等外部</option>
+              <option value="closed">已完成</option>
+              <option value="archived">已归档</option>
+            </select>
+            <button class="btn ghost" onclick="exportTasksCsv()" title="导出当前筛选可见的任务清单">导出 CSV</button>
             <button class="btn ghost" id="tbMoreBtn" onclick="toggleTbMore()">显示</button>
             <span class="tb-more" id="tbMore">
               <!-- 手动挡四件（新增任务/判定/全部按推荐/执行选中任务）已下线（2026-09-16 Alvin 定：
@@ -823,6 +836,21 @@ let fbImgs={},fbUploading={},fbBlobs={},fbBlobBusy={},fbOrig={};
 let blogSocial={};
 /* 任务视图筛选：默认藏起已完成，时间窗默认全部。只存内存，刷新即重置 */
 let showDone=false,taskDays=0,sprintScope='current';
+/* 状态切片（2026-10-20）：all 走原有视图逻辑；指定状态时变平面切片（跳过 sprint 口径与
+   进行中/已结束互斥），给人工对账用。archived 要服务端另拉（include_archived=1）。
+   archived 字段 PDO 回来是字符串，'0' 在 JS 里是真值，判定一律走 isArch()。 */
+let hsScope='all';
+function isArch(t){return Number(t&&t.archived)===1}
+function hsMatch(t){
+  if(hsScope==='all')return !isArch(t);
+  if(hsScope==='archived')return isArch(t);
+  return !isArch(t)&&hsOf(t)===hsScope;
+}
+function setHsScope(v){
+  const prev=hsScope;hsScope=v;
+  if(v==='archived'||prev==='archived')loadTasks();
+  else renderLanes();
+}
 /* 类目切换：paid = module 为 paid 的任务，其余算 SEO。渠道不参与分类（W10：渠道只是执行地点）。 */
 let catScope='all';
 let originScope='all';
@@ -3394,11 +3422,30 @@ async function addTask(){
 
 var sprintAnchor=null;
 async function loadTasks(){
-  const d=await api('/tasks?client_id='+curId);
+  const d=await api('/tasks?client_id='+curId+(hsScope==='archived'?'&include_archived=1':''));
   if(fail(d,'任务载入失败'))return;
   tasksData=d.tasks||[];
   sprintAnchor=d.sprint_anchor||null;
   renderLanes();
+}
+/* 对账导出（2026-10-20）：当前筛选下各泳道可见的行，renderLanes 顺手收集。
+   UTF-8 BOM 给 Excel 认中文；字段含 output_url 方便逐条点开核。 */
+var exportRows=[];
+function csvCell(v){v=String(v==null?'':v).replace(/\r?\n/g,' ');return '"'+v.replace(/"/g,'""')+'"'}
+function exportTasksCsv(){
+  if(!exportRows.length){toast('当前筛选没有可导出的任务',true);return}
+  const cols=['id','title','sprint','module','status','human_state','wait_reason','closed_kind','owner_type','priority','attention','archived','updated_at','output_url'];
+  const head=['任务号','标题','Sprint','模块','状态','人视角','等待原因','收口','执行位','优先级','停人标','已归档','更新时间','产出链接'];
+  const lines=[head.map(csvCell).join(',')];
+  exportRows.forEach(t=>lines.push(cols.map(k=>csvCell(t[k])).join(',')));
+  const cName=(clientsData.filter(c=>c.client_id===curId)[0]||{}).name||('client'+curId);
+  const blob=new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='tasks_'+cName+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000);
+  toast('已导出 '+exportRows.length+' 条');
 }
 
 /* ---- 队列条 ----
@@ -3594,7 +3641,8 @@ var hideEmptyLanes=true;
 /* 泳道按负责方（Agency / Client / Agent），泳道内不再按 status 分组：
    每张卡自己带一行状态（等我 / 在跑 / 等外部 / 结束），排序先等我、再在跑、再等外部，同档按优先级。
    结束的默认藏，「显示已结束」打开，受时间档约束。空泳道按开关隐藏。 */
-const HS_ORDER={wait_me:0,running:1,wait_ext:2,closed:3};
+/* queued 是服务端真实会发的 human_state（排期），漏了会让排序比较出 NaN 乱序（2026-10-20 补） */
+const HS_ORDER={wait_me:0,running:1,wait_ext:2,queued:3,closed:4};
 function hsOf(t){return t.human_state||(t.status==='done'?'closed':'wait_me')}
 /* 客户确认卡类任务（博客/网站内容确认卡、ads 词卡素材卡）在等客户点头期间算人的活
    （发卡、跟客户确认），显示进人工泳道；反馈折叠完（result_note 带 [卡反馈折叠]）
@@ -3640,15 +3688,20 @@ function renderLanes(){
   const cur=currentSprint(tasksData);
   let laterTotal=0,doneHiddenTotal=0;
   const laneHtml=[];const hiddenNames=[];
+  exportRows.length=0;
   LANES.forEach(lane=>{
-    const rows=tasksData.filter(t=>laneKeyOf(t)===lane.key&&(catScope==='all'||taskCat(t)===catScope)&&(originScope==='all'||taskOrigin(t)===originScope));
-    const afterDone=rows.filter(taskVisible);
+    const rows=tasksData.filter(t=>laneKeyOf(t)===lane.key&&(catScope==='all'||taskCat(t)===catScope)&&(originScope==='all'||taskOrigin(t)===originScope)&&hsMatch(t));
+    /* 状态切片是平面对账视图：跳过进行中/已结束互斥和 sprint 口径，只留时间窗。 */
+    const flat=hsScope!=='all';
+    const afterDone=flat?rows.filter(withinWindow):rows.filter(taskVisible);
     /* 已结束视图按结束时间倒序（2026-09-16 Alvin 定：刚完成的排最上，人工顺着审）；
        进行中视图沿用 等我>在跑>等外部 加优先级。 */
-    const vis=afterDone.filter(t=>withinScope(t,cur))
-      .sort(showDone
+    const byTime=showDone||hsScope==='closed'||hsScope==='archived';
+    const vis=(flat?afterDone:afterDone.filter(t=>withinScope(t,cur)))
+      .sort(byTime
         ?((a,b)=>String(taskTime(b)).localeCompare(String(taskTime(a)))||(b.id-a.id))
         :((a,b)=>(HS_ORDER[hsOf(a)]-HS_ORDER[hsOf(b)])||(priIdx(a.priority)-priIdx(b.priority))||(a.id-b.id)));
+    vis.forEach(t=>exportRows.push(t));
     const later=afterDone.length-vis.length;
     const doneHidden=rows.length-afterDone.length;
     laterTotal+=later;doneHiddenTotal+=doneHidden;

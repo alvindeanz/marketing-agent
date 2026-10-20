@@ -120,7 +120,7 @@ function auth_admin(){
     return $u;
 }
 /* 只读 token 的路由白名单。闭集：精确路径 + 两个带行 id 的形状，无前缀匹配。
-   注意 GET /tasks 自带 archive_closed_chat_tasks 维护写（幂等），已告知 Aiden，
+   注意 GET /tasks 自带 archive_closed_tasks 维护写（幂等），已告知 Aiden，
    这是我们自己的家务不算外部写入。 */
 function ro_allowed(){
     global $ROUTE;
@@ -1436,7 +1436,8 @@ define('PLAN_ANCHOR_ORDER',"FIELD(status,'active') DESC,(IFNULL(NULLIF(service,'
 
 /* 批五 1（2026-10-10 Alvin 定「chat 产线完成了就该直接归档」）：chat 来源任务收口即归档。
    archived=1 不进任务视图、不进侧栏徽章、不进「已结束」计数，审计走 GET /tasks?include_archived=1。
-   sprint 任务永不归档：排期账要留着对。列刚建时跑一次性迁移：
+   sprint 任务原规则「永不归档」已被 2026-10-20 的三类扫帚取代（见 archive_closed_tasks），
+   排期账改走 include_archived=1 对账。列刚建时跑一次性迁移：
    一、存量已收口 chat 单直接归档；
    二、存量未收口且空标签的 chat 单按创建日所在半月档补 sprint 章，老实变「逾期」，
       不再赖在本期装新活（前端口径：空标签永远算本期）。无方案锚补不出就保持空。 */
@@ -1488,13 +1489,29 @@ function reclaim_capability_gap_tasks(){
     }
 }
 
-/* 懒归档扫帚：任务读取入口顺手把已收口的 chat 单归档。不去猎每个置 done 的写点，
-   今后新增的收口路径也逃不出读入口。幂等，通常零行更新的开销。$cid=null 全库扫（/board、/clients）。 */
-function archive_closed_chat_tasks($cid=null){
+/* 懒归档扫帚：任务读取入口顺手把已收口的死账归档。不去猎每个置 done 的写点，
+   今后新增的收口路径也逃不出读入口。幂等，通常零行更新的开销。$cid=null 全库扫（/board、/clients）。
+   三类（2026-10-20 Alvin 定「板面只留活账」，取代批五 1 的「sprint 任务永不归档」；
+   审计与对账走 GET /tasks?include_archived=1，PATCH 可翻案）：
+   一、chat 单收口即归档（批五 1 原规则，原样保留）；
+   二、无产出收口单（note 带 [merged]/[dropped]/[killed]，replan 换版的收口噪音，55 号 91 条
+      done 里 83 条是这个）收口即归档；
+   三、有产出 done 单（done/accepted）收口满 30 天归档，近期完成账留板上可对，
+      30 天后该沉淀的早进 facts/快照，板面不再背。
+   谁都不碰的豁免：待反馈卡（卡令牌在身且未见 [卡反馈折叠]，14 天到期钟靠它在板上活着，
+   口径同 /clients 徽章的 cardish）、attention=1（停人标没人收口，归档等于藏尸）。 */
+function archive_closed_tasks($cid=null){
     ensure_task_archived();
     $sql="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND ".CHAT_ORIGIN_SQL;
     if($cid!==null){db()->prepare($sql." AND client_id=?")->execute([(int)$cid]);}
     else db()->exec($sql);
+    $sql2="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND attention=0"
+        ." AND NOT (CONCAT(IFNULL(result_note,''),IFNULL(output_url,'')) LIKE CONCAT('%?t=',id,'&k=%')"
+        ." AND IFNULL(result_note,'') NOT LIKE '%[卡反馈折叠%')"
+        ." AND (IFNULL(result_note,'') REGEXP '\\\\[(dropped|merged|killed)\\\\]'"
+        ." OR updated_at<DATE_SUB(NOW(),INTERVAL 30 DAY))";
+    if($cid!==null){db()->prepare($sql2." AND client_id=?")->execute([(int)$cid]);}
+    else db()->exec($sql2);
 }
 
 /* sprint 标签白名单（2026-10-09 批二 C，Oak #626 实证：W37 这类非法标签解析不进任何轮次
@@ -5421,7 +5438,7 @@ if($m==='GET'&&$ROUTE==='/clients'){
        proposed 排期占位不进红。蓝(agent 任务)口径不变。 */
     ensure_review_schema();
     ensure_task_origin();
-    archive_closed_chat_tasks(); /* 徽章不数已归档 chat 单（批五 1） */
+    archive_closed_tasks(); /* 徽章不数已归档单（批五 1，2026-10-20 扩三类） */
     $agentTasks=[];$manualTasks=[];
     /* 红点只数本期（2026-09-22 Alvin 定，取代跨期全数）：未来期的人工活到期自然亮，
        提前闹红点是注意力税。in_progress 例外（已动手的活不消失）；无 sprint 标签视同本期；
@@ -8333,7 +8350,7 @@ function sprint_anchor_norm($created){
 if($m==='GET'&&$ROUTE==='/board'){
     auth_any();
     ensure_review_schema();
-    archive_closed_chat_tasks(); /* 全库扫一次，循环里不再逐客户扫（批五 1） */
+    archive_closed_tasks(); /* 全库扫一次，循环里不再逐客户扫（批五 1，2026-10-20 扩三类） */
     reclaim_capability_gap_tasks(); /* 缺执行器补齐的人工单自动转回机器位（2026-10-15） */
     $today=new DateTime('today',new DateTimeZone('Pacific/Auckland'));
     $out=[];
@@ -8443,7 +8460,7 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     auth_user();
     $cid=need_client();
     ensure_review_schema();
-    archive_closed_chat_tasks($cid);
+    archive_closed_tasks($cid);
     /* 归档单默认不出列表（批五 1）；审计与排查传 include_archived=1。 */
     $wantArch=!empty($_GET['include_archived']);
     $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=?".($wantArch?'':' AND archived=0')." ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
@@ -8514,6 +8531,9 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
        吞掉（status 同批时更新照常走、注记丢失无感知），读改写又有并发覆盖风险。 */
     if(isset($i['result_note_append'])&&!isset($i['result_note'])){$sets[]="result_note=CONCAT_WS('\n\n',NULLIF(result_note,''),?)";$args[]=(string)$i['result_note_append'];}
     if(array_key_exists('attention',$i)){$sets[]='attention=?';$args[]=empty($i['attention'])?0:1;}
+    /* 归档翻案（2026-10-20 三类扫帚配套）：人工把误归档的单拉回视野，或把看完的账手动压档。
+       注意扫帚是读入口触发，手动压档的 done 单若仍满足扫帚条件，翻回来要连带改条件（如 attention=1）。 */
+    if(array_key_exists('archived',$i)){ensure_task_archived();$sets[]='archived=?';$args[]=empty($i['archived'])?0:1;}
     if(array_key_exists('plan_id',$i)){$sets[]='plan_id=?';$args[]=$i['plan_id']?(int)$i['plan_id']:null;}
     /* 卡反馈处理完毕的收口：只许清空不许手写时间，时间只由 /card_feedback 写入。 */
     if(!empty($i['card_feedback_done'])){ensure_review_schema();$sets[]='card_feedback_at=NULL';}
