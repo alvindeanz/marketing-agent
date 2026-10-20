@@ -1616,7 +1616,8 @@ async function cooldownWaiver(api, clientId, taskId, log) {
     const f = (fr.facts || []).find((x) => String(x.fact_key) === 'policy.cooldown_waiver'
       && String(x.status || '') !== 'retracted');
     if (!f) return false;
-    const ids = (String(f.value || '').match(/\d+/g) || []).map(Number);
+    /* 只认纯数字 token：人把说明文字写进 value 时，#42、日期这类嵌在词里的数字不算任务号 */
+    const ids = String(f.value || '').split(/[\s,;、，；]+/).filter((s) => /^\d+$/.test(s)).map(Number);
     if (ids.indexOf(Number(taskId)) === -1) return false;
     if (log) log('冷却闸豁免：policy.cooldown_waiver 点名 #' + taskId + '（人工批），放行落地，台账照记');
     return true;

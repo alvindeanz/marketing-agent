@@ -830,6 +830,10 @@ t('冷却闸人工豁免：policy.cooldown_waiver 点名任务号放行，其余
   ]), 5, 1536, null), false);
   // 没有豁免 fact：不豁免
   assert.strictEqual(await A7.cooldownWaiver(apiWith([]), 5, 1536, null), false);
+  // 嵌在说明文字里的数字不算任务号（#1536、日期都不豁免 1536，防误放行）
+  assert.strictEqual(await A7.cooldownWaiver(apiWith([
+    { fact_key: 'policy.cooldown_waiver', value: 'ticket #1536 2026-10-20 批', status: 'confirmed' },
+  ]), 5, 1536, null), false);
   // facts 读失败：宁严不松
   assert.strictEqual(await A7.cooldownWaiver({ listFacts: async () => { throw new Error('boom'); } }, 5, 1536, null), false);
 });
