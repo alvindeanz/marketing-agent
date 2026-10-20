@@ -103,6 +103,7 @@
     "mapping-confirmation": "reversible",
     "wp-seo-meta-update": "reversible",
     "wp-term-seo-update": "reversible",
+    "wp-term-description-set": "reversible",
     "wp-redirect-add": "reversible",
     "wp-sitemap-flush": "reversible",
     "paid-report-draft": "reversible",

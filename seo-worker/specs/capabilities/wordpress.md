@@ -21,6 +21,7 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 |---|---|---|
 | wp-seo-meta-update | agent_apply | post/page/product 的 title、description、focus、canonical，走 `/seo/<post_id>`。**授权域**（对齐 shopify article-meta-update 2026-09-24 版）：双闸 confirmed 客户在锁词/mapping 页面范围内免卡直落；无双闸客户覆盖已有值走网页调整卡 |
 | wp-term-seo-update | agent_apply | 分类 term（含 Woo 产品分类）的 SEO 字段，走 `/seo/term/<term_id>`，分界同上 |
+| wp-term-description-set | agent_apply | 分类 term（含 Woo 产品分类）的描述正文，走 `POST /content/term/<term_id>`（需站上 wf-agent >= 1.3.3）。字段 description 必填（空串清空），taxonomy 可选但建议必带作防错护栏（不符 400 零写入）；HTML 走 wp_kses_post 同 post 正文口径（p/h2/ul/a 保留，script 剥除）；写前快照 kind term_content 可回滚，写后回读不符 500 带 snapshot_id。2026-10-21 登记（sdalu #872/#873 缺口，wp 线程 1.3.3 补端点） |
 | wp-redirect-add | agent_apply | Rank Math 重定向增改，走 `/rankmath/redirections`；source 只收路径不收全 URL；加前必查目标零跳转防叠链 |
 | wp-sitemap-flush | agent_apply | 清 Rank Math sitemap 缓存，走 `/rankmath/sitemap/flush`，配合前三个 op 收尾用 |
 | ga4-audit | agent_readonly | 只读审计 GA4，口径同 webforger.md |
@@ -38,6 +39,7 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 
 - wp-seo-meta-update: reversible
 - wp-term-seo-update: reversible
+- wp-term-description-set: reversible
 - wp-redirect-add: reversible
 - wp-sitemap-flush: reversible
 <!-- RISK_CLASS_END -->

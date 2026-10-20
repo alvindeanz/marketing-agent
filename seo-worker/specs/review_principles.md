@@ -189,3 +189,9 @@ adjust 写正文阶段必须改的点。
 
 旧版把 redirect 和建页全划进硬闸，结构单烂在等卡泳道里反复占卡壳名额（#813/#815 一族、
 Apollo #808 熔断三次），2026-10-15 Alvin 定版按「错误是否可自愈」重切。
+
+**代确认客户（2026-10-20 Alvin 政）**：客户有 agency 代确认授权（policy.agency_proxy_confirm
+fact confirmed）时，agency 的 proxy agree（卡上 agency: 前缀留痕）就是合法 agree 凭证，软闸
+硬闸同认。建页链一步到位：建壳、灌成稿、解除 noindex、进导航与 sitemap 同一方案同一轮收口，
+不等 14 天；知会卡照发不阻塞。判决不得以「等 agree 凭证」「等 14 天」「等卡反馈」延后此类
+客户的可逆操作。生意闸不受此条影响：spend、不可逆、合同外、客户关系动作照旧停人。

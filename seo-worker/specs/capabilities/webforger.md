@@ -188,6 +188,7 @@ POST /api/auth/login  {"email":"...","password":"..."}
 - 端点：`POST /api/pages/{siteId}`，body `{ title, type, slug?, lang?, inNav, placeholder, template?, description? }`
 - **本泳道一律 `placeholder: true`**：平台只落最小 `<h1>+<p>` 空壳，零 AI 调用零成本。省略该旗平台会 AI 生成正文，那是平台侧付费路径，方案里出现即 lint 打回。
 - **建页后必须紧跟一步 `PATCH …/{slug}/advanced` 挂 `seo.noindex: true`**（平台不自动挂），正文由后续 content-edit 填，解除 noindex 必须是方案里明示的独立步骤。默认 `inNav: false`。
+- **代确认一步到位（2026-10-20 Alvin 政）**：客户有 agency 代确认授权（policy.agency_proxy_confirm fact confirmed，或卡上有 agency: 前缀 agree 留痕）时，建页不走三步分期：同一方案内建壳、灌成稿、不挂 noindex（或挂后同方案解除）、按方案 `inNav`/导航子菜单与 sitemap 一次收口；知会卡照发但不阻塞、不等 14 天。无代确认授权的客户维持上一条三步口径。判决与放行不得再以「等 agree 凭证」「等 14 天」延后代确认客户的建页链（镜像 #663 改判口径）。
 - `type` ∈ static | blog | collection | collection-item。语言前缀页传 `lang` 或直接 `slug:"zh/xxx"`，后续路由 slug 里的 `/` 编码为 `%2F`。
 - shadow 账号豁免套餐闸（plan gate），客户站可直接建。
 - 回滚：新建空壳未填内容前 `DELETE /api/pages/{siteId}/{slug}`（HTML 进 KV 回收站）；已填内容的页不删，挂回 noindex 并去导航。
