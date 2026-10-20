@@ -62,6 +62,37 @@ t('零行可硬审（条目全缺 resource name）：不过，防蒙混收口', 
   assert.strictEqual(r.unaudited, 1);
 });
 
+/* 转化目标两类（2026-10-20 #1523 零写入收口单被「零行可硬审」判死的回归） */
+const CCG = 'customers/111/customerConversionGoals/SUBMIT_LEAD_FORM~WEBSITE';
+const CPG = 'customers/111/campaignConversionGoals/222~SUBMIT_LEAD_FORM~WEBSITE';
+
+t('customer 转化目标 biddable=true 相符：过', () => {
+  const q = fakeAccount({ [CCG]: [{ customer_conversion_goal_biddable: true }] });
+  const r = auditAgentItems('111', [{ entity: '账户目标', op: 'conversion-goal-change', state: 'landed', evidence: '回读仅 ' + CCG + ' biddable=true' }], q);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.checked, 1);
+});
+
+t('campaign 转化目标期望 biddable=true 实际缺键（false）：不过', () => {
+  const q = fakeAccount({ [CPG]: [{ campaign_conversion_goal_resource_name: CPG }] });
+  const r = auditAgentItems('111', [{ entity: CPG, op: 'conversion-goal-change', state: 'landed', evidence: 'biddable=true' }], q);
+  assert.strictEqual(r.ok, false);
+  assert.ok(r.failures[0].why.includes('期望 biddable=true'));
+});
+
+t('转化目标查无此行：不过', () => {
+  const q = fakeAccount({});
+  const r = auditAgentItems('111', [{ entity: CCG, op: 'conversion-goal-change', state: 'landed', evidence: '' }], q);
+  assert.strictEqual(r.ok, false);
+  assert.ok(r.failures[0].why.includes('查无'));
+});
+
+t('转化目标未声明 biddable 期望：存在即过', () => {
+  const q = fakeAccount({ [CPG]: [{ campaign_conversion_goal_resource_name: CPG }] });
+  const r = auditAgentItems('111', [{ entity: CPG, op: 'conversion-goal-change', state: 'landed', evidence: '回读在账' }], q);
+  assert.strictEqual(r.ok, true);
+});
+
 t('blocked 行不参与对账', () => {
   const q = fakeAccount({ [AG]: [{ asset_group_status: 'ENABLED' }] });
   const r = auditAgentItems('111', [

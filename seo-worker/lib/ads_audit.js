@@ -14,7 +14,18 @@ function runGaqlDefault(customerId, query) {
   return out.split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
-const RES_RE = /customers\/\d+\/(assetGroups|campaignBudgets|campaigns|conversionActions|assets|adGroups|campaignCriteria|adGroupCriteria|sharedSets|sharedCriteria|campaignSharedSets)\/[\w~-]+/;
+const RES_RE = /customers\/\d+\/(assetGroups|campaignBudgets|campaigns|conversionActions|assets|adGroups|campaignCriteria|adGroupCriteria|sharedSets|sharedCriteria|campaignSharedSets|customerConversionGoals|campaignConversionGoals)\/[\w~-]+/;
+
+/* biddable 期望核验：expectText 里第一个 biddable=true/false 即期望值，没写只核存在。
+   GAQL 对 false 省略字段（proto3 默认值不出行），缺键按 false 读。 */
+function biddableMismatch(actual, expectText) {
+  const m = /biddable\s*=\s*(true|false)/i.exec(expectText);
+  if (!m) return '';
+  const want = m[1].toLowerCase() === 'true';
+  const got = actual === true || String(actual).toLowerCase() === 'true';
+  if (want !== got) return '期望 biddable=' + m[1].toLowerCase() + ' 实际 ' + got;
+  return '';
+}
 
 /* 每类资源：查什么、怎么算符合。expectText 是条目 target_value+evidence 的合并文本，
    用来抠期望状态或 micros 数值。 */
@@ -114,6 +125,23 @@ const CHECKS = {
       const wantMt = (expectText.match(/\b(PHRASE|BROAD|EXACT)\b/) || [])[1];
       if (wantMt && mt && mt !== wantMt) return '期望 ' + wantMt + ' 实际 ' + mt;
       return '';
+    },
+  },
+  /* 转化目标两类（2026-10-20 webforger #1523 教训，同 #740 病根：conversion-goal-change
+     写的恰是这两类，不在表里时全部条目被判不可审，零写入回读收口单永远过不了钢板，
+     自动链重试两次烧穿熔断）。live 验过 resource_name 过滤两类都支持。 */
+  customerConversionGoals: {
+    query: (rn) => "SELECT customer_conversion_goal.resource_name, customer_conversion_goal.biddable FROM customer_conversion_goal WHERE customer_conversion_goal.resource_name = '" + rn + "'",
+    verify(rows, expectText) {
+      if (!rows.length) return '账户里查无此 customer conversion goal';
+      return biddableMismatch(rows[0].customer_conversion_goal_biddable, expectText);
+    },
+  },
+  campaignConversionGoals: {
+    query: (rn) => "SELECT campaign_conversion_goal.resource_name, campaign_conversion_goal.biddable FROM campaign_conversion_goal WHERE campaign_conversion_goal.resource_name = '" + rn + "'",
+    verify(rows, expectText) {
+      if (!rows.length) return '账户里查无此 campaign conversion goal';
+      return biddableMismatch(rows[0].campaign_conversion_goal_biddable, expectText);
     },
   },
   campaignSharedSets: {
