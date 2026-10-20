@@ -1693,16 +1693,18 @@ async function runOne(ctx, context, workspace, taskId) {
     return runAdsApply(ctx, workspace, profile, task, taskId);
   }
 
-  // 冷却闸：站内写批次落地前查同页冷却与全站独占窗。博客发布豁免（新 URL 无前窗数据，
-  // 且有客户确认闸把节奏）。挡下的任务保持 review，note 带 [cooldown-until]，到期重放行即可。
+  // 冷却闸（2026-10-20 Alvin 政「闸进一步软，事前只拦不可逆」降软）：同页冷却与全站独占窗
+  // 不再事前拦落地，命中降为随落地的测量冲突注记（[cooldown-note]，前后对比归因时剔除叠写
+  // 影响），台账语义由注记承担，交 spotcheck 与分析侧事后看。检测器 cooldownGate/Live 原样
+  // 保留（注记要 why），人工豁免 fact 通路 cooldownWaiver 保留但不再需要。博客发布原豁免
+  // 口径不变（新 URL 无前窗数据）。旧 [cooldown-until] 挡下的存量单重放行即走本口径。
   const gateOps = taskOps(task);
   if (!gateOps.some((op) => BLOG_OPS.indexOf(op) !== -1)) {
     const gate = await cooldownGateLive(workspace, gateOps, taskId, log, splitMotherId(task.detail));
-    if (gate.blocked && await cooldownWaiver(api, job.client_id, taskId, log)) gate.blocked = false;
     if (gate.blocked) {
-      const msg = '[cooldown-until ' + gate.until + '] 落地暂缓：' + gate.why + '。' + gate.until + ' 后重放行即可，方案与判决保留。';
+      const msg = '[cooldown-note] 测量窗冲突照落地（2026-10-20 降软政）：' + gate.why + '。前后对比归因时剔除本次叠写影响。';
+      log('task ' + taskId + ': 冷却命中降为注记：' + gate.why);
       try { await api.postTaskResult(taskId, { output_url: String(task.output_url || ''), note: msg, attention: false }); } catch (e) { log('task ' + taskId + ': cooldown note write failed :: ' + e.message); }
-      throw new Error('task ' + taskId + ': ' + gate.why + '（cooldown until ' + gate.until + '）');
     }
   }
 
