@@ -20,6 +20,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-20 AIRA 四客户验证轮（Alvin 指令：串行 2 轮 x WF+Shopify，验当日全部更新）+ 永动锁刹车与 URL 剥壳两修（eb74b5a，worker 两机已部署）
+
+- 轮次：R1 Louvresky(16)+Oak(1)，R2 Kuddles(47)+Midea(3)，另有前菜 Apex(44) 两轮（建页死锁拆除，三页 placeholder+noindex 上线 200）。
+- eb74b5a 两件（随轮中发现随修）：
+  1. harness 0.4 永动锁刹车：later 挪期 ≥2 次 / 判龄 ≥14 天 / 判决 stale 的 review 单不再踢下期，盖 [later-expired] 章拉回本期交放行官重验（Apex #662、Oak 42 天案根治）。实测八中八：Louvresky #90/#813、Oak #470/#472、Kuddles #853、Midea #494/#499/#500/#504。
+  2. resolveBlogUrl 出口 urlTrim 剥壳：markdown 反引号/标点包裹的 URL 吞尾（Kuddles #853 apply 摔死，ticket #43 同族第二发），三来源同口径，回放用例进 tests/apply.test.js。
+- 放行官对拉回烂尾单的判决全部成立且各不相同（这是刹车方案的核心验证：重验而非盲放行）：#90 放行（卡已出）、#470 停人（42 天旧稿已被 #908 新版取代，照发会盖线上新改）、#472/#853/#494 打回重出、#499/#500/#504 停人（rebrand 品牌口径归客户）。
+- 其他实测：#1551 Midea Ads 换域名全链收口（3 条 sitelink 改前值留档 9 项对账过，平台禁改的 71 条走 noop 收口形态零写入，28eeb76 首次实战）；执行超时（1801s killed，Oak #470/Midea #494 大方案）按 transient 口径重排后全过，考虑大 collection 方案拆批或提 timeout 另议。
+- 待 Aiden 知悉：worker rev eb74b5a 两机同版；капgap 泛断言盖章没动你的收编扫帚口径。
+
 ### 2026-10-20 AIRA 能力广播工具 capability_broadcast + op 登记清单补第三步（Alvin 追问「舰队怎么获取最新能力」，#1310 假缺口二次复发实证）
 
 - 第一性（review_glue_failures_2026-10-20.md 第三部分）：能力分发早就有（worker 部署双机同版 + execute 注入清单），死循环根因是缓存失效缺位：任务文本里的能力断言是写入时为真的缓存，清单更新后没人叫醒它们，放行官简报又没有清单段，照着旧文本再拆假人工单（#813 修清单 #1310 原样复发）。
