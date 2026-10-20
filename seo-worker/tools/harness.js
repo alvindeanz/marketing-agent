@@ -67,6 +67,11 @@ async function call(method, p, body) {
   return j;
 }
 async function tasks() { const d = await call('GET', '/tasks?client_id=' + cid); return d.tasks || d; }
+/* 历史口径任务表（含已归档）。闸的「交付史」豁免与「出过卡」防重建都属历史判定，
+   不能用板面口径：归档扫帚（2026-10-20 上线）把 done 单归档后，板面口径下交付史会
+   凭空消失（45 实证：方向卡史 #739 被归档 → 存量豁免失明 → paid 全 held；入场卡
+   #1567 被 drop 归档 → 防重建失明 → 下轮再建卡再 drop，产卡永动机）。 */
+async function tasksAll() { const d = await call('GET', '/tasks?client_id=' + cid + '&include_archived=1'); return d.tasks || d; }
 /* 方案审批执行闸（2026-10-17，SEO 与 SEM 分开反馈分开批准的第一步）：此前选任务只看 sprint 与任务
    状态，不看所属方案批没批，draft 方案的任务会被一路推进到判定、执行、放行。现规则：带 plan_id 的任务，
    其方案状态必须是 active 才进判定与执行队列；draft、rejected、superseded（以及 /plans 里查不到的）
@@ -415,7 +420,7 @@ async function main() {
          静默死锁：闸在等一个没人负责生产的东西，harness 每轮空转违反「每轮推一步」。
          此时自动建一条产钥匙任务走正常判定与执行，按分野标准（老客户方向早已确立走静默
          补 fact 提案，新客户首次定方向出确认卡）产出，落 review 放行卡留人过目。 */
-      const allForKey = await tasks();
+      const allForKey = await tasksAll(); // 历史口径：钥匙单被归档不等于没出过，防产卡永动（见 tasksAll 注释）
       const hasKey = allForKey.some((t) => {
         if (['killed', 'blocked'].includes(String(t.status))) return false;
         if (/\[卡反馈折叠/.test(String(t.result_note || ''))) return false;
@@ -467,7 +472,7 @@ async function main() {
      铁律仍以客户 CLAUDE.md 为准。--skip-gates 同样强制全过。 */
   let semGateOk = true;
   if (['sem', 'paid', 'both'].includes(clientServices) && !argv.includes('--skip-gates')) {
-    const allT = await tasks();
+    const allT = await tasksAll();
     if (!PLAN_STATUS) { try { await loadPlanStatus(); } catch (e) { PLAN_STATUS = {}; log('SEM 闸：/plans 拉取失败（' + e.message + '），豁免只看方向卡史'); } }
     const paidHistory = allT.some((t) => {
       if (String(t.module || '') !== 'paid') return false;

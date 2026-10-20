@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-20 AIRA WF 三家加测轮（Alvin 指令，跳过当日已跑四家）：Ben's AU(46) + Ben's NZ(45) + Sammichelle(23) 串行 + 闸历史口径失明修复
+
+- 全程 19:46-19:57 约 11 分钟三家 rc=0。收口：#829/#118 两篇博文卡同意折叠后全自动发布验证 200 无 noindex；Sammichelle #307（10-11 停车等 WF collection 写接口的老单）本轮直接跑通落地（301 写入 + changeset + verify-split 自动拆 7 项人工复验工单 #1568，#1568 又被 auto-machine-run 自愈转机器位）；#815 零写入收口。刹车对新鲜 later 零误杀（45 #114 照旧挪 S6，Alvin 10-11 挂起语义保留）。
+- 发现并当场修一件（随轮修第三件）：**归档扫帚与闸的相互作用缺陷**。SEM 入场闸的存量豁免（查方向卡交付史）与防重建（查出过入场卡）、SEO 闸的 hasKey 防重建，三处都用板面口径 tasks()；当日上线的归档扫帚把 done 单归档后历史证据失明。45 实证：#739 方向卡史被归档 → 豁免失明 → 3 条 paid 误 held + 自动建入场卡 #1567 → fable 判定官识破「三样已有确认 fact 重复提问」drop → 下轮防重建又失明会再建（产卡永动机）。修法：harness 新增 tasksAll()（include_archived=1），三处历史判定换历史口径；决定型键窄匹配不动（10-19 立的对）。45 dry-run 验证豁免恢复命中。DEFECTS 已记 [glue] 行。
+- 注：判定官这次当了误杀出口（drop 判词准确），闸四件套的误杀出口设计立功，但不能靠它永动烧判定，根治在取数口径。
+
 ### 2026-10-20 AIRA Shopify 三家加测轮（Alvin 指令「接着跑一批 shopify 端 harness 验新规则」）：Badger(5) + Sunseeker(4) + Ctomi(11) 串行，零轮中修复
 
 - 选样依据：排除当日已跑的 Oak/Midea、不进 sprint 的 Playmate、执行面归 Aiden 的 Sungait；按 review 超龄与 attention 密度选三家。全程 17:05-17:36 约 31 分钟，三家 rc=0，队列排空。
