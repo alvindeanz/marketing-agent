@@ -24,7 +24,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 
 - 定位：默认放行政策的另一半。事前闸拆了，事后抽查这半句一直没人干，降软越多空位越危险。零模型零写入现实，人触发（硬规矩 1），从仓库直跑不部署（tools 惯例）。
 - 口径：抽近 7 天自动放行/自动落地写类 done 单（含归档）；watch 名单（新 op/刚降软覆盖）100% 抽且洗牌防客户序偏置、封顶额度 70%，其余随机 10% 下限 3 张，单轮封顶 12。核验 C1 产出 URL 可达零跳转、C2 客户可见源码无内部标记（LEAK_MARKS 黑名单，只收我们自产标记）、C3 任务书外 noindex、C4 快照/回滚证据字样。FAIL 须 --apply 才写 attention+note；台账 memory/spotcheck/run_*.md，处置规矩写在台账尾（现实错记 DEFECTS 修上游，误杀改工具规则）。四件套登记 specs/spotcheck.md。commit ea124da。
-- 首轮实战（抽 12/227，watch 55）：9 ok 1 warn 2 fail。FAIL 全是真货：已发布博客线上源码携带 Style Roll 注释（horntech AU #725/#729 抽中，手测 Ben s NZ 已发布文同中），存量泄漏跨客户。增量已被 d741524 写回剥离堵死，存量清扫（strip-only 外科手术）待 Alvin 批。warn 1 张为 note 无快照证据字样（Ben s AU #61，老单，观察）。DEFECTS 已记一行。
+- 首轮实战（抽 12/227，watch 55）：9 ok 1 warn 2 fail。FAIL 全是真货：已发布博客线上源码携带 Style Roll 注释（horntech AU #725/#729 抽中，手测 Ben s NZ 已发布文同中），存量泄漏跨客户。增量已被 d741524 写回剥离堵死；存量清扫 Alvin 批后即跑（tools/styleroll_sweep.js）：10 站 56 篇命中全清零 FAIL（含两张 FAIL 单的页面），逐篇前后 sha 台账 memory/spotcheck/sweep_styleroll_*，剥前注释存进带外记录保骨架延续，线上三站复测标记 0，两张 FAIL 单 attention 已收。warn 1 张为 note 无快照证据字样（Ben s AU #61，老单，观察）。DEFECTS 已记一行。
 - v2 预留按台账证据再开：异常自动原地还原（WF changeset revert / shopseo restore / ads before 快照重放）、按 op 深核（geo-target-set 可直接复用执行器 dry-run noop 判据）、模型质量抽检。
 - 坑：首版 watch 命中超封顶时按客户遍历序取数，样本全偏给字母靠前客户，已修（watch 洗牌+占比封顶）。抽查器自己的第一条规则修正来自它自己的第一轮运行，回流闭环即日生效。
 
