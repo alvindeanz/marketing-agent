@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-21 AIRA Apex 本期清场轮（Alvin 指令；导航已由 webforge 平台侧加好）
+
+- 收口：#665 done（零写入验收：厨房页 200 可收录进 sitemap，三处导航入口齐全）；#666 done（三页正文互链落地，12 项检查全过，changeset 3 文件；elements 路死后改道 page-rewrite 一次过）；冷却降软 [cooldown-note] 与熔断分流在本轮均实战落账。本期 S4 机器单仅剩 #1578（页脚两处死锚修复）blocked 等平台。
+- 新发现两缺陷（DEFECTS 已记）：①WF 平台 elements 端点全灭 404（含老页），content-edit 整条路死，波及全部 WF 客户，能力清单与平台脱节，归 webforge 修，建议能力清单加只读探活；②闸A 判定官对「页面是否在线」连续两轮引用方案正文里的旧实测记述误判 later，pull_data 与人工 note 纠正都压不过，修法（敏感断言标时点 + 可现测断言必现测）并入改造序④。本轮用「人工现在做」误杀出口绕过，出口设计第二次立功。
+- 跨 bot：wp-tools work log 已补 push（rebase 后 14d6a07）；sdalu term 156 Aiden 复核时点早于第四版落地，现值已是正式稿，XREPLY 已回。
+
 ### 2026-10-21 AIRA 深夜批：闸降软三件落地 + Apex 建页链收口 + sdalu term 描述债清账（Alvin 政「闸进一步软，事前只拦不可逆，事后抽查」+ wp 线程 1.3.3 回交）
 
 - **立法落地三件**：①冷却闸降软（322bfa2 两机）：同页冷却与全站独占窗不再事前拦，apply 命中改 [cooldown-note] 测量冲突注记照落地，release_review.md 判决语料同步；②release 熔断按可逆性分流（a60baf3 api+worker）：spend/不可逆保留每版两次封顶，可逆类第三次起照放带 [fuse-note] 台账（防环不变：每次重放夹一次判定，harness 人触发无 cron）；③代确认建页一步到位（82838e1）：page-create 代确认口径 + review_principles「proxy agree 即凭证，不等 14 天不等卡」，生意闸不受影响。
