@@ -24,9 +24,11 @@ releaseReviewModel），按 specs/release_review.md 的冲突清单判：
 - **hold_human**：note 写 `[hold-human opus]` 加命中的冲突条，attention 亮灯，人处理。
 - **redo**：方案有错打回，自动排 execute 重出，一次为限，第二次降 hold_human。
 
-熔断（服务端 /tasks/release_review_result，模型说了不算）：每版方案自动落地**至多两次**：
-首落一次 + 放行官判后重试一次，第三次必停人（2026-09-28 Alvin 定：熔断防的是无判断的
-盲目重放，判过的重试放一次；方案版本以 execute done 晚于上次 apply 界定，重出即新版）。
+熔断（服务端 /tasks/release_review_result，模型说了不算）：**按可逆性分流（2026-10-20
+Alvin 政「事前闸只留不可逆」，取代 2026-09-28 一刀切）**：spend/irreversible 类每版方案
+自动落地至多两次（首落 + 判后重试一次，第三次停人）；可逆类不设硬顶，第三次起照放但服务端
+强制 [fuse-note] 台账留痕。防环性质不变：每次重放中间必须夹一次放行官判定，harness 由人触发
+无 cron 自转（方案版本以 execute done 晚于上次 apply 界定，重出即新版）。
 判词必须说明上次失败原因已解除。redo 只自动一次。**批文压过静默期**：opus 判
 release 时引用批文 fact key（backing 字段），服务端自己去 facts 表验 confirmed，验上了
 spend/irreversible 也直接放，验不上才进静默期。人放行端点 /tasks/release 原样保留，人永远可以直接放或

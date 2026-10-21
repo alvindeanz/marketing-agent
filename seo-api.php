@@ -7776,19 +7776,24 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
         $h->execute($lastExec!==''?[$cid,$likeT,$lastExec]:[$cid,$likeT]);
         $hc=$h->fetch();
         $applyN=(int)($hc['c']??0);
-        /* 2026-09-28 Alvin 定：熔断防的是无判断的盲目重放，放行官判过的重试放一次。
-           每版方案自动落地至多两次（首落 + 判后重试一次），第三次必停人。防环性质不变：
-           失败方案想循环，中间必须夹一次判定，且同版只有一次重试额度。 */
-        if($applyN>=2){
-            task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：本版方案已自动落地 '.$applyN.' 次（含判后重试），第三次归人。判词：'.$reason);
+        $opsArr=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
+        $money=false;
+        foreach($opsArr as $op){$c=(string)($rc[$op]??'');if($c==='spend'||$c==='irreversible'){$money=true;break;}}
+        /* 熔断按可逆性分流（2026-10-20 Alvin 政「事前闸只留不可逆」，取代 2026-09-28 一刀切两次封顶）：
+           spend/irreversible 保留原封顶（每版方案首落 + 判后重试一次，第三次停人）；可逆类不设
+           硬顶，第三次起照放但强制 [fuse-note] 台账留痕。防环性质不变：每次重放中间必须夹一次
+           放行官判定（同版方案无判定不会再排 apply），且 harness 由人触发，无 cron 自转。 */
+        if($applyN>=2&&$money){
+            task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：本版方案已自动落地 '.$applyN.' 次（含判后重试），spend/不可逆类第三次归人。判词：'.$reason);
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'apply retry cap','apply_n'=>$applyN]);
             $act['held'][]=$tid;continue;
         }
-        $retryTag=$applyN===1?'（判后重试 1/1）':'';
-        $opsArr=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
-        $money=false;
-        foreach($opsArr as $op){$c=(string)($rc[$op]??'');if($c==='spend'||$c==='irreversible'){$money=true;break;}}
+        if($applyN>=2){
+            task_append_note($tid,'[fuse-note opus '.$stamp.'] 本版方案第 '.($applyN+1).' 次自动落地（可逆类，2026-10-20 降软政：熔断只拦 spend/不可逆；本次重放经放行官判定）。');
+            audit('opus-release','seo_release_fuse_note',(string)$tid,['apply_n'=>$applyN]);
+        }
+        $retryTag=$applyN===1?'（判后重试 1/1）':($applyN>=2?'（重放 '.($applyN+1).'，可逆降软）':'');
         if($money){
             /* 客户批文压过静默期（2026-09-27 Alvin 定）：opus 引用批文 fact key，这里自己去
                facts 表验（confirmed 才算，不信模型转述），验上了 spend/irreversible 也直接放。 */
