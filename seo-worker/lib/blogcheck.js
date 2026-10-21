@@ -394,7 +394,10 @@ function checkDraft(draft, ctx) {
   const styleroll = require('./styleroll');
   const parsed = styleroll.parseRollComment(body);
   if (!parsed.found) {
-    errors.push('正文头部缺少 Style Roll 注释');
+    errors.push(
+      '正文头部缺少 Style Roll 注释。这是内部元数据契约：写回平台前系统会自动剥掉它，' +
+        '平台上不会出现；即使任务要求清除平台正文里的注释，你交回的 json 第一行也必须带'
+    );
   } else if (roll && parsed.skeletonLabel !== roll.skeleton.label) {
     errors.push(
       'Style Roll 注释里的骨架是 ' + parsed.skeletonLabel + '，本次指定的是 ' + roll.skeleton.label + '，不许自己改'
@@ -413,8 +416,15 @@ function checkDraft(draft, ctx) {
   // fresh write carries none, images are a separate stage.
   const keep = Array.isArray(ctx.keepImages) ? ctx.keepImages : [];
   if (keep.length) {
+    // 按 URL 比对不按整串比对（2026-10-21 ticket #46：整串比对把「改 alt」误判成
+    // 「删图」，返修单 #1574 两次生成全被打死）。保图的真实意图是 URL 与数量不动，
+    // alt 文字任务要求时可改；丢图换图照拦（URL 缺失或数量不符）。
     for (const img of keep) {
-      if (body.indexOf(img) === -1) errors.push('原稿图片被改动或删除，必须原样保留：' + img.slice(0, 80));
+      const um = String(img).match(/\]\(([^)\s]+)/);
+      const url = um ? um[1] : img;
+      if (body.indexOf(url) === -1) {
+        errors.push('原稿图片被删除或换图，图片 URL 必须保留（alt 文字可按任务调整）：' + url.slice(0, 80));
+      }
     }
     if (st.images !== keep.length) {
       errors.push('图片数量应为 ' + keep.length + ' 张（与原稿一致），实际 ' + st.images + ' 张');

@@ -7,7 +7,10 @@
      V3（2026-09-08，Alvin 批）：adgroup-create 从 spend 改 structural（预算中性新建，不动 campaign 预算
      与出价策略，装配全对才启用），执行器上线；新增 keyword-pause（reversible）。
      V4（2026-09-11，W17，ctomi #678 缺口回补）：新增 keyword-add（structural）、keyword-final-url
-     （reversible）、ad-create（structural），三执行器上线（ads_mutate.py）。 -->
+     （reversible）、ad-create（structural），三执行器上线（ads_mutate.py）。
+     V5（2026-10-21，Ideal #1369/#1375/#1376 收编，tracker ticket #45）：新增 geo-target-set
+     （reversible，集合语义改 campaign 地域定向，before 快照 + 回读对账；进 l0_exclude 观察期，
+     首批落地走 L2 放行官）。 -->
 
 ## 规划视图
 
@@ -23,6 +26,7 @@
 | final-url-change | agent_apply | 只改既有 ad 的 final URL，改前记旧值，回读加 curl 200 零跳转 |
 | keyword-pause | agent_apply | 暂停单个关键词，只停不删 |
 | keyword-final-url | agent_apply | 给既有关键词设关键词级 final URL，改前记旧值，回读加 curl 200 零跳转 |
+| geo-target-set | agent_apply | campaign 地域定向改成目标集合（投/排 geo ID 声明终态，脚本算 diff），before 快照回滚，回读对账终态逐一相符；只动 LOCATION/PROXIMITY，预算出价不碰 |
 | keyword-add | agent_prepare | 往既有组加正向词（可带关键词级 URL），查重拒重复，预算中性 structural |
 | ad-create | agent_prepare | 既有组内新建一条 RSA，不动既有广告，组内上限 3 条，structural |
 | schedule-adjust | agent_prepare | 投放时段调整，mutate 执行器未实现，方案出来转人工落地 |
@@ -58,6 +62,7 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 - ad-pause / adgroup-pause [risk_class: reversible]：暂停单条 ad 或单个 ad group。
 - keyword-pause [risk_class: reversible]：暂停单个关键词，只停不删，回读验证。
 - keyword-bid-adjust [risk_class: reversible]：单关键词出价调整，幅度 ±20% 以内。
+- geo-target-set [risk_class: reversible]：campaign 地域定向改成目标集合（2026-10-21 V5，Ideal #1375 清单收编）。集合语义：spec 声明终态（locations 投、exclusions 排），脚本自己算 diff；criteria 只能增删不能改，回滚 = 拿 before 快照里的集合再跑一次本命令。硬闸：终态 geo ID 逐个验 geo_target_constant 表且 ENABLED，一个对不上整单拒；只动 LOCATION/PROXIMITY 两类 criterion；回读对账终态集合逐一相符，差一个算失败。预算、出价、位置选项（presence 设置）一概不碰。在 l0_exclude 观察期内，放行走 L2 放行官（地域定向决定钱花在哪，首批人看过硬读对账记录再降 L0）。
 - schedule-adjust [risk_class: reversible]：投放时段调整。（mutate 执行器未实现，当前落地时转人工）
 - final-url-change [risk_class: reversible]：改既有 ad / ad group 内广告的 final URL。只改既有结构不新建；改前记录旧 URL（回滚依据）；新 URL 必须 curl 200 且零跳转后才提交；提交后回读验证。不花钱、旧值可一键改回，故 reversible。
 - keyword-final-url [risk_class: reversible]：给既有关键词设关键词级 final URL（2026-09-11 W17）。同 final-url-change 的铁律：改前记旧值、新 URL curl 200 零跳转、回读验证；否定词拒设。

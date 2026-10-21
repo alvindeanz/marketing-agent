@@ -175,6 +175,19 @@ function parseRollComment(body) {
   return { found: true, fields, skeletonLabel: fields['骨架'] || null };
 }
 
+/**
+ * Strip every Style Roll comment out of a body before it touches the platform.
+ * 2026-10-21 带外化（ticket #46）：注释是内部元数据，机器校验契约照旧要求模型产出里带，
+ * 但客户平台的正文源码里不许出现（blogcheck 对其他内部注释早就是这个口径，唯独豁免了
+ * 自己这条）。平台草稿曾把注释包进 <p></p>（#1544 实证），一并清掉空壳。
+ */
+function stripRollComment(body) {
+  return String(body || '')
+    .replace(/<p>\s*<!--\s*Style Roll:[\s\S]*?-->\s*<\/p>/gi, '')
+    .replace(/<!--\s*Style Roll:[\s\S]*?-->/gi, '')
+    .replace(/^\s*\n/, '');
+}
+
 module.exports = {
   SKELETONS,
   DIMENSIONS,
@@ -183,6 +196,7 @@ module.exports = {
   rollComment,
   rollSummary,
   parseRollComment,
+  stripRollComment,
   skeletonForIndex,
   skeletonByNumber,
   skeletonByLabel,

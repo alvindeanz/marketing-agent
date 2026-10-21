@@ -24,6 +24,11 @@
   ad-create            --spec - 从 stdin 读 JSON 在既有组新建一条 RSA（structural：不动预算与既有广告。
                        spec: {ad_group_id, final_url, path1?, path2?, headlines:[{text,pin?}], descriptions:[{text}]}。
                        流程：查组在且组内非移除广告少于 3 条 → 校验文案 → 创建 → 回读验证。新广告会进审核）
+  geo-target-set       --spec - 从 stdin 读 JSON 把 campaign 地域定向改成目标集合（reversible：
+                       spec: {campaign_id, locations:[geoId...], exclusions:[geoId...]}，集合语义声明终态。
+                       流程：读现有 LOCATION/PROXIMITY criteria 全量打印（回滚依据）→ 目标 geo ID 逐个
+                       验在 geo_target_constant 表且 ENABLED → 算 diff（多的删、缺的加，proximity 一律
+                       清，终态只有 location）→ 单批 mutate → 回读验证终态集合逐一相符。Ideal #1369/#1375/#1376）
   schedule-adjust      未实现，直接拒，转人工
 铁律（脚本硬闸，不靠调用方自觉）:
   - 改前必查旧值并打印（JSON 行，回滚依据）；mutate 后回读验证并打印新值。
@@ -42,7 +47,7 @@ import time
 ENV_FILE = "/data/aira/.env.google-ads"
 OPS = ["final-url-change", "ad-pause", "adgroup-pause", "campaign-pause", "keyword-pause", "negative-keyword-add", "negative-keyword-remove",
        "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "keyword-add", "keyword-final-url",
-       "ad-create", "schedule-adjust", "raw-mutate"]
+       "ad-create", "geo-target-set", "schedule-adjust", "raw-mutate"]
 
 # raw-mutate 网关的拒绝表（2026-09-22，硬规矩 2 对齐：白名单是路由偏好不是能力天花板，
 # 白名单外的获批操作走本网关直接执行，validate_only 先行 + 零模型对账兜底）。
@@ -822,6 +827,136 @@ def op_keyword_bid_adjust(client, cid, args):
          "budget_impact": "出价级，无预算变动"})
 
 
+def op_geo_target_set(client, cid, args):
+    """campaign 地域定向改成目标集合（2026-10-21，Ideal #1369/#1375/#1376 收编，tracker ticket #45）。
+    集合语义：spec 声明终态（投哪些 geo ID、排哪些），脚本自己算 diff。criteria 不可改只能增删，
+    所以「改定向」天然就是 remove + create；回滚 = 用 before 快照里的集合再跑一次本命令。
+    只动 LOCATION 和 PROXIMITY 两类 criterion，关键词/受众/时段等其他 criterion 一概不碰。"""
+    if args.spec != "-":
+        die("geo-target-set 只收 --spec -（stdin JSON）")
+    try:
+        spec = json.load(sys.stdin)
+    except Exception as e:
+        die("spec JSON 解析失败: " + str(e)[:200])
+    try:
+        campaign_id = int(spec.get("campaign_id"))
+    except Exception:
+        die("spec 缺 campaign_id")
+    want_pos = spec.get("locations")
+    want_neg = spec.get("exclusions", [])
+    if not isinstance(want_pos, list) or not want_pos:
+        die("spec 的 locations 必须是非空数组（终态要投的 geo target constant ID）")
+    if not isinstance(want_neg, list):
+        die("spec 的 exclusions 必须是数组")
+    try:
+        want_pos = sorted({int(x) for x in want_pos})
+        want_neg = sorted({int(x) for x in want_neg})
+    except Exception:
+        die("locations / exclusions 里有非整数 geo ID")
+    overlap = set(want_pos) & set(want_neg)
+    if overlap:
+        die("同一 geo ID 不能既投又排: " + ",".join(str(x) for x in sorted(overlap)))
+
+    rows = gaql(client, cid, "SELECT campaign.id, campaign.name, campaign.status FROM campaign "
+                             "WHERE campaign.id = " + str(campaign_id))
+    if not rows:
+        die("campaign " + str(campaign_id) + " 不存在")
+    out({"step": "campaign", "id": str(campaign_id), "name": rows[0].campaign.name,
+         "status": enum_name(rows[0].campaign.status)})
+
+    # 终态 geo ID 必须都在 Google 地域库里且 ENABLED，一个对不上整单拒（别把 92 个落了 91 个）。
+    all_want = want_pos + want_neg
+    found = {}
+    for i in range(0, len(all_want), 500):
+        chunk = all_want[i:i + 500]
+        q = ("SELECT geo_target_constant.id, geo_target_constant.name, geo_target_constant.status "
+             "FROM geo_target_constant WHERE geo_target_constant.id IN (" + ",".join(str(x) for x in chunk) + ")")
+        for r in gaql(client, cid, q):
+            found[int(r.geo_target_constant.id)] = (r.geo_target_constant.name, enum_name(r.geo_target_constant.status))
+    missing = [x for x in all_want if x not in found]
+    not_enabled = [x for x in all_want if x in found and found[x][1] != "ENABLED"]
+    if missing:
+        die("geo ID 不在 Google 地域库: " + ",".join(str(x) for x in missing[:20]))
+    if not_enabled:
+        die("geo ID 非 ENABLED 状态: " + ",".join(str(x) + "(" + found[x][1] + ")" for x in not_enabled[:20]))
+
+    # before 快照：现有 LOCATION/PROXIMITY criteria 全量打印，这是回滚依据。
+    q = ("SELECT campaign_criterion.resource_name, campaign_criterion.type, campaign_criterion.negative, "
+         "campaign_criterion.location.geo_target_constant, campaign_criterion.proximity.radius, "
+         "campaign_criterion.proximity.radius_units, campaign_criterion.proximity.geo_point.latitude_in_micro_degrees, "
+         "campaign_criterion.proximity.geo_point.longitude_in_micro_degrees "
+         "FROM campaign_criterion WHERE campaign.id = " + str(campaign_id) +
+         " AND campaign_criterion.type IN ('LOCATION', 'PROXIMITY')")
+    cur_pos, cur_neg, cur_prox, before = {}, {}, [], []
+    for r in gaql(client, cid, q):
+        c = r.campaign_criterion
+        typ = enum_name(c.type_)
+        rec = {"resource_name": c.resource_name, "type": typ, "negative": bool(c.negative)}
+        if typ == "LOCATION":
+            gid = int(str(c.location.geo_target_constant).rsplit("/", 1)[-1] or 0)
+            rec["geo_id"] = gid
+            (cur_neg if c.negative else cur_pos)[gid] = c.resource_name
+        else:
+            rec["proximity"] = {"radius": c.proximity.radius, "units": enum_name(c.proximity.radius_units),
+                                "lat_micro": c.proximity.geo_point.latitude_in_micro_degrees,
+                                "lng_micro": c.proximity.geo_point.longitude_in_micro_degrees}
+            cur_prox.append(c.resource_name)
+        before.append(rec)
+    out({"step": "before", "op": "geo-target-set", "campaign_id": str(campaign_id),
+         "positive": sorted(cur_pos), "negative": sorted(cur_neg), "proximity_count": len(cur_prox),
+         "criteria": before})
+
+    removes = ([rn for gid, rn in cur_pos.items() if gid not in set(want_pos)] +
+               [rn for gid, rn in cur_neg.items() if gid not in set(want_neg)] + cur_prox)
+    add_pos = [g for g in want_pos if g not in cur_pos]
+    add_neg = [g for g in want_neg if g not in cur_neg]
+    plan = {"step": "plan", "removes": len(removes), "add_positive": len(add_pos), "add_negative": len(add_neg)}
+    if not removes and not add_pos and not add_neg:
+        out({"ok": True, "op": "geo-target-set", "noop": True, "note": "现状已是终态，零改动", "budget_impact": 0})
+        return
+    out(plan)
+    if args.dry_run:
+        out({"ok": True, "op": "geo-target-set", "dry_run": True,
+             "remove_resources": removes, "add_positive": add_pos, "add_negative": add_neg})
+        return
+
+    svc = client.get_service("CampaignCriterionService")
+    camp_rn = "customers/%s/campaigns/%s" % (cid, campaign_id)
+    ops = []
+    for rn in removes:
+        o = client.get_type("CampaignCriterionOperation")
+        o.remove = rn
+        ops.append(o)
+    for gid, neg in [(g, False) for g in add_pos] + [(g, True) for g in add_neg]:
+        o = client.get_type("CampaignCriterionOperation")
+        o.create.campaign = camp_rn
+        o.create.negative = neg
+        o.create.location.geo_target_constant = "geoTargetConstants/%s" % gid
+        ops.append(o)
+    done = 0
+    for i in range(0, len(ops), 200):
+        svc.mutate_campaign_criteria(customer_id=cid, operations=ops[i:i + 200])
+        done += len(ops[i:i + 200])
+    out({"step": "mutate", "operations": done})
+
+    # 回读对账：终态集合必须和 spec 逐一相符，差一个都算失败（人来收拾，不自动重试）。
+    after_pos, after_neg, after_prox = set(), set(), 0
+    for r in gaql(client, cid, q):
+        c = r.campaign_criterion
+        if enum_name(c.type_) == "LOCATION":
+            gid = int(str(c.location.geo_target_constant).rsplit("/", 1)[-1] or 0)
+            (after_neg if c.negative else after_pos).add(gid)
+        else:
+            after_prox += 1
+    if sorted(after_pos) != want_pos or sorted(after_neg) != want_neg or after_prox:
+        out({"ok": False, "error": "回读终态与 spec 不符",
+             "after_positive": sorted(after_pos), "after_negative": sorted(after_neg),
+             "after_proximity": after_prox, "want_positive": want_pos, "want_negative": want_neg})
+        sys.exit(1)
+    out({"ok": True, "op": "geo-target-set", "campaign_id": str(campaign_id),
+         "positive": len(after_pos), "negative": len(after_neg), "proximity": 0, "budget_impact": 0})
+
+
 def op_raw_mutate(client, cid, args):
     """白名单外获批操作的统一网关（GoogleAdsService.Mutate，MutateOperation 万能包）。
     spec 从 stdin 读 JSON：{"mutate_operations": [{"shared_set_operation": {"create": {...}}}, ...]}
@@ -919,6 +1054,7 @@ def main():
          "keyword-add": op_keyword_add,
          "keyword-final-url": op_keyword_final_url,
          "ad-create": op_ad_create,
+         "geo-target-set": op_geo_target_set,
          "raw-mutate": op_raw_mutate}[args.op](client, cid, args)
     except SystemExit:
         raise

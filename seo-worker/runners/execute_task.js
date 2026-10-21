@@ -1139,9 +1139,9 @@ function blogHardRules(opts) {
   let imageRule;
   if (keepImages && keepImages.length) {
     imageRule = [
-      '1. **现有图片一张不许动。** 原稿里已有 ' + keepImages.length + ' 张图片，全部原样保留：',
-      '   相同的 alt、相同的路径、留在原来的段落位置附近。不许删除、不许改路径、不许新增图片。',
-      '   机器校验会逐张比对，少一张多一张都打回。',
+      '1. **现有图片的 URL 与数量一张不许动。** 原稿里已有 ' + keepImages.length + ' 张图片，全部保留：',
+      '   相同的路径、留在原来的段落位置附近。不许删除、不许改路径、不许换图、不许新增图片。',
+      '   alt 文字默认保持原样，只有任务明确要求改 alt 时才按任务改。机器校验按 URL 逐张比对，少一张多一张都打回。',
     ];
   } else if (withImageBriefs) {
     imageRule = [
@@ -1172,6 +1172,38 @@ function blogHardRules(opts) {
     '7. 字数 ' + blogcheck.WORD_MIN + ' 到 ' + (blogcheck.WORD_MAX - 200) + ' 词之间，这是硬性区间。',
     '8. 不要在正文里写 meta 信息，不要写 "In this article"、"Let\'s dive in"、"In conclusion" 这类废话。',
   ].join('\n');
+}
+
+// ---- Style Roll 带外记录（2026-10-21 ticket #46 带外化）----
+// 注释不再写进平台正文（写回前统一剥离），骨架按 slug 存 seo-agent-output/styleroll/<slug>.json
+// （workspace 在 NFS 上，双 worker 同源）。改稿轮先读平台注释（存量草稿还带着），读不到再读
+// 这里；都没有就按新 roll 走，与历史行为一致。记录存注释原文，复用 parseRollComment 解析。
+function rollRecordFile(workspace, slug) {
+  const safe = String(slug || '').replace(/[^a-z0-9-]/gi, '_');
+  return path.join(workspace, OUTPUT_DIRNAME, 'styleroll', safe + '.json');
+}
+
+function saveRollRecord(workspace, slug, roll, taskId, log) {
+  try {
+    const f = rollRecordFile(workspace, slug);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(
+      f,
+      JSON.stringify({ slug, comment: styleroll.rollComment(roll), task_id: taskId, ts: new Date().toISOString() }, null, 1),
+      'utf8'
+    );
+  } catch (e) {
+    log('task ' + taskId + '：Style Roll 带外记录写入失败（不影响交付）:: ' + e.message);
+  }
+}
+
+function loadRollRecord(workspace, slug) {
+  try {
+    const rec = JSON.parse(fs.readFileSync(rollRecordFile(workspace, slug), 'utf8'));
+    return styleroll.parseRollComment(String(rec.comment || ''));
+  } catch (e) {
+    return { found: false, fields: {}, skeletonLabel: null };
+  }
 }
 
 function buildBlogPrompt(opts) {
@@ -1223,7 +1255,9 @@ function buildBlogRevisePrompt(opts) {
     '',
     '这是改稿，不是重写。没有被意见点到的部分尽量保持原样，尤其是结构、骨架和已经写好的数据。',
     '**slug 必须保持 ' + slug + ' 不变**，改了 slug 会让客户手里的预览链接失效。',
-    'Style Roll 注释也保持原样不变，骨架不许换。',
+    'Style Roll 注释是内部元数据：你交回的 json 正文第一行必须带着它，骨架不许换。',
+    '系统写回平台时会自动把这条注释剥掉，平台正文里不会出现。所以即使任务要求清除平台',
+    '正文里的这条注释，你也照样在 json 里带上它，剥离由系统完成，不用你删。',
     '',
     '本篇的风格组合（沿用原稿，不许改）：',
     styleroll.rollSummary(roll),
@@ -1490,6 +1524,11 @@ async function runBlogTask(ctx, context, workspace, task) {
       const body = String((got && got.post && got.post.body) || '');
       if (!body) continue;
       const fp = fingerprint(post, body);
+      // 带外化之后新发布的正文里没有注释，骨架从带外记录补（旧文照常从注释读）。
+      if (!(fp.roll && fp.roll['骨架'])) {
+        const rec = loadRollRecord(workspace, post.slug);
+        if (rec.found) fp.roll = rec.fields;
+      }
       prints.push(fp);
       if (!previousSkeletonLabel && fp.roll && fp.roll['骨架']) previousSkeletonLabel = fp.roll['骨架'];
     } catch (e) {
@@ -1540,7 +1579,8 @@ async function runBlogTask(ctx, context, workspace, task) {
         if (post) {
           mode = 'revise';
           currentBody = String(post.body || '');
-          const parsedRoll = styleroll.parseRollComment(currentBody);
+          let parsedRoll = styleroll.parseRollComment(currentBody);
+          if (!parsedRoll.found) parsedRoll = loadRollRecord(workspace, slug);
           const keep = parsedRoll.found && styleroll.skeletonByLabel(parsedRoll.skeletonLabel);
           if (keep) {
             roll.skeleton = keep;
@@ -1576,7 +1616,8 @@ async function runBlogTask(ctx, context, workspace, task) {
         mode = 'revise';
         slug = expandSlug;
         currentBody = String(post.body || '');
-        const parsedRoll = styleroll.parseRollComment(currentBody);
+        let parsedRoll = styleroll.parseRollComment(currentBody);
+        if (!parsedRoll.found) parsedRoll = loadRollRecord(workspace, slug);
         const keep = parsedRoll.found && styleroll.skeletonByLabel(parsedRoll.skeletonLabel);
         if (keep) roll.skeleton = keep;
         log('task ' + taskId + '：判定 / 大纲要求就地扩写 ' + expandSlug + '，本轮改这篇不新建');
@@ -1820,13 +1861,17 @@ async function runBlogTask(ctx, context, workspace, task) {
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
   fs.mkdirSync(outDir, { recursive: true });
   const draftFile = path.join(outDir, 'blog-task-' + taskId + '-' + Date.now() + '.md');
-  fs.writeFileSync(draftFile, draft.body_markdown, 'utf8');
+
+  // 写往平台的正文一律剥 Style Roll 注释（带外化，2026-10-21 ticket #46）：
+  // 机器校验契约照旧要求模型产出里带，骨架另存带外记录（writeback 后 saveRollRecord）。
+  const platformBody = styleroll.stripRollComment(draft.body_markdown);
+  fs.writeFileSync(draftFile, platformBody, 'utf8');
 
   const payload = {
     title: draft.title,
     keyword: draft.keyword,
     category: draft.category,
-    body: draft.body_markdown,
+    body: platformBody,
     excerpt: draft.excerpt,
     meta: { description: draft.meta_description },
   };
@@ -1879,6 +1924,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     }
     log('task ' + taskId + '：草稿已建，slug ' + finalSlug);
   }
+  if (finalSlug) saveRollRecord(workspace, finalSlug, roll, taskId, log);
   if (!previewUrl) {
     throw new Error('task ' + taskId + '：平台没有返回 previewUrl，无法交付给客户审阅');
   }
@@ -1922,7 +1968,7 @@ async function runBlogTask(ctx, context, workspace, task) {
           tmpDir,
           taskId,
           briefs: draft.image_briefs,
-          body: draft.body_markdown,
+          body: platformBody,
           keyword: draft.keyword,
           origin,
         }
@@ -1930,7 +1976,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     } catch (e) {
       // 配图工序本身炸了（FLUX 不通、下载失败之类）。稿子照样交付，图全部标待人工。
       log('task ' + taskId + '：配图工序异常，稿子照常交付，配图全部待人工 :: ' + e.message);
-      placed = { body: draft.body_markdown, ogImage: '', heroAlt: '', heroFallback: '', results: [], blocked: [{ slot: 'all', attempts: 0, failures: [{ reasons: [e.message] }] }] };
+      placed = { body: platformBody, ogImage: '', heroAlt: '', heroFallback: '', results: [], blocked: [{ slot: 'all', attempts: 0, failures: [{ reasons: [e.message] }] }] };
     } finally {
       blogimages.cleanupTmp(tmpDir, log);
     }
@@ -1971,7 +2017,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   // 预览页是可以直接转给客户的成稿页（2026-09-10 Alvin 定）：不带客户铁律回显、
   // 不带内部警示。改稿状态与配图缺口这些内部信息只留在卡面 note（summary 里已有）。
   const pvHtml = preview.renderBlogPreview({
-    draft: Object.assign({}, draft, { body_markdown: (placedBody || draft.body_markdown) }),
+    draft: Object.assign({}, draft, { body_markdown: (placedBody || platformBody) }),
     ogImage: placedOg,
     host: profile.domain,
     taskId,
@@ -2000,7 +2046,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   try {
     const bcRender = require('../specs/report/render_blog_confirmation.js');
     const clean = (s) => String(s || '').replace(/—/g, '，').replace(/\s+/g, ' ').trim();
-    const bodyMd = String(placedBody || draft.body_markdown || '');
+    const bodyMd = String(placedBody || platformBody || '');
     const linksOut = [];
     const seenLink = {};
     const linkRe = /\[([^\]]{1,60})\]\((\/[^)\s]+)\)/g;
