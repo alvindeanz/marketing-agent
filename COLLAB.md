@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-21 AIRA 工单修复轮（tracker ticket #44/#45/#46/#40，Alvin 共评批「开工，harness 验证」）
+
+- 定性先行（Alvin 要求先分类再修）：四张票按「病灶在哪一环」落类：#46=闸口病（断言过粗+元数据带内），#45=能力缺口+尾巴病复合（capgap 拆单 #1376 挂 wait_me 四天无钟），#44=决策件走错通道（merii Shopify 接入属范围决定，等 Alvin/monica），#40=登记已补（2b9461d），hold 本身是闸立功（Badger 影响面约定），等人过目。四张票 agent 能力不足占比为零，病全在胶水层。
+- ticket #46 修复（d741524）：blogcheck keepImages 改按图片 URL 比对加数量核对（改 alt 不再误判删图，丢图换图照拦）；Style Roll 注释带外化：校验契约照旧（模型产出必须带，缺失报错文案写明契约），写回平台前 stripRollComment 统一剥离（含 #1544 的 `<p>` 壳形态），骨架按 slug 存 `seo-agent-output/styleroll/<slug>.json`（NFS 双 worker 同源），改稿轮与历史指纹先读平台注释、读不到读带外记录。内部元数据不再漏进客户平台源码（blogcheck 对其他内部注释早就是这个口径，唯独豁免了自己这条，和 Apex card-autotoken 泄漏同病）。回放测试 6 条进 tests/blogcheck.test.js。
+- ticket #45 修复（同 commit）：ads_mutate.py 新增 geo-target-set（集合语义声明终态，before 快照全量打印做回滚依据，终态 geo ID 逐个验库且 ENABLED，只动 LOCATION/PROXIMITY，批量 mutate 后回读对账逐一相符差一个算失败）。登记三步齐：googleads.md V5、release_policy.json v23（reversible 入 l0_exclude 观察期，首批走 L2 放行官，地域定向决定钱花在哪）、broadcast 已跑（强命中 0，#1369/#1375 判决都在 done 单上属正常）。dry-run 对 Ideal 真实账户与 #1375 人工执行稿互证一致（HT-Bathroom：删 6 加 53 投 34 排，一条不差）。
+- 坑：theme-code-update（2b9461d 登记）当时漏跑 broadcast，本轮补跑盖了 1 张旧判决；「登记三步缺广播」第二次发生，支持把三步收敛成一条命令（下一批机制项）。
+- harness 验证：#1574（Ben's NZ 返修）与 #1376（Ideal 地域落地）转机器重跑（job 8900/8901），结果见后续条目。
+
 ### 2026-10-21 AIRA Apex 本期清场轮（Alvin 指令；导航已由 webforge 平台侧加好）
 
 - 收口：#665 done（零写入验收：厨房页 200 可收录进 sitemap，三处导航入口齐全）；#666 done（三页正文互链落地，12 项检查全过，changeset 3 文件；elements 路死后改道 page-rewrite 一次过）；冷却降软 [cooldown-note] 与熔断分流在本轮均实战落账。本期 S4 机器单仅剩 #1578（页脚两处死锚修复）blocked 等平台。
