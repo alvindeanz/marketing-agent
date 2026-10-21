@@ -25,6 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 收口：#665 done（零写入验收：厨房页 200 可收录进 sitemap，三处导航入口齐全）；#666 done（三页正文互链落地，12 项检查全过，changeset 3 文件；elements 路死后改道 page-rewrite 一次过）；冷却降软 [cooldown-note] 与熔断分流在本轮均实战落账。本期 S4 机器单仅剩 #1578（页脚两处死锚修复）blocked 等平台。
 - 新发现两缺陷（DEFECTS 已记）：①WF 平台 elements 端点全灭 404（含老页），content-edit 整条路死，波及全部 WF 客户，能力清单与平台脱节，归 webforge 修，建议能力清单加只读探活；②闸A 判定官对「页面是否在线」连续两轮引用方案正文里的旧实测记述误判 later，pull_data 与人工 note 纠正都压不过，修法（敏感断言标时点 + 可现测断言必现测）并入改造序④。本轮用「人工现在做」误杀出口绕过，出口设计第二次立功。
 - 跨 bot：wp-tools work log 已补 push（rebase 后 14d6a07）；sdalu term 156 Aiden 复核时点早于第四版落地，现值已是正式稿，XREPLY 已回。
+- 续（elements 修复回交后三件）：清单契约与容器写入规则入 webforger.md（51c4eaa 两机）；capability_broadcast content-edit 盖 4 张强命中（Ctomi #538、Sunseeker #1282、WebForger #1480 等）；#1578 复验重出后收口 done：两处页脚死锚实为 #services 锚点在子页失效，改 /#services 全站可用，共享页脚经修复后的 elements 通道落地（修复首笔生产写入），7 项检查全过。至此 Apex 本期 S4 机器单全清（#662/#663/#664/#665/#666/#1578 全 done），板上仅剩 S5 三张下期单。
 
 ### 2026-10-21 AIRA 深夜批：闸降软三件落地 + Apex 建页链收口 + sdalu term 描述债清账（Alvin 政「闸进一步软，事前只拦不可逆，事后抽查」+ wp 线程 1.3.3 回交）
 
