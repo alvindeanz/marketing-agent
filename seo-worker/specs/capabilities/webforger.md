@@ -104,7 +104,7 @@ POST /api/auth/login  {"email":"...","password":"..."}
 | 站点状态与域名 | `GET /api/content/{siteId}/meta` |
 | 业务信息 | `GET /api/content/{siteId}/discovery` |
 | 页面注册表 | `GET /api/pages/{siteId}` |
-| 页面可编辑元素 | `GET /api/content/{siteId}/elements?page=index.html` |
+| 页面可编辑元素 | `GET /api/content/{siteId}/elements?page=<slug>`（2026-10-21 契约定版：slug 取自页面注册表，带不带 .html 均可；省略 page 即首页；页头 `?page=_shared/header.html`、页脚 `?page=_shared/footer.html`；合集 item `?page={collSlug}/{itemId}`；旧写法 `pages/{slug}.html` 兼容；不支持 `?slug=` 与路径式。契约权威在平台 `GET /api/doc`） |
 | 索引开关 | `GET /api/pages/{siteId}/indexing` |
 | 博客列表与单篇 | `GET /api/blog/{siteId}`、`GET /api/blog/{siteId}/{slug}` |
 | 现有重定向 | `GET /api/content/{siteId}/redirects` |
@@ -230,7 +230,8 @@ POST /api/auth/login  {"email":"...","password":"..."}
 
 - 端点：`PATCH /api/content/{siteId}/edit`，body `{ page, edits: [...] }`
 - 单批最多 50 处。edit 的 `type` ∈ `text` | `image` | `button` | `link` | `logo` | `shortcode`，靠 `contentId` 定位。
-- 先 `GET /elements?page=` 拿到真实的 `contentId`，方案里不许出现凭想象写的 id。
+- 先 `GET /elements?page=` 拿到真实的 `contentId`，方案里不许出现凭想象写的 id。page 参数契约见上方只读表（2026-10-21 定版）。
+- **容器规则（2026-10-21 平台 2c6c7a4 起）**：elements 返回新增 `parent`、`container`、`occurrences` 三字段，父在前子在后，同 id 只出一条。`container: true` 的条目不是文本改写目标，要改写 `parent` 指向它的子 id；对容器发 text/html/button/logo 写入会 400 `CONTAINER_HAS_EDITABLE_CHILDREN` 零写入。a 或 button 容器上的 button 写入降级为只改 href（响应带 `hrefOnly` 字段），卡片文字不会被清空。标题类提取（headingsOfElements）覆盖面变大属预期，不是异常。
 - 改共享页头页脚在 edit 上加 `shared: true`。
 - 短代码只能用 `type: "shortcode"` 让服务端生成标记，手写标记一律不行。
 - 平台写前落 `history/{ts}-pages-{slug}.html`，回滚就是反向再 PATCH 一次原值，所以方案里要带原值。
