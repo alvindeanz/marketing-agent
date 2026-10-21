@@ -1496,8 +1496,9 @@ function reclaim_capability_gap_tasks(){
    一、chat 单收口即归档（批五 1 原规则，原样保留）；
    二、无产出收口单（note 带 [merged]/[dropped]/[killed]，replan 换版的收口噪音，55 号 91 条
       done 里 83 条是这个）收口即归档；
-   三、有产出 done 单（done/accepted）收口满 30 天归档，近期完成账留板上可对，
-      30 天后该沉淀的早进 facts/快照，板面不再背。
+   三、有产出 done 单（done/accepted）收口即归档（2026-10-21 Alvin 定，取代原 30 天窗：
+      「做完就收口」，板面只留活账不留破铜烂铁；翻账走 include_archived=1，证据早在
+      facts/快照/执行记录里，板面不背）。
    谁都不碰的豁免：待反馈卡（卡令牌在身且未见 [卡反馈折叠]，14 天到期钟靠它在板上活着，
    口径同 /clients 徽章的 cardish）、attention=1（停人标没人收口，归档等于藏尸）。 */
 function archive_closed_tasks($cid=null){
@@ -1507,9 +1508,7 @@ function archive_closed_tasks($cid=null){
     else db()->exec($sql);
     $sql2="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND attention=0"
         ." AND NOT (CONCAT(IFNULL(result_note,''),IFNULL(output_url,'')) LIKE CONCAT('%?t=',id,'&k=%')"
-        ." AND IFNULL(result_note,'') NOT LIKE '%[卡反馈折叠%')"
-        ." AND (IFNULL(result_note,'') REGEXP '\\\\[(dropped|merged|killed)\\\\]'"
-        ." OR updated_at<DATE_SUB(NOW(),INTERVAL 30 DAY))";
+        ." AND IFNULL(result_note,'') NOT LIKE '%[卡反馈折叠%')";
     if($cid!==null){db()->prepare($sql2." AND client_id=?")->execute([(int)$cid]);}
     else db()->exec($sql2);
 }
