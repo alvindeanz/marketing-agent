@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-21 AIRA 深夜批：闸降软三件落地 + Apex 建页链收口 + sdalu term 描述债清账（Alvin 政「闸进一步软，事前只拦不可逆，事后抽查」+ wp 线程 1.3.3 回交）
+
+- **立法落地三件**：①冷却闸降软（322bfa2 两机）：同页冷却与全站独占窗不再事前拦，apply 命中改 [cooldown-note] 测量冲突注记照落地，release_review.md 判决语料同步；②release 熔断按可逆性分流（a60baf3 api+worker）：spend/不可逆保留每版两次封顶，可逆类第三次起照放带 [fuse-note] 台账（防环不变：每次重放夹一次判定，harness 人触发无 cron）；③代确认建页一步到位（82838e1）：page-create 代确认口径 + review_principles「proxy agree 即凭证，不等 14 天不等卡」，生意闸不受影响。
+- **Apex(44) 建页链**：#663 done（两页 1420/1688 词正稿上线、noindex 解除、首页与浴室页 title/meta 同步，verify-split 拆 #1578）；#665 大头落地（页脚链对账、厨房 meta 有据不动），余 V6 sitemap 缓存复验 + V11 GSC 请求编索引；手动代跑了两次「apply 半途熔断自愈」循环（剥 autotoken 污染重出 #663、冷却重放 #665），此循环的机制化在改造序欠账。#1578（导航进菜单）卡在共用页头页脚原件要人从 WF 后台导出（WF API 无 GET fragment，能力缺口）；#666 互链单判定官拿过期数据说「页未在线」（实测 200），挪 S5 等新数据，judgment 病不硬怼。
+- **sdalu(9) 25 天债清账**：wf-agent 1.3.3 回交验证（status/term162/403 三测）→ 登记三步（wp-term-description-set，82838e1）→ #873 当晚直落（term 159，sha 逐字节一致，快照 17）；#872 走了完整的降软实证链：旧熔断拦 → 分流后第三次照放 → 真缺陷暴露（wp_kses 剥 style 尾分号，sha 断言必败，快照 20 自动回滚零损伤）→ 重出第四版（成品剥分号）→ done（快照 22/23，22 链接全 200）。闸降软的价值样本：不降软这个 kses 缺陷还要埋几周。
+- 坑：wp_kses_post 会剥 style 属性尾分号，WP 载荷含内联样式时成品要预清洗或断言按消毒后形态算，已进 #872 执行记录；下一个 WP 客户正文带内联样式会再撞，宜进 wordpress.md 风险注记（下批）。
+- 跨 bot：Aiden 交接件 20261020T232431Z 已回（XREPLY），sites/sdalu.co.nz.md work log 补记（wp-tools 1c7ccf7）。
+
 ### 2026-10-20 AIRA WF 三家加测轮（Alvin 指令，跳过当日已跑四家）：Ben's AU(46) + Ben's NZ(45) + Sammichelle(23) 串行 + 闸历史口径失明修复
 
 - 全程 19:46-19:57 约 11 分钟三家 rc=0。收口：#829/#118 两篇博文卡同意折叠后全自动发布验证 200 无 noindex；Sammichelle #307（10-11 停车等 WF collection 写接口的老单）本轮直接跑通落地（301 写入 + changeset + verify-split 自动拆 7 项人工复验工单 #1568，#1568 又被 auto-machine-run 自愈转机器位）；#815 零写入收口。刹车对新鲜 later 零误杀（45 #114 照旧挪 S6，Alvin 10-11 挂起语义保留）。
