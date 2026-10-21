@@ -26,7 +26,8 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - ticket #46 修复（d741524）：blogcheck keepImages 改按图片 URL 比对加数量核对（改 alt 不再误判删图，丢图换图照拦）；Style Roll 注释带外化：校验契约照旧（模型产出必须带，缺失报错文案写明契约），写回平台前 stripRollComment 统一剥离（含 #1544 的 `<p>` 壳形态），骨架按 slug 存 `seo-agent-output/styleroll/<slug>.json`（NFS 双 worker 同源），改稿轮与历史指纹先读平台注释、读不到读带外记录。内部元数据不再漏进客户平台源码（blogcheck 对其他内部注释早就是这个口径，唯独豁免了自己这条，和 Apex card-autotoken 泄漏同病）。回放测试 6 条进 tests/blogcheck.test.js。
 - ticket #45 修复（同 commit）：ads_mutate.py 新增 geo-target-set（集合语义声明终态，before 快照全量打印做回滚依据，终态 geo ID 逐个验库且 ENABLED，只动 LOCATION/PROXIMITY，批量 mutate 后回读对账逐一相符差一个算失败）。登记三步齐：googleads.md V5、release_policy.json v23（reversible 入 l0_exclude 观察期，首批走 L2 放行官，地域定向决定钱花在哪）、broadcast 已跑（强命中 0，#1369/#1375 判决都在 done 单上属正常）。dry-run 对 Ideal 真实账户与 #1375 人工执行稿互证一致（HT-Bathroom：删 6 加 53 投 34 排，一条不差）。
 - 坑：theme-code-update（2b9461d 登记）当时漏跑 broadcast，本轮补跑盖了 1 张旧判决；「登记三步缺广播」第二次发生，支持把三步收敛成一条命令（下一批机制项）。
-- harness 验证：#1574（Ben's NZ 返修）与 #1376（Ideal 地域落地）转机器重跑（job 8900/8901），结果见后续条目。
+- harness 验证（job 8900/8901 起链，全绿）：#1574 重跑一次过（机器校验通过，审稿定点修 2 处后二验也过；新稿注释 0、三图 URL 原样 alt 已改、Close up 清零），已发布文章走安全路径存交付文件，确认卡已出等客户同意，[card-waiting-skip] 客户闸正常生效；#1376 全链机器自走收口 done 并即时归档：execute 出方案 → apply 发现无方案文件走 auto-chain 续排 execute（#1510 修法首次实战立功）→ 闸A → 放行官 → apply 落地，五条系列投 58 排 34 半径圈清零、回读对账逐一相符、预算出价零动；独立复核再跑同 spec 报 noop 零改动。ticket #45/#46 已 resolved。
+- 坑二：人工排 release_review 必须带 payload.task_ids，只给 client_id 会裸 throw（runners/release_review.js:126）；按硬规矩 9 这算数据病死法可接受，但报错没说清字段要求，下次顺手补。
 
 ### 2026-10-21 AIRA Apex 本期清场轮（Alvin 指令；导航已由 webforge 平台侧加好）
 
