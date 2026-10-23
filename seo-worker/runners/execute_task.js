@@ -1617,6 +1617,33 @@ async function runBlogTask(ctx, context, workspace, task) {
      零模型读修订稿、按修订契约校验、PATCH 替换草稿正文、回读比对、重出确认卡。
      路由看载荷不看措辞（硬规矩 9）：修订稿文件真实存在才走这条路。已发布文章不走
      （PATCH 对已发布文章直接上线，等于绕放行），照旧走 LLM 改稿轮存交付文件等 apply。 */
+  if (mode === 'create') {
+    /* 目标草稿可能根本不写在本任务文本里，只在引用链任务的交付记录里（#1608 实证：
+       detail 只有「#1582 的草稿」，连相对路径都没有，job 9513 第一版修复照样掉进新建）。
+       只有写回载荷真实存在才去追引用链，普通新建单不会误入（接替单引用旧任务很常见，
+       拿旧任务的文章当目标会错）。 */
+    const wbProbe = writebackSource(task, workspace, taskId);
+    if (wbProbe.file || wbProbe.candidates.length > 1) {
+      const refUrl = await resolveRefBlogUrl(api, task, taskId, profile, log);
+      if (refUrl) {
+        const refSlug = wf.slugFromBlogUrl(refUrl);
+        try {
+          const gotRef = await client.getPost(refSlug);
+          const refPost = (gotRef && gotRef.post) || null;
+          if (refPost) {
+            mode = 'revise';
+            slug = refSlug;
+            targetPost = refPost;
+            currentBody = String(refPost.body || '');
+            outputUrl = refUrl;
+            log('task ' + taskId + '：写回载荷存在，目标草稿从引用链任务的交付记录里解析到 ' + refSlug);
+          }
+        } catch (e) {
+          log('task ' + taskId + '：引用链解析到的目标 ' + refSlug + ' 平台上读不到，照原流程处理 :: ' + e.message);
+        }
+      }
+    }
+  }
   if (mode === 'revise' && targetPost && String(targetPost.status || '').toLowerCase() !== 'published') {
     const wb = writebackSource(task, workspace, taskId);
     if (wb.file) {
@@ -2180,6 +2207,37 @@ function writebackSource(task, workspace, taskId) {
     }
   }
   return { file: candidates.length === 1 ? candidates[0] : '', candidates };
+}
+
+/* 目标草稿从引用链任务的字段里解析（2026-10-23 job 9513 教训）：改稿单的目标可能只写在
+   被引任务的交付记录里。扫 detail 里的 #N，逐个读 task_state 的 output_url 与 note 尾窗，
+   抓绝对博客链接与站内相对路径。跨引用去重按 slug：恰好一个目标才回，零个或多个都回空
+   （多目标不猜）。只在写回载荷存在时被调用，普通接替单不会被旧任务的文章带偏。 */
+async function resolveRefBlogUrl(api, task, taskId, profile, log) {
+  const refs = [];
+  for (const m of String(task.detail || '').matchAll(/#(\d{1,6})\b/g)) {
+    const n = Number(m[1]);
+    if (n && n !== Number(taskId) && refs.indexOf(n) === -1) refs.push(n);
+  }
+  const bySlug = {};
+  for (const n of refs.slice(0, 8)) {
+    let st = null;
+    try { st = await api.getTaskState(n); } catch (e) { continue; }
+    const t = (st && st.task) || {};
+    const text = String(t.output_url || '') + '\n' + String(t.result_note_tail || '');
+    const abs = (text.match(/https?:\/\/[^\s)\]，。]+/g) || [])
+      .map((u) => u.replace(/[`'"<>）】。，、；;,.]+$/, ''))
+      .filter((u) => wf.isBlogUrl(u, profile.domain));
+    const rel = wf.relBlogUrls(text, profile.domain);
+    for (const u of abs.concat(rel)) {
+      const s = wf.slugFromBlogUrl(u);
+      if (s && !bySlug[s]) bySlug[s] = u;
+    }
+  }
+  const slugs = Object.keys(bySlug);
+  if (slugs.length === 1) return bySlug[slugs[0]];
+  if (slugs.length > 1) log('task ' + taskId + '：引用链里解析到 ' + slugs.length + ' 篇不同文章（' + slugs.join('、') + '），不猜目标');
+  return '';
 }
 
 /* 修订契约校验：写回的是别人已经写好的成稿，不套新稿标准（1500 词、配图、FAQ、Style Roll
@@ -2860,6 +2918,7 @@ module.exports = {
   run,
   writebackSource,
   revisionCheck,
+  resolveRefBlogUrl,
   parseOpsCheck,
   lintPlan,
   lintReleaseCard,

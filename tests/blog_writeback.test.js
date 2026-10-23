@@ -11,7 +11,18 @@ const ex = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'execute_
 const ap = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
 
 let pass = 0, fail = 0;
-function t(name, fn) { try { fn(); pass++; console.log('  ok   ' + name); } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + e.message); } }
+const asyncRuns = [];
+function t(name, fn) {
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') {
+      asyncRuns.push(r.then(() => { pass++; console.log('  ok   ' + name); })
+        .catch((e) => { fail++; console.log('  FAIL ' + name + '\n       ' + e.message); }));
+      return;
+    }
+    pass++; console.log('  ok   ' + name);
+  } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + e.message); }
+}
 
 console.log('相对博客路径升格（ticket #48 死因一）');
 t('#1597 式 detail：裸 /blog/ 路径升格成站点绝对链接', () => {
@@ -109,6 +120,33 @@ t('无引用或目录缺失：不走写回，正常产线', () => {
   assert.strictEqual(r.file, '');
 });
 
+console.log('引用链目标解析（job 9513 教训：目标只写在被引任务的交付记录里）');
+function fakeApi(map) {
+  return { getTaskState: async (n) => { if (!map[n]) throw new Error('404'); return { task: map[n] }; } };
+}
+const noLog = () => {};
+t('#1608 式：detail 零链接，#1582 的 note 尾窗带预览链接，唯一命中', async () => {
+  const api = fakeApi({
+    1582: { output_url: 'https://agencyreport.horntech-dev.com/reports/x/blog_confirmation_task-1582.html?t=1582', result_note_tail: '预览：https://sanmichellebags.co.nz/blog/duffel-bag-nz-wheels-vs-straps-leather-vs-nylon/?preview=d18baf 请看' },
+    1591: { output_url: '', result_note_tail: '卡 https://agencyreport.horntech-dev.com/reports/x/blog_confirmation_task-1582.html?t=1591' },
+  });
+  const task = { detail: '站内 #1582 草稿。第一步读 #1597 的 job #9162 日志，用 #1591 修订稿写回。' };
+  const u = await ex.resolveRefBlogUrl(api, task, 1608, { domain: 'sanmichellebags.co.nz' }, noLog);
+  assert.strictEqual(u, 'https://sanmichellebags.co.nz/blog/duffel-bag-nz-wheels-vs-straps-leather-vs-nylon/?preview=d18baf');
+});
+t('引用链里两篇不同文章：不猜，回空', async () => {
+  const api = fakeApi({
+    11: { output_url: 'https://x.co.nz/blog/post-a/', result_note_tail: '' },
+    12: { output_url: 'https://x.co.nz/blog/post-b/', result_note_tail: '' },
+  });
+  const u = await ex.resolveRefBlogUrl(api, { detail: '用 #11 和 #12' }, 99, { domain: 'x.co.nz' }, noLog);
+  assert.strictEqual(u, '');
+});
+t('引用任务 404 或无链接：回空不炸', async () => {
+  const u = await ex.resolveRefBlogUrl(fakeApi({}), { detail: '读 #777 日志' }, 99, { domain: 'x.co.nz' }, noLog);
+  assert.strictEqual(u, '');
+});
+
 console.log('搬运契约（不套新稿标准）');
 t('完整正文过契约（不查 1500 词、配图、FAQ）', () => {
   const body = '# Duffel Bags\n\n正文段落。'.padEnd(600, '字') + '\n\n[类目](/collections/duffel-bags/)';
@@ -124,6 +162,8 @@ t('JSON 载荷、过短、占位符各自打回', () => {
   assert.ok(ex.revisionCheck('正文 [to supply] 待补数据'.padEnd(400, 'x')).some((s) => /占位/.test(s)));
 });
 
-console.log('');
-console.log(pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+Promise.all(asyncRuns).then(() => {
+  console.log('');
+  console.log(pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+});
