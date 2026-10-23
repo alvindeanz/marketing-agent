@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-23 AIRA 工单修复轮二（tracker ticket #47/#48/#49，Alvin 共评批「可以，你处理一下」）
+
+- 背景：summer 一天三票，实为两个旧病灶复发。一是发布凭证闸 requireBlogPublishConsent 误杀只改草稿的单（#1599/#1614 两次熔断，加 #1326/#809 共四单实证，DEFECTS #809 族）：闸把「带方案的博客任务且目标非在线」一律当发布动作索要 publish_blog=agree；#1599 还暴露第二个洞，客户当天已在 #837 点同意，闸只认「确认卡#N」形态引用，「卡 #837」接不上。二是「原样写回已有修订稿」的单被当新博文重写（#1597/#1608，job 9162/9297 各两次生成全被新稿校验枪毙）：detail 里目标草稿写的是站内相对路径 /blog/<slug>/，URL 识别只认绝对链接，revise 判定失明掉进 create 分支，Style Roll 重抽加 1500 词配图 FAQ 契约必死。
+- 修一（apply_task.js）：凭证闸按方案载荷分流（硬规矩 9，路由看载荷）：目标非在线时读方案文本，无发布动作（ops 无 blog-publish/article-publish、正文无 publishPost / /publish 端点 / status 置 published）即不触发闸，中文叙述「不发布/发布状态不动」不会命中；拿不到方案文本按有发布动作从严。跨单引用正则放宽收「卡 #N」，多收的号只多查一次 cardFeedback 行过滤仍只认 publish_blog，误伤面零。resolveBlogUrl 加相对路径兜底（多条不猜）。
+- 修二（execute_task.js + webforger.js）：wf.relBlogUrls 把站内相对博客路径按客户域名升格，execute 与 apply 同口径；博客产线新增零模型「原样写回」通路：目标是站内已有草稿且 detail 引用的任务目录里真实存在 revised-body 命名的 .md 修订稿（载荷路由；JSON 载荷形态跳过、本任务目录不扫、多候选不猜就地说明数据病），读稿剥 Style Roll 注释、过搬运契约（正文非载荷、无 HTML 注释、无占位符，不套新稿标准）、站内链接实测 200、PATCH 替换草稿正文、回读逐字节比对、写回后仍须是草稿、重出确认卡。出卡块抽成 issueBlogCard 共用。已发布文章不走此路（PATCH 直接上线等于绕放行），照旧走 LLM 改稿轮等 apply。
+- 测试：tests/blog_writeback.test.js 21 件（回放素材用 #1597/#1599 真实载荷文本），全套 38 件全绿。
+- 下一步/认领：部署 worker 后 harness 单跑 louvresky(16) 与 sanmichelle(23) 验证 #1599/#1614/#1608 自主走通，回写三张票 resolved。AIRA。
+
 ### 2026-10-23 AIRA chat 泳道降耗两刀：消息防抖 + 会话压缩（Alvin 批「按推荐直接做」；对话答复永不降档是他定的质量红线）
 
 - 背景：10-23 上午 11 点（NZ）额度窗重置后 3 小时烧掉周额度 8%，实测大头是收件箱人机协作（louvresky 54 次模型调用 63.6 万 output tokens）。根因是结构病：一条消息 = 一次全新 claude 进程 + 全量上下文，而对话本质是增量；且历史超 40 条是硬丢弃，模型一直在悄悄失忆。官方 6-15 的 SDK credit 拆分已暂停，claude -p 照旧吃订阅周额度。

@@ -842,7 +842,43 @@ function resolveBlogUrl(task, profile) {
   const noteHit = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
   if (noteHit) return noteHit;
   const detailUrls = (String(task.detail || '').match(/https?:\/\/[^\s)\]，。]+/g) || []).map(urlTrim);
-  return detailUrls.find((u) => wf.isBlogUrl(u, profile.domain)) || '';
+  const detailHit = detailUrls.find((u) => wf.isBlogUrl(u, profile.domain));
+  if (detailHit) return detailHit;
+  /* 相对路径兜底（2026-10-23 ticket #48）：频道单常只写 /blog/<slug>/，与 execute 同口径。
+     多条相对路径不敢猜，回空照旧走找不到分支。 */
+  const rel = wf.relBlogUrls(String(task.result_note || '') + '\n' + String(task.detail || ''), profile.domain);
+  return rel.length === 1 ? rel[0] : '';
+}
+
+/* 方案有没有发布动作（2026-10-23 ticket #47/#49，DEFECTS #809 族）：发布凭证闸管的是
+   「未上线内容对外见光」，只改草稿的方案没有见光动作，不该被它拦（#809/#1326/#1599/#1614
+   四单误杀，全是草稿改稿）。判据按载荷不按措辞（硬规矩 9）：ops 申报发布类，或方案正文
+   出现发布调用（publishPost、/publish 端点、status 置 published）。中文叙述里的「不发布/
+   发布状态不动」不会命中。宁可拦错不可漏放的边界保持：真发布动作一定带这些载荷之一。 */
+function planPublishIntent(ops, planText) {
+  const list = Array.isArray(ops) ? ops : [];
+  if (list.indexOf('blog-publish') !== -1 || list.indexOf('article-publish') !== -1) return true;
+  const t = String(planText || '');
+  if (/publishPost|publish_post/i.test(t)) return true;
+  if (/\/(posts?|blogs?|articles?)\/[^\s"'）)>]*\/publish\b/i.test(t)) return true;
+  if (/["']?status["']?\s*[:=]\s*["']?published\b/i.test(t)) return true;
+  if (/(改为|设为|置为|切到)\s*published\b/i.test(t)) return true;
+  return false;
+}
+
+/* 凭证卡的跨单引用提取。原正则只认「确认卡#N / 确认页 #N / blog_confirmation_task-N」，
+   频道单写「卡 #837」接不上（2026-10-23 ticket #47 第二个洞）：客户当天已在 #837 点了
+   同意，闸只查本任务照拦。放宽收「卡 #N」形态；多收的号只是多查一次 cardFeedback，
+   行过滤只认 publish_blog，误伤面为零。 */
+function consentRefIds(task) {
+  const refIds = [];
+  const taskId = task.id;
+  const refSrc = String(task.detail || '') + '\n' + String(task.result_note || '');
+  for (const m of refSrc.matchAll(/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)|(?:^|[\s（(、：:])卡\s*#(\d+)/gm)) {
+    const rid = Number(m[1] || m[2] || m[3]);
+    if (rid && rid !== taskId && refIds.indexOf(rid) === -1) refIds.push(rid);
+  }
+  return refIds;
 }
 
 async function requireBlogPublishConsent(api, task, record) {
@@ -862,12 +898,7 @@ async function requireBlogPublishConsent(api, task, record) {
       }
     } catch (e) { record('policy facts 读取失败（' + e.message + '），按未委托处理，照走卡凭证'); }
   }
-  const refIds = [];
-  const refSrc = String(task.detail || '') + '\n' + String(task.result_note || '');
-  for (const m of refSrc.matchAll(/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)/g)) {
-    const rid = Number(m[1] || m[2]);
-    if (rid && rid !== taskId && refIds.indexOf(rid) === -1) refIds.push(rid);
-  }
+  const refIds = consentRefIds(task);
   let pub = [];
   for (const cand of [taskId].concat(refIds)) {
     const fbres = await api.cardFeedback(cand).catch(() => ({ rows: [] }));
@@ -1769,7 +1800,16 @@ async function runOne(ctx, context, workspace, taskId) {
     if (live) {
       log('task ' + taskId + '：目标文章已公开在线（' + wf.publicUrlOf(blogUrl) + '），修订单不触发发布凭证闸');
     } else {
-      await requireBlogPublishConsent(api, task, (line) => log('task ' + taskId + '：' + line));
+      /* 草稿改稿不触发凭证闸（2026-10-23 ticket #47/#49，DEFECTS #809 族）：闸管的是
+         对外见光，方案载荷里没有发布动作就没有见光（#809/#1326/#1599/#1614 误杀实证）。
+         方案带发布动作的照旧过闸，拿不到方案文本按有发布动作从严处理。 */
+      let planText = '';
+      try { planText = fs.readFileSync(changePlanPath(workspace, taskId), 'utf8'); } catch (e) { planText = ''; }
+      if (planText && !planPublishIntent(ops, planText)) {
+        log('task ' + taskId + '：方案无发布动作（草稿改稿），发布凭证闸不触发；发布动作届时由发布单自行过闸');
+      } else {
+        await requireBlogPublishConsent(api, task, (line) => log('task ' + taskId + '：' + line));
+      }
     }
   }
 
@@ -2011,6 +2051,8 @@ module.exports = {
   changePlanPath,
   runBlogPublish,
   requireBlogPublishConsent,
+  planPublishIntent,
+  consentRefIds,
   resolveBlogUrl,
   onsiteCardExpired,
   revisedReadbackMismatch,

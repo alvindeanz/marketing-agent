@@ -384,6 +384,22 @@ function slugFromBlogUrl(url) {
   }
 }
 
+/* 站内相对博客路径升格（2026-10-23 ticket #48）：频道开的改稿单常把目标草稿写成
+   「/blog/<slug>/」相对路径，detail/note 里没有完整 https 链接。URL 识别只认绝对
+   链接时，改稿单掉进新建分支按新稿模板重写（#1597/#1608 两次熔断的死因）。这里把
+   相对路径按客户域名升格成绝对链接，execute 与 apply 的目标定位共用一个口径。 */
+function relBlogUrls(text, domain) {
+  const host = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  if (!host) return [];
+  const out = [];
+  const seen = {};
+  for (const m of String(text || '').matchAll(/(?:^|[\s("'（「：:])(\/blog\/[A-Za-z0-9][A-Za-z0-9_-]*)\/?(?![A-Za-z0-9_/-])/gm)) {
+    const u = 'https://' + host + m[1] + '/';
+    if (!seen[u]) { seen[u] = 1; out.push(u); }
+  }
+  return out;
+}
+
 /** Is this url a blog post url on the client's own site? */
 function isBlogUrl(url, domain) {
   const s = String(url || '');
@@ -417,5 +433,6 @@ module.exports = {
   originOf,
   slugFromBlogUrl,
   isBlogUrl,
+  relBlogUrls,
   DEFAULT_BASE,
 };

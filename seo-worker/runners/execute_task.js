@@ -1570,6 +1570,18 @@ async function runBlogTask(ctx, context, workspace, task) {
     const alt = detailUrls.find((u) => wf.isBlogUrl(u, profile.domain));
     if (alt) { outputUrl = alt; }
   }
+  if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
+    /* 相对路径兜底（2026-10-23 ticket #48）：频道单常只写 /blog/<slug>/，没有绝对链接，
+       改稿单因此掉进新建分支按新稿模板重写（#1597/#1608 死因）。多条相对路径不敢猜。 */
+    const rel = wf.relBlogUrls(String(task.result_note || '') + '\n' + String(task.detail || ''), profile.domain);
+    if (rel.length === 1) {
+      outputUrl = rel[0];
+      log('task ' + taskId + '：目标草稿按站内相对路径升格定位 ' + outputUrl);
+    } else if (rel.length > 1) {
+      log('task ' + taskId + '：detail/note 里有 ' + rel.length + ' 条站内博客相对路径，不猜目标，照原流程处理');
+    }
+  }
+  let targetPost = null;
   if (outputUrl && wf.isBlogUrl(outputUrl, profile.domain)) {
     slug = wf.slugFromBlogUrl(outputUrl);
     if (slug) {
@@ -1578,6 +1590,7 @@ async function runBlogTask(ctx, context, workspace, task) {
         const post = (got && got.post) || null;
         if (post) {
           mode = 'revise';
+          targetPost = post;
           currentBody = String(post.body || '');
           let parsedRoll = styleroll.parseRollComment(currentBody);
           if (!parsedRoll.found) parsedRoll = loadRollRecord(workspace, slug);
@@ -1596,6 +1609,23 @@ async function runBlogTask(ctx, context, workspace, task) {
         log('task ' + taskId + '：output_url 指向的草稿 ' + slug + ' 读不到，按新建处理 :: ' + e.message);
         slug = '';
       }
+    }
+  }
+
+  /* ---- 原样写回通路（2026-10-23 ticket #48）----
+     目标是站内已有「草稿」、而修订稿已经是别的任务的交付文件时，这单是搬运不是写作：
+     零模型读修订稿、按修订契约校验、PATCH 替换草稿正文、回读比对、重出确认卡。
+     路由看载荷不看措辞（硬规矩 9）：修订稿文件真实存在才走这条路。已发布文章不走
+     （PATCH 对已发布文章直接上线，等于绕放行），照旧走 LLM 改稿轮存交付文件等 apply。 */
+  if (mode === 'revise' && targetPost && String(targetPost.status || '').toLowerCase() !== 'published') {
+    const wb = writebackSource(task, workspace, taskId);
+    if (wb.file) {
+      return runBlogWriteback(ctx, { task, taskId, workspace, profile, client, slug, targetPost, srcFile: wb.file });
+    }
+    if (wb.candidates.length > 1) {
+      throw new Error('task ' + taskId + '：原样写回通路找到 ' + wb.candidates.length + ' 份候选修订稿（'
+        + wb.candidates.map((f) => path.relative(workspace, f)).join('、')
+        + '），不猜。这是任务书数据病：请在任务 detail 里只引用一个来源任务号，或删掉多余引用后重跑。');
     }
   }
 
@@ -2042,11 +2072,34 @@ async function runBlogTask(ctx, context, workspace, task) {
   // 从 draft 自动组卡（关键词用主词 + 正文 H2 子题、内链从正文提取、draft 预览按钮），
   // 渲染成客户版卡，output_url 指向卡（带 t/k）。人工前端把这个链接发给客户，客户在卡上
   // 点「同意，安排发布」(publish_blog=agree)，apply 才放行 publish（发布门有硬闸查这个）。
+  const cardUrl = await issueBlogCard(ctx, {
+    workspace, taskId, previewUrl, imagesMissing,
+    title: draft.title,
+    keyword: draft.keyword,
+    excerpt: draft.excerpt,
+    metaDescription: draft.meta_description,
+    bodyMd: String(placedBody || platformBody || ''),
+    log,
+  });
+
+  // Anything the pass left in the task's deliverable directory goes up before
+  // the result, so the card and its downloads appear together.
+  await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
+  const noteWithCard = cardUrl ? ('博客确认卡（发给客户，客户点同意才发布）: ' + cardUrl + '\n' + note) : note;
+  // 图没齐就打 attention：稿子进待放行，但人得先补图，发布门会拦。
+  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: noteWithCard, attention: imagesMissing });
+  log('task ' + taskId + '：已交付，任务进 review，' + (cardUrl ? '确认卡已出待客户同意发布' : '确认卡缺失退回预览链接') + (imagesMissing ? '（配图不齐，已标需人判断）' : ''));
+  return draftFile;
+}
+
+/* 博客确认卡出卡（2026-09-15 机制，2026-10-23 抽成共用：新稿产线与原样写回通路同用）。
+   失败不抛：卡生成失败退回平台预览链接，发布门仍要求客户同意。返回 cardUrl 或空串。 */
+async function issueBlogCard(ctx, opts) {
+  const { workspace, taskId, previewUrl, imagesMissing, title, keyword, excerpt, metaDescription, bodyMd, log } = opts;
   let cardUrl = '';
   try {
     const bcRender = require('../specs/report/render_blog_confirmation.js');
     const clean = (s) => String(s || '').replace(/—/g, '，').replace(/\s+/g, ' ').trim();
-    const bodyMd = String(placedBody || platformBody || '');
     const linksOut = [];
     const seenLink = {};
     const linkRe = /\[([^\]]{1,60})\]\((\/[^)\s]+)\)/g;
@@ -2056,13 +2109,13 @@ async function runBlogTask(ctx, context, workspace, task) {
       seenLink[lm[2]] = 1;
       linksOut.push({ page: lm[2], anchor: clean(lm[1]) });
     }
-    const keywords = [{ term: clean(draft.keyword || draft.title), intent: '搜这个词的人正在找这方面的答案，站内目前没有页面接得住' }];
+    const keywords = [{ term: clean(keyword || title), intent: '搜这个词的人正在找这方面的答案，站内目前没有页面接得住' }];
     const h2s = (bodyMd.match(/^##\s+(.+)$/gm) || []).slice(0, 3).map((h) => clean(h.replace(/^##\s+/, '')));
     for (const h of h2s) if (/[A-Za-z]/.test(h)) keywords.push({ term: h, intent: '文章覆盖的一个子问题' });
     const cardData = {
-      title: clean(draft.title),
+      title: clean(title),
       period_label: '草稿待您确认 · ' + new Date().toISOString().slice(0, 7),
-      oneline: clean(draft.excerpt || draft.meta_description || draft.title).slice(0, 120),
+      oneline: clean(excerpt || metaDescription || title).slice(0, 120),
       draft_url: previewUrl,
       draft_hint: '这是只有您能看到的预览链接，文章还没对外发布。',
       keywords,
@@ -2070,7 +2123,7 @@ async function runBlogTask(ctx, context, workspace, task) {
       images_line: imagesMissing ? '配图还差几张，发布前会补齐。' : '文章已配好图，具体见预览。',
       decision: {
         q: '这篇文章可以发布吗？',
-        situation: '围绕「' + clean(draft.keyword || draft.title) + '」这个搜索，站内还没有页面接得住',
+        situation: '围绕「' + clean(keyword || title) + '」这个搜索，站内还没有页面接得住',
         recommendation: '发出去能接住搜这个问题的访客，顺势把他们引到相关的产品或服务页',
         no_reply: '不回复我们就先留着不发，等您确认',
         item: 'publish_blog',
@@ -2094,15 +2147,133 @@ async function runBlogTask(ctx, context, workspace, task) {
   } catch (e) {
     log('task ' + taskId + '：博客确认卡生成失败，output_url 退回平台预览链接（发布门仍要求客户同意）:: ' + e.message);
   }
+  return cardUrl;
+}
 
-  // Anything the pass left in the task's deliverable directory goes up before
-  // the result, so the card and its downloads appear together.
+/* ---- 原样写回通路的三件套（2026-10-23 ticket #48）---- */
+
+const WRITEBACK_NAME_RE = /revised[-_]?body|body[-_]?revised/i;
+
+/* 找修订稿来源：任务 detail 里引用的其他任务号（#N），其交付目录 task-N/ 下存在
+   revised body 命名的 .md 文件即候选。路由判据是文件真实存在（载荷），任务措辞只提供
+   去哪找的线索（硬规矩 9）。内容以 { 开头的跳过：那是 publishedRevise 流程给 apply 用的
+   JSON 载荷（revised-body-<slug>.md 同名族），不是写回正文源。本任务自己的目录不扫，
+   防止重跑时把上一轮残留当输入。 */
+function writebackSource(task, workspace, taskId) {
+  const refs = [];
+  for (const m of String(task.detail || '').matchAll(/#(\d{1,6})\b/g)) {
+    const n = Number(m[1]);
+    if (n && n !== Number(taskId) && refs.indexOf(n) === -1) refs.push(n);
+  }
+  const candidates = [];
+  for (const n of refs) {
+    const dir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + n);
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch (e) { continue; }
+    for (const f of names) {
+      if (!WRITEBACK_NAME_RE.test(f) || !/\.md$/i.test(f)) continue;
+      const full = path.join(dir, f);
+      let head = '';
+      try { head = fs.readFileSync(full, 'utf8').slice(0, 200).trim(); } catch (e) { continue; }
+      if (head.startsWith('{')) continue;
+      candidates.push(full);
+    }
+  }
+  return { file: candidates.length === 1 ? candidates[0] : '', candidates };
+}
+
+/* 修订契约校验：写回的是别人已经写好的成稿，不套新稿标准（1500 词、配图、FAQ、Style Roll
+   这些是写作契约不是搬运契约）。搬运契约只管：是正文不是载荷、不带内部元数据、没有占位符。 */
+function revisionCheck(body) {
+  const issues = [];
+  const t = String(body || '').trim();
+  if (t.length < 300) issues.push('修订稿过短（' + t.length + ' 字符），不像完整正文');
+  if (t.startsWith('{')) issues.push('内容像 JSON 载荷不是正文，不是写回源文件');
+  if (/<!--/.test(t)) issues.push('仍含 HTML 注释，内部元数据不得写进客户平台');
+  if (/\[to supply\]|\[待补|TODO[:：]/i.test(t)) issues.push('含未完成占位符');
+  return issues;
+}
+
+/* 原样写回：零模型。读修订稿、剥 Style Roll 注释、修订契约校验、站内链接实测、
+   PATCH 替换草稿正文（草稿不对外，PATCH 不转发布、预览令牌不变）、回读逐字节比对、
+   存交付文件、重出确认卡。失败就地说清是数据病还是平台病，不裸摔。 */
+async function runBlogWriteback(ctx, opts) {
+  const { cfg, api, log } = ctx;
+  const { taskId, workspace, profile, client, slug, targetPost, srcFile } = opts;
+  log('task ' + taskId + '：原样写回模式，修订稿 ' + path.relative(workspace, srcFile) + '，目标草稿 ' + slug + '（零模型）');
+
+  const raw = fs.readFileSync(srcFile, 'utf8');
+  const platformBody = styleroll.stripRollComment(raw);
+  const issues = revisionCheck(platformBody);
+  if (issues.length) {
+    throw new Error('task ' + taskId + '：修订稿没过搬运契约，草稿未动：' + issues.join('；')
+      + '。这是修订稿文件的数据病：修好来源任务的交付文件再重跑。');
+  }
+
+  // 站内链接实测（任务书验收口径：内链 200 无跳转）。只查站内相对链接，最多 12 条。
+  const host = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  const relLinks = [];
+  for (const m of platformBody.matchAll(/\]\((\/[^)\s#?]+)[^)]*\)/g)) {
+    if (relLinks.indexOf(m[1]) === -1) relLinks.push(m[1]);
+  }
+  const dead = [];
+  for (const p of relLinks.slice(0, 12)) {
+    try {
+      const r = await wf.fetchPublic('https://' + host + p, cfg.httpTimeoutMs);
+      if (r.status !== 200) dead.push(p + ' -> ' + r.status);
+    } catch (e) { dead.push(p + ' -> ' + e.message); }
+  }
+  if (dead.length) {
+    throw new Error('task ' + taskId + '：修订稿里 ' + dead.length + ' 条站内链接实测不是 200，草稿未动：'
+      + dead.join('；') + '。修好修订稿里的链接再重跑。');
+  }
+  log('task ' + taskId + '：站内链接实测 ' + Math.min(relLinks.length, 12) + ' 条全 200');
+
+  await client.patchPost(slug, { body: platformBody });
+  const got = await client.getPost(slug);
+  const after = (got && got.post) || {};
+  if (String(after.body || '') !== platformBody) {
+    throw new Error('task ' + taskId + '：正文替换后平台回读与修订稿不一致（回读 '
+      + String(after.body || '').length + ' 字符，修订稿 ' + platformBody.length + ' 字符），写入没有落上，停手报人。');
+  }
+  if (String(after.status || '').toLowerCase() === 'published') {
+    throw new Error('task ' + taskId + '：写回后草稿状态变成 published，这不该发生（PATCH 不应转发布），停手报人复查平台。');
+  }
+  log('task ' + taskId + '：草稿正文已替换并回读一致（' + Buffer.byteLength(platformBody, 'utf8') + ' 字节），仍是草稿未发布');
+
+  const outDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
+  fs.mkdirSync(outDir, { recursive: true });
+  const outFile = path.join(outDir, 'writeback-body-' + slug + '.md');
+  fs.writeFileSync(outFile, platformBody, 'utf8');
+
+  const previewUrl = String((got && got.previewUrl) || '');
+  const title = String((targetPost && targetPost.title) || slug);
+  const cardUrl = await issueBlogCard(ctx, {
+    workspace, taskId, previewUrl, imagesMissing: false,
+    title,
+    keyword: String((targetPost && targetPost.keyword) || title),
+    excerpt: String((targetPost && targetPost.excerpt) || ''),
+    metaDescription: String((((targetPost || {}).meta) || {}).description || ''),
+    bodyMd: platformBody,
+    log,
+  });
+
+  const social = 'We have updated the draft with the agreed revisions. You can review it here: '
+    + (previewUrl || '(preview link unavailable)')
+    + ' . If everything looks good, we will schedule it for publishing.';
+  const note = [
+    '平台预览链接：' + previewUrl,
+    '客户话术：',
+    SOCIAL_OPEN,
+    social,
+    SOCIAL_CLOSE,
+    '要点：原样写回已有修订稿（来源 ' + path.relative(workspace, srcFile) + '），零模型搬运，正文回读一致，仍为草稿未发布。配图未动。',
+  ].filter(Boolean).join('\n');
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
   const noteWithCard = cardUrl ? ('博客确认卡（发给客户，客户点同意才发布）: ' + cardUrl + '\n' + note) : note;
-  // 图没齐就打 attention：稿子进待放行，但人得先补图，发布门会拦。
-  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: noteWithCard, attention: imagesMissing });
-  log('task ' + taskId + '：已交付，任务进 review，' + (cardUrl ? '确认卡已出待客户同意发布' : '确认卡缺失退回预览链接') + (imagesMissing ? '（配图不齐，已标需人判断）' : ''));
-  return draftFile;
+  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: noteWithCard, attention: false });
+  log('task ' + taskId + '：原样写回已交付，任务进 review，' + (cardUrl ? '确认卡已重出' : '确认卡缺失退回预览链接'));
+  return outFile;
 }
 
 /** 大纲门那一轮：只出大纲，存成交付文件，任务进待放行等客户回批。 */
@@ -2687,6 +2858,8 @@ async function run(ctx) {
 
 module.exports = {
   run,
+  writebackSource,
+  revisionCheck,
   parseOpsCheck,
   lintPlan,
   lintReleaseCard,
