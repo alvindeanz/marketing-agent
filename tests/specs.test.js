@@ -139,6 +139,33 @@ try {
   console.log('  ok   planning view 与 policy 的 op 集合一致（WF/Shopify/WordPress/GoogleAds）');
 } catch (e) { fail += 1; console.log('  FAIL planning-view/policy 一致性 :: ' + e.message); }
 
+// 反向：policy risk 表的 op 必须在某个平台的 planning view 出现（2026-10-23 #808 复盘补洞：
+// 上面的单向断言拦不住 #808 的原始洞——op 进了 risk 表与契约节、唯独漏 planning view，
+// autonomyOf 回 null 被当未知 op 剥掉，execute 落分析模式不产方案。两个方向都要锁。
+// 非平台 op（确认卡等 readonly_ops、ads 原语）不在平台 planning view 属设计内，按前缀豁免。
+try {
+  const pol = JSON.parse(fs.readFileSync(path.join(S, 'release_policy.json'), 'utf8'));
+  const seen = new Set();
+  for (const plat of ['webforger', 'shopify', 'wordpress', 'googleads']) {
+    const txt = fs.readFileSync(path.join(S, 'capabilities', plat + '.md'), 'utf8');
+    const m = txt.match(/PLANNING_VIEW_START -->([\s\S]*?)<!-- PLANNING_VIEW_END/);
+    assert.ok(m, plat + ' 缺 planning view 标记');
+    for (const line of m[1].split('\n')) {
+      if (!line.trim().startsWith('|')) continue;
+      const cells = line.split('|').map((c) => c.trim());
+      if (cells.length < 4) continue;
+      const name = cells[1];
+      if (!name || name === 'operation' || /^-+$/.test(name)) continue;
+      seen.add(name);
+    }
+  }
+  const ro = new Set((pol.readonly_ops && pol.readonly_ops.ops) || []);
+  const orphan = Object.keys(pol.risk_class_by_op)
+    .filter((op) => !op.startsWith('_') && !seen.has(op) && !ro.has(op));
+  assert.ok(!orphan.length, 'policy risk 表有 op 不在任何平台 planning view（#808 同款登记洞）: ' + orphan.join(', '));
+  console.log('  ok   policy risk 表 op 全部有 planning view 落点（反向）');
+} catch (e) { fail += 1; console.log('  FAIL policy/planning-view 反向一致性 :: ' + e.message); }
+
 // shopseo CLI 写命令必须在 shopify 能力清单有登记（2026-10-15 ticket #38/#39 教训：
 // collection update 1.4.0 就有但清单没登 collection-content-edit，LuxeLink #1229 停人一天；
 // collection-item-update 在政策表却不在清单，旧测试单向比对拦不住。CLI 是能力事实源，

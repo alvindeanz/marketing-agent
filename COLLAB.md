@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-23 AIRA specs 测试补反向断言（#808 复盘补洞）
+
+- 背景：#808（apollo 两页 title/description）复盘查明「WF 写入静默失败」是误诊：两次 apply（5361/5375）都撞「no approved change plan」当场失败，PATCH 从未发出，存储层 /advanced 至今是改前原值，WF 平台无辜（DEFECTS 10-21 行已订正）。误诊根子是卡上 [auto-release] 批注被当成落地回执，放行账与 job 终态对账已列机制债。
+- 补洞：10-10 加的 planning-view/policy 一致性测试只验了 planning view → risk 表单向，拦不住 #808 原始洞（op 进了 risk 表与契约节、唯独漏 planning view，execute 落分析模式）。specs.test.js 补反向断言：risk 表每个 op 必须出现在某平台 planning view 或 readonly_ops，`_` 前缀文档键豁免。
+- 测试：node tests/ 全套绿；php 未动。纯测试改动，不需部署。AIRA。
+
 ### 2026-10-23 AIRA 工单修复轮二（tracker ticket #47/#48/#49，Alvin 共评批「可以，你处理一下」）
 
 - 背景：summer 一天三票，实为两个旧病灶复发。一是发布凭证闸 requireBlogPublishConsent 误杀只改草稿的单（#1599/#1614 两次熔断，加 #1326/#809 共四单实证，DEFECTS #809 族）：闸把「带方案的博客任务且目标非在线」一律当发布动作索要 publish_blog=agree；#1599 还暴露第二个洞，客户当天已在 #837 点同意，闸只认「确认卡#N」形态引用，「卡 #837」接不上。二是「原样写回已有修订稿」的单被当新博文重写（#1597/#1608，job 9162/9297 各两次生成全被新稿校验枪毙）：detail 里目标草稿写的是站内相对路径 /blog/<slug>/，URL 识别只认绝对链接，revise 判定失明掉进 create 分支，Style Roll 重抽加 1500 词配图 FAQ 契约必死。
