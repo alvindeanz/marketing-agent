@@ -3060,9 +3060,9 @@ function renderChatStream(){
 function renderChatStatus(){
   const el=document.getElementById('chStatus');
   if(el)el.innerHTML=chatPending
-    ?'<div class="ch-typing"><span class="d"></span><span class="d"></span><span class="d"></span>agent 正在处理（job #'+chatPending+'），回复会自动出现</div>':'';
+    ?'<div class="ch-typing"><span class="d"></span><span class="d"></span><span class="d"></span>agent 正在处理（job #'+chatPending+'），回复会自动出现。排队窗口内继续发会并入同一轮；已开跑的会提示稍候。</div>':'';
   const btn=document.getElementById('chSend');
-  if(btn)btn.disabled=!!chatPending||chatSending;
+  if(btn)btn.disabled=chatSending;
   const arch=chatItem&&chatItem.status==='resolved';
   const form=document.getElementById('chForm');
   if(form)form.classList.toggle('hidden',!!arch);
@@ -4037,13 +4037,13 @@ function threadBox(t,where){
     ((m.refs&&m.refs.actions)||[]).forEach((a,i)=>{h+=thActionCard(d.root_id,m.id,i,a,!!done[m.id+'/'+i])});
     return h+'</div>';
   }).join('');
-  const pending=d.chat_pending?'<div class="ch-wait">agent 思考中，job #'+d.chat_pending+'，回复出来会自动出现</div>':'';
+  const pending=d.chat_pending?'<div class="ch-wait">agent 思考中，job #'+d.chat_pending+'，回复出来会自动出现。排队窗口内继续发会并入同一轮一起答；已经开跑的会提示稍候。</div>':'';
   return box+'<div class="fb-title">任务线程 #'+d.root_id+'</div>'+
     '<div class="ch-stream" style="max-height:320px">'+stream+'</div>'+pending+
     '<div class="ch-form"><div class="fld"><textarea id="th_text_'+where+'_'+t.id+'" onpaste="onFbPaste('+t.id+',event)" placeholder="例如：描述里别写 220，社交图用真照片，改了重跑。截图直接粘贴。"></textarea></div>'+
     '<div class="fb-thumbs" id="fb_imgs_'+t.id+'"></div>'+
     '<input type="file" class="hidden" id="fb_file_'+t.id+'" accept="image/png,image/jpeg,image/webp" multiple onchange="onFbPick('+t.id+',this)">'+
-    '<div class="fb-row"><button class="btn tiny" '+((d.chat_pending||thSending[t.id])?'disabled':'')+' onclick="sendThread('+t.id+',\''+where+'\')">发送</button>'+
+    '<div class="fb-row"><button class="btn tiny" '+(thSending[t.id]?'disabled':'')+' onclick="sendThread('+t.id+',\''+where+'\')">发送</button>'+
     '<button class="btn tiny ghost" onclick="pickFbFiles('+t.id+')">加截图</button>'+
     '<label class="fb-check"><input type="checkbox" id="th_client_'+where+'_'+t.id+'"'+(thClient[t.id]?' checked':'')+' onchange="thClient['+t.id+']=this.checked"> 客户原话</label>'+
     '<span class="plan-meta">你说的每一句都进这个客户的 facts。改任务、重跑、改判、不做，说了它就直接办；放行永远留给你点。</span></div></div></div>';

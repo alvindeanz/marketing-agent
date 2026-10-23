@@ -54,6 +54,10 @@ const DEFAULTS = {
      2026-10-14 教训补一刀：这次降档被 Mac config.json 的陈旧 chatModel/threadModel=fable 覆盖挡住，
      10-11 至 10-13 三天 Mac 又烧 329 次 fable（走操作者本机凭据库）。全链路降 opus，覆盖键一并清理。 */
   chatModel: 'opus',
+  /* 会话压缩蒸馏（2026-10-23 Alvin 批，降耗第二刀）：超窗的早期对话由 sonnet 蒸成前情摘要，
+     答题的还是 chatModel（opus 读 sonnet 写的摘要，分工同 claude-bot）。对话答复永不降档，
+     这是 Alvin 2026-10-23 明确的质量红线。 */
+  chatSummaryModel: 'sonnet',
   // 叙述回合（2026-10-16 Alvin 批）：频道出身任务收口后的对话语境进展说明。
   // 纯叙述不是判断，sonnet 足够；瘦简报下单条成本分钱级。别抬到 opus。
   narrationModel: 'sonnet',

@@ -36,6 +36,15 @@ class Api {
     return res && res.job ? res.job : null;
   }
 
+  /* claim 的完整回包版：空手时可能带 retry_in（防抖窗口里最近一个 run_after 还差几秒），
+     listener 用它定一只回头钟，别让 30 秒的窗等 5 分钟兜底 poll。 */
+  async claimJobFull(lane) {
+    const body = { worker: this.workerId };
+    if (lane) body.lane = lane;
+    const res = await this.req('POST', '/jobs/claim', body);
+    return { job: res && res.job ? res.job : null, retryIn: res && res.retry_in ? Number(res.retry_in) : 0 };
+  }
+
   /** POST /asks -> 出卡登记待答实体（auth_worker，ask_id 幂等 upsert；失败不挡出卡，调用方兜） */
   async postAsk(body) {
     return this.req('POST', '/asks', body);
@@ -343,6 +352,15 @@ class Api {
   /* body.actions（任务线程里模型提议的动作）随 drafts 一起原样交给服务端规整存进 refs。 */
   async postChatReply(rootId, body) {
     return this.req('POST', '/inbox/' + encodeURIComponent(rootId) + '/chat_reply', body);
+  }
+
+  /**
+   * POST /inbox/{root_id}/chat_summary body { summary, upto }
+   * 会话压缩摘要回写（2026-10-23 降耗第二刀）：sonnet 蒸馏的前情摘要存在根行上，
+   * upto 单调前进由服务端把关。原始消息行永远不动，摘要只是视图。
+   */
+  async postChatSummary(rootId, body) {
+    return this.req('POST', '/inbox/' + encodeURIComponent(rootId) + '/chat_summary', body);
   }
 
   /**

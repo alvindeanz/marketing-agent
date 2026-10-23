@@ -193,12 +193,14 @@ t('频道动作认 release，双锚照旧必填', () => {
   assert.strictEqual(out[0].type, 'release');
 });
 
-t('超长会话只留最近 N 条，掐头不掐尾', () => {
+t('threadMessages 回全量，截断职责在 promptWindow（2026-10-23 会话压缩）：超长仍是掐头不掐尾', () => {
   const many = [];
   for (let i = 1; i <= chat.MAX_HISTORY_MESSAGES + 10; i += 1) many.push(userMsg(i, '第' + i + '句'));
   const msgs = chat.threadMessages({}, many);
-  assert.strictEqual(msgs.length, chat.MAX_HISTORY_MESSAGES);
-  assert.strictEqual(msgs[msgs.length - 1].id, chat.MAX_HISTORY_MESSAGES + 10);
+  assert.strictEqual(msgs.length, chat.MAX_HISTORY_MESSAGES + 10, 'threadMessages 不再自己截断');
+  const w = chat.promptWindow(msgs, 0);
+  assert.strictEqual(w.verbatim.length, chat.MAX_HISTORY_MESSAGES);
+  assert.strictEqual(w.verbatim[w.verbatim.length - 1].id, chat.MAX_HISTORY_MESSAGES + 10);
 });
 
 t('历史渲染带上角色标签和消息号，空会话有兜底话术', () => {

@@ -336,6 +336,23 @@ async function pendingTerminalFlush() {
 // drain loop
 // ---------------------------------------------------------------------------
 
+/* 防抖窗口回头钟（2026-10-23）：每道最多一只，取更早的那次。钟到即 drain 一轮。
+   worker 重启丢钟无妨：5 分钟兜底 poll 仍是下限保证。 */
+const delayedDrainTimers = {};
+function scheduleDelayedDrain(lane, sec) {
+  const fireAt = Date.now() + (sec + 1) * 1000;
+  const cur = delayedDrainTimers[lane];
+  if (cur && cur.fireAt <= fireAt) return;
+  if (cur) clearTimeout(cur.timer);
+  const timer = setTimeout(() => {
+    delete delayedDrainTimers[lane];
+    drainLane('run-after', lane);
+  }, fireAt - Date.now());
+  if (timer.unref) timer.unref();
+  delayedDrainTimers[lane] = { fireAt, timer };
+  log('防抖回头钟：' + lane + ' 道 ' + (sec + 1) + 's 后回来领单');
+}
+
 /**
  * Claim and run one lane's jobs until that lane's queue is empty. Single
  * flight per lane: a concurrent call just marks pendingWake and returns.
@@ -370,7 +387,11 @@ async function drainLane(reason, lane) {
           break;
         }
         try {
-          job = await api.claimJob(lane);
+          const r = await api.claimJobFull(lane);
+          job = r.job;
+          /* 防抖窗口回头钟（2026-10-23）：空手但有 run_after 未到的单，按服务端给的秒数
+             定一只一次性钟回来再领。不然 30 秒的窗要等 5 分钟兜底 poll 才兑现。 */
+          if (!job && r.retryIn > 0) scheduleDelayedDrain(lane, r.retryIn);
         } catch (e) {
           log('claim(' + lane + ') failed :: ' + e.message);
           stop = true;

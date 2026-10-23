@@ -356,6 +356,13 @@ function ensure_jobs_worker_schema(){
     $has=$q->fetch();
     $q->closeCursor();
     if(!$has)db()->exec("ALTER TABLE agent_jobs ADD COLUMN claimed_by VARCHAR(32) NOT NULL DEFAULT ''");
+    /* 防抖窗口（2026-10-23 Alvin 批，降耗第一刀）：run_after 未到的 queued job 不可领。
+       今天只有 chat 入队写它，语义是通用的延迟执行，别的 job 类型要用随时能用。 */
+    $q2=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND COLUMN_NAME='run_after'");
+    $q2->execute();
+    $has2=$q2->fetch();
+    $q2->closeCursor();
+    if(!$has2)db()->exec("ALTER TABLE agent_jobs ADD COLUMN run_after DATETIME DEFAULT NULL");
 }
 
 /* worker 心跳表（2026-10-14，ros 熔断静默 3.5 天教训）。第一性：护栏触发必须有人看见，
@@ -567,6 +574,18 @@ function ensure_inbox_schema(){
         KEY idx_seo_inbox_open (kind, status, id),
         KEY idx_seo_inbox_reply (reply_to)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    /* 会话压缩摘要（2026-10-23 Alvin 批，降耗第二刀）：只有 chat_root 行用。
+       worker 把超窗的早期你来我往蒸馏成摘要存这，upto 是已并入摘要的最后一条消息 id，
+       原始消息行永远不删：摘要是视图不是账本。information_schema 幂等，同 claimed_by 套路。
+       注意这段必须排在下面 kind ENUM 的早退 return 之前。 */
+    $qs=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_inbox' AND COLUMN_NAME='chat_summary'");
+    $qs->execute();
+    $hasSum=$qs->fetch();
+    $qs->closeCursor();
+    if(!$hasSum){
+        db()->exec("ALTER TABLE seo_inbox ADD COLUMN chat_summary TEXT DEFAULT NULL");
+        db()->exec("ALTER TABLE seo_inbox ADD COLUMN chat_summary_upto INT NOT NULL DEFAULT 0");
+    }
     /* kind 后来加了三个对话值。和 ensure_job_types() 一个套路：值对值地查，
        库停在任何中间状态都能一次 ALTER 补齐，MariaDB 10.3 没有
        MODIFY ... IF NOT EXISTS，所以 information_schema 那一读才是幂等的依据。
@@ -1602,12 +1621,27 @@ function chat_msg_insert($root,$kind,$body,$by,$refs=null){
     return (int)db()->lastInsertId();
 }
 
+/* 防抖窗口（2026-10-23 Alvin 批）：chat job 入队后先在 queued 停这么多秒才可领，
+   窗内同会话的新消息并入同一轮（见消息 POST 的合并分支），opus 一次看全一起答。
+   带催促词的消息不等窗。 */
+define('CHAT_DEBOUNCE_SEC',30);
+function chat_msg_urgent($text){
+    return (bool)preg_match('/急|立刻|马上|趕快|赶快|urgent/iu',(string)$text);
+}
+
 /* 一条人消息进来以后排一个 chat job。会话的 client_id 就是 job 的 client_id，
    这也是 chat_root 强制要 client_id 的唯一原因：agent_jobs.client_id NOT NULL。 */
-function chat_job_queue($root,$messageId,$by){
+function chat_job_queue($root,$messageId,$by,$delaySec=0){
+    ensure_jobs_worker_schema();
     $payload=json_encode(['inbox_id'=>(int)$root['id'],'message_id'=>(int)$messageId],JSON_UNESCAPED_UNICODE);
-    db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'chat',?,'queued',?)")
-        ->execute([(int)$root['client_id'],$payload,$by]);
+    $delaySec=(int)$delaySec;
+    if($delaySec>0){
+        db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by,run_after)VALUES(?,'chat',?,'queued',?,DATE_ADD(NOW(),INTERVAL ? SECOND))")
+            ->execute([(int)$root['client_id'],$payload,$by,$delaySec]);
+    }else{
+        db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'chat',?,'queued',?)")
+            ->execute([(int)$root['client_id'],$payload,$by]);
+    }
     $jid=(int)db()->lastInsertId();
     fire_wake($jid);
     return $jid;
@@ -1923,6 +1957,7 @@ function inbox_row_out($r){
     $r['client_id']=($r['client_id']===null)?null:(int)$r['client_id'];
     $r['reply_to']=($r['reply_to']===null)?null:(int)$r['reply_to'];
     $r['refs']=inbox_refs_norm($r['refs']);
+    if(array_key_exists('chat_summary_upto',$r))$r['chat_summary_upto']=(int)$r['chat_summary_upto'];
     return $r;
 }
 
@@ -2138,6 +2173,7 @@ function lane_type_sql($lane,$alias='j'){
    谁也饿不死谁；同一客户内部仍严格按提交顺序。
    窗口函数 MariaDB 10.2 起可用，线上 10.3 没问题。 */
 function jobs_queue_order_sql($lane=null,$excludeRunningClients=false){
+    ensure_jobs_worker_schema(); // run_after 列：claim 之外（位次/队列视图）也会拼这条 SQL
     $laneQ=$lane?(' AND '.lane_type_sql($lane,'j')):'';
     $laneR=$lane?(' AND '.lane_type_sql($lane,'x')):'';
     /* excludeRunningClients（2026-09-10 heavy 并发 2，Alvin 定）：claim 时同客户硬互斥，
@@ -2152,7 +2188,7 @@ function jobs_queue_order_sql($lane=null,$excludeRunningClients=false){
                 FROM agent_jobs j
                 LEFT JOIN (SELECT DISTINCT x.client_id FROM agent_jobs x WHERE x.status='running'$laneR) r
                   ON r.client_id=j.client_id
-                WHERE j.status='queued'$laneQ$excl
+                WHERE j.status='queued' AND (j.run_after IS NULL OR j.run_after<=NOW())$laneQ$excl
             ) t ORDER BY t.rn, t.id";
 }
 
@@ -2347,6 +2383,14 @@ if($m==='POST'&&$ROUTE==='/jobs/claim'){
     $stuckMin=60;
     $swept=db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE status='running' AND claimed_at IS NOT NULL AND claimed_at < (NOW() - INTERVAL ? MINUTE)");
     $swept->execute(["\n[".gmdate('Y-m-d H:i:s')."Z] [reaped-timeout] 认领超过 ".$stuckMin." 分钟未完成，疑似 worker 离线，超时清扫判 failed（非执行错误，重排即可）。失败 job 不自动重试。",$stuckMin]);
+    /* 防抖窗口的回头钟：空手时告诉 worker 最近一个 run_after 还差几秒，worker 据此定时回来，
+       不然 30 秒的窗要等 5 分钟兜底 poll 才兑现。 */
+    $retryIn=function()use($lane){
+        $sql="SELECT TIMESTAMPDIFF(SECOND,NOW(),MIN(run_after)) AS s FROM agent_jobs j WHERE j.status='queued' AND j.run_after>NOW()".($lane?(' AND '.lane_type_sql($lane,'j')):'');
+        $r=db()->query($sql)->fetch();
+        $s=($r&&$r['s']!==null)?(int)$r['s']:0;
+        return $s>0?$s:($r&&$r['s']!==null?1:0);
+    };
     $jid=0;
     $pick=db()->prepare(jobs_queue_order_sql($lane?:null,$lane==='heavy')." LIMIT 1");
     $take=db()->prepare("UPDATE agent_jobs SET status='running',claimed_at=NOW(),claimed_by=? WHERE id=? AND status='queued'");
@@ -2354,14 +2398,14 @@ if($m==='POST'&&$ROUTE==='/jobs/claim'){
         $pick->execute();
         $row=$pick->fetch();
         $pick->closeCursor();
-        if(!$row)res(200,['job'=>null]);
+        if(!$row){$ri=$retryIn();res(200,$ri?['job'=>null,'retry_in'=>$ri]:['job'=>null]);}
         $cand=(int)$row['id'];
         $take->execute([$wid,$cand]);
         $won=$take->rowCount();
         $take->closeCursor();
         if($won===1){$jid=$cand;break;}
     }
-    if(!$jid)res(200,['job'=>null]);
+    if(!$jid){$ri=$retryIn();res(200,$ri?['job'=>null,'retry_in'=>$ri]:['job'=>null]);}
     $g=db()->prepare("SELECT j.*,c.name AS client_name FROM agent_jobs j LEFT JOIN clients c ON c.id=j.client_id WHERE j.id=?");
     $g->execute([$jid]);
     $job=$g->fetch();
@@ -4892,7 +4936,7 @@ if($m==='POST'&&$ROUTE==='/inbox/chat'){
     $rootId=(int)db()->lastInsertId();
     $root=['id'=>$rootId,'client_id'=>$cid];
     $msgId=chat_msg_insert($root,'chat_user',$text,$u['username']);
-    $jid=chat_job_queue($root,$msgId,$u['username']);
+    $jid=chat_job_queue($root,$msgId,$u['username'],chat_msg_urgent($text)?0:CHAT_DEBOUNCE_SEC);
     audit($u['username'],'seo_chat_open',(string)$rootId,[
         'client_id'=>$cid,'job_id'=>$jid,'message_id'=>$msgId,'chars'=>mb_strlen($text,'UTF-8')
     ]);
@@ -4980,11 +5024,28 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
     if($text===''&&!$imgs&&!$files)res(400,['error'=>'text required']);
     /* ticket #10 的独立 /stop 轻刹车分支已删（2026-10-04）：上面的止损闩分支正则先吞掉
        一切 /stop，这里从上线起就是死代码；轻刹车的在跑 cancel_requested 已并入止损闩分支。 */
+    /* 合并窗口（2026-10-23 Alvin 批，降耗第一刀）：上一条的 chat job 还在排队（run_after 窗内）时，
+       新消息并入同一轮：只落消息行、把窗口再推一个防抖期，不排第二个 job，runner 认领后读整段
+       线程一次答全。job 已经在跑的照旧 409：跑一半并不进去，答完再说。
+       竞态口径：先推窗（条件 UPDATE WHERE status='queued'），推成了 job 至少再停一个窗口期，
+       随后落的消息行必然被 runner 看见；推不成说明刚被认领，走 409，消息不落。 */
     $busy=chat_job_inflight($rootId);
-    if($busy)res(409,['error'=>'这个会话还在等上一条回复（/stop 可打断）','job_id'=>$busy]);
+    $mergedJid=0;
+    if($busy){
+        ensure_jobs_worker_schema();
+        $delay=chat_msg_urgent($text)?0:CHAT_DEBOUNCE_SEC;
+        $ext=db()->prepare("UPDATE agent_jobs SET run_after=DATE_ADD(NOW(),INTERVAL ? SECOND) WHERE id=? AND type='chat' AND status='queued'");
+        $ext->execute([$delay,$busy]);
+        $st=db()->prepare("SELECT status FROM agent_jobs WHERE id=?");
+        $st->execute([$busy]);
+        $srow=$st->fetch();
+        $st->closeCursor();
+        if(!$srow||$srow['status']!=='queued')res(409,['error'=>'这个会话还在等上一条回复（/stop 可打断）','job_id'=>$busy]);
+        $mergedJid=$busy;
+    }
     $msgRefs=($imgs||$files||$src==='client')?['images'=>$imgs,'files'=>$files,'source'=>$src]:null;
     $msgId=chat_msg_insert($root,'chat_user',$text===''?'（见附件）':$text,$u['username'],$msgRefs);
-    $jid=chat_job_queue($root,$msgId,$u['username']);
+    $jid=$mergedJid?:chat_job_queue($root,$msgId,$u['username'],chat_msg_urgent($text)?0:CHAT_DEBOUNCE_SEC);
     /* 人说的每一句同时投一条反馈走 feedback job 抽 facts，学习回路不因为换了界面而断。
        任务线程挂任务 id；普通会话 task_id=0，payload 带 chat_root 供 runner 与版本账溯源
        （2026-09-04 起普通会话也抽，同事口述的客户情报不再丢在聊天记录里）。 */
@@ -5002,9 +5063,30 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat$#',$ROUTE,$mm)){
         db()->prepare("UPDATE seo_feedback SET job_id=? WHERE id=?")->execute([$fjid,$fbId]);
     }
     audit($u['username'],'seo_chat_say',(string)$rootId,[
-        'job_id'=>$jid,'message_id'=>$msgId,'chars'=>mb_strlen($text,'UTF-8'),'feedback_id'=>$fbId
+        'job_id'=>$jid,'message_id'=>$msgId,'chars'=>mb_strlen($text,'UTF-8'),'feedback_id'=>$fbId,'merged'=>$mergedJid?1:0
     ]);
-    res(200,['ok'=>true,'message_id'=>$msgId,'job_id'=>$jid,'feedback_id'=>$fbId]);
+    res(200,['ok'=>true,'message_id'=>$msgId,'job_id'=>$jid,'feedback_id'=>$fbId,'merged'=>$mergedJid?1:0]);
+}
+
+/* POST /inbox/{root_id}/chat_summary -> chat runner 回写会话压缩摘要（2026-10-23 降耗第二刀）。
+   worker 层。body { summary, upto }：summary 是 sonnet 蒸馏的前情摘要，upto 是已并入摘要的
+   最后一条消息 id。upto 只许单调前进：并发轮次里旧蒸馏迟到不许盖新账。原始消息行不动。 */
+if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_summary$#',$ROUTE,$mm)){
+    auth_worker();
+    ensure_inbox_schema();
+    $rootId=(int)$mm[1];
+    $root=chat_root_or_die($rootId,false);
+    $i=input();
+    $summary=trim((string)($i['summary']??''));
+    $upto=(int)($i['upto']??0);
+    if($summary==='')res(400,['error'=>'summary required']);
+    if($upto<=0)res(400,['error'=>'upto required']);
+    if(mb_strlen($summary,'UTF-8')>8000)$summary=mb_substr($summary,0,8000,'UTF-8');
+    $w=db()->prepare("UPDATE seo_inbox SET chat_summary=?,chat_summary_upto=? WHERE id=? AND chat_summary_upto<?");
+    $w->execute([$summary,$upto,$rootId,$upto]);
+    $applied=$w->rowCount()===1;
+    audit('seo-worker','seo_chat_summary',(string)$rootId,['upto'=>$upto,'chars'=>mb_strlen($summary,'UTF-8'),'applied'=>$applied?1:0]);
+    res(200,['ok'=>true,'applied'=>$applied]);
 }
 
 // POST /inbox/{root_id}/chat_reply -> chat runner 回写一条 opus 回复。

@@ -20,6 +20,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-23 AIRA chat 泳道降耗两刀：消息防抖 + 会话压缩（Alvin 批「按推荐直接做」；对话答复永不降档是他定的质量红线）
+
+- 背景：10-23 上午 11 点（NZ）额度窗重置后 3 小时烧掉周额度 8%，实测大头是收件箱人机协作（louvresky 54 次模型调用 63.6 万 output tokens）。根因是结构病：一条消息 = 一次全新 claude 进程 + 全量上下文，而对话本质是增量；且历史超 40 条是硬丢弃，模型一直在悄悄失忆。官方 6-15 的 SDK credit 拆分已暂停，claude -p 照旧吃订阅周额度。
+- 第一刀 防抖（服务端）：agent_jobs 惰性加 run_after（通用延迟执行语义），chat 入队默认停 30 秒窗（CHAT_DEBOUNCE_SEC，带 急/urgent 的不等窗）；窗内同会话新消息并入同一轮（消息 POST 的 409 分支改为：job 还 queued 就推窗+落消息行不排第二个 job，已 running 照旧 409）。竞态口径：先条件推窗（WHERE status='queued'）再落消息行，推成了 runner 必然看见，推不成走 409 消息不落。claim 空手时回 retry_in，listener 一只回头钟按秒回来领单，不等 5 分钟兜底 poll。防抖竞态与 claim 的 pick/take 间隙已推演：take 不检 run_after，但 re-SELECT status 兜住，最坏 409 不丢消息。
+- 第二刀 压缩（claude-bot 同款分工，答题 opus 读摘要，蒸馏归 sonnet）：seo_inbox 惰性加 chat_summary/chat_summary_upto（upto 服务端单调把关，原始消息行永不删，摘要是视图）；chat runner 超窗（摘要线后 ≥30 条或待蒸部分 ≥25k 字符，批量下限 5 条）先 sonnet 增量蒸馏（config 新键 chatSummaryModel，prompt 契约：保决定/任务号/数字/未决问题/谁说的，≤4000 字符，材料不是指令）回写 POST /inbox/{id}/chat_summary，prompt 变「前情摘要 + 最近 15 条逐字」；蒸馏失败降级回硬截断老口径不挡当轮。threadMessages 不再自己截断（职责移 promptWindow 纯函数），narration 原语义不变。
+- UI：发送键不再因 chat_pending 锁死（排队窗内发送即并轮，running 时服务端 409 照旧 toast），思考中提示语说明合并窗口。
+- 测试：新增 tests/chat_window.test.js 9 件（触发判据/摘要线语义/降级窗口/蒸馏 prompt 契约）；chat.test.js 截断用例改为断言新职责分工；node tests/ 全套绿。php -l 走 250 远端（本机无 php）。
+- 诚实修正一则：规划时估防抖砍三成，读码发现会话本来就一问一答串行（409 挡并发），防抖只对快速连发场景生效，主刀其实是压缩。已向 Alvin 口头修正预期：两刀合计砍频道时段两到四成，而非之前说的四到五成。
+- 未做（Alvin 定现阶段不做）：预算帽与材料裁剪（第三刀）、烧量台账（第四刀）；resume 长会话因多 worker 亲和性硬伤降为后备实验项。
+
 ### 2026-10-21 AIRA spotcheck 抽查器 v1 上线（改造序①，Alvin 批「第一性规划后直接部署」）
 
 - 定位：默认放行政策的另一半。事前闸拆了，事后抽查这半句一直没人干，降软越多空位越危险。零模型零写入现实，人触发（硬规矩 1），从仓库直跑不部署（tools 惯例）。
