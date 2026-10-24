@@ -123,6 +123,8 @@
     "theme-code-update": "reversible",
     "article-template-assign": "reversible",
     "product-template-assign": "reversible",
+    "product-type-update": "reversible",
+    "product-image-alt-update": "reversible",
     "geo-target-set": "reversible",
     "deliverable-file-write": "reversible",
     "report-html-update": "reversible",
