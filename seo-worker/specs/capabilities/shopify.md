@@ -51,6 +51,7 @@
 | report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
 | article-set-cover-alt | agent_apply | 博客封面图 alt 更新（shopseo article set-cover-alt，1.2.0 起即有）：无封面拒写、src 原样回传防清图、写前快照、回读核对。2026-10-24 登记补欠（能力早于登记，七张配额博客拆单的学费） |
 | article-set-template | agent_apply | 同 article-template-assign（规划器用过的别名拼写，收编匹配用；规范名用 article-template-assign，shopseo article set-template） |
+| article-tags-update | agent_apply | 同 article-meta-update 的 tags 与 excerpt 面（规划器用过的别名拼写，收编匹配用；清单将文章 tags 写入归并进 article-meta-update 不另立 op，旧判决写的是本名，别名登记供收编扫帚对号；shopseo article set-tags-excerpt，1.5.0 起） |
 <!-- PLANNING_VIEW_END -->
 
 ## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）

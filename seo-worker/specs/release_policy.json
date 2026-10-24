@@ -130,6 +130,7 @@
     "report-preview-deploy": "reversible",
     "article-set-cover-alt": "reversible",
     "article-set-template": "reversible",
+    "article-tags-update": "reversible",
     "pmax-text-asset-update": "external",
     "sitelink-update": "external"
   },
