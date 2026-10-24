@@ -28,8 +28,25 @@ const contentRegistry = require('../lib/registry');
 const deliverables = require('../lib/deliverables');
 const { ensureClientWorkspace, summarize, truncate, safeJson } = require('../lib/util');
 
-const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*)';
+const SHOPSEO_RO = '/data/aira/tools/shopseo/shopseo-ro';
+const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*),Bash(' + SHOPSEO_RO + ':*)';
 const OUTPUT_DIRNAME = 'seo-agent-output';
+
+/* Shopify 读站纪律（2026-10-25，Midea #494 三连超时与 LuxeLink #586 同日定型）：Shopify 对
+   Midea/Badger/LuxeLink 三店的 storefront 都开着店级 local_rate_limited（任意出口 IP 秒 429，
+   retry-after 60 的桶等不动），storefront curl 读现状等于把预算烧在退避循环上。execute 阶段
+   读现状一律 admin API 优先（shopseo-ro 只读包装器，拒 --yes 拒写命令），storefront 只做轻探。 */
+const SHOPIFY_READ_DOCTRINE = [
+  '',
+  'Shopify 读站纪律（本客户是 Shopify 站，优先级高于上面的通用读法）：',
+  '- 读线上现状优先走 ' + SHOPSEO_RO + '（shopseo 只读面：--shop <alias> product/collection/article get、',
+  '  products/collections/articles list、redirect list、theme templates；alias 与客户 workspace 目录名一致）。',
+  '  admin API 的字段值就是事实源：product/collection 的 body_html、title、SEO metafield、status、published_at。',
+  '- storefront 页面 curl 全程最多试 3 次、每次 --max-time 30，不许写退避等待循环：连续 429 是',
+  '  Shopify 店级 local_rate_limited（与你的行为无关，等不动），立即改以 shopseo-ro 回读为事实源，',
+  '  方案里注明「前台渲染未验（429 限流）」即可，不许把 429 当页面故障定性，更不许 sleep 等桶。',
+  '- 方案第 2 节的「回读核对」设计同规矩：核对步骤写 shopseo 只读命令与期望字段值，不写前台 curl。',
+].join('\n');
 const CHANGE_PLAN_PREFIX = 'change-plan-task-';
 
 // The blog SOP travels with the worker. No SOP, no post: writing SEO copy off
@@ -2583,6 +2600,7 @@ async function runOne(ctx, context, workspace, taskId) {
        把 card_data 契约、规格全文、schema 注进 prompt，模型只产数据不写 HTML。 */
     if (confKind) prompt += '\n' + cardDataContract(confKind);
   }
+  if (capabilities.slugPlatform(platform) === 'shopify') prompt += '\n' + SHOPIFY_READ_DOCTRINE;
 
   const res = await runClaude(cfg, {
     prompt,

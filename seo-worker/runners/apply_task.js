@@ -1327,7 +1327,8 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
 // ==== Shopify 落地（博客与 redirect v1，2026-09-10）====
 // 安全模型：唯一写通道 shopseo CLI（token 服务现取、写命令默认 dry-run、--yes 写前自动快照），
 // 三条铁律：先 dry-run 后实弹；写前现读线上当前值（客户会自行改站，读到与方案预期不符即停手报告）；
-// 改后 curl 线上验证。失败不重试，任务留 review 转人工。
+// 改后自验两层：shopseo 回读对账必过，storefront curl 尽力（店级 429 时以回读为准）。
+// 失败不重试，任务留 review 转人工。
 const SHOPSEO_CLI = '/data/aira/tools/shopseo/shopseo';
 const SHOPSEO_TOOLS = 'Read,Bash(curl:*),Bash(' + SHOPSEO_CLI + ':*)';
 
@@ -1346,7 +1347,11 @@ function buildShopifyPrompt(opts) {
     '  把差异写进执行记录，不要动那一处，也不要「纠正」客户的改动。',
     '- 正文类改动（article update --body-file）：从 article get 取当前 body_html 落盘，只改方案点名的部分，',
     '  未点名的客户原文一字不动；新增文案零破折号零 emoji。',
-    '- 改完 curl 线上页面验证 200 且关键改动点出现在页面里。',
+    '- 写后自验分两层。第一层必过：shopseo 只读命令回读每个改动字段逐一对版（写了什么读回什么就算落地）。',
+    '  第二层尽力：storefront curl 看页面渲染，全程最多 3 次、每次 --max-time 30，不许写退避等待循环；',
+    '  连续 429 是 Shopify 店级 local_rate_limited（Midea/Badger/LuxeLink 三店实证，与方案无关，等不动），',
+    '  以第一层回读对账为准照常收口，执行记录注明「前台渲染未验（429 限流），待复测」；',
+    '  严禁把 429 当失败定性，严禁 sleep 等限流桶（2026-10-24 Midea #494 烧两小时预算零产出的教训）。',
     '- 方案没写的资产一根手指都不许碰。',
     '',
     '能力清单（风险注记必须遵守）：',
