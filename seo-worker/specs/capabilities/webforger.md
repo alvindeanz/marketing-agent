@@ -39,7 +39,21 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | gtm-edit | agent_prepare | GTM 容器变更：标签、触发器、变量，发布留人放行 |
 | gbp-align | agent_readonly+onpage | GBP 两件套（Alvin 2026-09-17 收窄，取代 gbp-audit 的清单式审计）：输入是 GBP 链接，产出只有两件——① 商家档案落 fact `gbp.profile`（NAP、主类目、GBP 链接、营业时间，一字不改照录，做 map citation 与一致性核对的原料，发现第三方平台旧址残留一并记进该 fact 备注）；② 站内 LocalBusiness/Organization 结构化数据部署或对齐（sameAs 指 GBP，NAP 与 fact 逐字一致，走 WF advanced JSON-LD 通道，机器可落）。**禁止产出**：补照片、发 posts、补产品、重写简介、问答维护这类无法度量 SEO 收益的清单项——为列而列没有意义。citation 修正不在本 op 里散装列，等 map citation 批次拿 gbp.profile fact 统一做 |
 | gbp-update | human_only | GBP 的实际写入（改资料与类目、发帖、回问答、citation）归人工，agent 不发不改（无可靠 API 加政策，Alvin 2026-09-09 定）。档案记录与站内 schema 对齐走 gbp-align |
+| deliverable-file-write | agent_apply | 本地交付物写入：把任务工作区修订稿落到 /data/aira/clients/<客户>/reports/ 正式路径，白名单路径+写前留档+lint+回读，契约见「本地交付物写入契约」 |
+| report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
+| report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 <!-- PLANNING_VIEW_END -->
+
+## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）
+
+把任务工作区的修订稿落到客户正式交付路径，三个 op 同一契约，区别只是文件类型。方案里引用的来源修订稿必须真实存在（载荷路由，不认申报）。
+
+- 唯一允许的写入面：/data/aira/clients/<客户>/reports/ 之下。目标路径出界即失败停手，零写入。
+- 写前留档：目标文件已存在，先在同目录复制 <文件名>.bak-<UTC时间戳> 留档；留档失败停手。
+- HTML 交付落位后必须过 lint：python3 /data/aira/scripts/deliverable_lint.py <落位文件>，输出非 PASS 用留档还原并停手回报。
+- 写后回读：重读落位文件与来源修订稿逐字节比对，不一致用留档还原并报失败。
+- 收口 note 必须写明四件：来源修订稿路径、落位路径、留档文件名、lint 结果（xlsx/csv 写「不适用」）。
+
 
 <!-- RISK_CLASS_START：放行分级输入（见 ../release_policy.md），与 release_policy.json 一致由 specs 测试断言 -->
 ## risk_class（放行分级）

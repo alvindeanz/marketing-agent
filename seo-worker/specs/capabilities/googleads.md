@@ -40,7 +40,21 @@
 | conversion-goal-change | agent_prepare | 转化目标与权重调整，不可逆类 |
 | keyword-direction | agent_readonly | 关键词方向卡，一步出报告 |
 | creative-direction | agent_readonly | 素材方向卡，一步出报告 |
+| deliverable-file-write | agent_apply | 本地交付物写入：把任务工作区修订稿落到 /data/aira/clients/<客户>/reports/ 正式路径，白名单路径+写前留档+lint+回读，契约见「本地交付物写入契约」 |
+| report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
+| report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 <!-- PLANNING_VIEW_END -->
+
+## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）
+
+把任务工作区的修订稿落到客户正式交付路径，三个 op 同一契约，区别只是文件类型。方案里引用的来源修订稿必须真实存在（载荷路由，不认申报）。
+
+- 唯一允许的写入面：/data/aira/clients/<客户>/reports/ 之下。目标路径出界即失败停手，零写入。
+- 写前留档：目标文件已存在，先在同目录复制 <文件名>.bak-<UTC时间戳> 留档；留档失败停手。
+- HTML 交付落位后必须过 lint：python3 /data/aira/scripts/deliverable_lint.py <落位文件>，输出非 PASS 用留档还原并停手回报。
+- 写后回读：重读落位文件与来源修订稿逐字节比对，不一致用留档还原并报失败。
+- 收口 note 必须写明四件：来源修订稿路径、落位路径、留档文件名、lint 结果（xlsx/csv 写「不适用」）。
+
 
 ## raw-mutate 网关（2026-09-22，硬规矩 2 落地：白名单是路由偏好不是能力天花板）
 

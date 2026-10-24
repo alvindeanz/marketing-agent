@@ -1603,6 +1603,12 @@ function task_insert($cid,$t,$by,$origin='sprint'){
        当初盖章是为了治「空标签永远算本期」的视图挤占与调度隐身，现在前端任务视图默认只看
        sprint 泳道、停滞 chat 单由 harness 的 chat 泳道扫帚（零 LLM 超龄报）兜底，两个病因都
        换了解法。人工 PATCH 补 sprint 章 = 显式把 chat 单转正入轮，panel 按出生地照旧可见。 */
+    /* 出生即有家（2026-10-24 Alvin 批四刀 A1，#1461/#1617 调度隐身绝育）：空 sprint 不再是
+       合法第三态——前端把空标签算本期、harness 把空标签算不可见，两套口径打架的任务会永久
+       停摆。sprint 泳道单（非 chat 系 origin）落库时空 sprint 一律盖当期章，服务端单一事实源，
+       哨兵/报告观察/任何新产线不用各自记得盖；无 active plan 锚的客户盖不出就保持空（老口径）。 */
+    if($t['sprint']===''&&!preg_match('/^(spawn|chatw|report|ruling):/',(string)$origin))
+        $t['sprint']=client_current_sprint_label($cid);
     db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin,card_kind)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             (int)$cid,$t['plan_id'],$t['sprint'],$t['module'],$t['title'],$t['detail'],
@@ -1879,6 +1885,35 @@ function thread_action_exec($root,$t,$a,$by){
     return ['ok'=>false,'what'=>'未知动作'];
 }
 
+/* 报告反馈折返（2026-10-24 Alvin 批四刀 A3）：同一份正式报告的后续反馈折进既有开放修订单
+   滚动改，不一条反馈开一张（视图铁律原文；Louvresky 10 月广告月报一链 5 单的教训）。
+   折返键看载荷不看标题（规矩 9）：从新单文本里抽报告文件名，与开放 report: 单的文本比对，
+   命中即追加反馈 + 置回 approved + 重排 execute（detail 变更天然使旧判决过期）。
+   返回被折入的任务 id，没有可折的返回 0。 */
+function report_task_fold($cid,$title,$detail,$by){
+    $txt=(string)$title."\n".(string)$detail;
+    if(!preg_match_all('/[A-Za-z0-9][A-Za-z0-9_.\\-]{3,}\.(?:html|xlsx|pdf|docx|csv)/u',$txt,$fm))return 0;
+    $files=array_values(array_unique($fm[0]));
+    if(!$files)return 0;
+    ensure_task_origin();ensure_task_archived();
+    $q=db()->prepare("SELECT id,title,detail,result_note,status FROM seo_tasks WHERE client_id=? AND origin LIKE 'report:%' AND archived=0 AND status IN('proposed','approved','in_progress','review') ORDER BY id DESC LIMIT 30");
+    $q->execute([(int)$cid]);
+    foreach($q->fetchAll() as $r){
+        $hay=(string)$r['title']."\n".(string)$r['detail']."\n".(string)$r['result_note'];
+        foreach($files as $f){
+            if(mb_stripos($hay,$f)===false)continue;
+            $tid=(int)$r['id'];
+            db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?),status='approved' WHERE id=?")
+                ->execute(["\n[折返反馈 ".date('Y-m-d')."（".$by."）] 同一交付物（".$f."）的新反馈并入本单滚动改：\n".mb_substr(trim((string)$title."\n".(string)$detail),0,2000,'UTF-8'),$tid]);
+            task_append_note($tid,'[折返 '.date('Y-m-d').'] 新反馈并入滚动改（原拟新单「'.mb_substr((string)$title,0,60,'UTF-8').'」未建），已重排 execute');
+            queue_task_jobs((int)$cid,'execute_task',[$tid],$by,'seo_report_fold');
+            audit($by,'seo_report_task_fold',(string)$tid,['file'=>$f,'folded_title'=>(string)$title]);
+            return $tid;
+        }
+    }
+    return 0;
+}
+
 /* 委托单确认启动（2026-09-11 W13 契约闸，Alvin 定）。chat 建任务两阶段：
    agent 先在频道提议委托单（存 chat_agent 行的 refs.drafts），人在之后的消息里一句话确认，
    模型引用确认原话作 mandate，这里双验：提议必须存在于更早的 agent 消息；确认引语必须
@@ -1953,6 +1988,11 @@ function commission_start_exec($root,$a,$asker,$sameTurnDrafts=null,$curMsgId=0)
     $t['detail']=trim($t['detail'])."\n\n[委托单] 频道 #".$rootId." 消息 #".$pmid."/".$pidx.($fastPath?' 快路同轮启动（指令即确认）':' 提议').'，'.$asker." 确认启动\n[授权引语] ".mb_substr($mandate,0,200,'UTF-8');
     if($backKey!=='')$t['detail'].="\n[backing] ".$backKey;
     $origin=$kind==='change'?('chatw:'.$rootId):($kind==='report'?('report:'.$rootId):('spawn:'.$rootId));
+    /* 报告反馈折返（A3）：同一份报告已有开放修订单就并入滚动改，不开新单。 */
+    if($kind==='report'){
+        $foldId=report_task_fold($cid,(string)$t['title'],(string)$t['detail'],$asker);
+        if($foldId)return ['ok'=>true,'what'=>'该报告已有开放修订单 #'.$foldId.'，本条反馈已并入滚动改并重排（同一交付物不开第二张单）','task_id'=>$foldId,'job_ids'=>[]];
+    }
     $tid=task_insert($cid,$t,$asker,$origin);
     $jid=0;
     if($t['owner_type']!=='client'){
@@ -5512,6 +5552,12 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
         $originS='chatw:'.$rootId;
     }elseif($kindS==='report'){
         $originS='report:'.$rootId;
+        /* 报告反馈折返（A3）：同一份报告已有开放修订单就并入滚动改，不开新单。 */
+        $foldIdS=report_task_fold($cid,(string)$t['title'],(string)$t['detail'],$u['username']);
+        if($foldIdS){
+            $msgIdS=chat_msg_insert($root,'chat_agent','该报告已有开放修订单 #'.$foldIdS.'，本条反馈已并入滚动改并重排，不另开单。',$u['username'],['tasks'=>[$foldIdS]]);
+            res(200,['ok'=>true,'task_id'=>$foldIdS,'message_id'=>$msgIdS,'folded'=>true]);
+        }
     }
     $tid=task_insert($cid,$t,$u['username'],$originS);
     /* 开工即排产（2026-09-08 Alvin 定，同日二次收紧：按钮从「立项」改「开工」，agency 任务

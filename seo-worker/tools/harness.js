@@ -764,7 +764,11 @@ async function report(all, sprint, retried) {
   // 与 main 的本期口径一致：日历本期 + 欠账（2026-09-24）
   const sn = (s) => { const m = /^S(\d+)$/i.exec(String(s || '')); return m ? parseInt(m[1], 10) : null; };
   const cn = sn(sprint);
-  const scoped = all.filter((t) => (IDS ? IDS.includes(t.id) : (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn)));
+  /* 泳道维度（2026-10-24 四刀 A2）：chat 泳道单脱轮后无 sprint，放行判定窗、静默期放行、
+     卡刷新、阻塞回写若只按 sprint 筛就全断（脱轮当天的洞）。泳道单按 origin 入窗，
+     等客户/停人/静默期的既有跳过规则原样生效。 */
+  const laneT = (t) => /^(spawn|chatw|report|ruling):/.test(String(t.origin || ''));
+  const scoped = all.filter((t) => (IDS ? IDS.includes(t.id) : (laneT(t) || (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn))));
   // 方案审批执行闸：未批准方案的任务不进阻塞回写、卡刷新、放行判定与静默期放行，单列计数
   const mine = scoped.filter(planGateOk);
   const heldPlan = scoped.filter((t) => OPEN_ST.includes(t.status) && !planGateOk(t));
