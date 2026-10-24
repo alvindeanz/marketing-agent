@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-24 AIRA note 增殖修复：状态块围栏 + 放行官圈数熔断 + 存量洗疤 84 张（Alvin 批「开工吧」，rev 6ecdc90）
+
+- 起因：Kuddles #79 泳道面板显示「好几页」，摸底查出 2026-10-10 夜放行循环家族（cc2ebbb 热修提交到部署的空窗内烧 6 张百余圈），每圈整块发卡记录追加进 result_note，重灾 3.9 万字。
+- 第一性病根：note 同时当机器流水账、最新状态载体、人读收口账，只有追加一种写法；状态（卡块）该替换不该追加。
+- 修三层：task_note_block_upsert 围栏状态块（事务 FOR UPDATE，POST /result 与 PATCH 均接 note_block；出卡两路、harness card-refresh 改走围栏，后者顺手修掉读改写全量 note 的并发互踩）；圈数熔断（blog_outline_stage 放行分支 auto-release 批注满 2 枚即 hold_human，入口无关，audit seo_release_loop_fuse，误杀出口=人工放行不走此分支）；存量洗疤 84 张（重复卡块折叠留最新+围栏化迁移+同类注记计数折叠，原文存档 projects/MA/temp/note_scrub_20261024/，线上 PATCH 幂等验证过）。
+- 测试：node tests 全绿、远端 php -l 过、#79 note_block 幂等重写实测 1507→1507。
+
 ### 2026-10-24 AIRA chat 泳道脱轮：聊天派生单剥离 sprint，Chat tab 右侧泳道面板（Alvin 批「动手吧」）
 
 - 立法变更：chat 产线单（origin spawn:/chatw:/report:/ruling:）不再出生盖当期 sprint 章（取代 2026-10-10 批五 1），sprint 板只记半月承诺账。task_insert 拆章；ensure_task_archived 里批五 1 的历史回填保留不动（只跑建列那一次）。
