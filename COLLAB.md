@@ -20,6 +20,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-24 AIRA 机制四刀 + 空 detail 护栏（Louvresky 七问摸底修复批，Alvin 批「开工吧」「顺手加护栏」，rev f58a17d + 9f8d005）
+
+- A1 出生即有家：task_insert 对 sprint 泳道单空 sprint 盖当期章，空标签不再是「前端算本期、轮子算不可见」的第三态（#1461/#1617 族绝育）。
+- A2 判定窗泳道维度：harness report() 的 scoped 加 origin 泳道入窗，修脱轮当日留下的推进断档；验证轮实证 5 张泳道单进放行卡清单。
+- A3 report_task_fold：同一报告文件已有开放修订单即折返滚动改（载荷键=文件名），commission_start 与 spawn_task 两入口接入；月报一链 5 单的产线病断根。
+- A4 本地交付物执行器登记：deliverable-file-write / report-html-update / report-xlsx-write / report-preview-deploy 四 op 三步登记（四平台规划视图+契约节+policy reversible+broadcast），契约四硬件=路径白名单(clients/*/reports/)+写前留档+lint+回读；#1625 盖章后收编扫帚自动翻回机器位实证。
+- 护栏：PATCH /tasks 空 detail 需显式 allow_empty_detail=1（当日手滑清空 #1326 任务书 40 秒的学费，线上实测 400 拦截）。
+- 板面清障：关 #813（合并不回收僵尸，止住 later-expired 空转）、#1603 accepted（现实已达成）、#835 killed（客户拍不发）、#1612 killed（假人工）、#1328 killed（平台债降跟踪项）；#1617 补章并当轮收口；#1326 按判语重出，产出零写入核验方案。
+- 测试与验证：node tests 全绿（含双向一致性）、远端 php -l 过、harness 16 验证轮全绿。
+
 ### 2026-10-24 AIRA note 增殖修复：状态块围栏 + 放行官圈数熔断 + 存量洗疤 84 张（Alvin 批「开工吧」，rev 6ecdc90）
 
 - 起因：Kuddles #79 泳道面板显示「好几页」，摸底查出 2026-10-10 夜放行循环家族（cc2ebbb 热修提交到部署的空窗内烧 6 张百余圈），每圈整块发卡记录追加进 result_note，重灾 3.9 万字。
