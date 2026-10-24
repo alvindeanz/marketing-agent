@@ -49,6 +49,8 @@
 | report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
 | report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 | report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
+| article-set-cover-alt | agent_apply | 博客封面图 alt 更新（shopseo article set-cover-alt，1.2.0 起即有）：无封面拒写、src 原样回传防清图、写前快照、回读核对。2026-10-24 登记补欠（能力早于登记，七张配额博客拆单的学费） |
+| article-set-template | agent_apply | 同 article-template-assign（规划器用过的别名拼写，收编匹配用；规范名用 article-template-assign，shopseo article set-template） |
 <!-- PLANNING_VIEW_END -->
 
 ## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）

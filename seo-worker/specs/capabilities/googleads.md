@@ -44,6 +44,8 @@
 | report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
 | report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 | report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
+| pmax-text-asset-update | agent_prepare | PMax 文本资产删加（ads_mutate pmax-text-asset-update）：删后余量硬闸 H>=3/D>=2/LH>=1、字符闸 30/90/90、before 全量打印、回读核对；对外资产，批文才自动 |
+| sitelink-update | agent_prepare | sitelink 换挂（ads_mutate sitelink-update）：campaign 级摘链/挂既有/新建并挂，摘链不删资产本体（挂回即回滚）、字符闸 25/35、回读核对；对外资产，批文才自动 |
 <!-- PLANNING_VIEW_END -->
 
 ## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）

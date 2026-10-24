@@ -47,7 +47,7 @@ import time
 ENV_FILE = "/data/aira/.env.google-ads"
 OPS = ["final-url-change", "ad-pause", "adgroup-pause", "campaign-pause", "keyword-pause", "negative-keyword-add", "negative-keyword-remove",
        "keyword-bid-adjust", "adgroup-create", "rsa-copy-update", "keyword-add", "keyword-final-url",
-       "ad-create", "geo-target-set", "schedule-adjust", "raw-mutate"]
+       "ad-create", "geo-target-set", "pmax-text-asset-update", "sitelink-update", "schedule-adjust", "raw-mutate"]
 
 # raw-mutate 网关的拒绝表（2026-09-22，硬规矩 2 对齐：白名单是路由偏好不是能力天花板，
 # 白名单外的获批操作走本网关直接执行，validate_only 先行 + 零模型对账兜底）。
@@ -957,6 +957,213 @@ def op_geo_target_set(client, cid, args):
          "positive": len(after_pos), "negative": len(after_neg), "proximity": 0, "budget_impact": 0})
 
 
+def op_pmax_text_asset_update(client, cid, args):
+    # PMax 文本资产删加（2026-10-24 Shopify 七问巡检批 2，Midea #1338 缺口）。
+    # spec: {asset_group_id, remove_asset_ids:[id...], add:[{text, field_type:"HEADLINE"|"DESCRIPTION"|"LONG_HEADLINE"}]}
+    # 铁律：before 全量打印（回滚依据）；删后余量硬闸 HEADLINE>=3 / DESCRIPTION>=2 / LONG_HEADLINE>=1
+    # （低于 PMax 服务下限会整组停摆）；字符硬闸 30/90/90；mutate 后回读终态逐条核对。
+    raw = sys.stdin.read() if (args.spec or "") == "-" else None
+    if raw is None:
+        die("pmax-text-asset-update 需要 --spec -（JSON 走 stdin）")
+    try:
+        spec = json.loads(raw)
+    except Exception as e:
+        die("spec JSON 解析失败: " + str(e)[:200])
+    ag_id = int(spec.get("asset_group_id") or 0)
+    rm_ids = [int(x) for x in (spec.get("remove_asset_ids") or [])]
+    adds = spec.get("add") or []
+    if not ag_id:
+        die("spec 缺 asset_group_id")
+    if not rm_ids and not adds:
+        die("spec 既无 remove_asset_ids 也无 add，零事可做")
+    LIMITS = {"HEADLINE": 30, "DESCRIPTION": 90, "LONG_HEADLINE": 90}
+    MINS = {"HEADLINE": 3, "DESCRIPTION": 2, "LONG_HEADLINE": 1}
+    for a in adds:
+        ft = str(a.get("field_type") or "").upper()
+        if ft not in LIMITS:
+            die("add.field_type 只认 HEADLINE/DESCRIPTION/LONG_HEADLINE，收到 " + ft)
+        if not a.get("text") or len(str(a["text"])) > LIMITS[ft]:
+            die("add 文案为空或超长（%s 上限 %d）：%s" % (ft, LIMITS[ft], str(a.get("text"))[:60]))
+    rows = gaql(client, cid,
+                "SELECT asset_group_asset.resource_name, asset_group_asset.field_type, "
+                "asset.id, asset.text_asset.text, asset_group.name "
+                "FROM asset_group_asset WHERE asset_group.id = %d "
+                "AND asset_group_asset.field_type IN ('HEADLINE','DESCRIPTION','LONG_HEADLINE') "
+                "AND asset_group_asset.status != 'REMOVED'" % ag_id)
+    if not rows:
+        die("asset_group %d 不存在或没有文本资产" % ag_id)
+    cur = [{"asset_id": int(r.asset.id), "field_type": enum_name(r.asset_group_asset.field_type),
+            "text": r.asset.text_asset.text, "rn": r.asset_group_asset.resource_name} for r in rows]
+    out({"step": "before", "op": "pmax-text-asset-update", "asset_group_id": ag_id,
+         "group_name": rows[0].asset_group.name, "assets": [{k: v for k, v in c.items() if k != "rn"} for c in cur]})
+    by_id = {}
+    for c in cur:
+        by_id.setdefault(c["asset_id"], []).append(c)
+    for rid in rm_ids:
+        if rid not in by_id:
+            die("remove_asset_ids 里的 asset %d 不挂在本 asset group 的文本位上" % rid)
+    counts = {}
+    for c in cur:
+        counts[c["field_type"]] = counts.get(c["field_type"], 0) + 1
+    for rid in rm_ids:
+        for c in by_id[rid]:
+            counts[c["field_type"]] -= 1
+    for a in adds:
+        ft = str(a["field_type"]).upper()
+        counts[ft] = counts.get(ft, 0) + 1
+    for ft, mn in MINS.items():
+        if counts.get(ft, 0) < mn:
+            die("删加后 %s 余 %d 条，低于 PMax 下限 %d，拒绝（先加后删或缩小删除面）" % (ft, counts.get(ft, 0), mn))
+    if args.dry_run:
+        out({"ok": True, "dry_run": True, "would_remove": rm_ids,
+             "would_add": [{"field_type": str(a["field_type"]).upper(), "text": str(a["text"])} for a in adds],
+             "resulting_counts": counts})
+        return
+    aga_svc = client.get_service("AssetGroupAssetService")
+    ops = []
+    for rid in rm_ids:
+        for c in by_id[rid]:
+            o = client.get_type("AssetGroupAssetOperation")
+            o.remove = c["rn"]
+            ops.append(o)
+    if ops:
+        aga_svc.mutate_asset_group_assets(customer_id=cid, operations=ops)
+    added = []
+    if adds:
+        a_svc = client.get_service("AssetService")
+        for a in adds:
+            ao = client.get_type("AssetOperation")
+            ao.create.text_asset.text = str(a["text"])
+            res = a_svc.mutate_assets(customer_id=cid, operations=[ao])
+            arn = res.results[0].resource_name
+            lo = client.get_type("AssetGroupAssetOperation")
+            lo.create.asset = arn
+            lo.create.asset_group = client.get_service("AssetGroupService").asset_group_path(cid, ag_id)
+            lo.create.field_type = getattr(client.enums.AssetFieldTypeEnum, str(a["field_type"]).upper())
+            aga_svc.mutate_asset_group_assets(customer_id=cid, operations=[lo])
+            added.append({"asset": arn, "field_type": str(a["field_type"]).upper(), "text": str(a["text"])})
+    rows2 = gaql(client, cid,
+                 "SELECT asset.id, asset.text_asset.text, asset_group_asset.field_type "
+                 "FROM asset_group_asset WHERE asset_group.id = %d "
+                 "AND asset_group_asset.field_type IN ('HEADLINE','DESCRIPTION','LONG_HEADLINE') "
+                 "AND asset_group_asset.status != 'REMOVED'" % ag_id)
+    final = [{"asset_id": int(r.asset.id), "field_type": enum_name(r.asset_group_asset.field_type),
+              "text": r.asset.text_asset.text} for r in rows2]
+    for rid in rm_ids:
+        if any(f["asset_id"] == rid for f in final):
+            die("回读发现 asset %d 仍挂在组上，删除未生效，人工核对" % rid, 1)
+    for a in adds:
+        if not any(f["text"] == str(a["text"]) and f["field_type"] == str(a["field_type"]).upper() for f in final):
+            die("回读没找到新增文案「%s」，人工核对" % str(a["text"])[:40], 1)
+    out({"ok": True, "op": "pmax-text-asset-update", "asset_group_id": ag_id,
+         "removed": rm_ids, "added": added, "final_counts": counts,
+         "budget_impact": 0, "note": "PMax 文本资产已删加并回读一致，资产将重新进入审核"})
+
+
+def op_sitelink_update(client, cid, args):
+    # sitelink 换挂（2026-10-24 同批，Midea #1338 缺口）。campaign 级 CampaignAsset 粒度：
+    # spec: {campaign_id, remove_asset_ids:[id...], link_asset_ids:[id...], add:[{link_text, final_url, description1?, description2?}]}
+    # remove=从本 campaign 摘链（资产本体不删，可再挂回=回滚）；link=挂既有 sitelink 资产；add=新建并挂。
+    # 铁律：before 全量打印；link_text<=25、desc<=35；回读终态核对。
+    raw = sys.stdin.read() if (args.spec or "") == "-" else None
+    if raw is None:
+        die("sitelink-update 需要 --spec -（JSON 走 stdin）")
+    try:
+        spec = json.loads(raw)
+    except Exception as e:
+        die("spec JSON 解析失败: " + str(e)[:200])
+    camp_id = int(spec.get("campaign_id") or 0)
+    rm_ids = [int(x) for x in (spec.get("remove_asset_ids") or [])]
+    link_ids = [int(x) for x in (spec.get("link_asset_ids") or [])]
+    adds = spec.get("add") or []
+    if not camp_id:
+        die("spec 缺 campaign_id")
+    if not rm_ids and not link_ids and not adds:
+        die("spec 没有任何动作")
+    for a in adds:
+        lt = str(a.get("link_text") or "")
+        if not lt or len(lt) > 25:
+            die("add.link_text 为空或超 25 字符：" + lt[:40])
+        if not a.get("final_url"):
+            die("add 缺 final_url：" + lt)
+        for dk in ("description1", "description2"):
+            if a.get(dk) and len(str(a[dk])) > 35:
+                die("add.%s 超 35 字符：%s" % (dk, str(a[dk])[:40]))
+    rows = gaql(client, cid,
+                "SELECT campaign_asset.resource_name, asset.id, asset.sitelink_asset.link_text, "
+                "asset.final_urls, campaign.name FROM campaign_asset "
+                "WHERE campaign.id = %d AND campaign_asset.field_type = 'SITELINK' "
+                "AND campaign_asset.status != 'REMOVED'" % camp_id)
+    cur = [{"asset_id": int(r.asset.id), "link_text": r.asset.sitelink_asset.link_text,
+            "final_urls": list(r.asset.final_urls), "rn": r.campaign_asset.resource_name} for r in rows]
+    out({"step": "before", "op": "sitelink-update", "campaign_id": camp_id,
+         "campaign_name": rows[0].campaign.name if rows else "",
+         "sitelinks": [{k: v for k, v in c.items() if k != "rn"} for c in cur]})
+    cur_ids = {c["asset_id"] for c in cur}
+    for rid in rm_ids:
+        if rid not in cur_ids:
+            die("remove_asset_ids 里的 asset %d 不挂在 campaign %d 的 sitelink 位上" % (rid, camp_id))
+    for lid in link_ids:
+        chk = gaql(client, cid, "SELECT asset.id FROM asset WHERE asset.id = %d AND asset.type = 'SITELINK'" % lid)
+        if not chk:
+            die("link_asset_ids 里的 asset %d 不存在或不是 sitelink 资产" % lid)
+    if args.dry_run:
+        out({"ok": True, "dry_run": True, "would_remove": rm_ids, "would_link": link_ids,
+             "would_add": [{"link_text": str(a["link_text"]), "final_url": str(a["final_url"])} for a in adds]})
+        return
+    ca_svc = client.get_service("CampaignAssetService")
+    rm_ops = []
+    for c in cur:
+        if c["asset_id"] in rm_ids:
+            o = client.get_type("CampaignAssetOperation")
+            o.remove = c["rn"]
+            rm_ops.append(o)
+    if rm_ops:
+        ca_svc.mutate_campaign_assets(customer_id=cid, operations=rm_ops)
+    camp_rn = client.get_service("CampaignService").campaign_path(cid, camp_id)
+    new_assets = []
+    if adds:
+        a_svc = client.get_service("AssetService")
+        for a in adds:
+            ao = client.get_type("AssetOperation")
+            ao.create.sitelink_asset.link_text = str(a["link_text"])
+            if a.get("description1"):
+                ao.create.sitelink_asset.description1 = str(a["description1"])
+            if a.get("description2"):
+                ao.create.sitelink_asset.description2 = str(a["description2"])
+            ao.create.final_urls.append(str(a["final_url"]))
+            res = a_svc.mutate_assets(customer_id=cid, operations=[ao])
+            new_assets.append(res.results[0].resource_name)
+    link_ops = []
+    for arn in new_assets + [client.get_service("AssetService").asset_path(cid, i) for i in link_ids]:
+        lo = client.get_type("CampaignAssetOperation")
+        lo.create.asset = arn
+        lo.create.campaign = camp_rn
+        lo.create.field_type = client.enums.AssetFieldTypeEnum.SITELINK
+        link_ops.append(lo)
+    if link_ops:
+        ca_svc.mutate_campaign_assets(customer_id=cid, operations=link_ops)
+    rows2 = gaql(client, cid,
+                 "SELECT asset.id, asset.sitelink_asset.link_text FROM campaign_asset "
+                 "WHERE campaign.id = %d AND campaign_asset.field_type = 'SITELINK' "
+                 "AND campaign_asset.status != 'REMOVED'" % camp_id)
+    final_ids = {int(r.asset.id) for r in rows2}
+    for rid in rm_ids:
+        if rid in final_ids:
+            die("回读发现 asset %d 仍挂在 campaign 上，摘链未生效" % rid, 1)
+    for lid in link_ids:
+        if lid not in final_ids:
+            die("回读没找到应挂上的既有资产 %d" % lid, 1)
+    for a in adds:
+        if not any(r.asset.sitelink_asset.link_text == str(a["link_text"]) for r in rows2):
+            die("回读没找到新建 sitelink「%s」" % str(a["link_text"]), 1)
+    out({"ok": True, "op": "sitelink-update", "campaign_id": camp_id,
+         "removed": rm_ids, "linked_existing": link_ids,
+         "created": [{"asset": rn} for rn in new_assets],
+         "final_sitelinks": sorted(final_ids), "budget_impact": 0,
+         "note": "sitelink 换挂完成并回读一致；摘下的资产本体未删，可再挂回即回滚"})
+
+
 def op_raw_mutate(client, cid, args):
     """白名单外获批操作的统一网关（GoogleAdsService.Mutate，MutateOperation 万能包）。
     spec 从 stdin 读 JSON：{"mutate_operations": [{"shared_set_operation": {"create": {...}}}, ...]}
@@ -1055,6 +1262,8 @@ def main():
          "keyword-final-url": op_keyword_final_url,
          "ad-create": op_ad_create,
          "geo-target-set": op_geo_target_set,
+         "pmax-text-asset-update": op_pmax_text_asset_update,
+         "sitelink-update": op_sitelink_update,
          "raw-mutate": op_raw_mutate}[args.op](client, cid, args)
     except SystemExit:
         raise
