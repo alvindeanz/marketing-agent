@@ -2114,7 +2114,8 @@ async function runBlogTask(ctx, context, workspace, task) {
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
   const noteWithCard = cardUrl ? ('博客确认卡（发给客户，客户点同意才发布）: ' + cardUrl + '\n' + note) : note;
   // 图没齐就打 attention：稿子进待放行，但人得先补图，发布门会拦。
-  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: noteWithCard, attention: imagesMissing });
+  // 卡块是「状态」不是「事件」（2026-10-24 #79 note 增殖修复）：走围栏替换，重出卡只留最新一份。
+  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: '', note_block: { key: 'blog_card', content: noteWithCard }, attention: imagesMissing });
   log('task ' + taskId + '：已交付，任务进 review，' + (cardUrl ? '确认卡已出待客户同意发布' : '确认卡缺失退回预览链接') + (imagesMissing ? '（配图不齐，已标需人判断）' : ''));
   return draftFile;
 }
@@ -2329,7 +2330,8 @@ async function runBlogWriteback(ctx, opts) {
   ].filter(Boolean).join('\n');
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
   const noteWithCard = cardUrl ? ('博客确认卡（发给客户，客户点同意才发布）: ' + cardUrl + '\n' + note) : note;
-  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: noteWithCard, attention: false });
+  // 同上：卡块走围栏替换（2026-10-24），重出确认卡不再把旧块留在 note 里增殖。
+  await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: '', note_block: { key: 'blog_card', content: noteWithCard }, attention: false });
   log('task ' + taskId + '：原样写回已交付，任务进 review，' + (cardUrl ? '确认卡已重出' : '确认卡缺失退回预览链接'));
   return outFile;
 }

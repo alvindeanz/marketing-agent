@@ -1091,6 +1091,38 @@ function task_append_note($tid,$note){
         ->execute([mb_substr($note,0,1000,'UTF-8'),(int)$tid]);
 }
 
+/* 状态块写口（2026-10-24，#79 note 增殖修复）：note 里「状态」类内容（当前确认卡块、
+   card-refresh 标记）永远只有一份最新值，围栏段替换不追加；「事件」类注记照旧走
+   task_append_note。围栏形如 [[块:blog_card]]…[[/块:blog_card]]。
+   事务内 FOR UPDATE 读改写（多 worker 规矩 8：共享状态 DB 原子），与并发 append 不互踩。
+   返回 null 成功，或一句错误说明。 */
+function task_note_block_upsert($tid,$key,$content){
+    $key=preg_replace('/[^a-z0-9_-]/i','',(string)$key);
+    if($key==='')return '块名非法';
+    $content=trim((string)$content);
+    if($content==='')return '块内容为空';
+    $open='[[块:'.$key.']]';$close='[[/块:'.$key.']]';
+    $blk=$open."\n".mb_substr($content,0,8000,'UTF-8')."\n".$close;
+    $db=db();
+    try{
+        $db->beginTransaction();
+        $q=$db->prepare("SELECT result_note FROM seo_tasks WHERE id=? FOR UPDATE");
+        $q->execute([(int)$tid]);
+        $row=$q->fetch();
+        if($row===false){$db->rollBack();return 'Task not found';}
+        $n=(string)($row['result_note']??'');
+        $pat='/'.preg_quote($open,'/').'.*?'.preg_quote($close,'/').'/s';
+        if(preg_match($pat,$n))$n=preg_replace($pat,$blk,$n,1);
+        else $n=($n===''?$blk:($n."\n\n".$blk));
+        $db->prepare("UPDATE seo_tasks SET result_note=? WHERE id=?")->execute([$n,(int)$tid]);
+        $db->commit();
+    }catch(Exception $e){
+        if($db->inTransaction())$db->rollBack();
+        return $e->getMessage();
+    }
+    return null;
+}
+
 /* 给任务行挂判定状态，GET /tasks 用。
    review_effective  人推翻的优先，其次 fable 的，都没有为 null
    review_stale      判决之后任务被改过，或该客户的 facts 更新过，判决按过期显示，
@@ -2554,6 +2586,11 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     if($note!==''){
         db()->prepare("UPDATE seo_tasks SET result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
             ->execute([$note,$tid]);
+    }
+    /* 状态块（2026-10-24 note 增殖修复）：确认卡块这类「最新值」内容走围栏替换，重出卡不再追加。 */
+    if(isset($i['note_block'])&&is_array($i['note_block'])){
+        $nbErr=task_note_block_upsert($tid,(string)($i['note_block']['key']??''),(string)($i['note_block']['content']??''));
+        if($nbErr)task_append_note($tid,'[note-block] 状态块写入失败（'.$nbErr.'），内容未落');
     }
     if(isset($i['ops'])){
         /* 生产端校验（2026-09-24 产线 op 必填刀，同 9/22 chat 委托单 cleanDrafts 的路数）：
@@ -7913,6 +7950,17 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             $act['released'][]=$tid;continue;
         }
         if(blog_outline_stage($t)){
+            /* 圈数熔断（2026-10-24，#79 家族 2026-10-10 夜 6 张百余圈的学费）：放行官判 release
+               排写稿、写完又回到放行位，正常流程至多发生一次（写稿后卡在途由 blog_card_waiting
+               跳过）。auto-release 批注到第 2 枚还进这个分支就是在绕圈，与入口无关一律停人，
+               把下一个没想到的死循环入口封顶在 2 圈。误杀出口：人工放行按钮不走本分支，照常可用。 */
+            $lapN=substr_count($note,'[auto-release L2-opus');
+            if($lapN>=2){
+                task_append_note($tid,'[hold-human opus '.$stamp.'] 放行官已 '.$lapN.' 次判 release 排写稿仍回到放行位，疑似循环（#79 同款），停人：'.$reason);
+                db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+                audit('opus-release','seo_release_loop_fuse',(string)$tid,['laps'=>$lapN]);
+                $act['held'][]=$tid;continue;
+            }
             list($jb,)=blog_release_as_write($cid,$t,'opus-release');
             task_append_note($tid,'[auto-release L2-opus '.$stamp.']'.$retryTag.' '.$reason);
             audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'blog_write','jobs'=>$jb]);
@@ -8629,6 +8677,14 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     /* 追加注记（2026-10-15 补）：此前只有全量 result_note，调用方传 result_note_append 被静默
        吞掉（status 同批时更新照常走、注记丢失无感知），读改写又有并发覆盖风险。 */
     if(isset($i['result_note_append'])&&!isset($i['result_note'])){$sets[]="result_note=CONCAT_WS('\n\n',NULLIF(result_note,''),?)";$args[]=(string)$i['result_note_append'];}
+    /* 状态块（2026-10-24）：围栏替换不追加，card-refresh 这类周期标记用它防 note 增殖。
+       独立事务执行，不进本次 UPDATE 的 $sets；允许单独只写块。 */
+    $nbDone=false;
+    if(isset($i['note_block'])&&is_array($i['note_block'])&&!isset($i['result_note'])){
+        $nbErr=task_note_block_upsert($tid,(string)($i['note_block']['key']??''),(string)($i['note_block']['content']??''));
+        if($nbErr)res(400,['error'=>'note_block: '.$nbErr]);
+        $nbDone=true;
+    }
     if(array_key_exists('attention',$i)){$sets[]='attention=?';$args[]=empty($i['attention'])?0:1;}
     /* 归档翻案（2026-10-20 三类扫帚配套）：人工把误归档的单拉回视野，或把看完的账手动压档。
        注意扫帚是读入口触发，手动压档的 done 单若仍满足扫帚条件，翻回来要连带改条件（如 attention=1）。 */
@@ -8640,9 +8696,11 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
        「到期视同同意」的时钟锚在这里；发错重置传 card_sent_clear。 */
     if(!empty($i['card_sent'])){ensure_review_schema();$sets[]='sent_at=NOW()';}
     if(!empty($i['card_sent_clear'])){ensure_review_schema();$sets[]='sent_at=NULL';}
-    if(!$sets)res(400,['error'=>'nothing to update']);
-    $args[]=$tid;
-    db()->prepare("UPDATE seo_tasks SET ".implode(',',$sets)." WHERE id=?")->execute($args);
+    if(!$sets&&!$nbDone)res(400,['error'=>'nothing to update']);
+    if($sets){
+        $args[]=$tid;
+        db()->prepare("UPDATE seo_tasks SET ".implode(',',$sets)." WHERE id=?")->execute($args);
+    }
     audit($u['username'],'seo_task_update',(string)$tid,$i);
     res(200,['ok'=>true]);
 }

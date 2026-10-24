@@ -843,7 +843,9 @@ async function report(all, sprint, retried) {
       const jr = await call('POST', '/jobs', { client_id: cid, type: 'execute_task', payload: { task_ids: [t.id] } });
       const jid = jr && (jr.id || (jr.ids && jr.ids[0]));
       if (jid) {
-        await call('PATCH', '/tasks/' + t.id, { result_note: String(t.result_note || '') + '\n[card-refresh ' + new Date().toISOString().slice(0, 10) + '] 未发卡数据窗超 7 天，自动重拉重出（job #' + jid + '），数字全量刷新，反馈链接不变' });
+        /* 围栏状态块（2026-10-24）：card-refresh 是周期标记，只留最新一份；顺手修掉原先
+           读改写全量 note 的并发互踩隐患（多 worker 规矩 8）。debounce 正则读的行在块内照常命中。 */
+        await call('PATCH', '/tasks/' + t.id, { note_block: { key: 'card-refresh', content: '[card-refresh ' + new Date().toISOString().slice(0, 10) + '] 未发卡数据窗超 7 天，自动重拉重出（job #' + jid + '），数字全量刷新，反馈链接不变' } });
       }
     }
     console.log('\n## 卡时效刷新（' + cardRefresh.length + ' 张未发卡数据超龄，已重排）：#' + cardRefresh.map((t) => t.id).join(' #'));
