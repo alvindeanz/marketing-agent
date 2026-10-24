@@ -7769,6 +7769,16 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         if(blog_card_waiting($t))continue; /* 确认卡已出等客户，L0 不重排 apply（2026-10-10 #815 验证时的多余一跳） */
         $ops=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
         if(!$ops)continue; /* 无 ops 的任务说不清风险，走人 */
+        /* hold 前科闸（2026-10-25，PlayMate #562 实证）：放行官 hold-human 是人味否决在案，
+           客户闸类 hold（锁词/mapping/批文）尤其如此。方案刷新后 risk 档是 auto 不代表 hold
+           的关切已解决，自动放行无权推翻人工否决。有前科一律跳过自动道（L0 与 mandate-carry
+           都不走），留 L2 放行官带着 note 里的 hold 理由复核。误杀出口：L2 放行官 release 或
+           看板人工放行；[L0 回避] 注记即命中台账。 */
+        if(strpos((string)($t['result_note']??''),'[hold-human')!==false){
+            if(strpos((string)$t['result_note'],'[L0 回避]')===false)
+                task_append_note($tid,'[L0 回避] 本单有 hold-human 否决在案，自动放行无权推翻，留 L2 放行官复核：hold 关切已解决则放行，未解决维持或打回。');
+            continue;
+        }
         /* 定档统一走 dispatch_grade（2026-09-08）：全 reversible 直落；external/structural
            要任务 detail 里 [backing] 指向的客户批文 fact 存在且 confirmed 才直落；
            spend/不可逆/排除表/未知 op 一律停人。与 Chat 派单同一个函数同一份政策，不许分叉。 */
