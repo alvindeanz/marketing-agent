@@ -19,3 +19,9 @@ if [ $RC -ne 0 ] || [ -z "$OUT" ]; then
   exit 1
 fi
 echo "$(date -u +%FT%TZ) $OUT"
+
+# Shopify 接入状态 fact 同步（2026-10-24 修 1）：roster.json -> platform.shopify.connected，
+# 失败不挡取数（告警一行，下周自愈）。
+SYNC_OUT=$(SEO_AGENT_TOKEN="$TOKEN" node "$(dirname "$0")/shopify_conn_sync.js" 2>&1) \
+  && echo "$(date -u +%FT%TZ) conn_sync: $(echo "$SYNC_OUT" | tail -1)" \
+  || echo "$(date -u +%FT%TZ) conn_sync 失败（不挡取数）: $(echo "$SYNC_OUT" | tail -1)"

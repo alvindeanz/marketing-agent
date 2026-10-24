@@ -611,12 +611,25 @@ async function main() {
     const laterAll = allNow.filter((t) => t.status === 'review'
       && String(t.review_effective || t.review_verdict || '') === 'later');
     for (const t of laterAll) {
+      /* 替代链刹车（2026-10-24 修 5，#813/#1282 机制空转抢救僵尸两例）：板上已有自书
+         「替代 #N」的后继单时，本单是待收口僵尸不是烂尾活，作废重验是空转。注记一次
+         转尾巴钟收口清单，挪期与拉回都不做。载荷判据=后继单标题/详情文本，非申报字段。 */
+      const successor = allNow.find((s) => s.id !== t.id
+        && (String(s.title || '') + ' ' + String(s.detail || '')).indexOf('替代 #' + t.id) !== -1);
+      if (successor) {
+        if (!String(t.result_note || '').includes('[替代链]')) {
+          if (!DRY) await call('PATCH', '/tasks/' + t.id, { result_note_append: '[替代链] 已有后继单 #' + successor.id + '（自书替代 #' + t.id + '），不再作废拉回重验，转收口清单。' });
+        }
+        log('#' + t.id + ' later 但已有替代单 #' + successor.id + '，跳过挪期/拉回，列收口清单');
+        continue;
+      }
       const moved = (String(t.result_note || '').match(/\[later\] (存量挪期|判定延后)/g) || []).length;
       const ageDays = t.reviewed_at ? Math.floor((Date.now() - Date.parse(String(t.reviewed_at).replace(' ', 'T'))) / 86400000) : 0;
       const rotten = t.review_stale || moved >= 2 || ageDays >= 14;
       if (rotten) {
         if (DRY) { log('#' + t.id + ' later 烂尾（挪期 ' + moved + ' 次/判龄 ' + ageDays + ' 天/stale ' + !!t.review_stale + '），would 盖章拉回 S' + curNum + ' 重判'); continue; }
-        const body = { sprint: 'S' + curNum, result_note: String(t.result_note || '') + '\n[later-expired ' + stamp() + '] 挪期 ' + moved + ' 次/判龄 ' + ageDays + ' 天，旧判决作废拉回本期，放行官重验前置条件。' };
+        /* result_note 改走 append（2026-10-24 顺手修）：原读改写全量 note 与并发 append 互踩。 */
+        const body = { sprint: 'S' + curNum, result_note_append: '[later-expired ' + stamp() + '] 挪期 ' + moved + ' 次/判龄 ' + ageDays + ' 天，旧判决作废拉回本期，放行官重验前置条件。' };
         if (!t.review_stale) body.detail = String(t.detail || '') + '\n[later-expired ' + stamp() + '] 判决作废重验（挪期 ' + moved + ' 次/判龄 ' + ageDays + ' 天）。';
         await call('PATCH', '/tasks/' + t.id, body);
         log('#' + t.id + ' later 烂尾，盖章拉回 S' + curNum + ' 交放行官重验');

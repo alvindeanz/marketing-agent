@@ -69,6 +69,11 @@
 
 - verdict 三选一：release / hold_human / redo。
 - reason ≤160 字，写你核了什么，不写套话。
+- client_question（可选，仅 hold_human）：停人的根本原因是**缺客户口径**（产品事实、品牌命名、
+  会影响客户自有报表或投放的改法）时，附一句可以直接发给客户的问题（≤120 字，具体到可勾选或
+  一句话能答）。服务端会自动生成客户口径确认工单进待发通道，停人位不再是决策件的死胡同
+  （2026-10-24 Alvin 批，Sunseeker #434/#436/#437 三张停人单挂三周的教训）。缺的不是客户口径
+  （如纯技术前提、内部数据问题）就不要给这个字段。
 - backing：任务涉及 spend / irreversible 时，release 判决要带 backing 字段 = 覆盖本次改动的
   客户批文 fact key（如 cards.t798.outcome）。服务端会去 facts 表验真（confirmed 才算），
   验上了跳过静默期直接落地，验不上进静默期。没有批文就不写，让它走静默期，别编 key。

@@ -77,7 +77,10 @@ function cleanVerdicts(json, batchIds, log) {
       : [];
     /* backing：spend/irreversible 的 release 引用批文 fact key，服务端自己去 facts 表验真。 */
     const backing = String(v.backing || '').replace(/[^A-Za-z0-9_.\-]/g, '').slice(0, 120);
-    byId.set(tid, { task_id: tid, verdict, reason: summarize(reason, MAX_REASON_CHARS), conflicts, backing });
+    /* client_question（2026-10-24 修 3）：hold_human 且缺客户口径时模型给出可直发客户的问题，
+       服务端据此自动开客户口径确认单。只在 hold_human 上透传，其他判决忽略。 */
+    const clientQ = verdict === 'hold_human' ? summarize(v.client_question, 240) : '';
+    byId.set(tid, Object.assign({ task_id: tid, verdict, reason: summarize(reason, MAX_REASON_CHARS), conflicts, backing }, clientQ ? { client_question: clientQ } : {}));
   }
   const out = [];
   for (const tid of batchIds) {

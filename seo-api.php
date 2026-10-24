@@ -1055,7 +1055,17 @@ function capgap_split_on_accept($tid){
         $motherNote='[capgap-split] 能力缺口为执行器命令未实现（[cli]），已生成补执行器工单 #';
     }else{
         $title=mb_substr('人工落地：#'.$tid.' '.$t['title'],0,255,'UTF-8');
-        $detail="母任务 #".$tid." 的交付已验收归档，但收口时标注了能力缺口，执行步机器做不了，按本单转人工：\n- ".mb_substr($gapNote,0,300,'UTF-8')."\n\n执行材料（执行单与附件）在母任务 #".$tid."，验收标准以母任务执行单为准，做完在母任务或本单备注对账。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。".($gapCls===''?"\n注意：母单收口没带三问标注（[cli]/[api]/[scope]），排人前先把三问补核一遍。":"");
+        /* 三问第二问注入事实源（2026-10-24 修 2，Oak 七张拆单「scope 未核实」的教训）：
+           平台接入状态是可查事实（fact platform.shopify.connected 等），拆单出生时直接带答案，
+           「无法核实」不再是合法理由。读不到 fact 保持旧文案。 */
+        $connLine='';
+        try{
+            $fq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='platform.shopify.connected' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
+            $fq->execute([$cid]);
+            $fv=$fq->fetch();
+            if($fv)$connLine="\n三问第二问的事实源：platform.shopify.connected = ".mb_substr((string)$fv['value'],0,160,'UTF-8');
+        }catch(Exception $e){}
+        $detail="母任务 #".$tid." 的交付已验收归档，但收口时标注了能力缺口，执行步机器做不了，按本单转人工：\n- ".mb_substr($gapNote,0,300,'UTF-8')."\n\n执行材料（执行单与附件）在母任务 #".$tid."，验收标准以母任务执行单为准，做完在母任务或本单备注对账。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。".$connLine.($gapCls===''?"\n注意：母单收口没带三问标注（[cli]/[api]/[scope]），排人前先把三问补核一遍。":"");
         $reviewReason='继承母任务 #'.$tid.' 判决（能力缺口收口拆人工，验收标准以母执行单为准）';
         $motherNote='[capgap-split] 能力缺口的执行步已生成人工工单 #';
     }
@@ -7906,6 +7916,31 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             task_append_note($tid,'[hold-human opus '.$stamp.'] 冲突['.$cf.']：'.$reason);
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             audit('opus-release','seo_release_hold',(string)$tid,['reason'=>$reason,'conflicts'=>$cf]);
+            /* 客户口径出口（2026-10-24 修 3，Sunseeker #434/#436/#437 停人挂三周的教训）：
+               放行官判定停人根因是缺客户口径时给 client_question，这里自动拆成有人认领的
+               客户口径确认单（机器拆单是出口，纯注记提醒不是，#1232 铁律），同母单去重。 */
+            $cq=trim((string)($r['client_question']??''));
+            if($cq!==''){
+                $dqC=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? AND title LIKE '客户口径确认%' AND status NOT IN('done') LIMIT 1");
+                $dqC->execute(['split:'.$tid]);
+                $exC=$dqC->fetch();
+                if($exC){
+                    task_append_note($tid,'[client-question] 已有未收口的客户口径确认单 #'.(int)$exC['id'].'，本轮问题并入该单');
+                    db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?) WHERE id=?")
+                        ->execute(['[追加问题 '.$stamp.'] '.mb_substr($cq,0,240,'UTF-8'),(int)$exC['id']]);
+                }else{
+                    list($tsC,$teC)=task_fields_clean([
+                        'title'=>mb_substr('客户口径确认：#'.$tid.' '.$t['title'],0,255,'UTF-8'),
+                        'detail'=>"放行官停人判定指向缺客户口径（母单 #".$tid."）。需要客户回答：\n".mb_substr($cq,0,240,'UTF-8')."\n\n拿到口径后在母单备注回填并重排，或在频道一句话转达。停人判语全文在母单 note。",
+                        'module'=>(string)$t['module'],'owner_type'=>'agency','priority'=>(string)$t['priority'],'ops'=>'','sprint'=>'',
+                    ],['status_force'=>'approved']);
+                    if(!$teC){
+                        $cqTid=task_insert($cid,$tsC,'opus-release','split:'.$tid);
+                        task_append_note($tid,'[client-question] 缺客户口径，已自动生成确认单 #'.$cqTid.'（问题：'.mb_substr($cq,0,80,'UTF-8').'…）');
+                        audit('opus-release','seo_release_client_question',(string)$tid,['q'=>$cq,'task'=>$cqTid]);
+                    }
+                }
+            }
             $act['held'][]=$tid;continue;
         }
         if($verdict==='redo'){
