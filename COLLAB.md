@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-24 AIRA chat 泳道脱轮：聊天派生单剥离 sprint，Chat tab 右侧泳道面板（Alvin 批「动手吧」）
+
+- 立法变更：chat 产线单（origin spawn:/chatw:/report:/ruling:）不再出生盖当期 sprint 章（取代 2026-10-10 批五 1），sprint 板只记半月承诺账。task_insert 拆章；ensure_task_archived 里批五 1 的历史回填保留不动（只跑建列那一次）。
+- API：GET /tasks 新增 origin=chat（泳道口径：含归档、id 倒序、limit/offset 翻页回 total）与 origin=sprint（反选）；其余路径不变。
+- 前端：Chat tab 右侧新增泳道面板（#chTasks，300px，默认 10 条 load more，状态点＝在跑蓝/等人红/等外部琥珀/收口绿/叫停灰，收口单灰显全程可见，15 秒随轮询刷新）；任务视图来源筛选默认值 all 改 sprint；taskOrigin 补 ruling 前缀。
+- harness：新增 chat 泳道扫帚（零 LLM）：failed/blocked/停人即时报、非终态超 3 天报，进每轮「## chat 泳道欠收口」段，只报不推（#1461 判 do 没人推的泳道版预防针，兜「脱轮后 inScope 看不见 chat 单」的洞）。
+- 存量迁移：部署后一次性把未收口 chat 单的 sprint 章洗掉（API PATCH sprint=''，可逆），已收口的不动。
+- 测试：node tests 38 套全绿，seo-api.php 远端 php -l 过，harness node --check 过。徽章口径零改动（无 sprint 视同本期，chat 停人照计红）。
+
 ### 2026-10-23 AIRA specs 测试补反向断言（#808 复盘补洞）
 
 - 背景：#808（apollo 两页 title/description）复盘查明「WF 写入静默失败」是误诊：两次 apply（5361/5375）都撞「no approved change plan」当场失败，PATCH 从未发出，存储层 /advanced 至今是改前原值，WF 平台无辜（DEFECTS 10-21 行已订正）。误诊根子是卡上 [auto-release] 批注被当成落地回执，放行账与 job 终态对账已列机制债。

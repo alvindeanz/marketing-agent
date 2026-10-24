@@ -1566,12 +1566,11 @@ function task_insert($cid,$t,$by,$origin='sprint'){
     ensure_task_origin();
     ensure_review_schema();
     $t['sprint']=sprint_label_norm($cid,$t['sprint']??'');
-    /* chat 产线出生即盖当期章（2026-10-10 批五 1）：空标签在前端永远算本期，永不逾期永不翻篇，
-       本期视图被挤成没眼看（Louvresky 本期 17 张里 9 张无标签 chat 单）。与 split 工单
-       2026-09-24「出生即落当期」同口径。spawn_task 按钮路径 2026-09-29 曾各自盖章，
-       但用的是作废的 14 天公式（半月制 fa26285 漏改处之一），一并收口到这里。 */
-    if($t['sprint']===''&&preg_match('/^(spawn|chatw|report|ruling):/',(string)$origin))
-        $t['sprint']=client_current_sprint_label($cid);
+    /* chat 泳道脱轮（2026-10-24 Alvin 定，取代批五 1 的出生盖章）：chat 产线单不再入 sprint，
+       家在 Chat tab 右侧泳道面板（GET /tasks?origin=chat），sprint 板只记半月承诺账。
+       当初盖章是为了治「空标签永远算本期」的视图挤占与调度隐身，现在前端任务视图默认只看
+       sprint 泳道、停滞 chat 单由 harness 的 chat 泳道扫帚（零 LLM 超龄报）兜底，两个病因都
+       换了解法。人工 PATCH 补 sprint 章 = 显式把 chat 单转正入轮，panel 按出生地照旧可见。 */
     db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin,card_kind)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
             (int)$cid,$t['plan_id'],$t['sprint'],$t['module'],$t['title'],$t['detail'],
@@ -8546,10 +8545,24 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     auth_user();
     $cid=need_client();
     ensure_review_schema();
+    ensure_task_origin();
     archive_closed_tasks($cid);
     /* 归档单默认不出列表（批五 1）；审计与排查传 include_archived=1。 */
     $wantArch=!empty($_GET['include_archived']);
-    $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=?".($wantArch?'':' AND archived=0')." ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
+    /* chat 泳道查询（2026-10-24 脱轮）：origin=chat 走泳道口径——含归档（done/killed 是泳道
+       生命周期的一部分，Chat 面板要全程可见）、按 id 倒序（最新在上）、limit/offset 翻页并回
+       total 供 load more。origin=sprint 反选泳道，其余照旧。 */
+    $og=(string)($_GET['origin']??'');
+    if($og==='chat'){
+        $limC=max(1,min((int)($_GET['limit']??10),100));
+        $offC=max(0,(int)($_GET['offset']??0));
+        $totC=(int)db()->query("SELECT COUNT(*) FROM seo_tasks WHERE client_id=".(int)$cid." AND ".CHAT_ORIGIN_SQL)->fetchColumn();
+        $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND ".CHAT_ORIGIN_SQL." ORDER BY id DESC LIMIT $limC OFFSET $offC");
+        $s->execute([$cid]);
+        res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid),'total'=>$totC,'offset'=>$offC]);
+    }
+    $ogSql=$og==='sprint'?(' AND NOT '.CHAT_ORIGIN_SQL):'';
+    $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=?".($wantArch?'':' AND archived=0').$ogSql." ORDER BY FIELD(owner_type,'agency','client','agent'),FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
     $s->execute([$cid]);
     /* sprint 锚点：生效 plan 的生成日（没有生效的取最新一份）。前端按两周一档推算 S1..S6 的日历区间，
        「本期」按今天落在哪一档定，逾期的照显示，做完了就等下一档，不再按「最小未完成 S 号」跳。 */

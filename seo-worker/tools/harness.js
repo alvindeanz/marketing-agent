@@ -895,6 +895,32 @@ async function report(all, sprint, retried) {
   for (const r of ready) console.log('- #' + r.id + ' ' + r.title + (r.preview ? ' ' + r.preview : ''));
   console.log('\n## 阻塞与待人定（' + blockers.length + '）');
   for (const b of blockers) console.log('- #' + b.id + ' ' + b.kind + '：' + b.text);
+
+  /* chat 泳道扫帚（2026-10-24 脱轮配套，零 LLM）：chat 产线单不入 sprint，轮子的 inScope
+     看不见它们，这里按 origin 兜一道停滞可见性——failed/停人/blocked 即时报，排队在跑超
+     3 天报。只报不推：chat 单是快路直启，推进靠它自己的链路，这里保证的是「没人拦也没人推」
+     的那部分在每轮汇总里有名有姓（#1461 判 do 没人推同款病的泳道版预防针）。 */
+  try {
+    const chatLane = (t) => /^(spawn|chatw|report|ruling):/.test(String(t.origin || ''));
+    const laneAge = (t) => { const d = Date.parse(String(t.updated_at || t.created_at || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : (Date.now() - d) / 86400000; };
+    const laneOpen = all.filter((t) => chatLane(t) && !['done'].includes(t.status));
+    const laneStuck = laneOpen.filter((t) => {
+      const js = t.job_state || {};
+      if (js.status === 'failed' || t.status === 'blocked' || Number(t.attention) === 1) return true;
+      return laneAge(t) > 3;
+    });
+    if (laneStuck.length) {
+      const oldest = Math.max.apply(null, laneStuck.map((t) => Math.round(laneAge(t))));
+      console.log('\n## chat 泳道欠收口（' + laneStuck.length + ' 张，最老 ' + oldest + ' 天）');
+      for (const t of laneStuck) {
+        const js = t.job_state || {};
+        const why = js.status === 'failed' ? '执行失败' : (t.status === 'blocked' ? 'blocked' : (Number(t.attention) === 1 ? '停人' : ('超 3 天未收口/' + t.status)));
+        console.log('- #' + t.id + ' [' + String(t.origin || '').split(':')[0] + '/' + why + '] ' + String(t.title || '').slice(0, 60));
+      }
+    } else if (laneOpen.length) {
+      console.log('\n## chat 泳道：' + laneOpen.length + ' 张在途，无停滞');
+    }
+  } catch (e) { console.log('chat 泳道扫帚异常（不挡轮）：' + e.message); }
   console.log('\n## 方案未批准挡下（held_unapproved_plan=' + heldPlan.length + '）' + (heldPlan.length ? '：' + planHeldSummary(heldPlan) : ''));
   for (const t of heldPlan.slice(0, 25)) console.log('- #' + t.id + ' [方案 ' + planPid(t) + ' ' + planStateOf(t) + '/' + (t.module || '') + '/' + t.status + '] ' + t.title);
   if (heldPlan.length > 25) console.log('- …另有 ' + (heldPlan.length - 25) + ' 条');

@@ -258,6 +258,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ch-row .t{font-size:12.5px;color:#e2e8f0;word-break:break-word;line-height:1.5}
 .ch-row .m{font-size:11px;color:#64748b;margin-top:3px}
 .ch-main{flex:1;min-width:0;border:1px solid #2d3748;background:#1e2433;border-radius:10px;padding:13px 15px}
+/* Chat 泳道面板（2026-10-24 脱轮）：聊天派的活在聊天旁边看，含收口单，最新在上。 */
+.ch-body{display:flex;gap:12px;align-items:flex-start}
+.ch-tasks{flex:0 0 300px;max-width:300px;border:1px solid #2d3748;background:#1e2433;border-radius:10px;padding:11px 13px}
+.ch-tasks .cth{font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;display:flex;justify-content:space-between;align-items:baseline}
+.ch-tasks .ctr{padding:7px 0;border-bottom:1px dashed #2d3748}
+.ch-tasks .ctr:last-child{border-bottom:none}
+.ch-tasks .ctr .tt{font-size:12px;color:#e2e8f0;line-height:1.45;word-break:break-word}
+.ch-tasks .ctr .tt a{color:inherit;text-decoration:none}
+.ch-tasks .ctr .tt a:hover{color:#60a5fa}
+.ch-tasks .ctr .tm{font-size:11px;color:#64748b;margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.ch-tasks .dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:0 0 7px}
+.ch-tasks .ctr.closed{opacity:.55}
+.ch-tasks .ct-empty{font-size:12px;color:#64748b}
+@media(max-width:1100px){.ch-tasks{display:none}}
 .ch-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;border-bottom:1px solid #2d3748;padding-bottom:9px}
 .ch-title{font-size:13px;font-weight:600;color:#f1f5f9;flex:1;word-break:break-word}
 .ch-stream{max-height:460px;overflow-y:auto;padding-right:4px}
@@ -511,7 +525,10 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
           你说到的客户事实（门店、政策、价格、联系人这类）会被自动抽取进该客户的档案，说话按可入档的标准来。
         </div>
         <div class="ch-hist hidden" id="chHist"></div>
-        <div class="ch-main" id="chMain"></div>
+        <div class="ch-body">
+          <div class="ch-main" id="chMain"></div>
+          <aside class="ch-tasks" id="chTasks"></aside>
+        </div>
       </div>
     </div>
 
@@ -535,8 +552,8 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
             <button class="btn ghost" id="ct_seo" onclick="setCatScope('seo')">SEO</button>
             <button class="btn ghost" id="ct_paid" onclick="setCatScope('paid')">Paid</button>
             <span style="display:inline-block;width:1px;height:16px;background:#2b3546;margin:0 6px;vertical-align:middle"></span>
-            <button class="btn" id="og_all" onclick="setOriginScope('all')">全部来源</button>
-            <button class="btn ghost" id="og_sprint" onclick="setOriginScope('sprint')">Sprint</button>
+            <button class="btn ghost" id="og_all" onclick="setOriginScope('all')">全部来源</button>
+            <button class="btn" id="og_sprint" onclick="setOriginScope('sprint')">Sprint</button>
             <button class="btn ghost" id="og_chat" onclick="setOriginScope('chat')">Chat</button>
             <span style="display:inline-block;width:1px;height:16px;background:#2b3546;margin:0 6px;vertical-align:middle"></span>
             <!-- 状态切片与导出（2026-10-20 Alvin 定：人工把任意切片拉出来对账）。
@@ -853,8 +870,9 @@ function setHsScope(v){
 }
 /* 类目切换：paid = module 为 paid 的任务，其余算 SEO。渠道不参与分类（W10：渠道只是执行地点）。 */
 let catScope='all';
-let originScope='all';
-function taskOrigin(t){var o=String(t.origin||'sprint');return (o.indexOf('chat')===0||o.indexOf('spawn')===0||o.indexOf('report')===0)?'chat':'sprint'}
+/* chat 泳道脱轮（2026-10-24）：任务视图默认只看 sprint 泳道，chat 单的家在 Chat tab 右侧面板。 */
+let originScope='sprint';
+function taskOrigin(t){var o=String(t.origin||'sprint');return (o.indexOf('chat')===0||o.indexOf('spawn')===0||o.indexOf('report')===0||o.indexOf('ruling')===0)?'chat':'sprint'}
 function setOriginScope(v){originScope=v;renderLanes()}
 function taskCat(t){return String((t&&t.module)||'')==='paid'?'paid':'seo'}
 function setCatScope(v){catScope=v;renderLanes()}
@@ -2879,16 +2897,19 @@ function loadReport(){
 function chStop(){if(chatTimer){clearInterval(chatTimer);chatTimer=null}}
 function chStart(){
   chStop();
+  let chTick=0;
   chatTimer=setInterval(()=>{
     if(!token||curView!=='inbox'||!chatRootId||document.visibilityState!=='visible')return;
     loadChatThread(true);
+    if(++chTick%3===0)loadChatTasks(false); /* 泳道面板 15 秒一刷，跟排产状态 */
   },5000);
 }
 function chReset(){
   chStop();
   chatList=[];chatRootId=0;chanRootId=0;chatHistOpen=false;chatItem=null;chatMsgs=[];chatPending=0;chatSending=false;chatSpawned={};chatSig='';
+  chTasks=[];chTasksTotal=0;chTasksLoading=false;
   /* 换客户时把上一位客户的频道从 DOM 上抹掉，别让旧线程在那儿挂着 */
-  ['chMain','chHist'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
+  ['chMain','chHist','chTasks'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
   const hb=document.getElementById('chHist');if(hb)hb.classList.add('hidden');
 }
 
@@ -2904,9 +2925,10 @@ async function loadChatView(){
   renderChatMain();
   await loadChatThread(false);
   loadChats();
+  loadChatTasks(false);
   chStart();
 }
-function chRefresh(){loadChatThread(false);loadChats()}
+function chRefresh(){loadChatThread(false);loadChats();loadChatTasks(false)}
 function toggleChatHist(){
   chatHistOpen=!chatHistOpen;
   const el=document.getElementById('chHist');
@@ -3097,6 +3119,56 @@ function renderChatMain(){
       '<span class="plan-meta">一次一轮，等它回完再说下一句。</span></div>'+
     '</div>';
   renderFbStrip(key);
+}
+
+/* ===== Chat 泳道面板（2026-10-24 脱轮）=====
+   聊天派生单（origin spawn:/chatw:/report:/ruling:）不入 sprint，这里是它们唯一的家：
+   含归档收口单，最新在上，默认 10 条 load more。数据走 GET /tasks?origin=chat（服务端分页）。 */
+let chTasks=[],chTasksTotal=0,chTasksLoading=false;
+async function loadChatTasks(more){
+  if(!curId||chTasksLoading)return;
+  chTasksLoading=true;
+  const off=more?chTasks.length:0;
+  const d=await api('/tasks?client_id='+curId+'&origin=chat&limit=10&offset='+off);
+  chTasksLoading=false;
+  if(!d||d.error)return;
+  chTasks=more?chTasks.concat(d.tasks||[]):(d.tasks||[]);
+  chTasksTotal=typeof d.total==='number'?d.total:chTasks.length;
+  renderChatTasks();
+}
+function chTaskState(t){
+  const hs=t.human_state||(t.status==='done'?'closed':'wait_me');
+  if(hs==='closed'){
+    const k=t.closed_kind||'done';
+    return {dot:(k==='killed'||k==='dropped')?'#64748b':'#22c55e',
+      txt:({done:'已完成',accepted:'已验收',dropped:'已放弃',merged:'已并入',killed:'已叫停'})[k]||'已结束',closed:true};
+  }
+  if(hs==='running')return {dot:'#3b82f6',txt:t.run_note||'执行中',closed:false};
+  if(hs==='queued')return {dot:'#3b82f6',txt:t.run_note||'排队',closed:false};
+  if(hs==='wait_ext')return {dot:'#f59e0b',txt:t.wait_reason||'等外部',closed:false};
+  return {dot:'#ef4444',txt:t.wait_reason||'等人',closed:false};
+}
+function gotoChatTask(id){
+  const t=chTasks.filter(x=>x.id===id)[0];
+  if(t&&t.archived&&t.output_url){window.open(t.output_url,'_blank');return}
+  originScope='chat';
+  navTo(curId,'tasks');
+}
+function renderChatTasks(){
+  const box=document.getElementById('chTasks');
+  if(!box)return;
+  const head='<div class="cth"><span>聊天派的活</span><span class="muted">'+(chTasksTotal||0)+' 张</span></div>';
+  if(!chTasks.length){box.innerHTML=head+'<div class="ct-empty">这个客户的聊天还没派过活。</div>';return}
+  const rows=chTasks.map(t=>{
+    const st=chTaskState(t);
+    const d=String(t.updated_at||t.created_at||'').slice(5,10);
+    return '<div class="ctr'+(st.closed?' closed':'')+'">'+
+      '<div class="tt"><a href="javascript:void(0)" onclick="gotoChatTask('+t.id+')">#'+t.id+' '+esc(String(t.title||'').slice(0,60))+'</a></div>'+
+      '<div class="tm"><span class="dot" style="background:'+st.dot+'"></span><span>'+esc(st.txt)+'</span>'+(d?'<span>'+esc(d)+'</span>':'')+'</div>'+
+    '</div>';
+  }).join('');
+  const more=chTasks.length<chTasksTotal?'<div style="margin-top:8px"><button class="btn tiny ghost" onclick="loadChatTasks(true)">再看 10 张（共 '+chTasksTotal+'）</button></div>':'';
+  box.innerHTML=head+rows+more;
 }
 
 function togglePfSec(which){
