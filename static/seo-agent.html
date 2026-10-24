@@ -272,6 +272,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ch-tasks .ctr.closed{opacity:.55}
 .ch-tasks .ct-empty{font-size:12px;color:#64748b}
 @media(max-width:1100px){.ch-tasks{display:none}}
+/* 泳道任务浮层（2026-10-24）：点开看明细，不跳任务页。只读放大镜，零写操作。 */
+.ct-sec{font-size:11.5px;font-weight:700;color:#94a3b8;letter-spacing:.3px;margin:12px 0 5px}
+.ct-pre{font-size:12.5px;line-height:1.7;color:#cbd5e1;white-space:pre-wrap;word-break:break-word;background:#0f1117;border:1px solid #2d3748;border-radius:8px;padding:9px 11px;max-height:220px;overflow-y:auto}
 .ch-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;border-bottom:1px solid #2d3748;padding-bottom:9px}
 .ch-title{font-size:13px;font-weight:600;color:#f1f5f9;flex:1;word-break:break-word}
 .ch-stream{max-height:460px;overflow-y:auto;padding-right:4px}
@@ -3148,11 +3151,51 @@ function chTaskState(t){
   if(hs==='wait_ext')return {dot:'#f59e0b',txt:t.wait_reason||'等外部',closed:false};
   return {dot:'#ef4444',txt:t.wait_reason||'等人',closed:false};
 }
-function gotoChatTask(id){
+/* 浮层明细（2026-10-24 Alvin 定「点开别跳任务页」）：数据用面板已拉的整行，零新增请求。
+   只读红线：不放任何写操作按钮，看板的写口子只有一个的规矩不动；看日志/下载交付物是只读件，可放。 */
+function chTaskClose(){const bg=document.getElementById('chTaskBg');if(bg)bg.classList.remove('show')}
+function chTaskModal(id){
   const t=chTasks.filter(x=>x.id===id)[0];
-  if(t&&t.archived&&t.output_url){window.open(t.output_url,'_blank');return}
-  originScope='chat';
-  navTo(curId,'tasks');
+  if(!t)return;
+  let bg=document.getElementById('chTaskBg');
+  if(!bg){
+    bg=document.createElement('div');bg.id='chTaskBg';bg.className='modal-bg';
+    bg.addEventListener('click',e=>{if(e.target===bg)chTaskClose()});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')chTaskClose()});
+    document.body.appendChild(bg);
+  }
+  const st=chTaskState(t);
+  const rootM=/^(spawn|chatw|report|ruling):(\d+)$/.exec(String(t.origin||''));
+  const OWN={agent:'机器位',agency:'我们',client:'客户位'};
+  const meta=[t.module,t.priority,OWN[t.owner_type]||t.owner_type,
+    '建 '+String(t.created_at||'').slice(0,10),'更 '+String(t.updated_at||'').slice(0,16)].filter(Boolean).join(' · ');
+  const pv=String(t.result_note||'').match(/预览: (https?:\/\/\S+)/g);
+  const pvU=pv&&pv.length?pv[pv.length-1].replace(/^预览: /,''):'';
+  const dls=t.deliverables||[];
+  const failed=(t.job_state||{}).status==='failed';
+  bg.innerHTML='<div class="modal" style="max-width:640px">'+
+    '<div class="sec-head"><div class="sec-title" style="word-break:break-word">#'+t.id+' '+esc(t.title||'')+'</div>'+
+      '<button class="btn tiny ghost" onclick="chTaskClose()">关闭</button></div>'+
+    '<div style="display:flex;gap:7px;align-items:center;margin:2px 0 4px;font-size:12px;color:#94a3b8;flex-wrap:wrap">'+
+      '<span style="background:'+st.dot+';width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 8px"></span>'+
+      '<b style="color:#e2e8f0">'+esc(st.txt)+'</b>'+
+      (t.round?'<span>方案 v'+t.round+'</span>':'')+
+      '<span>'+esc(meta)+'</span></div>'+
+    (failed&&t.fail_reason?'<div style="color:#f87171;font-size:12px;margin-top:4px">原因：'+esc(t.fail_reason)+'</div>':'')+
+    (t.detail?'<div class="ct-sec">任务书</div><div class="ct-pre">'+chLinkify(String(t.detail))+'</div>':'')+
+    (String(t.result_note||'').trim()?'<div class="ct-sec">执行记录</div><div class="ct-pre">'+chLinkify(String(t.result_note))+'</div>':'')+
+    ((pvU||t.output_url||dls.length)?
+      ('<div class="ct-sec">产出</div><div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px">'+
+        (pvU?'<a href="'+esc(pvU)+'" target="_blank" rel="noopener" style="color:#60a5fa">预览</a>':'')+
+        (t.output_url?'<a href="'+esc(t.output_url)+'" target="_blank" rel="noopener" style="color:#60a5fa">产出链接</a>':'')+
+        dls.map(d=>'<a href="javascript:void(0)" style="color:#60a5fa" onclick="downloadDeliverable(\''+esc(String(d.stored_name||''))+'\',this)">'+esc(d.orig_name||d.stored_name||'附件')+'</a>').join('')+
+      '</div>'):'')+
+    '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">'+
+      (rootM?'<button class="btn tiny ghost" onclick="chTaskClose();openChat('+parseInt(rootM[2],10)+')">回出生会话 #'+rootM[2]+'</button>':'')+
+      ((t.job_state||{}).job_id?'<button class="btn tiny ghost" onclick="showJobLog('+(t.job_state.job_id||0)+')">看日志</button>':'')+
+      '<button class="btn tiny ghost" onclick="chTaskClose();originScope=\'chat\';navTo(curId,\'tasks\')">在任务页打开</button>'+
+    '</div></div>';
+  bg.classList.add('show');
 }
 function renderChatTasks(){
   const box=document.getElementById('chTasks');
@@ -3163,7 +3206,7 @@ function renderChatTasks(){
     const st=chTaskState(t);
     const d=String(t.updated_at||t.created_at||'').slice(5,10);
     return '<div class="ctr'+(st.closed?' closed':'')+'">'+
-      '<div class="tt"><a href="javascript:void(0)" onclick="gotoChatTask('+t.id+')">#'+t.id+' '+esc(String(t.title||'').slice(0,60))+'</a></div>'+
+      '<div class="tt"><a href="javascript:void(0)" onclick="chTaskModal('+t.id+')">#'+t.id+' '+esc(String(t.title||'').slice(0,60))+'</a></div>'+
       '<div class="tm"><span class="dot" style="background:'+st.dot+'"></span><span>'+esc(st.txt)+'</span>'+(d?'<span>'+esc(d)+'</span>':'')+'</div>'+
     '</div>';
   }).join('');
