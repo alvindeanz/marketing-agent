@@ -84,6 +84,17 @@ async function runClaude(cfg, opts) {
   }
 }
 
+/* spawn 超时的取值顺序：调用方显式 timeoutMs > runner_host 按 job 类型注入的
+   llmTimeoutMsDefault > 基础 jobTimeoutMin。第二档是 2026-10-24 补的：listener 的
+   job 看门狗早按 jobTimeoutMinByType 给 execute/apply 放宽到 60 分（2026-09-21 Alvin 批），
+   但这里一直回落 30 分基础值，内层先杀外层白放宽，一天 8 例 1801s 腰斩
+   （Oak #479、Midea #494/#1562 各两次、Badger #1025/#455/#1634）。 */
+function resolveTimeoutMs(cfg, opts) {
+  if (opts.timeoutMs) return opts.timeoutMs;
+  if (cfg.llmTimeoutMsDefault) return cfg.llmTimeoutMsDefault;
+  return (cfg.jobTimeoutMin || 30) * 60 * 1000;
+}
+
 function runClaudeOnce(cfg, opts) {
   const prompt = String(opts.prompt || '');
   if (!prompt.trim()) return Promise.reject(new Error('runClaude called with an empty prompt'));
@@ -91,7 +102,7 @@ function runClaudeOnce(cfg, opts) {
   const log = opts.log || function () {};
   const model = opts.model || cfg.claudeModel || 'opus';
   const allowedTools = opts.allowedTools || DEFAULT_ALLOWED_TOOLS;
-  const timeoutMs = opts.timeoutMs || (cfg.jobTimeoutMin || 30) * 60 * 1000;
+  const timeoutMs = resolveTimeoutMs(cfg, opts);
   const label = opts.label || 'claude';
   const args = ['-p', prompt, '--model', model, '--allowedTools', allowedTools];
 
@@ -196,4 +207,4 @@ function runClaudeOnce(cfg, opts) {
   });
 }
 
-module.exports = { runClaude, killAll, isSpawnFlake, DEFAULT_ALLOWED_TOOLS };
+module.exports = { runClaude, killAll, isSpawnFlake, resolveTimeoutMs, DEFAULT_ALLOWED_TOOLS };

@@ -4,7 +4,7 @@
    背景：2026-10-06 ros 上 claude CLI 三分钟窗口内连死两个 job（4 秒退出码 1，零输出），
    这类 spawn 抖动原地重试一次；真失败（有输出、超时、跑了很久）绝不吃进重试。 */
 const assert = require('assert');
-const { isSpawnFlake } = require('../seo-worker/lib/llm');
+const { isSpawnFlake, resolveTimeoutMs } = require('../seo-worker/lib/llm');
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -33,6 +33,20 @@ t('跑满 30 秒以上不是 flake（模型已经在干活）', () => {
 t('超时与正常退出都不是 flake', () => {
   assert.strictEqual(isSpawnFlake(null, '', '', 4000, true), false, 'timedOut');
   assert.strictEqual(isSpawnFlake(0, '', '', 4000, false), false, 'exit 0');
+});
+
+t('spawn 超时取值：显式 > 分档注入 > 基础 jobTimeoutMin', () => {
+  assert.strictEqual(resolveTimeoutMs({ jobTimeoutMin: 30 }, { timeoutMs: 1000 }), 1000, '调用方显式优先');
+  assert.strictEqual(resolveTimeoutMs({ jobTimeoutMin: 30, llmTimeoutMsDefault: 55 * 60000 }, {}), 55 * 60000, 'runner_host 注入的分档值');
+  assert.strictEqual(resolveTimeoutMs({ jobTimeoutMin: 30 }, {}), 30 * 60000, '基础值兜底');
+  assert.strictEqual(resolveTimeoutMs({}, {}), 30 * 60000, '缺配置默认 30 分');
+});
+
+t('execute/apply 的 1801s 腰斩口径：60 分档注入后内层应拿 55 分', () => {
+  // runner_host 的注入算式：max(typedMin - 5, jobTimeoutMin) * 60000
+  const typedMin = 60, base = 30;
+  const injected = Math.max(typedMin - 5, base) * 60000;
+  assert.strictEqual(resolveTimeoutMs({ jobTimeoutMin: base, llmTimeoutMsDefault: injected }, {}), 55 * 60000);
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

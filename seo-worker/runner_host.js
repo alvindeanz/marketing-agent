@@ -83,6 +83,14 @@ async function main() {
     throw new Error('runner ' + runnerPath + ' does not export run()');
   }
 
+  /* 内层 LLM 预算对齐 job 分档（2026-10-24）：listener 看门狗按 jobTimeoutMinByType 放宽的
+     类型，spawn 预算跟着放宽，减 5 分钟留给收尾与失败落账（外层硬杀会丢 per-task 错误账）。
+     不在分档表里的类型不动，仍走 jobTimeoutMin 基础值。 */
+  const typedMin = Number(cfg.jobTimeoutMinByType && cfg.jobTimeoutMinByType[job.type]) || 0;
+  if (typedMin > cfg.jobTimeoutMin) {
+    cfg.llmTimeoutMsDefault = Math.max(typedMin - 5, cfg.jobTimeoutMin) * 60 * 1000;
+  }
+
   // payload can arrive as a JSON string from PHP. Normalize once, here.
   job.payload = safeJson(job.payload, {}) || {};
   const payloadKeys = Object.keys(job.payload);
