@@ -118,6 +118,17 @@ async function headStatus(url) {
   } catch (e) { return 0; }
 }
 
+/* 平台生成物整类豁免（2026-10-24，Badger #455/#1633 与 Sungait 两度实证）：Shopify 自动把
+   /agents.md 塞进 sitemap，商家后台不可编辑，报了也没人能修，按平台整类豁免不按客户记名单。
+   豁免不是消失：台账与 digest 都带「豁免 N 条」，误杀有出口（从这里删一行）。 */
+const PLATFORM_JUNK_EXEMPT = { shopify: new Set(['/agents.md']) };
+
+function junkExempt(platform, u) {
+  const ex = PLATFORM_JUNK_EXEMPT[String(platform || '').toLowerCase()];
+  if (!ex) return false;
+  try { return ex.has(new URL(u).pathname.replace(/\/+$/, '')); } catch (e) { return false; }
+}
+
 async function runClient(cid) {
   const context = await api.getContext(cid);
   const profile = context && context.profile;
@@ -133,9 +144,12 @@ async function runClient(cid) {
 
   // 1. sitemap 杂项
   const junk = [];
+  let exempted = 0;
   for (const u of urls) {
     const ext = extOf(u);
-    if (!PAGE_EXT_OK.has(ext)) junk.push({ url: u, ext });
+    if (PAGE_EXT_OK.has(ext)) continue;
+    if (junkExempt(profile.platform, u)) { exempted++; continue; }
+    junk.push({ url: u, ext });
   }
   for (const j of junk.slice(0, 10)) j.status = await headStatus(j.url);
 
@@ -151,13 +165,14 @@ async function runClient(cid) {
     } catch (e) { log(name + ': GSC 差集失败 :: ' + e.message); }
   }
 
-  const row = { cid, name, checked_at: today, sitemap_urls: urls.length, sources: sm.sources.length, junk, zero_impression: zero };
+  const row = { cid, name, checked_at: today, sitemap_urls: urls.length, sources: sm.sources.length, junk, junk_exempted: exempted, zero_impression: zero };
   const ws = path.join(cfg.workspaceRoot, profile.workspace_dir || String(cid));
   try {
     const mdFile = path.join(ws, 'notes', 'site_hygiene.md');
     fs.mkdirSync(path.dirname(mdFile), { recursive: true });
     const lines = ['# 站点卫生周检（site_hygiene 自动生成，勿手编）', '', '检查日 ' + today + '，sitemap ' + urls.length + ' 条 URL（' + sm.sources.length + ' 个文件）', ''];
     lines.push('## sitemap 杂项（非页面扩展名）');
+    if (exempted) lines.push('- 豁免 ' + exempted + ' 条（平台生成物，名单见 site_hygiene.js PLATFORM_JUNK_EXEMPT）');
     if (!junk.length) lines.push('- 无');
     for (const j of junk) lines.push('- ' + j.url + '（.' + j.ext + (j.status !== undefined ? '，HTTP ' + j.status : '') + '）');
     lines.push('');
