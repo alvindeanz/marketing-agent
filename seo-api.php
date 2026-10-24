@@ -8746,6 +8746,11 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
         $sets[]='status=?';$args[]=$i['status'];
         /* 重开已归档的 chat 单要回到视野（批五 1）：状态离开 done 就解除归档，置 done 的归档交给读入口扫帚。 */
         if($i['status']!=='done'){ensure_task_archived();$sets[]='archived=0';}
+        /* done 不停人（2026-10-24 Alvin 停人三问）：收口动作必须清红点，未了事项的出口是拆跟进任务，
+           不是贴在尸体上的标。task_close 一直就清（见 task_close 的 attention=0），人工 PATCH 收口
+           此前不清，Haakaa #1639 与 55 号四张即此病。事后抽查要重新点名的走显式 attention=1
+           （spotcheck FAIL 对已 done 单的 PATCH 带 attention 字段），不受此拦。 */
+        if($i['status']==='done'&&!array_key_exists('attention',$i)){$sets[]='attention=0';}
     }
     if(isset($i['owner_type'])){
         if(!in_array($i['owner_type'],['agency','client','agent'],true))res(400,['error'=>'bad owner_type']);

@@ -827,7 +827,15 @@ async function report(all, sprint, retried) {
     const block = '\n\n[harness ' + new Date().toISOString().slice(0, 16).replace('T', ' ') + '] 阻塞：\n' + list.map((b) => '- ' + b.kind + '：' + b.text).join('\n');
     const note = String(t.result_note || '');
     if (note.includes('[harness ') && list.every((b) => note.includes(b.text))) continue;
-    if (!DRY) await call('PATCH', '/tasks/' + id, { attention: 1, result_note: note + block });
+    /* 停人三问（2026-10-24 Alvin 定）：红点只给「机器没有出口、等待有代价、没有别的认领队列」
+       三问全是的阻塞。这里只有执行失败满足（红线：失败 job 不自动重试，人是唯一出口）；
+       人工任务/待人工配图/待人工验证/待判/判决过期各有既有认领面（周检清单、manual_checks、
+       harness 自己排判），全打红点等于全板常红，只记 note 台账不打标。2026-10-24 普查：
+       92 张停人里 39 张是本写回打在人工位上的，即此病。 */
+    const needsAtt = list.some((b) => b.kind === '执行失败' || b.kind === '重排后仍失败');
+    const patch = { result_note: note + block };
+    if (needsAtt) patch.attention = 1;
+    if (!DRY) await call('PATCH', '/tasks/' + id, patch);
   }
 
   // 卡时效刷新（2026-09-29 ticket #9）：数据窗在卡生成时定死，卡在发卡队列里躺久了
