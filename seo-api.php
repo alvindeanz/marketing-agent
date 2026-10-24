@@ -8715,7 +8715,14 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
         $sets[]='priority=?';$args[]=$i['priority'];
     }
     if(isset($i['title'])){$sets[]='title=?';$args[]=(string)$i['title'];}
-    if(isset($i['detail'])){$sets[]='detail=?';$args[]=(string)$i['detail'];}
+    if(isset($i['detail'])){
+        /* 空 detail 护栏（2026-10-24 Alvin 批）：全量覆盖允许空串等于一把没有保险的枪，
+           手滑一条 PATCH 就静默清空任务书（当日 #1326 实证，靠会话缓存才逐字节救回）。
+           真要清空必须显式带 allow_empty_detail=1，误触直接 400。 */
+        if(trim((string)$i['detail'])===''&&empty($i['allow_empty_detail']))
+            res(400,['error'=>'detail 为空：清空任务书需显式传 allow_empty_detail=1（防手滑静默清空护栏）']);
+        $sets[]='detail=?';$args[]=(string)$i['detail'];
+    }
     if(isset($i['sprint'])){$sets[]='sprint=?';$args[]=sprint_label_norm((int)$trowP['client_id'],(string)$i['sprint']);} /* 批二 C */
     if(isset($i['output_url'])){$sets[]='output_url=?';$args[]=(string)$i['output_url'];}
     if(isset($i['ops'])){$sets[]='ops=?';$args[]=(string)$i['ops'];$sets[]='card_kind=?';$args[]=card_kind_of((string)$i['ops']);}

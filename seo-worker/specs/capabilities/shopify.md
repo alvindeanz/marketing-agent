@@ -48,6 +48,7 @@
 | deliverable-file-write | agent_apply | 本地交付物写入：把任务工作区修订稿落到 /data/aira/clients/<客户>/reports/ 正式路径，白名单路径+写前留档+lint+回读，契约见「本地交付物写入契约」 |
 | report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
 | report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
+| report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
 <!-- PLANNING_VIEW_END -->
 
 ## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）
@@ -59,6 +60,7 @@
 - HTML 交付落位后必须过 lint：python3 /data/aira/scripts/deliverable_lint.py <落位文件>，输出非 PASS 用留档还原并停手回报。
 - 写后回读：重读落位文件与来源修订稿逐字节比对，不一致用留档还原并报失败。
 - 收口 note 必须写明四件：来源修订稿路径、落位路径、留档文件名、lint 结果（xlsx/csv 写「不适用」）。
+- report-preview-deploy 同族：发布面只许本客户的 agencyreport 目录，发布后回读 URL 返回 200 才算数，URL 写进收口 note。
 
 
 ## 操作集说明
