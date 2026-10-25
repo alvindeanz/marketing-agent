@@ -28,6 +28,10 @@ pull_data（零 LLM 四源：GSC/GA4/Semrush/content_registry，顺带 upsert �
    - **闸四件套**：新闸必须同时写明管什么动作、豁免面、误杀出口（人工豁免杆或降级路径）、命中台账（立功与误杀都记），缺一不许合；守卫正则必须用 agent 真实产出回放测试（ticket #41/#42、冷却闸血缘、凭证闸无条件触发，四次学费同一课）。
    - **闸年检**：每月按命中台账复盘，窗口内零立功且有误杀的闸自动降一级（硬到软、软到提示、提示到拆除）；立过功的留，不许凭感觉拆。方案评审在北极星三问外加第四问：本方案新增几个申报-现实契约点、几道闸，新增的要自辩。
 
+## gym（打分与优化地基，2026-10-25 Alvin 定名）
+
+worker 每次 LLM 调用自动落 trace（`lib/trace.js`，`<配置目录>/traces/`，llm.js 封套解析 session 轨迹）；五类纠偏信号由 `tools/label_sync.js` 收进标签账本；`tools/label_stats.js`（人触发，月底随 DEFECTS 复盘）打印四道成熟度 Gate，优化动作（judge 校准、蒸馏升级、prompt 优化）按 Gate 解锁不按日历。gym 相关新工具一律 `gym_` 前缀。规划在 PJ 侧 PLAN.md W18。trace 是账本不是闸：任何 trace 失败不得影响 job。
+
 ## 部署
 
 `./deploy.sh check|api|worker`，凭据在 .deploy-env（gitignored，含 ROS_PASS/BT_PASS）。先 commit 再部署。api 先传 /tmp 远端 php -l 过了才落位；worker 备份、rsync 校验和白名单同步、双端哈希清单比对、node --check 加 require 加载校验、重启 systemd、失败自动回滚，DEPLOYED 文件记 rev。runner_host.js 顶层直接跑 main，不可 require；新 job 类型必须同时登记 runner_host 的 KNOWN_TYPES、seo-api 的 ensure_job_types、两边的 lanes 表；并且任何往惰性 ENUM 列写新值的入口都要先调对应的 ensure（agent_jobs.type 是 `ensure_job_types()`，seo_tasks.module 是 `ensure_task_module()`）：ENUM 没扩就插，MariaDB 非严格模式会静默截成空串（2026-08-29 plan_review job 195；2026-08-31 任务 module=paid 丢失）。加任何 ENUM 新值 = 改 PHP 校验 + ensure 函数 + 本条清单，三处。登记新 op = 能力清单（specs/capabilities/<平台>.md）+ release_policy.json 风险表 + 跑一次 `SEO_AGENT_TOKEN=... node seo-worker/tools/capability_broadcast.js --op <name> --apply`（零 LLM 广播：盖章失效全舰队旧的「缺执行器」判决，下轮自动重判；泛断言命中先人眼核再决定 --wide），三步缺一不可（#813 修清单 #1310 原样复发的教训）。
