@@ -4,7 +4,7 @@
    背景：2026-10-06 ros 上 claude CLI 三分钟窗口内连死两个 job（4 秒退出码 1，零输出），
    这类 spawn 抖动原地重试一次；真失败（有输出、超时、跑了很久）绝不吃进重试。 */
 const assert = require('assert');
-const { isSpawnFlake, resolveTimeoutMs } = require('../seo-worker/lib/llm');
+const { isSpawnFlake, resolveTimeoutMs, parseResultEnvelope } = require('../seo-worker/lib/llm');
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -47,6 +47,37 @@ t('execute/apply 的 1801s 腰斩口径：60 分档注入后内层应拿 55 分'
   const typedMin = 60, base = 30;
   const injected = Math.max(typedMin - 5, base) * 60000;
   assert.strictEqual(resolveTimeoutMs({ jobTimeoutMin: base, llmTimeoutMsDefault: injected }, {}), 55 * 60000);
+});
+
+t('封套解析：result 正文还给 runner，session 与用量进 trace（T1）', () => {
+  const env = JSON.stringify({
+    type: 'result', subtype: 'success', is_error: false,
+    result: '# 方案\n正文', session_id: 'abc-123', total_cost_usd: 0.05,
+    usage: { input_tokens: 10 },
+  });
+  const p = parseResultEnvelope(env);
+  assert.strictEqual(p.parsed, true);
+  assert.strictEqual(p.text, '# 方案\n正文');
+  assert.strictEqual(p.sessionId, 'abc-123');
+  assert.strictEqual(p.costUsd, 0.05);
+  assert.strictEqual(p.usage.input_tokens, 10);
+});
+
+t('封套解析：不是封套一律原样返回（旗标关闭/老 CLI/半截输出）', () => {
+  assert.strictEqual(parseResultEnvelope('普通文本输出').parsed, false);
+  assert.strictEqual(parseResultEnvelope('普通文本输出').text, '普通文本输出');
+  assert.strictEqual(parseResultEnvelope('{"type":"result"').parsed, false, '半截 JSON 原样');
+  assert.strictEqual(parseResultEnvelope('{"foo":1}').parsed, false, '无 type 字段原样');
+  assert.strictEqual(parseResultEnvelope('{"type":"result","result":null}').parsed, false, 'result 非字符串原样');
+  assert.strictEqual(parseResultEnvelope('').text, '');
+});
+
+t('封套解析：模型正文自己是 JSON 时不被二次解包', () => {
+  const inner = '{"tasks":[1,2]}';
+  const env = JSON.stringify({ type: 'result', result: inner, session_id: 's' });
+  const p = parseResultEnvelope(env);
+  assert.strictEqual(p.parsed, true);
+  assert.strictEqual(p.text, inner, '只解一层封套');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

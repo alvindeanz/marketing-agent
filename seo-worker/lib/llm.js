@@ -8,6 +8,7 @@
 const { spawn } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
+const trace = require('./trace');
 
 // Every live claude process, so runner_host can tear them down on SIGTERM.
 const liveChildren = new Set();
@@ -52,6 +53,31 @@ function killAll(signal) {
  * 纯函数，单测在 tests/llm.test.js。
  */
 const SPAWN_FLAKE_MAX_MS = 30000;
+
+/**
+ * --output-format json 的封套解析（T1 trace，2026-10-25）。成功时 stdout 是一个
+ * {type:'result', result:'<模型正文>', session_id, usage, total_cost_usd} 的 JSON，
+ * 解出正文还给 runner（契约不变），session_id 等进 trace。解析不动原文：不是封套
+ * （旗标关了、CLI 老版本、半截输出）一律原样返回，parsed=false。纯函数，单测在 tests/llm.test.js。
+ */
+function parseResultEnvelope(stdout) {
+  const raw = String(stdout || '');
+  const t = raw.trim();
+  if (!t.startsWith('{') || t.indexOf('"type"') === -1) return { text: raw, parsed: false };
+  try {
+    const j = JSON.parse(t);
+    if (j && j.type === 'result' && typeof j.result === 'string') {
+      return {
+        text: j.result,
+        sessionId: j.session_id || null,
+        usage: j.usage || null,
+        costUsd: typeof j.total_cost_usd === 'number' ? j.total_cost_usd : null,
+        parsed: true,
+      };
+    }
+  } catch (e) { /* 不是封套 */ }
+  return { text: raw, parsed: false };
+}
 function isSpawnFlake(code, stdout, stderr, durationMs, timedOut) {
   if (timedOut || code === 0) return false;
   if (durationMs >= SPAWN_FLAKE_MAX_MS) return false;
@@ -105,6 +131,7 @@ function runClaudeOnce(cfg, opts) {
   const timeoutMs = resolveTimeoutMs(cfg, opts);
   const label = opts.label || 'claude';
   const args = ['-p', prompt, '--model', model, '--allowedTools', allowedTools];
+  if (cfg.llmJsonEnvelope !== false) args.push('--output-format', 'json');
 
   log(
     label +
@@ -170,15 +197,32 @@ function runClaudeOnce(cfg, opts) {
       finish(reject, new Error('claude process error: ' + err.message));
     });
 
+    /* trace 落账（成功与失败都记，失败的 trace 对复盘更值钱）。
+       record 内部全程 try/catch，绝不反噬 job。 */
+    function traceCall(ok, text, env2, error, durationMs) {
+      trace.record({
+        prompt,
+        stdout: text,
+        stderr,
+        model,
+        label,
+        startedAt: new Date(started).toISOString(),
+        durationMs,
+        ok,
+        error,
+        sessionId: (env2 && env2.sessionId) || null,
+        usage: (env2 && env2.usage) || null,
+        costUsd: env2 ? env2.costUsd : null,
+        cwd: opts.cwd,
+      });
+    }
+
     child.on('close', (code, signal) => {
       const durationMs = Date.now() - started;
       if (timedOut) {
-        finish(
-          reject,
-          new Error(
-            label + ': claude timed out after ' + Math.round(durationMs / 1000) + 's, killed'
-          )
-        );
+        const msg = label + ': claude timed out after ' + Math.round(durationMs / 1000) + 's, killed';
+        traceCall(false, stdout, parseResultEnvelope(stdout), 'timeout', durationMs);
+        finish(reject, new Error(msg));
         return;
       }
       if (code !== 0) {
@@ -191,20 +235,39 @@ function runClaudeOnce(cfg, opts) {
             stderr.replace(/\s+/g, ' ').slice(0, 800)
         );
         err.spawnFlake = isSpawnFlake(code, stdout, stderr, durationMs, timedOut);
+        traceCall(false, stdout, parseResultEnvelope(stdout), 'exit ' + code, durationMs);
         finish(reject, err);
         return;
       }
+      const env2 =
+        cfg.llmJsonEnvelope !== false ? parseResultEnvelope(stdout) : { text: stdout, parsed: false };
       log(
         label +
           ': done in ' +
           Math.round(durationMs / 1000) +
           's, ' +
-          stdout.length +
-          ' chars of output'
+          env2.text.length +
+          ' chars of output' +
+          (env2.sessionId ? ', session ' + env2.sessionId : '')
       );
-      finish(resolve, { stdout, stderr, durationMs });
+      traceCall(true, env2.text, env2, null, durationMs);
+      finish(resolve, {
+        stdout: env2.text,
+        stderr,
+        durationMs,
+        sessionId: env2.sessionId || null,
+        usage: env2.usage || null,
+        costUsd: typeof env2.costUsd === 'number' ? env2.costUsd : null,
+      });
     });
   });
 }
 
-module.exports = { runClaude, killAll, isSpawnFlake, resolveTimeoutMs, DEFAULT_ALLOWED_TOOLS };
+module.exports = {
+  runClaude,
+  killAll,
+  isSpawnFlake,
+  resolveTimeoutMs,
+  parseResultEnvelope,
+  DEFAULT_ALLOWED_TOOLS,
+};

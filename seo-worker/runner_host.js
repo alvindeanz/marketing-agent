@@ -68,6 +68,10 @@ async function main() {
   const api = new Api(cfg);
   const log = makeLog(job);
 
+  /* T1 trace 落盘（PLAN W18）：一 job 一进程，这里 init 一次，llm.js 每次调用自动落账。
+     trace 是账本不是闸，init 失败静默跳过。 */
+  try { require('./lib/trace').init(cfg, job); } catch (e) { /* 不挡 job */ }
+
   if (!KNOWN_TYPES.includes(job.type)) {
     throw new Error('unknown job type "' + job.type + '", known types: ' + KNOWN_TYPES.join(', '));
   }

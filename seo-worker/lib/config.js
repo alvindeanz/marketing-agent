@@ -113,6 +113,14 @@ const DEFAULTS = {
   blogReviewClients: [],
   workspaceRoot: '/data/aira/clients',
   defaultClientDir: 'powerdekorfloors',
+  /* T1 trace 落盘（PLAN W18，2026-10-25 Alvin 批）：每次 LLM 调用的 prompt/stdout/meta
+     （加 session jsonl 工具轨迹）归档目录。空串 = config 文件所在目录下 traces/，
+     部署目录在 NFS 上即双 worker 单一事实源（硬规矩 8 ③）。写失败不挡 job。 */
+  traceDir: '',
+  traceRetentionDays: 180,
+  /* claude -p 加 --output-format json 拿 session_id 与用量（trace 要）。runner 拿到的
+     stdout 仍是模型正文（llm.js 解封套），契约不变。CLI 版本不认该旗标时设 false 全退旧行为。 */
+  llmJsonEnvelope: true,
   httpTimeoutMs: 60000,
   gscSpamExcludeRegex: '(jack|jek|jak|jeck)\\s?toto',
   // Skip an external pull when the newest snapshot for that source is younger
@@ -238,6 +246,14 @@ function load() {
     ? cfg.blogReviewClients.map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0)
     : [];
   cfg.semrushDb = String(cfg.semrushDb || DEFAULTS.semrushDb);
+  cfg.traceRetentionDays = Number(cfg.traceRetentionDays) || DEFAULTS.traceRetentionDays;
+  cfg.llmJsonEnvelope = cfg.llmJsonEnvelope !== false;
+  {
+    let td = String(cfg.traceDir || '');
+    if (!td) td = path.join(path.dirname(configPath()), 'traces');
+    else if (!path.isAbsolute(td)) td = path.join(path.dirname(configPath()), td);
+    cfg.traceDir = td;
+  }
 
   // Resolve relative paths against the worker root.
   if (cfg.ga4KeyFile && !path.isAbsolute(cfg.ga4KeyFile)) {
