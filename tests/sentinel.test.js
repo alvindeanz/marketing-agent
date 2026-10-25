@@ -30,22 +30,28 @@ function series(days, valueOf) {
   return out;
 }
 
-t('点击周环比掉 50% 且基数够，命中', () => {
-  const s = { gsc_clicks: series(21, (i) => (i < 7 ? 2 : 4)) }; // w0=14, w1=28
+t('点击连续两窗对基线掉 50% 且基数够，命中（2026-10-25 改两窗连续塌方）', () => {
+  const s = { gsc_clicks: series(21, (i) => (i < 14 ? 2 : 4)) }; // w0=14, w1=14, 基线 w2=28
   const alerts = sentinel.evalSentinel(s);
   assert.strictEqual(alerts.length, 1);
   assert.strictEqual(alerts[0].metric, 'gsc_clicks');
   assert.strictEqual(alerts[0].dropPct, 50);
+  assert.strictEqual(alerts[0].weeks, 2);
   assert.strictEqual(alerts[0].anchor, '2026-10-14');
 });
 
-t('点击掉得狠但上周不足 20 次（小样本），不开单', () => {
-  const s = { gsc_clicks: series(21, (i) => (i < 7 ? 0 : 2)) }; // w1=14 < floor 20
+t('点击只塌最近一窗（上一窗仍在基线水平），振荡不开单（HornTech #1373 学费）', () => {
+  const s = { gsc_clicks: series(21, (i) => (i < 7 ? 2 : 4)) }; // w1=28 未跌破
   assert.strictEqual(sentinel.evalSentinel(s).length, 0);
 });
 
-t('点击只掉 20%，不到 30% 阈值，不开单', () => {
-  const s = { gsc_clicks: series(21, (i) => (i < 7 ? 8 : 10)) };
+t('点击掉得狠但基线窗不足 20 次（小样本），不开单', () => {
+  const s = { gsc_clicks: series(21, (i) => (i < 14 ? 0 : 2)) }; // 基线 w2=14 < floor 20
+  assert.strictEqual(sentinel.evalSentinel(s).length, 0);
+});
+
+t('点击持续只掉 20%，不到 30% 阈值，不开单', () => {
+  const s = { gsc_clicks: series(21, (i) => (i < 14 ? 8 : 10)) };
   assert.strictEqual(sentinel.evalSentinel(s).length, 0);
 });
 
@@ -62,7 +68,7 @@ t('曝光单周掉 40% 不算，连续两周对基线掉 40% 才命中', () => {
 });
 
 t('GSC 窗口取数空洞（覆盖不足 5 天），宁可漏报不误报', () => {
-  const s = { gsc_clicks: series(21, (i) => (i < 7 ? 1 : 5)).filter((_, idx) => idx % 2 === 0) };
+  const s = { gsc_clicks: series(21, (i) => (i < 14 ? 1 : 5)).filter((_, idx) => idx % 2 === 0) };
   assert.strictEqual(sentinel.evalSentinel(s).length, 0);
 });
 
@@ -115,7 +121,7 @@ t('去重：未结哨兵单拦住，14 天内结过的也拦，老单不拦', ()
 });
 
 t('开单文案：标题带降幅与锚定日，detail 带生态级并单指引与四选一要求，置顶', () => {
-  const alerts = sentinel.evalSentinel({ gsc_clicks: series(21, (i) => (i < 7 ? 2 : 4)) });
+  const alerts = sentinel.evalSentinel({ gsc_clicks: series(21, (i) => (i < 14 ? 2 : 4)) });
   const task = sentinel.buildTask('X', alerts, ['https://a/ ：100 -> 10']);
   assert.ok(task.title.startsWith(sentinel.TITLE_PREFIX));
   assert.ok(task.title.includes('降50%'));

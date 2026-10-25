@@ -15,8 +15,11 @@ const LOOKBACK_DAYS = 35; // 询盘两个 14 天窗 28 天 + GSC 迟到缓冲
 // floor 是对「上一窗/基线窗」的最低量门槛，小样本客户不开单。
 // 询盘用 14 天窗：周窗基数 4 的 -50% 泊松误报率约 24%，14 天窗基数 10 压到 7% 以下。
 // coverage 是每窗至少要有数据行的天数（GSC 序列天天有行，覆盖不足说明取数空洞，宁漏不误报）。
+// 点击改两窗连续塌方（2026-10-25 Alvin 批，HornTech #1373 学费：周基数 24 刚过 floor 20，
+// 正常振荡 22,15,15,22,24,11,17 也能触发 -50% 单；floor 提 50 会让周基数 20 量级的站对真塌方
+// 永久失聪，所以收紧的是持续性不是基数，与曝光同口径，代价是报警晚一个窗）。
 const RULES = [
-  { metric: 'gsc_clicks', label: '自然点击', winDays: 7, drop: 0.3, floor: 20, weeks: 1, coverage: 5 },
+  { metric: 'gsc_clicks', label: '自然点击', winDays: 7, drop: 0.3, floor: 20, weeks: 2, coverage: 5 },
   { metric: 'ga4_leads', label: '自然询盘', winDays: 14, drop: 0.5, floor: 10, weeks: 1, coverage: 0 },
   { metric: 'gsc_impressions', label: '搜索曝光', winDays: 7, drop: 0.4, floor: 1000, weeks: 2, coverage: 5 },
 ];
