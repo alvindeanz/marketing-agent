@@ -20,7 +20,23 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
-### 2026-10-24 AIRA 机制四刀 + 空 detail 护栏（Louvresky 七问摸底修复批，Alvin 批「开工吧」「顺手加护栏」，rev f58a17d + 9f8d005）
+### 2026-10-25 AIRA T1-T4 打分与优化地基（PLAN W18，Alvin 批「按照你的规划去改造」，rev 1b75065）
+
+- T1 trace 落盘：runner_host 一 job 一 init，llm.js 每次 claude 调用把完整 prompt、模型正文、meta
+  （model/label/时长/specs rev/worker/用量/成本）加 session jsonl 工具轨迹落 `<配置目录>/traces/<cid>/<job_id>-<type>/`，
+  180 天日度清扫（golden/ 豁免）。纪律：账本不是闸，trace 任何失败静默跳过零反噬。
+- llm.js 契约注意：claude -p 现在带 `--output-format json`，runner 拿到的 stdout 仍是模型正文（llm.js 解封套），
+  但 resolve 对象多了 sessionId/usage/costUsd 字段。**坑与退路**：哪台 worker 的 CLI 版本不认此旗标，
+  该机 config.json 设 `llmJsonEnvelope:false` 整体退旧行为（trace 照记，只少 session 轨迹）。ros 真跑冒烟已实证；
+  Mac worker 首个 job 跑完值得看一眼 traces 目录与 job 是否正常收口。
+- T2 标签回挂：tools/label_sync.js 把五类信号（人推翻判决/方案打回/spotcheck fail+warn/cohort 回测/卡上非 agree）
+  统一形状落 /data/aira/projects/MA/memory/labels/labels.jsonl（labelKey 去重），每跑一次记 judged/overridden
+  快照进 stats_history.jsonl（推翻率趋势分母）。解析纯函数在 lib/labels.js。
+- T4 统计打分：tools/label_stats.js（默认先 sync），seo/paid 分桶印四道 Gate 进度（A judge 校准 50/20、
+  B 蒸馏升级 30 天、C 结果层成熟窗、D prompt 优化 golden 50+holdout 25+trace 100）。人触发，随月底 DEFECTS 复盘跑。
+  首跑实证：70 条标签入账（card 44/plan_reject 9/spotcheck 3/cohort 14），judged 195。
+- 测试：node tests/ 全套 40 件绿（新增 trace 7 件、labels 8 件，llm 加封套 3 件）；php 未动。
+- 下一步（欠账已写 W18）：cohort_backtest 补 paid 侧回测窗口表；golden 集月底复盘攒样本。待部署 worker。
 
 - A1 出生即有家：task_insert 对 sprint 泳道单空 sprint 盖当期章，空标签不再是「前端算本期、轮子算不可见」的第三态（#1461/#1617 族绝育）。
 - A2 判定窗泳道维度：harness report() 的 scoped 加 origin 泳道入窗，修脱轮当日留下的推进断档；验证轮实证 5 张泳道单进放行卡清单。
