@@ -1696,8 +1696,10 @@ function inbox_refs_norm($v){
     if(is_string($v)){$d=json_decode($v,true);$v=($d===null)?[]:$d;}
     if(!is_array($v))return $out;
     /* 频道标记必须穿透归一化（2026-09-22 ctomi 事故：任务号自动挂引用回写 refs 时
-       白名单重建把 channel:true 冲掉，频道根隐身，下次开频道新建空根顶掉 133 条历史）。 */
+       白名单重建把 channel:true 冲掉，频道根隐身，下次开频道新建空根顶掉 133 条历史）。
+       module 同理（2026-10-27 频道分线）：被冲掉 = 分线频道查询失配 + worker 读不到线别。 */
     if(!empty($v['channel']))$out['channel']=true;
+    if(!empty($v['module'])&&in_array($v['module'],['seo','paid'],true))$out['module']=$v['module'];
     if($v&&array_keys($v)===range(0,count($v)-1))$v=['tasks'=>$v];
     foreach(['tasks','jobs'] as $k){
         $list=(isset($v[$k])&&is_array($v[$k]))?$v[$k]:[];
