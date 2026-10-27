@@ -4156,7 +4156,10 @@ if($m==='GET'&&$ROUTE==='/context'){
     }
 
     ensure_task_archived();
-    $tk=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND archived=0 ORDER BY FIELD(owner_type,'agent','agency','client'),FIELD(priority,'P0','P1','P2','P3'),id");
+    /* include_archived=1 连归档任务一起给（2026-10-27 cohort_backtest 需要翻旧账：done 批次
+       会被看板自动归档，回测熟窗常在归档之后，#1626 实证）。默认口径不变，只有回测用。 */
+    $withArch=!empty($_GET['include_archived']);
+    $tk=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=?".($withArch?'':' AND archived=0')." ORDER BY FIELD(owner_type,'agent','agency','client'),FIELD(priority,'P0','P1','P2','P3'),id");
     $tk->execute([$cid]);
     $tasks=$tk->fetchAll();
 

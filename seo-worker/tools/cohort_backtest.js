@@ -272,7 +272,8 @@ function runPaid(customerId, tasks, store) {
 }
 
 async function runClient(cid) {
-  const context = await api.getContext(cid);
+  /* 带归档一起拉：done 批次会被看板自动归档，熟窗常在归档之后（#1626 实证，2026-10-27） */
+  const context = await api.req('GET', '/context?client_id=' + encodeURIComponent(cid) + '&include_archived=1');
   const profile = context && context.profile;
   if (!profile) { log('client ' + cid + ': 无 profile，跳过'); return []; }
   const property = profile.gsc_property || profile.gsc_site;
