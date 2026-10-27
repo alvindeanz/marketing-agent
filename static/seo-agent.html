@@ -3187,6 +3187,21 @@ function chTaskState(t){
 /* 浮层明细（2026-10-24 Alvin 定「点开别跳任务页」）：数据用面板已拉的整行，零新增请求。
    只读红线：不放任何写操作按钮，看板的写口子只有一个的规矩不动；看日志/下载交付物是只读件，可放。 */
 function chTaskClose(){const bg=document.getElementById('chTaskBg');if(bg)bg.classList.remove('show')}
+/* result_note 是按时间正序堆叠的审计日志，最新事实在尾部。人第一眼要的是现状，不是
+   三天前的旧话（#1627 教训：头部压着一句过时的「#1626 还没落地」，最新方案在尾部）。
+   取最后一个 --- 机器段的摘要句；段尾若有后补的 [标签] 事件行（停人/熔断等），优先它。 */
+function noteLatest(note){
+  note=String(note||'').trim();
+  if(!note)return '';
+  const sep=note.lastIndexOf('\n---\n');
+  const seg=sep>=0?note.slice(sep+5):note;
+  const lines=seg.split('\n').map(s=>s.trim()).filter(Boolean)
+    .filter(l=>!/^\[(停人已通知|折返key)/.test(l));
+  if(!lines.length)return '';
+  let pick=/^\[/.test(lines[lines.length-1])?lines[lines.length-1]:lines[0];
+  pick=pick.replace(/\s+/g,' ');
+  return pick.length>180?pick.slice(0,178)+'…':pick;
+}
 function chTaskModal(id){
   const t=chTasks.filter(x=>x.id===id)[0];
   if(!t)return;
@@ -3216,7 +3231,7 @@ function chTaskModal(id){
       '<span>'+esc(meta)+'</span></div>'+
     (failed&&t.fail_reason?'<div style="color:#f87171;font-size:12px;margin-top:4px">原因：'+esc(t.fail_reason)+'</div>':'')+
     (t.detail?'<div class="ct-sec">任务书</div><div class="ct-pre">'+chLinkify(String(t.detail))+'</div>':'')+
-    (String(t.result_note||'').trim()?'<div class="ct-sec">执行记录</div><div class="ct-pre">'+chLinkify(String(t.result_note))+'</div>':'')+
+    (String(t.result_note||'').trim()?'<div class="ct-sec">最新进展</div><div class="ct-pre" style="color:#e2e8f0">'+chLinkify(noteLatest(t.result_note))+'</div><div class="ct-sec">执行记录全文（按时间正序，越往下越新）</div><div class="ct-pre">'+chLinkify(String(t.result_note))+'</div>':'')+
     ((pvU||t.output_url||dls.length)?
       ('<div class="ct-sec">产出</div><div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px">'+
         (pvU?'<a href="'+esc(pvU)+'" target="_blank" rel="noopener" style="color:#60a5fa">预览</a>':'')+

@@ -98,6 +98,24 @@ function parseSpotcheckMd(text, runName) {
 /** cohort_backtest 结果 → label（结果层信号，status=measured 才算）。 */
 function cohortLabel(rec, slug) {
   if (!rec || rec.status !== 'measured') return null;
+  /* paid 行（cohort_backtest 2026-10-27 接线）自带判读与口径说明：verdict 由类型主指标
+     （止血 cost/CPA、出价预算 CPA、文案 CTR）算好，低量与混杂的行 status 不是 measured
+     天然进不来。 */
+  if (rec.channel === 'paid') {
+    if (!rec.verdict) return null;
+    return {
+      at: rec.measured_at || null,
+      signal: 'cohort',
+      subject: 'task',
+      id: 'cohort#' + rec.taskId + '@' + slug + '@' + (rec.measured_at || ''),
+      client: slug,
+      module: 'paid',
+      verdict: rec.verdict,
+      fable_verdict: '',
+      why: String(rec.why || '').slice(0, 200) + '（' + (rec.klass || '') + '，' + (rec.scope || '') + '，' + (rec.window_days || '') + 'd 窗）',
+      src: 'cohort_results.json',
+    };
+  }
   const d = rec.delta || {};
   const why =
     'Δclicks ' + (d.clicks == null ? '?' : d.clicks) +

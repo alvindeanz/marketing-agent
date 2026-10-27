@@ -1656,6 +1656,30 @@ function chat_msg_insert($root,$kind,$body,$by,$refs=null){
     return (int)db()->lastInsertId();
 }
 
+/* 停人通知（2026-10-27 Alvin 批「等人时刻的一张嘴」）：通知挂状态转移的事实点，不挂预测。
+   值得进频道的状态转移只有两种：终态（收口回合管）和「开始等人」（本函数管）。方案一出就
+   预报「会自动放行/等人点卡」的旧做法全部退场——自动放行的几秒后收口回合自会说，真停人的
+   由本函数在停人落库的那一刻说。只对频道出身（chatw:/chat:/spawn:/report:）的任务回出生
+   频道；sprint 单不进频道，看板 attention 红点与停人清单是它们的位置。
+   幂等：同任务同日至多一条（note 打 [停人已通知 日期] 标），放行官轮询重判不重复喊。 */
+function hold_notify($tid,$why,$by='seo-worker'){
+    $q=db()->prepare("SELECT id,client_id,title,origin,result_note FROM seo_tasks WHERE id=?");
+    $q->execute([(int)$tid]);
+    $t=$q->fetch();
+    if(!$t)return;
+    if(!preg_match('/^(chatw|chat|spawn|report):(\d+)$/',(string)$t['origin'],$om))return;
+    $key='[停人已通知 '.gmdate('Y-m-d').']';
+    if(strpos((string)$t['result_note'],$key)!==false)return;
+    $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+    $rq->execute([(int)$om[2]]);
+    $root=$rq->fetch();
+    if(!$root)return;
+    task_append_note($tid,$key);
+    chat_msg_insert($root,'chat_agent','任务 #'.(int)$tid.'「'.mb_substr((string)$t['title'],0,40,'UTF-8').'」停下等人：'
+        .mb_substr(trim((string)$why),0,200,'UTF-8')
+        .'。细节在任务卡，放行类的可在看板点放行或回「放行 #'.(int)$tid.' 标题片段」。',$by);
+}
+
 /* 防抖窗口（2026-10-23 Alvin 批）：chat job 入队后先在 queued 停这么多秒才可领，
    窗内同会话的新消息并入同一轮（见消息 POST 的合并分支），opus 一次看全一起答。
    带催促词的消息不等窗。 */
@@ -2708,6 +2732,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             task_append_note($tid,'[hold-human] 确认卡任务交付时没有卡链接（静默提案或产线中断），不自动收口：等人裁决走发卡还是照提案落 fact，裁完人工收口开闸');
             audit('seo-worker','seo_task_card_hold',(string)$tid,['reason'=>'card task delivered without card link']);
+            hold_notify($tid,'确认卡任务交付时没有卡链接（静默提案或产线中断），等人裁决走发卡还是照提案落事实');
             res(200,['ok'=>true,'held'=>true]);
         }
         $errAA=task_close($tid,'accepted','[auto-accept] 只读交付默认放行（可逆，事后抽查+原地还原），无需人工放行');
@@ -2750,11 +2775,13 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         if(ops_halted($cidC)){
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             task_append_note($tid,'[auto-chain:execute] apply 无已批方案，请求续排 execute，但止损闩生效中，不排，等人。');
+            hold_notify($tid,'apply 缺已批方案且止损闩生效中（/stop），不自动续排，解闩（/resume）后再处理');
             res(200,['ok'=>true,'chained'=>false,'reason'=>'ops_halted']);
         }
         if($prevC>=1){
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             task_append_note($tid,'[auto-chain:execute] 第二次无方案（上次续排的 execute 没产出方案文件），熔断转人，不再自动续排。');
+            hold_notify($tid,'两次出不了可执行方案，已熔断转人，需人看根因或改任务书');
             res(200,['ok'=>true,'chained'=>false,'reason'=>'fused']);
         }
         list($jidsC,$skipC)=queue_task_jobs($cidC,'execute_task',[$tid],'seo-worker','seo_tasks_execute_auto');
@@ -2769,13 +2796,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
        熔断：同任务只自动落地一次。apply 失败会把失败 note 写回本端点，没有这道闸就是
        失败重排死循环（账本 bm 条的 20 连烧根因），所以查到任何 apply job 历史一律不再自动排。 */
     if(strpos((string)($cr['origin']??''),'chatw:')===0){
-        $rootIdW=(int)substr((string)$cr['origin'],6);
-        $rootW=null;
-        if($rootIdW>0){
-            $rqW=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
-            $rqW->execute([$rootIdW]);
-            $rootW=$rqW->fetch();
-        }
+        /* 频道消息统一走 hold_notify（按 origin 自查根），这里不再直接插频道行（2026-10-27） */
         $cidW=(int)($cr['client_id']??0);
         $seenW=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload=?");
         $seenW->execute([$cidW,json_encode(['task_ids'=>[$tid]],JSON_UNESCAPED_UNICODE)]);
@@ -2786,11 +2807,14 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
                在人工清单上烂着）。失败结果照样进闸A重判：判 drop 自动收口，判 do 续放行官
                （方案本身有错放行官判 redo 打回重出，额度一次，与非 chatw 来源同一条链）。 */
             list($rjW,)=queue_review_job($cidW,[$tid],'seo-worker','seo_tasks_review_auto');
-            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」有过落地史，按熔断规矩不自动重排 apply；结果已交闸A重判（判 do 走放行官裁决，判 drop 自动收口），细节在任务卡结果备注里。','seo-worker');
+            /* 中间态不进频道（2026-10-27 等人时刻的一张嘴）：闸A会续走，自动链条对人不存在；
+               最终判 drop 由收口回合说，判 do 停人由 hold_notify 说。 */
+            task_append_note($tid,'[熔断] 有过落地史，不自动重排 apply，结果已交闸A重判（判 do 走放行官，判 drop 自动收口）');
             res(200,['ok'=>true,'dispatch_grade'=>'halted','review_job_id'=>$rjW]);
         }
         if(ops_halted($cidW)){
-            if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，但止损闩生效中（/stop），不自动落地。解闩发 /resume 后人工放行。','seo-worker');
+            task_append_note($tid,'[止损闩] 方案已出但止损闩生效中（/stop），不自动落地，解闩（/resume）后人工放行');
+            hold_notify($tid,'方案已出但止损闩生效中（/stop），不自动落地，解闩（/resume）后人工放行');
             res(200,['ok'=>true,'dispatch_grade'=>'halted']);
         }
         $opsW=array_values(array_filter(array_map('trim',explode(',',(string)($cr['ops']??'')))));
@@ -2813,14 +2837,14 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         if($allCondW&&$condsW){
             db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
             task_append_note($tid,'[wait-condition] 等待：'.mb_substr(implode('；',$condsW),0,300,'UTF-8').'。条件满足由巡检自动续跑（授权已含在委托单里）');
-            if($rootW)chat_msg_insert($rootW,'chat_agent','任务 #'.$tid.'「'.$cr['title'].'」方案已出，但有前置条件：'.mb_substr(implode('；',$condsW),0,200,'UTF-8').'。已挂起等条件，巡检到条件满足会自动续跑并回报，不用人盯。','seo-worker');
+            /* 等条件不是等人，不进频道：巡检自动续，续完收口回合说话，停滞有泳道扫帚兜底（2026-10-27） */
             res(200,['ok'=>true,'dispatch_grade'=>'wait-condition','conditions'=>$condsW]);
         }
         if($gradeW==='auto'){
             list($ajW,)=queue_task_jobs($cidW,'apply_task',[$tid],'chat-dispatch-auto','seo_tasks_release');
             if($ajW){
                 task_append_note($tid,'[auto-apply chat] fable 频道判定的改动类派单，风险档可回滚'.($backW?'/有批文背书':'').'，按政策自动落地（apply job #'.$ajW[0].'），失败即熔断转人工');
-                if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，风险档可回滚，自动落地中（apply job #'.$ajW[0].'），落完回报。','seo-worker');
+                /* 「自动落地中」中间态行退场（2026-10-27）：落完收口回合说，失败走熔断/停人各自的嘴 */
             }
         }else{
             /* 频道意图携带（2026-09-14 Alvin 定）：chatw 委托本身就是双验过的人类执行意图，
@@ -2832,26 +2856,22 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
                 list($ajM,)=queue_task_jobs($cidW,'apply_task',[$tid],'mandate-carry','seo_tasks_release');
                 if($ajM){
                     task_append_note($tid,'[mandate-apply] 频道委托的执行意图视同放行（意图凭证见委托记录），不二次停卡，落地 apply job #'.$ajM[0].'，失败即熔断转人工');
-                    if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出，委托时的执行意图视同放行，落地中（apply job #'.$ajM[0].'），落完回报。','seo-worker');
+                    /* 「落地中」中间态行退场（2026-10-27）：落完收口回合说 */
                 }
             }else{
-                if($rootW)chat_msg_insert($rootW,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」方案已出但范围越出委托申报（条目含申报外操作），放行卡在任务卡上：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
+                /* 越范围是真停人时点（chatw 不自动排闸A，没有自动链条会推进它）：置停人标走统一嘴（2026-10-27） */
+                db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+                task_append_note($tid,'[越范围停人] 方案范围越出委托申报（条目含申报外操作），不自动落地，等人放行');
+                hold_notify($tid,'方案范围越出委托申报（条目含申报外操作），不自动落地');
             }
         }
         res(200,['ok'=>true,'dispatch_grade'=>$gradeW]);
     }
     /* Chat 派单（只读验证）：产出即完结不进待放行不排判定，结果回频道系统行，
        留痕给人工审计（Alvin 发起，不自动化）。 */
-    if(strpos((string)($cr['origin']??''),'spawn:')===0){
-        /* 立项即排产的任务出了方案：回频道提醒放行（判定与 L0 自动放行照常走，不在这动） */
-        $rootIdS=(int)substr((string)$cr['origin'],6);
-        if($rootIdS>0){
-            $rqS=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
-            $rqS->execute([$rootIdS]);
-            $rootS=$rqS->fetch();
-            if($rootS)chat_msg_insert($rootS,'chat_agent','任务 #'.$tid.'「'.$cr['title'].'」方案已出，进入判定与放行环节（可回滚项会自动放行，其余等人点放行卡）。','seo-worker');
-        }
-    }
+    /* spawn: 任务出方案不再进频道（2026-10-27 等人时刻的一张嘴）：判定与 L0 自动放行照常走，
+       自动放行的收口回合会报，判停人的由 hold_notify 在停人落库时说，预测性的「进入判定与
+       放行环节」对人没有动作价值。 */
     if(strpos((string)($cr['origin']??''),'report:')===0){
         /* 报告草稿：不自动验收（红线：对客发送必须人审）。通知终态化（2026-10-27 louvresky
            复盘）：固定模板 + 引用最新折返反馈原文 + 预览链接。原始结果备注截 300 字贴频道的
@@ -7878,6 +7898,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
                 db()->prepare("UPDATE seo_tasks SET status='blocked',attention=1 WHERE id=?")->execute([$tid]);
                 if(strpos((string)$t['result_note'],'[auto-release 停人] 确定性拒绝')===false)
                     task_append_note($tid,'[auto-release 停人] 确定性拒绝（方案契约或凭证问题），重试不会有不同结果，已停自动放行并转人工：剔除违规步骤重出方案，或人工拆单重走判定。方案重出后自动解锁。');
+                hold_notify($tid,'执行被确定性拒绝（方案契约或凭证问题），需剔除违规步骤重出方案或人工拆单');
                 continue;
             }
         }
@@ -7885,6 +7906,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
             db()->prepare("UPDATE seo_tasks SET status='blocked',attention=1 WHERE id=?")->execute([$tid]);
             if(strpos((string)$t['result_note'],'[auto-release 熔断] 本版方案')===false)
                 task_append_note($tid,'[auto-release 熔断] 本版方案已自动落地 '.$an0.' 次，第三次留人处理（已置 blocked 停人红点，方案重出后解锁）');
+            hold_notify($tid,'本版方案已自动落地 '.$an0.' 次，第三次留人处理，方案重出后解锁');
             continue;
         }
         list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],$mand0?'mandate-carry':'release-policy-l0','seo_tasks_release');
@@ -7982,6 +8004,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             task_append_note($tid,'[hold-human opus '.$stamp.'] 冲突['.$cf.']：'.$reason);
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             audit('opus-release','seo_release_hold',(string)$tid,['reason'=>$reason,'conflicts'=>$cf]);
+            hold_notify($tid,'放行官判停人（'.mb_substr($reason,0,120,'UTF-8').'），需人裁');
             /* 客户口径出口（2026-10-24 修 3，Sunseeker #434/#436/#437 停人挂三周的教训）：
                放行官判定停人根因是缺客户口径时给 client_question，这里自动拆成有人认领的
                客户口径确认单（机器拆单是出口，纯注记提醒不是，#1232 铁律），同母单去重。 */
@@ -8014,6 +8037,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
                 task_append_note($tid,'[hold-human opus '.$stamp.'] redo 已用过一次仍不过，停人：'.$reason);
                 db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
                 audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'redo twice: '.$reason]);
+                hold_notify($tid,'方案打回重出一次后仍不过，归人裁（'.mb_substr($reason,0,120,'UTF-8').'）');
                 $act['held'][]=$tid;continue;
             }
             task_append_note($tid,'[redo opus '.$stamp.'] 方案打回重出：'.$reason);
@@ -8051,6 +8075,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：本版方案已自动落地 '.$applyN.' 次（含判后重试），spend/不可逆类第三次归人。判词：'.$reason);
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
             audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'apply retry cap','apply_n'=>$applyN]);
+            hold_notify($tid,'本版方案已自动落地 '.$applyN.' 次，花钱或不可逆类第三次归人');
             $act['held'][]=$tid;continue;
         }
         if($applyN>=2){
@@ -8089,6 +8114,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             if(!$hasOut){
                 task_append_note($tid,'[hold-human opus '.$stamp.'] 分析任务无产出链接、预览或交付文件，无法验收');
                 db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+                hold_notify($tid,'分析任务没有产出链接、预览或交付文件，无法验收，需人看');
                 $act['held'][]=$tid;continue;
             }
             $err=task_close($tid,'accepted','分析报告已验收（opus 放行官）：'.$reason,'opus-release');
@@ -8106,6 +8132,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
                 task_append_note($tid,'[hold-human opus '.$stamp.'] 放行官已 '.$lapN.' 次判 release 排写稿仍回到放行位，疑似循环（#79 同款），停人：'.$reason);
                 db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
                 audit('opus-release','seo_release_loop_fuse',(string)$tid,['laps'=>$lapN]);
+                hold_notify($tid,'放行流程疑似循环已熔断，归人看');
                 $act['held'][]=$tid;continue;
             }
             list($jb,)=blog_release_as_write($cid,$t,'opus-release');

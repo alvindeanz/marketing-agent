@@ -144,7 +144,8 @@ async function main() {
 
   const cohortN = buckets.seo.filter((l) => l.signal === 'cohort').length;
   console.log(fmtGate('C 结果层 seo', cohortN > 0, 'cohort 已测批次 ' + cohortN + ' 条（成熟窗 28d，cohort_backtest 在管）'));
-  console.log(fmtGate('C 结果层 paid', false, '回测未接线（W18 欠账：cohort_backtest 补 paid 侧，止血类 14d、出价预算类学习期+28d、低量户按转化满 30）'));
+  const cohortP = buckets.paid.filter((l) => l.signal === 'cohort').length;
+  console.log(fmtGate('C 结果层 paid', cohortP > 0, 'cohort 已测批次 ' + cohortP + ' 条（2026-10-27 接线：止血 14d、出价预算学习期 7d+28d、文案 28d 看 CTR；低量不满 30 转化与混杂批次不出结论）'));
 
   const good = countEntries(path.join(TRACES_DIR, 'golden', 'good'));
   const bad = countEntries(path.join(TRACES_DIR, 'golden', 'bad'));

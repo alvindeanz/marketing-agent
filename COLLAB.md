@@ -20,6 +20,35 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-27 AIRA 等人时刻的一张嘴 + 卡面最新进展 + cohort paid 侧接线（欠账清偿轮，Alvin 批「动手做吧」）
+
+上一条的残留欠账加摸底新发现，三刀一销账。原则延伸一句：值得进频道的状态转移只有两种，
+终态（收口回合管）和「开始等人」（本轮新函数 hold_notify 管），预测性中间态全部退场。
+
+- **停人一张嘴**（seo-api.php hold_notify）：零模型固定模板，挂在停人落库的事实点上（放行官判
+  hold_human、redo 二次降档、spend 熔断、分析无产出、博客圈数熔断、L0 确定性拒绝与熔断、
+  auto-chain 两熔断、卡任务无链接、chatw 止损闩与越范围）。只对频道出身（chatw:/chat:/spawn:/
+  report:）任务回出生频道，note 打 [停人已通知 日期] 标同日幂等；sprint 单不进频道（板面
+  attention 红点已有位置）。预测行退场清单：spawn「进入判定与放行环节」、chatw「自动落地中」
+  「落地中」两条、止损闩与前置条件频道行（降 note）、熔断重判频道行（降 note）；chatw 越范围
+  原来只发频道预测行，现在置 attention=1 走统一嘴（它是真停人点：chatw 不自动排闸A）。
+- **卡面最新进展**（seo-agent.html noteLatest）：result_note 是正序审计日志，#1627 的教训是头部
+  压着一句过时的「#1626 还没落地」（实际 10-23 已全落完）。chat 泳道任务弹窗加「最新进展」行
+  （取最后一个 --- 机器段摘要句，段尾后补 [标签] 事件行优先），执行记录全文照旧，存量备注零洗。
+- **cohort_backtest paid 侧**（W18 Gate C 欠账）：批次=module paid/sem 的 done 任务抠 [applied]
+  实体（ad/assetGroup/campaign 族），GAQL 反查归因 campaign；窗按类型（止血 14d、出价预算跳 7d
+  学习期再 28d、文案 28d 看 CTR）；两道保护：转化合计不满 30 只标 low_volume（止血按花费判是
+  唯一例外）、同 campaign 窗内他批落地标 confounded，宁可少标不硬归因。结果并进同一
+  cohort_results.json（channel:paid），labels.cohortLabel 认 paid 行（verdict 直取），label_stats
+  Gate C paid 行开闸。cohort_backtest 顶层 config 加载改懒加载（纯函数可单测 require）。
+- **销账**：#1624 那笔「报告草稿/附件同步 blogpreview 执行器」工具债摸底核实 10-26 A4 批已收
+  （三 op 已登记，publishFile 通道 HTML/xlsx 都能走），TODO 行改为待实战一单验证。
+- 测试：新增 tests/cohort_paid.test.js 8 组（#1626 真实 note 形态回放），全套 node tests/ 过，
+  前端 script 块 node --check 过，远端 php -l 过。第四问自答：零新闸零新申报点，净删五张预测嘴
+  换一张事实嘴。
+- 验收口径：下一次放行官判 hold / 熔断停人时，对应频道应出现一条「停下等人」+ 放行入口；
+  自动落地全程频道安静到收口回合。cohort paid 首批可测批次在 #1626（文案类，11-23 到窗）。
+
 ### 2026-10-27 AIRA 频道叙事终态化 + SEO/PAID 分线（louvresky 复盘，Alvin 批「你开工吧」）
 
 起因：Monica 反馈 louvresky 频道「模型稀里糊涂一大堆，不知道任务做了没有」。摸底结论：模型回复
