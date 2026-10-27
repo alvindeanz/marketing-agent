@@ -26,7 +26,7 @@ const blogimages = require('../lib/blogimages');
 const wf = require('../lib/webforger');
 const contentRegistry = require('../lib/registry');
 const deliverables = require('../lib/deliverables');
-const { ensureClientWorkspace, summarize, truncate, safeJson } = require('../lib/util');
+const { ensureClientWorkspace, summarize, truncate, headTail, safeJson } = require('../lib/util');
 
 const SHOPSEO_RO = '/data/aira/tools/shopseo/shopseo-ro';
 const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*),Bash(' + SHOPSEO_RO + ':*)';
@@ -113,7 +113,8 @@ function taskDetail(task) {
   if (task.priority) rows.push('Priority: ' + task.priority);
   if (task.type || task.category) rows.push('Type: ' + (task.type || task.category));
   const detail = task.detail || task.description || task.notes || '';
-  if (detail) rows.push('Detail:\n' + truncate(String(detail), 4000));
+  /* 保头保尾：滚动修订单的最新折返反馈在尾部，留头砍尾会丢掉这轮真正要做的事（2026-10-27）。 */
+  if (detail) rows.push('Detail:\n' + headTail(String(detail), 2400, 2400));
   return rows.join('\n');
 }
 

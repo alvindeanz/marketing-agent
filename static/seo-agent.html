@@ -517,6 +517,7 @@ table.grid td.wrap{white-space:pre-wrap;word-break:break-word}
       <div class="sec" id="chSec">
         <div class="sec-head">
           <div class="sec-title" id="chTitle">Chat</div>
+          <span class="tb-group" id="chTabs" style="margin-right:auto;margin-left:12px"></span>
           <div class="tb-group">
             <span class="plan-meta" id="chMeta"></span>
             <button class="btn ghost" id="chHistBtn" onclick="toggleChatHist()">历史会话</button>
@@ -2909,21 +2910,53 @@ function chStart(){
 }
 function chReset(){
   chStop();
-  chatList=[];chatRootId=0;chanRootId=0;chatHistOpen=false;chatItem=null;chatMsgs=[];chatPending=0;chatSending=false;chatSpawned={};chatSig='';
+  chatList=[];chatRootId=0;chanRootId=0;chModule='';chatHistOpen=false;chatItem=null;chatMsgs=[];chatPending=0;chatSending=false;chatSpawned={};chatSig='';
   chTasks=[];chTasksTotal=0;chTasksLoading=false;
   /* 换客户时把上一位客户的频道从 DOM 上抹掉，别让旧线程在那儿挂着 */
-  ['chMain','chHist','chTasks'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
+  ['chMain','chHist','chTasks','chTabs'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=''});
   const hb=document.getElementById('chHist');if(hb)hb.classList.add('hidden');
 }
 
-/* 进 Chat 视图：找到（或建出）这个客户的默认频道，直接开聊 */
+/* 频道分线（2026-10-27 Alvin 批）：SEO 与 PAID 各一条频道，对话、派单、泳道互不穿插。
+   状态先行（同报告页 repChan 的教训）：渲染只读 chModule，初始化按 services 定，
+   both 记住本会话上次选择；单线客户不出 tab、直接落在自己那条线。 */
+var chModule='',chModuleChoice={},chanRoots={};
+function chModuleInit(){
+  var c=repClientRow();
+  var svc=c?String(c.services||'').toLowerCase():'';
+  if(chModuleChoice[curId]){chModule=chModuleChoice[curId]}
+  else if(svc==='sem'||svc==='paid'){chModule='paid'}
+  else{chModule='seo'}
+  if(!(c&&insSvcPaid(c)))chModule='seo';
+}
+function renderChTabs(){
+  var el=document.getElementById('chTabs');if(!el)return;
+  var c=repClientRow();
+  if(!(c&&String(c.services||'').toLowerCase()==='both')){el.innerHTML='';return}
+  el.innerHTML='<button class="btn tiny '+(chModule==='seo'?'':'ghost')+'" onclick="setChModule(\'seo\')">SEO</button>'+
+    '<button class="btn tiny '+(chModule==='paid'?'':'ghost')+'" onclick="setChModule(\'paid\')">PAID</button>';
+}
+function setChModule(m){
+  if(chModule===m)return;
+  chModule=m;chModuleChoice[curId]=m;
+  chatRootId=0;chanRootId=0;chatItem=null;chatMsgs=[];chatPending=0;chatSpawned={};chatSig='';
+  chTasks=[];chTasksTotal=0;
+  renderChTabs();
+  loadChatView();
+}
+
+/* 进 Chat 视图：找到（或建出）这个客户当前线的频道，直接开聊 */
 async function loadChatView(){
   if(!curId)return;
-  if(!chanRootId){
-    const d=await api('/inbox/channel','POST',{client_id:curId});
+  if(!chModule)chModuleInit();
+  renderChTabs();
+  const key=curId+':'+chModule;
+  if(!chanRoots[key]){
+    const d=await api('/inbox/channel','POST',{client_id:curId,module:chModule});
     if(fail(d,'频道打开失败'))return;
-    chanRootId=d.root_id;
+    chanRoots[key]=d.root_id;
   }
+  chanRootId=chanRoots[key];
   if(!chatRootId)chatRootId=chanRootId;
   renderChatMain();
   await loadChatThread(false);
@@ -3132,7 +3165,7 @@ async function loadChatTasks(more){
   if(!curId||chTasksLoading)return;
   chTasksLoading=true;
   const off=more?chTasks.length:0;
-  const d=await api('/tasks?client_id='+curId+'&origin=chat&limit=10&offset='+off);
+  const d=await api('/tasks?client_id='+curId+'&origin=chat&limit=10&offset='+off+(chModule?('&module='+chModule):''));
   chTasksLoading=false;
   if(!d||d.error)return;
   chTasks=more?chTasks.concat(d.tasks||[]):(d.tasks||[]);
@@ -3200,7 +3233,7 @@ function chTaskModal(id){
 function renderChatTasks(){
   const box=document.getElementById('chTasks');
   if(!box)return;
-  const head='<div class="cth"><span>聊天派的活</span><span class="muted">'+(chTasksTotal||0)+' 张</span></div>';
+  const head='<div class="cth"><span>聊天派的活'+(chModule?(' · '+chModule.toUpperCase()):'')+'</span><span class="muted">'+(chTasksTotal||0)+' 张</span></div>';
   if(!chTasks.length){box.innerHTML=head+'<div class="ct-empty">这个客户的聊天还没派过活。</div>';return}
   const rows=chTasks.map(t=>{
     const st=chTaskState(t);
@@ -3244,10 +3277,10 @@ async function sendChat(){
   const text=(el?el.value:'').trim();
   if(text==='/reset'){
     if(chatRootId!==chanRootId){toast('翻篇只对频道有效，历史会话用「归档会话」',true);return}
-    const d0=await api('/inbox/channel/reset','POST',{client_id:curId});
+    const d0=await api('/inbox/channel/reset','POST',chModule?{client_id:curId,module:chModule}:{client_id:curId});
     if(fail(d0,'翻篇失败'))return;
     if(el)el.value='';
-    chanRootId=d0.root_id;chatRootId=0;chatLimit=50;
+    chanRootId=d0.root_id;chanRoots[curId+':'+chModule]=d0.root_id;chatRootId=0;chatLimit=50;
     toast('已翻篇，旧频道进历史');
     openChat(d0.root_id);
     loadChats();
@@ -3313,7 +3346,10 @@ async function spawnTask(msgId,idx){
   const d=await api('/inbox/'+chatRootId+'/spawn_task','POST',{
     title:d0.title,detail:d0.detail||'',module:d0.module,owner_type:d0.owner_type||'agency',
     priority:d0.priority||'P2',sprint:d0.sprint||'',ops:d0.ops||'',
-    kind:d0.kind||'',backing_fact:d0.backing_fact||''
+    kind:d0.kind||'',backing_fact:d0.backing_fact||'',
+    /* 草案身份随卡带上：报告反馈折返的幂等键，与 agent 的 commission_start 同源，
+       两个入口对同一条反馈只折一次（2026-10-27 louvresky 复盘）。 */
+    proposal_msg_id:msgId,proposal_idx:idx
   });
   if(btn)btn.disabled=false;
   /* 409 = 这张单已经启动过（多半是快路直启或别人先点了）。不是错误：把卡标回已排产即可。 */
@@ -3325,6 +3361,12 @@ async function spawnTask(msgId,idx){
   }
   if(fail(d,'开工失败'))return;
   chatSpawned[msgId+':'+idx]=d.task_id;
+  if(d.folded){
+    toast(d.dup?('该反馈此前已并入修订单 #'+d.task_id+'，未重复排产'):('已并入修订单 #'+d.task_id+' 滚动改并重排'));
+    await loadChatThread(false);
+    loadChatTasks(false);
+    return;
+  }
   toast('已开工 #'+d.task_id+(d.job_id?'，已排产 job #'+d.job_id:'，已挂看板等客户动作'));
   await loadChatThread(false);
   loadClients(true);

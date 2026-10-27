@@ -90,6 +90,15 @@ function fmtGate(name, open, detail) {
 async function main() {
   const noSync = process.argv.includes('--no-sync');
   if (!noSync) {
+    /* gym 账本聚合（2026-10-27）：Mac worker 的 trace 落它本机盘（/data/aira 在 Mac 不是 NFS），
+       读取侧先把 Mac 的并回来再统计；Mac 不在线只提示不挡。零 LLM。 */
+    try {
+      const { execFileSync } = require('node:child_process');
+      const out = execFileSync('bash', [require('node:path').join(__dirname, 'gym_trace_pull.sh')], { timeout: 120000, encoding: 'utf8' });
+      process.stdout.write(out);
+    } catch (e) {
+      console.log('[gym_trace_pull] 失败不挡统计 :: ' + String(e.message || e).slice(0, 200));
+    }
     const r = await sync.sync([]);
     console.log('label_sync：新增 ' + r.fresh.length + ' 条\n');
   }

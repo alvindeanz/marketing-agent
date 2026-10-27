@@ -25,7 +25,7 @@ const blogcadence = require('../lib/blogcadence');
 const { runClaude } = require('../lib/llm');
 const { extractTrailingJson } = require('../lib/mdjson');
 const { buildPlanningBriefing } = require('../lib/distill');
-const { ensureClientWorkspace, truncate, summarize } = require('../lib/util');
+const { ensureClientWorkspace, truncate, summarize, headTail } = require('../lib/util');
 
 const ALLOWED_TOOLS = 'Read';
 const PRINCIPLES_FILE = path.join(__dirname, '..', 'specs', 'review_principles.md');
@@ -60,7 +60,9 @@ function taskBlock(t) {
     .join(' ');
   const rows = [head + ' ' + (t.title || '(无标题)')];
   if (t.ops) rows.push('  ops：' + t.ops);
-  if (t.detail) rows.push('  说明：' + truncate(String(t.detail).replace(/\s+/g, ' '), MAX_DETAIL_CHARS));
+  /* 保头保尾：滚动修订单的最新折返反馈在 detail 尾部，留头砍尾会让判官「看不到内容」
+     （2026-10-27 louvresky job 10013 复盘）。 */
+  if (t.detail) rows.push('  说明：' + headTail(String(t.detail).replace(/\s+/g, ' '), 1200, MAX_DETAIL_CHARS));
   if (t.result_note) rows.push('  已有结果备注：' + summarize(String(t.result_note), 300));
   if (t.change_plan) {
     const kind = t.artifact_kind || '变更方案';

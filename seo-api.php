@@ -956,16 +956,14 @@ function task_close($tid,$kind,$reason='',$by=''){
     }
     db()->prepare("UPDATE seo_tasks SET status='done',attention=0 WHERE id=?")->execute([$tid]);
     task_append_note($tid,'['.$kind.'] '.($by!==''?($by.'：'):'').$reason);
-    if($kind==='accepted'){
-        $sp=capgap_split_on_accept($tid);
-        if(!$sp)accepted_close_notify($tid,$reason);
-    }
+    if($kind==='accepted')capgap_split_on_accept($tid);
     narration_queue($tid,$kind,$reason);
     return null;
 }
-/* 叙述回帖排队（2026-10-16 Alvin 批，纯叙述模式）：频道出身的任务收口后排一个带
-   narrate 标记的 chat job，模型用对话语境补一条进展说明，让下任务的人不翻看板就知道
-   结果。模板事实行照发不动（零模型兜底），叙述层挂了或判 SKIP 不影响事实送达。
+/* 收口回合排队（2026-10-16 Alvin 批纯叙述模式；2026-10-27 Alvin 批升级为唯一的嘴，match PJ）：
+   频道出身的任务收口后排一个带 narrate 标记的 chat job，由 chat 主脑（opus、带完整会话上下文）
+   在原会话里亲口报告收口结果。服务端不再另发 applied/accepted 模板事实行（两张嘴打架是
+   louvresky 复盘的主病），事实送达的兜底在 worker 侧：叙述回合 LLM 挂了就地发零模型模板行。
    合规边界：链条源于人（任务是频道里的人发起的），worker 侧叙述分支无 drafts 无 actions
    无工具带，模型只许说话，不自链。 */
 function narration_queue($tid,$kind,$reason){
@@ -987,18 +985,8 @@ function narration_queue($tid,$kind,$reason){
     audit('seo-worker','seo_chat_narrate_queue',(string)$jid,['task_id'=>(int)$tid,'kind'=>$kind]);
     fire_wake($jid);
 }
-/* 终局回频道（2026-10-16 #1369 教训：任务在频道眼皮底下验收收口，频道却无下文，操作员
-   只能靠猜进度）。频道发起的任务 accepted 收口且没有 capgap 拆单消息时，补发三要素：
-   动没动 / 下一步 / 谁负责。频道放行指令自己会发执行回执，靠 reason 关键词跳过防双发。 */
-function accepted_close_notify($tid,$reason){
-    if(mb_strpos((string)$reason,'频道放行')!==false)return;
-    $q=db()->prepare("SELECT id,title,origin FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
-    if(!$t)return;
-    if(!preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)$t['origin'],$om))return;
-    $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");$rq->execute([(int)$om[2]]);$rootN=$rq->fetch();
-    if(!$rootN)return;
-    chat_msg_insert($rootN,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」已验收收口：本单交付为分析或方案，账户与站点未因本单改动；若还有执行步，以频道或看板上的后续工单为准。','seo-worker');
-}
+/* accepted_close_notify 已删（2026-10-27）：accepted 的频道播报统一归收口回合（narration_queue
+   升级版，worker 侧带零模型兜底行），模板行与叙述双嘴打架的病根之一，见 louvresky 复盘。 */
 /* capability-gap 收口拆人工单（2026-10-13 ticket #31 教训：#1232 的 placement 排除执行单
    按能力缺口标注「进运营清理队列」，但系统里没有这个队列，分析验收一关单，人工执行步就只
    活在归档任务的备注里，客户经理在任务列表找不到活，chat 还对着死任务许诺放行。修法与
@@ -1895,17 +1883,20 @@ function thread_action_exec($root,$t,$a,$by){
     return ['ok'=>false,'what'=>'未知动作'];
 }
 
-/* 报告反馈折返（2026-10-24 Alvin 批四刀 A3）：同一份正式报告的后续反馈折进既有开放修订单
-   滚动改，不一条反馈开一张（视图铁律原文；Louvresky 10 月广告月报一链 5 单的教训）。
+/* 报告反馈折返（2026-10-24 Alvin 批四刀 A3；2026-10-27 louvresky 复盘加幂等与滚动单身份）：
+   同一份正式报告的后续反馈折进既有开放修订单滚动改，不一条反馈开一张。
    折返键看载荷不看标题（规矩 9）：从新单文本里抽报告文件名，与开放 report: 单的文本比对，
    命中即追加反馈 + 置回 approved + 重排 execute（detail 变更天然使旧判决过期）。
-   返回被折入的任务 id，没有可折的返回 0。 */
-function report_task_fold($cid,$title,$detail,$by){
+   幂等：同一条反馈从两个入口进来（agent 的 commission_start 与卡上「立项」按钮）只许折一次，
+   键优先用草案身份 src（提议消息id:序号，两个入口同源），缺省退回标题 md5；折过的认旧账返回。
+   返回 ['tid'=>任务id,'dup'=>是否重复折返]，没有可折的返回 null。 */
+function report_task_fold($cid,$title,$detail,$by,$srcKey=''){
     $txt=(string)$title."\n".(string)$detail;
-    if(!preg_match_all('/[A-Za-z0-9][A-Za-z0-9_.\\-]{3,}\.(?:html|xlsx|pdf|docx|csv)/u',$txt,$fm))return 0;
+    if(!preg_match_all('/[A-Za-z0-9][A-Za-z0-9_.\\-]{3,}\.(?:html|xlsx|pdf|docx|csv)/u',$txt,$fm))return null;
     $files=array_values(array_unique($fm[0]));
-    if(!$files)return 0;
+    if(!$files)return null;
     ensure_task_origin();ensure_task_archived();
+    $fkey=$srcKey!==''?('src:'.preg_replace('/[^0-9:]/','',$srcKey)):('t:'.substr(md5(trim((string)$title)),0,10));
     $q=db()->prepare("SELECT id,title,detail,result_note,status FROM seo_tasks WHERE client_id=? AND origin LIKE 'report:%' AND archived=0 AND status IN('proposed','approved','in_progress','review') ORDER BY id DESC LIMIT 30");
     $q->execute([(int)$cid]);
     foreach($q->fetchAll() as $r){
@@ -1913,15 +1904,34 @@ function report_task_fold($cid,$title,$detail,$by){
         foreach($files as $f){
             if(mb_stripos($hay,$f)===false)continue;
             $tid=(int)$r['id'];
+            if(strpos((string)$r['detail'],'[折返key '.$fkey.']')!==false)return ['tid'=>$tid,'dup'=>true];
             db()->prepare("UPDATE seo_tasks SET detail=CONCAT_WS('\n',NULLIF(detail,''),?),status='approved' WHERE id=?")
-                ->execute(["\n[折返反馈 ".date('Y-m-d')."（".$by."）] 同一交付物（".$f."）的新反馈并入本单滚动改：\n".mb_substr(trim((string)$title."\n".(string)$detail),0,2000,'UTF-8'),$tid]);
+                ->execute(["\n[折返反馈 ".date('Y-m-d')."（".$by."）][折返key ".$fkey."] 同一交付物（".$f."）的新反馈并入本单滚动改：\n".mb_substr(trim((string)$title."\n".(string)$detail),0,2000,'UTF-8'),$tid]);
+            /* 滚动单身份（规矩 9 的叙事面）：标题是申报不是叙事，追着每条反馈改标题是补丁。
+               首次折返一次性规范成稳定身份，此后频道叙述一律引用最新折返反馈原文（见
+               report_latest_feedback），不再拿标题当内容讲。 */
+            if(mb_stripos((string)$r['title'],'修订滚动单')===false){
+                db()->prepare("UPDATE seo_tasks SET title=? WHERE id=?")->execute([mb_substr($f,0,120,'UTF-8').' 修订滚动单',$tid]);
+            }
             task_append_note($tid,'[折返 '.date('Y-m-d').'] 新反馈并入滚动改（原拟新单「'.mb_substr((string)$title,0,60,'UTF-8').'」未建），已重排 execute');
             queue_task_jobs((int)$cid,'execute_task',[$tid],$by,'seo_report_fold');
-            audit($by,'seo_report_task_fold',(string)$tid,['file'=>$f,'folded_title'=>(string)$title]);
-            return $tid;
+            audit($by,'seo_report_task_fold',(string)$tid,['file'=>$f,'folded_title'=>(string)$title,'fkey'=>$fkey]);
+            return ['tid'=>$tid,'dup'=>false];
         }
     }
-    return 0;
+    return null;
+}
+
+/* 滚动修订单 detail 里最新一条折返反馈的摘录（频道叙述引用人的原话，不引用任务标题）。 */
+function report_latest_feedback($detail){
+    $p=mb_strrpos((string)$detail,'[折返反馈 ');
+    if($p===false)return '';
+    $seg=mb_substr((string)$detail,$p);
+    $nl=mb_strpos($seg,"\n");
+    if($nl===false)return '';
+    $body=trim(mb_substr($seg,$nl+1));
+    $body=preg_replace('/\s+/u',' ',$body);
+    return mb_substr($body,0,80,'UTF-8');
 }
 
 /* 委托单确认启动（2026-09-11 W13 契约闸，Alvin 定）。chat 建任务两阶段：
@@ -1998,10 +2008,13 @@ function commission_start_exec($root,$a,$asker,$sameTurnDrafts=null,$curMsgId=0)
     $t['detail']=trim($t['detail'])."\n\n[委托单] 频道 #".$rootId." 消息 #".$pmid."/".$pidx.($fastPath?' 快路同轮启动（指令即确认）':' 提议').'，'.$asker." 确认启动\n[授权引语] ".mb_substr($mandate,0,200,'UTF-8');
     if($backKey!=='')$t['detail'].="\n[backing] ".$backKey;
     $origin=$kind==='change'?('chatw:'.$rootId):($kind==='report'?('report:'.$rootId):('spawn:'.$rootId));
-    /* 报告反馈折返（A3）：同一份报告已有开放修订单就并入滚动改，不开新单。 */
+    /* 报告反馈折返（A3）：同一份报告已有开放修订单就并入滚动改，不开新单。
+       幂等键用草案身份（提议消息id:序号），与卡上「立项」按钮同源，两口只折一次。 */
     if($kind==='report'){
-        $foldId=report_task_fold($cid,(string)$t['title'],(string)$t['detail'],$asker);
-        if($foldId)return ['ok'=>true,'what'=>'该报告已有开放修订单 #'.$foldId.'，本条反馈已并入滚动改并重排（同一交付物不开第二张单）','task_id'=>$foldId,'job_ids'=>[]];
+        $foldR=report_task_fold($cid,(string)$t['title'],(string)$t['detail'],$asker,$pmid.':'.$pidx);
+        if($foldR)return ['ok'=>true,'what'=>($foldR['dup']
+            ?('该反馈此前已并入修订单 #'.$foldR['tid'].'，不重复折返不重复排产')
+            :('该报告已有开放修订单 #'.$foldR['tid'].'，本条反馈已并入滚动改并重排（同一交付物不开第二张单）')),'task_id'=>$foldR['tid'],'job_ids'=>[]];
     }
     $tid=task_insert($cid,$t,$asker,$origin);
     $jid=0;
@@ -2706,15 +2719,16 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     $cq->execute([$tid]);
     $cr=$cq->fetch();
     $cq->closeCursor();
-    /* 事件回流（2026-09-11 W16）：apply 失败/中止不再只躺在 result_note 里等人来问。
-       chat 系来源的任务，失败与中止事件当场推回发起频道，附条目账本口径的一句话。
-       「人来问进度」按新度量算流程失败，所以状态变化必须主动出现在人眼前。 */
-    if($note!==''&&preg_match('/(执行失败|执行中止)：/u',$note)&&preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)($cr['origin']??''),$omE)){
+    /* 事件回流（2026-09-11 W16；2026-10-27 收窄到终态）：apply 真失败（不自动重试、要人接手）
+       推回发起频道。执行中止不再逐事件发声：中止多为链内自愈（review 调整后重跑、无方案续接），
+       自愈链内部的波折对人不存在，频道只听终态；死局停滞由 chat 泳道扫帚兜底报。
+       中止原文带 md5、apply-log 路径这类内部字段，曾原样进频道（louvresky 复盘）。 */
+    if($note!==''&&preg_match('/执行失败：/u',$note)&&preg_match('/^(chatw|chat|report|spawn):(\d+)$/',(string)($cr['origin']??''),$omE)){
         $rqE=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
         $rqE->execute([(int)$omE[2]]);
         $rootE=$rqE->fetch();
         if($rootE){
-            $whyE=preg_match('/(执行失败|执行中止)：([^\n]{0,160})/u',$note,$wm)?($wm[1].'：'.$wm[2]):'执行没有完成';
+            $whyE=preg_match('/执行失败：([^\n]{0,160})/u',$note,$wm)?('执行失败：'.$wm[1]):'执行没有完成';
             chat_msg_insert($rootE,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$cr['title'],0,50,'UTF-8').'」'.$whyE.' 哪些落了哪些没落看任务卡「条目」，接手安排也在那里。','seo-worker');
         }
     }
@@ -2837,16 +2851,26 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         }
     }
     if(strpos((string)($cr['origin']??''),'report:')===0){
-        /* 报告草稿：不自动验收（红线：对客发送必须人审），只把出稿消息回频道 */
+        /* 报告草稿：不自动验收（红线：对客发送必须人审）。通知终态化（2026-10-27 louvresky
+           复盘）：固定模板 + 引用最新折返反馈原文 + 预览链接。原始结果备注截 300 字贴频道的
+           老做法废止——英文、md5、半句话原样进频道就是 Monica 看到的「稀里糊涂一大堆」。 */
         $rootIdR=(int)substr((string)$cr['origin'],7);
         if($rootIdR>0){
             $rqR=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
             $rqR->execute([$rootIdR]);
             $rootR=$rqR->fetch();
             if($rootR){
-                $sumR=trim((string)($i['note']??''));
-                if($sumR==='')$sumR=trim((string)($cr['result_note']??''));
-                chat_msg_insert($rootR,'chat_agent','派单 #'.$tid.'「'.$cr['title'].'」草稿已出：'.mb_substr($sumR,0,300,'UTF-8')."\n注意：这是内部草稿，人工验收（放行=验收）后才可发客户。",'seo-worker');
+                $fbR=report_latest_feedback((string)$cr['detail']);
+                $urlR=trim((string)($cr['output_url']??''));
+                if($urlR===''){
+                    $sumR=trim((string)($i['note']??''));
+                    if($sumR==='')$sumR=trim((string)($cr['result_note']??''));
+                    if(preg_match('#https?://[^\s"」）)]+#u',$sumR,$um))$urlR=$um[0];
+                }
+                chat_msg_insert($rootR,'chat_agent','修订草稿已出 #'.$tid
+                    .($fbR!==''?('，对应反馈「'.$fbR.'」'):('「'.mb_substr((string)$cr['title'],0,50,'UTF-8').'」'))
+                    .($urlR!==''?('，预览：'.$urlR):'')
+                    .'。内部草稿，人工验收（放行=验收）后才可发客户。','seo-worker');
             }
         }
         /* 继续走正常 review 排队，人审入口不变 */
@@ -2911,16 +2935,8 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/complete$#',$ROUTE,$mm)){
     /* 落地产物链接（2026-09-22 sungait #619：Shopify 博客落地后卡上没有链接）。可选，给了才写。 */
     $ouC=trim((string)($i['output_url']??''));
     if($ouC!==''&&preg_match('#^https?://#',$ouC))db()->prepare("UPDATE seo_tasks SET output_url=? WHERE id=?")->execute([mb_substr($ouC,0,500,'UTF-8'),$tid]);
-    /* Chat 改动类派单闭环：落地完成回频道说一声，人不用去看板巡。 */
-    if(strpos((string)($trow['origin']??''),'chatw:')===0){
-        $rootIdK=(int)substr((string)$trow['origin'],6);
-        if($rootIdK>0){
-            $rqK=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
-            $rqK->execute([$rootIdK]);
-            $rootK=$rqK->fetch();
-            if($rootK)chat_msg_insert($rootK,'chat_agent','派单 #'.$tid.'「'.$trow['title'].'」已落地并自验通过（检查行在任务卡结果备注），月度抽查照旧。','seo-worker');
-        }
-    }
+    /* Chat 改动类派单的落地播报（2026-10-27）：统一归收口回合（task_close 里的 narration_queue，
+       worker 侧带零模型兜底行），这里不再发模板行，免得与收口回合两张嘴打架。 */
     /* 待复验路由（2026-09-21 Alvin 批，第一性审阅 P4）：收口 note 里的「待复验 N 项（...）」
        是不可见例外件，文本不是队列。拆两支：数据回测类（GSC/位次/观察/复测/数据/CTR/排名）
        归 cohort_backtest 管道自动测，打标即可；真人工类聚合建一个跟进工单（verify: 前缀，
@@ -4070,11 +4086,13 @@ if($m==='GET'&&$ROUTE==='/task_state'){
     ensure_task_archived();
     $tid=(int)($_GET['task_id']??0);
     if(!$tid)res(400,['error'=>'task_id required']);
-    $q=db()->prepare("SELECT id,client_id,title,status,owner_type,module,sprint,priority,archived,output_url,created_at,updated_at,result_note FROM seo_tasks WHERE id=?");
+    $q=db()->prepare("SELECT id,client_id,title,status,owner_type,module,sprint,priority,archived,output_url,created_at,updated_at,result_note,detail FROM seo_tasks WHERE id=?");
     $q->execute([$tid]);$t=$q->fetch();
     if(!$t)res(404,['error'=>'Task not found']);
     $t['result_note_tail']=mb_substr((string)$t['result_note'],-1500,NULL,'UTF-8');
-    unset($t['result_note']);
+    /* 滚动修订单的叙述材料：最新折返反馈原话（收口回合引用它，不引用旧标题）。 */
+    $t['fold_feedback']=report_latest_feedback((string)$t['detail']);
+    unset($t['result_note'],$t['detail']);
     $j=db()->prepare("SELECT id,type,status,created_at,finished_at,payload FROM agent_jobs WHERE client_id=? ORDER BY id DESC LIMIT 80");
     $j->execute([(int)$t['client_id']]);
     $jobs=[];
@@ -4961,8 +4979,15 @@ if($m==='POST'&&$ROUTE==='/inbox/channel/reset'){
     $i=input();
     $cid=(int)($i['client_id']??0);
     if(!$cid)res(400,['error'=>'client_id required']);
-    $q=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND (refs LIKE '%\"channel\":true%' OR body='频道') AND status='open' ORDER BY id DESC LIMIT 1");
-    $q->execute([$cid]);
+    $mod=(string)($i['module']??'');
+    if($mod!==''&&!in_array($mod,['seo','paid'],true))res(400,['error'=>'bad module']);
+    if($mod!==''){
+        $q=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' AND refs LIKE ? AND status='open' ORDER BY id DESC LIMIT 1");
+        $q->execute([$cid,'%"module":"'.$mod.'"%']);
+    }else{
+        $q=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND (refs LIKE '%\"channel\":true%' OR body='频道') AND status='open' ORDER BY id DESC LIMIT 1");
+        $q->execute([$cid]);
+    }
     $cur=$q->fetch();
     $oldId=0;
     if($cur){
@@ -4970,25 +4995,50 @@ if($m==='POST'&&$ROUTE==='/inbox/channel/reset'){
         chat_msg_insert($cur,'chat_agent','频道已翻篇（'.$u['username'].' 发起），这一页归档为历史，后续对话在新频道。','seo-worker');
         db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE id=?")->execute([$oldId]);
     }
-    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'chat_root','频道',?,NULL,'open',?)")
-        ->execute([$cid,json_encode(['channel'=>true]),$u['username']]);
+    db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'chat_root',?,?,NULL,'open',?)")
+        ->execute([$cid,($mod==='paid'?'PAID 频道':($mod==='seo'?'SEO 频道':'频道')),json_encode($mod!==''?['channel'=>true,'module'=>$mod]:['channel'=>true]),$u['username']]);
     $rid=(int)db()->lastInsertId();
-    audit($u['username'],'seo_chat_channel_reset',(string)$rid,['client_id'=>$cid,'old_root_id'=>$oldId]);
-    res(200,['ok'=>true,'root_id'=>$rid,'old_root_id'=>$oldId]);
+    audit($u['username'],'seo_chat_channel_reset',(string)$rid,['client_id'=>$cid,'old_root_id'=>$oldId,'module'=>$mod!==''?$mod:null]);
+    res(200,['ok'=>true,'root_id'=>$rid,'old_root_id'=>$oldId,'module'=>$mod!==''?$mod:null]);
 }
 
-/* POST /inbox/channel body { client_id } -> { root_id }
+/* POST /inbox/channel body { client_id, module? } -> { root_id }
    客户的默认聊天频道（Discord 式一客户一条流）。找不到就建一个，不排任何 job：
-   频道只是一个 refs 带 channel 标记的 chat_root，消息照常走 /inbox/{id}/chat。 */
+   频道只是一个 refs 带 channel 标记的 chat_root，消息照常走 /inbox/{id}/chat。
+   频道分线（2026-10-27 Alvin 批）：module=seo|paid 时按线各一条频道（refs 再带 module），
+   SEO 与 PAID 的对话、派单、泳道互不穿插（Monica 管 paid、Summer 管 seo 的分工落到视野上）。
+   首次建分线频道时把旧的无线别频道归档成历史，混线历史随时可翻，新对话各归各线。
+   不带 module 保持老行为（worker 与脚本兼容）。 */
 if($m==='POST'&&$ROUTE==='/inbox/channel'){
     $u=auth_user();
     ensure_inbox_schema();
     $i=input();
     $cid=(int)($i['client_id']??0);
     if(!$cid)res(400,['error'=>'client_id required']);
+    $mod=(string)($i['module']??'');
+    if($mod!==''&&!in_array($mod,['seo','paid'],true))res(400,['error'=>'bad module']);
     $c=db()->prepare("SELECT id FROM clients WHERE id=?");
     $c->execute([$cid]);
     if(!$c->fetch())res(404,['error'=>'Client not found']);
+    if($mod!==''){
+        $q=db()->prepare("SELECT id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND refs LIKE '%\"channel\":true%' AND refs LIKE ? AND status='open' ORDER BY id DESC LIMIT 1");
+        $q->execute([$cid,'%"module":"'.$mod.'"%']);
+        $row=$q->fetch();
+        if($row)res(200,['ok'=>true,'root_id'=>(int)$row['id'],'created'=>false,'module'=>$mod]);
+        /* 旧混线频道归档为历史（只在第一次开分线频道时发生一次） */
+        $lq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND (refs LIKE '%\"channel\":true%' OR body='频道') AND refs NOT LIKE '%\"module\"%' AND status='open' ORDER BY id DESC LIMIT 1");
+        $lq->execute([$cid]);
+        $legacy=$lq->fetch();
+        if($legacy){
+            chat_msg_insert($legacy,'chat_agent','频道已按 SEO / PAID 分线，这一页归档为历史（随时可翻），后续对话在对应线的频道。','seo-worker');
+            db()->prepare("UPDATE seo_inbox SET status='resolved' WHERE id=?")->execute([(int)$legacy['id']]);
+        }
+        db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,'chat_root',?,?,NULL,'open',?)")
+            ->execute([$cid,($mod==='paid'?'PAID 频道':'SEO 频道'),json_encode(['channel'=>true,'module'=>$mod]),$u['username']]);
+        $rid=(int)db()->lastInsertId();
+        audit($u['username'],'seo_chat_channel_create',(string)$rid,['client_id'=>$cid,'module'=>$mod,'legacy_archived'=>$legacy?(int)$legacy['id']:0]);
+        res(200,['ok'=>true,'root_id'=>$rid,'created'=>true,'module'=>$mod]);
+    }
     $q=db()->prepare("SELECT id FROM seo_inbox WHERE client_id=? AND kind='chat_root' AND (refs LIKE '%\"channel\":true%' OR body='频道') AND status='open' ORDER BY id DESC LIMIT 1");
     $q->execute([$cid]);
     $row=$q->fetch();
@@ -5562,11 +5612,15 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/spawn_task$#',$ROUTE,$mm)){
         $originS='chatw:'.$rootId;
     }elseif($kindS==='report'){
         $originS='report:'.$rootId;
-        /* 报告反馈折返（A3）：同一份报告已有开放修订单就并入滚动改，不开新单。 */
-        $foldIdS=report_task_fold($cid,(string)$t['title'],(string)$t['detail'],$u['username']);
-        if($foldIdS){
-            $msgIdS=chat_msg_insert($root,'chat_agent','该报告已有开放修订单 #'.$foldIdS.'，本条反馈已并入滚动改并重排，不另开单。',$u['username'],['tasks'=>[$foldIdS]]);
-            res(200,['ok'=>true,'task_id'=>$foldIdS,'message_id'=>$msgIdS,'folded'=>true]);
+        /* 报告反馈折返（A3）：同一份报告已有开放修订单就并入滚动改，不开新单。
+           幂等（2026-10-27）：前端随卡带来草案身份，agent 的 commission_start 已折过的
+           这里认旧账，静默返回不再折、不再排产、不再发频道消息。 */
+        $srcKeyS=((int)($i['proposal_msg_id']??0)>0)?(((int)$i['proposal_msg_id']).':'.((int)($i['proposal_idx']??0))):'';
+        $foldRS=report_task_fold($cid,(string)$t['title'],(string)$t['detail'],$u['username'],$srcKeyS);
+        if($foldRS){
+            if(!empty($foldRS['dup']))res(200,['ok'=>true,'task_id'=>$foldRS['tid'],'folded'=>true,'dup'=>true,'message_id'=>0]);
+            $msgIdS=chat_msg_insert($root,'chat_agent','该报告已有开放修订单 #'.$foldRS['tid'].'，本条反馈已并入滚动改并重排，不另开单。',$u['username'],['tasks'=>[$foldRS['tid']]]);
+            res(200,['ok'=>true,'task_id'=>$foldRS['tid'],'message_id'=>$msgIdS,'folded'=>true]);
         }
     }
     $tid=task_insert($cid,$t,$u['username'],$originS);
@@ -8695,8 +8749,12 @@ if($m==='GET'&&$ROUTE==='/tasks'){
     if($og==='chat'){
         $limC=max(1,min((int)($_GET['limit']??10),100));
         $offC=max(0,(int)($_GET['offset']??0));
-        $totC=(int)db()->query("SELECT COUNT(*) FROM seo_tasks WHERE client_id=".(int)$cid." AND ".CHAT_ORIGIN_SQL)->fetchColumn();
-        $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND ".CHAT_ORIGIN_SQL." ORDER BY id DESC LIMIT $limC OFFSET $offC");
+        /* 泳道分线（2026-10-27 频道分 SEO/PAID tab）：module=paid 含 sem 老值，module=seo 是
+           「非 paid 即 seo」口径（与 labels.js moduleOf 一致），不筛就是全量老行为。 */
+        $modC=(string)($_GET['module']??'');
+        $modSql=$modC==='paid'?" AND module IN('paid','sem')":($modC==='seo'?" AND (module IS NULL OR module NOT IN('paid','sem'))":'');
+        $totC=(int)db()->query("SELECT COUNT(*) FROM seo_tasks WHERE client_id=".(int)$cid." AND ".CHAT_ORIGIN_SQL.$modSql)->fetchColumn();
+        $s=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND ".CHAT_ORIGIN_SQL.$modSql." ORDER BY id DESC LIMIT $limC OFFSET $offC");
         $s->execute([$cid]);
         res(200,['tasks'=>attach_human_state(attach_review_state(attach_job_state(attach_deliverables($s->fetchAll()),$cid),$cid),$cid),'total'=>$totC,'offset'=>$offC]);
     }

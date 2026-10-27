@@ -58,9 +58,8 @@ const DEFAULTS = {
      答题的还是 chatModel（opus 读 sonnet 写的摘要，分工同 claude-bot）。对话答复永不降档，
      这是 Alvin 2026-10-23 明确的质量红线。 */
   chatSummaryModel: 'sonnet',
-  // 叙述回合（2026-10-16 Alvin 批）：频道出身任务收口后的对话语境进展说明。
-  // 纯叙述不是判断，sonnet 足够；瘦简报下单条成本分钱级。别抬到 opus。
-  narrationModel: 'sonnet',
+  // narrationModel 已退役（2026-10-27 Alvin 批收口回合升级）：收口播报是频道里唯一的嘴，
+  // 走 chatModel（对话答复全程 opus 不降档，2026-10-22 质量红线），不再单设旁白模型键。
   // Marketing Inbox 对客户回复（2026-10-18）：harness 子步骤里的受限调用（工具带只给 Read、材料全装进 prompt），
   // 对外文字要稳，给 opus。见 lib/clientreply.js。
   clientReplyModel: 'opus',

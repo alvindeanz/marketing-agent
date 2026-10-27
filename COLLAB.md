@@ -20,6 +20,37 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-27 AIRA 频道叙事终态化 + SEO/PAID 分线（louvresky 复盘，Alvin 批「你开工吧」）
+
+起因：Monica 反馈 louvresky 频道「模型稀里糊涂一大堆，不知道任务做了没有」。摸底结论：模型回复
+22/22 与 trace 逐字一致没病，病在通知层与 10-24 折返机制——每个 job 事件都往频道吼（原始备注截
+300 字原样贴，英文/md5/apply-log 路径全进频道）、同一反馈两入口各折一次、折返后旧标题当叙事讲、
+review 留头砍尾看不到最新折返。两条第一性原则落地：**通知挂任务终态不挂 job 事件**；**同一事实
+只许一张嘴说**（match PJ 模式）。改动七处：
+
+- **收口回合=唯一的嘴**（chat.js runNarration 升级）：opus（chatModel，narrationModel 键退役）、
+  带前情摘要+频道近况+job 终局序列+最新折返反馈原话+产物链接；LLM 挂了就地发零模型兜底事实行，
+  job 不判红。服务端 applied/accepted 模板行（2921 已落地行、accepted_close_notify）退场。
+- **折返幂等**（report_task_fold）：键=草案身份（提议消息id:序号，commission_start 与「立项」按钮
+  同源），退路=标题 md5；折过的认旧账静默返回。首次折返把标题一次性规范成「<报告文件> 修订滚动单」，
+  频道叙述此后引用 report_latest_feedback（人的原话），不再拿标题当内容讲。
+- **草稿通知模板化**：report: 任务出稿只发「修订草稿已出 #id，对应反馈「…」，预览：url」固定模板；
+  执行中止不再发频道（链内自愈对人不存在，真·执行失败照发），停滞兜底归 chat 泳道扫帚。
+- **频道分线**：POST /inbox/channel 带 module=seo|paid 一客户两条频道（refs 带 module），首开分线时
+  旧混线频道自动归档成历史；前端 Chat 页 SEO/PAID tab（仅 both 客户出 tab，单线客户直落自己线），
+  泳道面板按线筛（/tasks origin=chat&module=，paid 含 sem 老值）；chat prompt 声明本线，草案 module 默认归线。
+- **保头保尾**（lib/util headTail）：review_plan（1500 留头砍尾是 job 10013「看不到内容」的直接根因）
+  与 execute_task 的 detail 改 headTail，滚动单最新折返在尾部不再被砍。
+- **gym 账本聚合**（tools/gym_trace_pull.sh，gym_ 前缀首例）：实测 Mac 的 /data/aira 是本机盘非 NFS
+  （只挂了 clients/tools/scripts 三个子目录），Mac trace 落本机属硬规矩 8 合法隔离态；聚合放读取侧，
+  label_stats 跑统计前自动 rsync 并回（Mac 不在线跳过不挡）。首拉已并入 louvresky 的 5 个 Mac chat trace。
+  顺带：10-25 留的「Mac CLI 认不认 --output-format json」观察项关闭（job 日志有 session uuid，认）。
+- 测试：narration.test.js 重写（8 组，含折返摘录、兜底行、headTail 用 louvresky 真实病灶形态回放），
+  全套 node tests/ 加远端 php -l 全绿。规矩 9 第四问自答：零新闸，删一个申报依赖（叙事不再用标题）。
+- 验收：louvresky 真实修订单重放一轮（频道该线应只剩折返确认 1 条+收口回合 1 条），Monica 用一天回访。
+- 残留欠账：spawn:（非 report）任务的「方案已出，进入判定与放行环节」中间态行未动（它兼任放行提醒，
+  重构放行提醒挂到 hold 时点是下一刀，本轮不扩）。
+
 ### 2026-10-25 AIRA T1-T4 打分与优化地基（PLAN W18，Alvin 批「按照你的规划去改造」，rev 1b75065）
 
 - T1 trace 落盘：runner_host 一 job 一 init，llm.js 每次 claude 调用把完整 prompt、模型正文、meta

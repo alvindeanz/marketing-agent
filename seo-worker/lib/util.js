@@ -83,6 +83,15 @@ function summarize(str, n) {
   return truncate(String(str == null ? '' : str).replace(/\s+/g, ' ').trim(), n);
 }
 
+/* 保头保尾截断：滚动修订单的 detail 头是原始委托、尾是最新折返反馈，两头都要给模型。
+   砍中间不砍尾（2026-10-27 louvresky 复盘：review_plan 留头砍尾把最新折返砍没了，
+   挂出「正文被截断看不到内容」的调整要求，apply 跟着中止）。 */
+function headTail(str, head, tail) {
+  const s = String(str == null ? '' : str);
+  if (s.length <= head + tail + 24) return s;
+  return s.slice(0, head) + '\n…[中间略 ' + (s.length - head - tail) + ' 字]…\n' + s.slice(-tail);
+}
+
 function safeJson(value, fallback) {
   if (value == null) return fallback;
   if (typeof value === 'object') return value;
@@ -104,5 +113,6 @@ module.exports = {
   ensureClientWorkspace,
   truncate,
   summarize,
+  headTail,
   safeJson,
 };
