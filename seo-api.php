@@ -999,14 +999,14 @@ function capgap_split_on_accept($tid){
     if(!$t)return 0;
     if(!preg_match('/(^|\n)capability-gap(?:\[(cli|api|scope)\])?：\s*([^\n]{1,300})/u',(string)$t['result_note'],$m))return 0;
     $gapCls=strtolower((string)$m[2]);$gapNote=trim((string)$m[3]);
-    if(strpos((string)$t['origin'],'split:')===0)return 0; /* 套娃护栏，口径同判定期分流 */
+    if(is_split_origin($t['origin']))return 0; /* 套娃护栏，口径同判定期分流（split:/splitw: 同义） */
     /* 守卫收窄（2026-10-16 #1369 教训）：频道指令直接开出的「人工落地：」单不是 split 产物
        （origin 是 chatw:/chat:），它收口带 capability-gap[cli] 时照样要拆补执行器单并回频道，
        否则整个终局静默，操作员只能靠猜。真正的套娃由上面的 origin split: 检查和
        origin='split:<tid>' 去重键拦，标题守卫只留「补执行器：」（工具维护单再报缺口不再套拆）。 */
     if(mb_strpos((string)$t['title'],'补执行器：')===0)return 0;
-    $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
-    $sq->execute(['split:'.$tid]);$sr=$sq->fetch();$sq->closeCursor();
+    $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin IN(?,?) LIMIT 1");
+    $sq->execute(['split:'.$tid,'splitw:'.$tid]);$sr=$sq->fetch();$sq->closeCursor();
     if($sr)return (int)$sr['id'];
     /* 重开链去重（2026-10-13 #1260/#1262 教训）：重开单的母单 id 是新的，只按本 tid 去重会给
        同一件活拆第二张人工单。母单标题里引用的任务号（如「重开 #1232」）若已有未收口的 split
@@ -1014,8 +1014,8 @@ function capgap_split_on_accept($tid){
        意味着活要再做一遍。 */
     if(preg_match_all('/#(\d{1,10})/',(string)$t['title'],$rm)&&$rm[1]){
         $refs=array_values(array_unique(array_map('intval',$rm[1])));
-        $rq=db()->prepare("SELECT id,origin FROM seo_tasks WHERE origin IN (".implode(',',array_fill(0,count($refs),"CONCAT('split:',?)")).") AND status NOT IN('done','dropped','merged','killed') LIMIT 1");
-        $rq->execute($refs);$rr=$rq->fetch();$rq->closeCursor();
+        $rq=db()->prepare("SELECT id,origin FROM seo_tasks WHERE origin IN (".implode(',',array_merge(array_fill(0,count($refs),"CONCAT('split:',?)"),array_fill(0,count($refs),"CONCAT('splitw:',?)"))).") AND status NOT IN('done','dropped','merged','killed') LIMIT 1");
+        $rq->execute(array_merge($refs,$refs));$rr=$rq->fetch();$rq->closeCursor();
         if($rr){
             $dupId=(int)$rr['id'];
             task_append_note($tid,'[capgap-split] 能力缺口的执行步已有未收口的人工工单 #'.$dupId.'（'.$rr['origin'].'，重开链去重，不再拆新单），做完在那单对账');
@@ -1031,8 +1031,10 @@ function capgap_split_on_accept($tid){
     /* split 单落当期不继承母期（#861 教训），锚算法同判定期分流。
        2026-10-14 修残余：原 floor(days/14) 是两周制漏改（fa26285 同批），统一走半月制指针。 */
     $splitSprint=(string)$t['sprint'];
-    $curLbl=client_current_sprint_label($cid);
-    if($curLbl!=='')$splitSprint=$curLbl;
+    if(!preg_match('/^(spawn|chatw|report|ruling):/',(string)$t['origin'])){
+        $curLbl=client_current_sprint_label($cid);
+        if($curLbl!=='')$splitSprint=$curLbl;
+    } /* chat 系母单的子单不盖章，留 chat 泳道（splitw:，2026-10-28） */
     /* 三问分流（2026-10-13 #1265 教训）：[cli] 是执行器没实现，活归工具维护者走版本库补命令，
        不许排真人到客户后台做（2026-09-24 定则）；[api]/[scope]/未标注才是人工落地单。 */
     $isCli=($gapCls==='cli');
@@ -1063,7 +1065,7 @@ function capgap_split_on_accept($tid){
         'module'=>(string)$t['module'],'owner_type'=>'agency','priority'=>(string)$t['priority'],'ops'=>'','sprint'=>$splitSprint,
     ],['status_force'=>'approved']);
     if($te)return 0;
-    $splitTid=task_insert($cid,$ts,'seo-worker','split:'.$tid);
+    $splitTid=task_insert($cid,$ts,'seo-worker',split_origin_for($t['origin'],$tid));
     ensure_review_schema();
     db()->prepare("UPDATE seo_tasks SET review_verdict='do',review_reason=?,reviewed_at=NOW() WHERE id=?")
         ->execute([$reviewReason,$splitTid]);
@@ -1247,7 +1249,7 @@ function attach_human_state($tasks,$cid){
                attention=1 的单列「停人」（hold-human/熔断/harness 阻塞都打这个标），和普通待放行分开，
                普通待放行下一轮放行官会推进，停人的不会（2026-10-07 僵尸根因：Louvresky #752 hold 后 9 天没人裁）。 */
             $hs='wait_me';$why=!empty($t['attention'])?'停人：需人裁决（note 有 hold 判语）':'待放行';
-        }elseif(strpos((string)($t['origin']??''),'split:')===0&&(string)($t['owner_type']??'')!=='agent'){
+        }elseif(is_split_origin($t['origin']??'')&&(string)($t['owner_type']??'')!=='agent'){
             /* 拆条人工工单（2026-09-21）：母判决已继承，没有排期概念，就是等人上手。
                2026-10-10 补 owner 判断：转回机器位（machine_run/转位）的拆条单不再标
                「待人工执行」，掉进下面排期口径，由 harness 正常推进。 */
@@ -1490,7 +1492,16 @@ define('PLAN_ANCHOR_ORDER',"FIELD(status,'active') DESC,(IFNULL(NULLIF(service,'
    一、存量已收口 chat 单直接归档；
    二、存量未收口且空标签的 chat 单按创建日所在半月档补 sprint 章，老实变「逾期」，
       不再赖在本期装新活（前端口径：空标签永远算本期）。无方案锚补不出就保持空。 */
-define('CHAT_ORIGIN_SQL',"(origin LIKE 'spawn:%' OR origin LIKE 'chatw:%' OR origin LIKE 'report:%' OR origin LIKE 'ruling:%')");
+define('CHAT_ORIGIN_SQL',"(origin LIKE 'spawn:%' OR origin LIKE 'chatw:%' OR origin LIKE 'report:%' OR origin LIKE 'ruling:%' OR origin LIKE 'splitw:%')");
+/* 拆单泳道继承（2026-10-28 Alvin 定，Sammichelle #1647~#1705 十五张实证）：chat 系母单
+   拆出的人工落地/补执行器/口径确认子单用 origin=splitw:<母单>，留在 chat 泳道不盖 sprint 章；
+   sprint 母单照旧 split:<母单>。两个前缀在套娃护栏、去重键、转位否决、harness 过滤里完全
+   同义（is_split_origin），只有泳道归属与盖章不同。10-24 chat 脱轮（100d360）只洗了 chat
+   单本身，split 子单血缘断在这里，由本补丁收口。 */
+function is_split_origin($o){return (bool)preg_match('/^splitw?:/',(string)$o);}
+function split_origin_for($parentOrigin,$tid){
+    return (preg_match('/^(spawn|chatw|report|ruling):/',(string)$parentOrigin)?'splitw:':'split:').(int)$tid;
+}
 function ensure_task_archived(){
     static $done=false;
     if($done)return;
@@ -1605,7 +1616,7 @@ function task_insert($cid,$t,$by,$origin='sprint'){
        合法第三态——前端把空标签算本期、harness 把空标签算不可见，两套口径打架的任务会永久
        停摆。sprint 泳道单（非 chat 系 origin）落库时空 sprint 一律盖当期章，服务端单一事实源，
        哨兵/报告观察/任何新产线不用各自记得盖；无 active plan 锚的客户盖不出就保持空（老口径）。 */
-    if($t['sprint']===''&&!preg_match('/^(spawn|chatw|report|ruling):/',(string)$origin))
+    if($t['sprint']===''&&!preg_match('/^(spawn|chatw|report|ruling|splitw):/',(string)$origin))
         $t['sprint']=client_current_sprint_label($cid);
     db()->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,output_url,created_by,origin,card_kind)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
         ->execute([
@@ -3140,11 +3151,11 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
         /* 套娃护栏（2026-09-25，sdalu #872/#873 实证）：拆条人工工单自己被转回 agent 位再过判定时，
            白名单外条目仍在，而去重键只认 origin=split:<本单id>，查不到就再拆一层孙单，形成
            「人工落地：#A 人工落地：#B」套娃链。split 单的白名单外条目就是它自己的活，只留痕不再拆。 */
-        if($blocked&&strpos((string)$task['origin'],'split:')===0&&(string)$task['status']!=='done'){
+        if($blocked&&is_split_origin($task['origin'])&&(string)$task['status']!=='done'){
             task_append_note($tid,'[split-guard] 本单已是拆条人工工单，'.count($blocked).' 处白名单外条目留在本单执行，不再拆孙单');
         }elseif($blocked&&(string)$task['owner_type']==='agent'&&(string)$task['status']!=='done'){
-            $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
-            $sq->execute(['split:'.$tid]);
+            $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin IN(?,?) LIMIT 1");
+            $sq->execute(['split:'.$tid,'splitw:'.$tid]);
             $sr=$sq->fetch();
             $sq->closeCursor();
             if(!$sr){
@@ -3155,15 +3166,17 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
                    「即时就位」就成了空话（#861 继承 S3 实证）。当期按日历锚算，无锚回退母期。 */
                 /* 2026-10-14 修残余：原 floor(days/14) 是两周制漏改（fa26285 同批），统一走半月制指针。 */
                 $splitSprint=(string)$task['sprint'];
-                $curLbl=client_current_sprint_label($cid);
-                if($curLbl!=='')$splitSprint=$curLbl;
+                if(!preg_match('/^(spawn|chatw|report|ruling):/',(string)$task['origin'])){
+                    $curLbl=client_current_sprint_label($cid);
+                    if($curLbl!=='')$splitSprint=$curLbl;
+                } /* chat 系母单的子单不盖章，留 chat 泳道（splitw:，2026-10-28） */
                 list($ts,$te)=task_fields_clean([
                     'title'=>mb_substr('人工落地：#'.$tid.' '.$task['title'],0,255,'UTF-8'),
                     'detail'=>"母任务 #".$tid." 的方案里以下 ".count($blocked)." 处写入不在机器白名单，按判定期分流转人工。逐条做完在母任务条目账本上对账（或在本任务备注写明），验收标准以母任务方案为准。\n排班前先过三问（2026-09-24 Alvin 定）：API 支持吗 / scope 授了吗 / 只是 CLI 没实现？只有前两问有 no 才是真人工，CLI 没实现按定则补执行器，不许排真人。\n\n".implode("\n",$lines),
                     'module'=>(string)$task['module'],'owner_type'=>'agency','priority'=>(string)$task['priority'],'ops'=>'','sprint'=>$splitSprint,
                 ],['status_force'=>'approved']);
                 if(!$te){
-                    $splitTid=task_insert($cid,$ts,'seo-worker','split:'.$tid);
+                    $splitTid=task_insert($cid,$ts,'seo-worker',split_origin_for($task['origin'],$tid));
                     /* 继承母判决（2026-09-21 Alvin 定：拆条不产生新的「该不该做」，别再排期等下轮判定）。
                        该不该做在母任务判定期已答过，工单当场就位等人执行。 */
                     ensure_review_schema();
@@ -5403,8 +5416,8 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                    收口的任务是指错路，重开照样做不了。带上结束原因，有人工工单就指号。 */
                 $closeLineD='';
                 if(preg_match_all('/\[(applied|accepted|dropped|merged|killed)\][^\n]*/u',(string)$t2['result_note'],$mmD)&&$mmD[0])$closeLineD=mb_substr(trim((string)end($mmD[0])),0,160,'UTF-8');
-                $sqD=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? LIMIT 1");
-                $sqD->execute(['split:'.$tidA]);$srD=$sqD->fetch();$sqD->closeCursor();
+                $sqD=db()->prepare("SELECT id FROM seo_tasks WHERE origin IN(?,?) LIMIT 1");
+                $sqD->execute(['split:'.$tidA,'splitw:'.$tidA]);$srD=$sqD->fetch();$sqD->closeCursor();
                 $msgD='任务 #'.$tidA.' 已经结束'.($closeLineD!==''?('，收口记录：'.$closeLineD):'（结果备注里有结束类型与原因）').'。';
                 if($srD)$msgD.='这件事的人工执行工单是 #'.(int)$srD['id'].'，在任务列表可见，机器没有这一步的执行器，执行完在频道说一声即可。';
                 elseif(strpos((string)$t2['result_note'],'capability-gap')!==false)$msgD.='结束原因是能力缺口，重开任务机器也做不了，要么按母任务附件人工执行，要么等补执行器。';
@@ -7782,7 +7795,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
             if(!$t0)$veto='task missing';
             elseif(strpos((string)$t0['result_note'],'[reclass]')!==false)$veto='reclass 熔断：同任务只自愈一次';
             elseif(!in_array((string)$t0['status'],['proposed','approved','blocked'],true))$veto='status '.$t0['status'].' 不改归类（已有产出）';
-            elseif(strpos((string)$t0['origin'],'split:')===0)$veto='split 工单是刻意给人的，不转';
+            elseif(is_split_origin($t0['origin']))$veto='split 工单是刻意给人的，不转';
             if(!$veto&&$newMod!==''&&(!in_array($newMod,['technical','onpage','content','local','offpage','paid'],true)||$newMod===(string)$t0['module']))$veto='module 目标不合法或与现值相同';
             if(!$veto&&$newOwn!==''){
                 if($newOwn!=='agent'||(string)$t0['owner_type']!=='agency')$veto='owner 只允许 agency 转 agent';
@@ -8031,8 +8044,8 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
                客户口径确认单（机器拆单是出口，纯注记提醒不是，#1232 铁律），同母单去重。 */
             $cq=trim((string)($r['client_question']??''));
             if($cq!==''){
-                $dqC=db()->prepare("SELECT id FROM seo_tasks WHERE origin=? AND title LIKE '客户口径确认%' AND status NOT IN('done') LIMIT 1");
-                $dqC->execute(['split:'.$tid]);
+                $dqC=db()->prepare("SELECT id FROM seo_tasks WHERE origin IN(?,?) AND title LIKE '客户口径确认%' AND status NOT IN('done') LIMIT 1");
+                $dqC->execute(['split:'.$tid,'splitw:'.$tid]);
                 $exC=$dqC->fetch();
                 if($exC){
                     task_append_note($tid,'[client-question] 已有未收口的客户口径确认单 #'.(int)$exC['id'].'，本轮问题并入该单');
@@ -8045,7 +8058,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
                         'module'=>(string)$t['module'],'owner_type'=>'agency','priority'=>(string)$t['priority'],'ops'=>'','sprint'=>'',
                     ],['status_force'=>'approved']);
                     if(!$teC){
-                        $cqTid=task_insert($cid,$tsC,'opus-release','split:'.$tid);
+                        $cqTid=task_insert($cid,$tsC,'opus-release',split_origin_for($t['origin'],$tid));
                         task_append_note($tid,'[client-question] 缺客户口径，已自动生成确认单 #'.$cqTid.'（问题：'.mb_substr($cq,0,80,'UTF-8').'…）');
                         audit('opus-release','seo_release_client_question',(string)$tid,['q'=>$cq,'task'=>$cqTid]);
                     }

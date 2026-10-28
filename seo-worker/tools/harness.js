@@ -792,7 +792,7 @@ async function report(all, sprint, retried) {
   /* 泳道维度（2026-10-24 四刀 A2）：chat 泳道单脱轮后无 sprint，放行判定窗、静默期放行、
      卡刷新、阻塞回写若只按 sprint 筛就全断（脱轮当天的洞）。泳道单按 origin 入窗，
      等客户/停人/静默期的既有跳过规则原样生效。 */
-  const laneT = (t) => /^(spawn|chatw|report|ruling):/.test(String(t.origin || ''));
+  const laneT = (t) => /^(spawn|chatw|report|ruling|splitw):/.test(String(t.origin || ''));
   const scoped = all.filter((t) => (IDS ? IDS.includes(t.id) : (laneT(t) || (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn))));
   // 方案审批执行闸：未批准方案的任务不进阻塞回写、卡刷新、放行判定与静默期放行，单列计数
   const mine = scoped.filter(planGateOk);
@@ -940,7 +940,7 @@ async function report(all, sprint, retried) {
      3 天报。只报不推：chat 单是快路直启，推进靠它自己的链路，这里保证的是「没人拦也没人推」
      的那部分在每轮汇总里有名有姓（#1461 判 do 没人推同款病的泳道版预防针）。 */
   try {
-    const chatLane = (t) => /^(spawn|chatw|report|ruling):/.test(String(t.origin || ''));
+    const chatLane = (t) => /^(spawn|chatw|report|ruling|splitw):/.test(String(t.origin || ''));
     const laneAge = (t) => { const d = Date.parse(String(t.updated_at || t.created_at || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : (Date.now() - d) / 86400000; };
     const laneOpen = all.filter((t) => chatLane(t) && !['done'].includes(t.status));
     const laneStuck = laneOpen.filter((t) => {
@@ -991,7 +991,7 @@ async function report(all, sprint, retried) {
     const sprintN = (t) => { const m = /^S(\d+)/.exec(String(t.sprint || '')); return m ? parseInt(m[1], 10) : null; };
     const baseOk = (t) => ['proposed', 'approved'].includes(t.status)
       && sprintN(t) !== null && sprintN(t) <= curN
-      && String(t.origin || '').indexOf('split:') !== 0
+      && !/^splitw?:/.test(String(t.origin || ''))
       && !HUMANISH.test(String(t.title || '') + String(t.detail || '').slice(0, 200))
       && String(t.result_note || '').indexOf('[auto-machine-run]') === -1;
     /* 两条转位路：
