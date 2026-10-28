@@ -12,6 +12,7 @@
 // GET. Nothing in this file can alter a live site.
 
 const fs = require('node:fs');
+const { writeFileRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
@@ -301,8 +302,8 @@ function materialiseConfirmationCard(data, cardKind, workspace, log) {
   const stem = cardKind + '_' + path.basename(workspace) + '_' + String(data.issued);
   const dataFile = path.join(rdir, stem + '.data.json');
   const htmlFile = path.join(rdir, stem + '.html');
-  fs.writeFileSync(dataFile, JSON.stringify(data, null, 1), 'utf8');
-  fs.writeFileSync(htmlFile, render.renderCard(data), 'utf8');
+  writeFileRetry(dataFile, JSON.stringify(data, null, 1), 'utf8');
+  writeFileRetry(htmlFile, render.renderCard(data), 'utf8');
   if (log) log('确认卡产线：' + path.basename(dataFile) + ' 与同名 HTML 已落 reports/（data.json 单源，askreg 同读）');
   return { dataFile, htmlFile, html: path.basename(htmlFile) };
 }
@@ -1205,7 +1206,7 @@ function saveRollRecord(workspace, slug, roll, taskId, log) {
   try {
     const f = rollRecordFile(workspace, slug);
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(
+    writeFileRetry(
       f,
       JSON.stringify({ slug, comment: styleroll.rollComment(roll), task_id: taskId, ts: new Date().toISOString() }, null, 1),
       'utf8'
@@ -1343,7 +1344,7 @@ async function publishPreview(ctx, workspace, taskId, html, log) {
     const dir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
     fs.mkdirSync(dir, { recursive: true });
     const local = path.join(dir, 'preview-task-' + taskId + '.html');
-    fs.writeFileSync(local, html, 'utf8');
+    writeFileRetry(local, html, 'utf8');
     const res = await publishFile(cfg, slug, 'preview', 'task-' + taskId + '.html', local, log);
     return res.url;
   } catch (e) {
@@ -1940,7 +1941,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   // 写往平台的正文一律剥 Style Roll 注释（带外化，2026-10-21 ticket #46）：
   // 机器校验契约照旧要求模型产出里带，骨架另存带外记录（writeback 后 saveRollRecord）。
   const platformBody = styleroll.stripRollComment(draft.body_markdown);
-  fs.writeFileSync(draftFile, platformBody, 'utf8');
+  writeFileRetry(draftFile, platformBody, 'utf8');
 
   const payload = {
     title: draft.title,
@@ -1964,7 +1965,7 @@ async function runBlogTask(ctx, context, workspace, task) {
       const revDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
       fs.mkdirSync(revDir, { recursive: true });
       const revFile = path.join(revDir, 'revised-body-' + slug + '.md');
-      fs.writeFileSync(revFile, JSON.stringify(payload, null, 1), 'utf8');
+      writeFileRetry(revFile, JSON.stringify(payload, null, 1), 'utf8');
       const host = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
       previewUrl = host ? 'https://' + host + '/blog/' + slug + '/' : '';
       finalSlug = slug;
@@ -2061,7 +2062,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     await client.patchPost(finalSlug, { body: placed.body, meta });
     placedBody = placed.body;
     placedOg = placed.ogImage || '';
-    fs.writeFileSync(draftFile, placed.body, 'utf8');
+    writeFileRetry(draftFile, placed.body, 'utf8');
     const okCount = placed.results.length;
     const total = (draft.image_briefs || []).length || 4;
     const missing = (placed.blocked || []).map((b) => b.slot);
@@ -2182,7 +2183,7 @@ async function issueBlogCard(ctx, opts) {
     const rdir = path.join(workspace, 'reports');
     fs.mkdirSync(rdir, { recursive: true });
     const cardName = 'blog_confirmation_task-' + taskId + '.html';
-    fs.writeFileSync(path.join(rdir, cardName), cardHtml, 'utf8');
+    writeFileRetry(path.join(rdir, cardName), cardHtml, 'utf8');
     /* 令牌注入（2026-09-21 取消预览模式）：裸链接自动补参 */
     const fbTok = require('../lib/publish').injectCardToken(path.join(rdir, cardName), taskId, ctx.cfg.serviceToken);
     const res = await publishFile(ctx.cfg, path.basename(workspace), '', cardName, path.join(rdir, cardName), log);
@@ -2321,7 +2322,7 @@ async function runBlogWriteback(ctx, opts) {
   const outDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
   fs.mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, 'writeback-body-' + slug + '.md');
-  fs.writeFileSync(outFile, platformBody, 'utf8');
+  writeFileRetry(outFile, platformBody, 'utf8');
 
   const previewUrl = String((got && got.previewUrl) || '');
   const title = String((targetPost && targetPost.title) || slug);
@@ -2373,7 +2374,7 @@ async function runOutlineOnly(ctx, opts) {
   fs.mkdirSync(outDir, { recursive: true });
   const file = path.join(outDir, 'outline-task-' + taskId + '.md');
   const qs = Array.isArray(o.questions_for_client) ? o.questions_for_client : [];
-  fs.writeFileSync(file, [
+  writeFileRetry(file, [
     '# ' + String(o.title || task.title),
     '',
     'keyword: ' + String(o.keyword || ''),
@@ -2617,7 +2618,7 @@ async function runOne(ctx, context, workspace, taskId) {
 
   // Keep the full text on disk. The API note only carries a short summary.
   // The change plan filename is stable on purpose: apply_task looks it up by id.
-  fs.writeFileSync(file, output, 'utf8');
+  writeFileRetry(file, output, 'utf8');
   log('task ' + taskId + ': ' + (prepare ? 'change plan' : 'output') + ' saved to ' + file);
 
   if (prepare) {
@@ -2648,7 +2649,7 @@ async function runOne(ctx, context, workspace, taskId) {
         const lint2 = lintPlan(fixed);
         if (!lint2.length && !missingPlanSections(fixed).length) {
           output = fixed;
-          fs.writeFileSync(file, output, 'utf8');
+          writeFileRetry(file, output, 'utf8');
           log('task ' + taskId + ': lint 自修通过，方案已更新');
           lint = [];
         } else {
@@ -2770,7 +2771,7 @@ async function runOne(ctx, context, workspace, taskId) {
           if (parsed && !parseErr && CARD_DATA_RE.test(output)) {
             // 自修结果写回交付文件，附件里的块与落盘的 data.json 一致
             output = output.replace(CARD_DATA_RE, '```card_data\n' + JSON.stringify(parsed, null, 1) + '\n```');
-            fs.writeFileSync(file, output, 'utf8');
+            writeFileRetry(file, output, 'utf8');
           }
         }
       }

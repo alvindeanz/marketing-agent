@@ -15,6 +15,7 @@
 //   叙事失败                          ->  降级，job done
 
 const fs = require('node:fs');
+const { writeFileRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
@@ -584,8 +585,8 @@ async function run(ctx) {
   fs.mkdirSync(outDir, { recursive: true });
   let localHtml = path.join(outDir, 'report-' + ym + '-v' + versionHint + '.html');
   let localPack = path.join(outDir, 'report-' + ym + '-v' + versionHint + '.pack.json');
-  fs.writeFileSync(localHtml, html, 'utf8');
-  fs.writeFileSync(localPack, JSON.stringify(pack, null, 1), 'utf8');
+  writeFileRetry(localHtml, html, 'utf8');
+  writeFileRetry(localPack, JSON.stringify(pack, null, 1), 'utf8');
   log('成品写入 ' + localHtml);
 
   // ---- 发布 ----

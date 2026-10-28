@@ -13,6 +13,7 @@
 // command is allowed to run.
 
 const fs = require('node:fs');
+const { writeFileRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { seoq, rootDomain, sanitizeSubcommand, CallBudget, rowsOf, payloadOf } = require('../lib/seoq');
@@ -82,7 +83,7 @@ function snapshotData(latest, source) {
 function writeRaw(dir, name, value, log) {
   const file = path.join(dir, name + '.json');
   const text = JSON.stringify(value, null, 1);
-  fs.writeFileSync(file, text, 'utf8');
+  writeFileRetry(file, text, 'utf8');
   log('material: ' + name + '.json, ' + Buffer.byteLength(text, 'utf8') + ' bytes');
   return file;
 }
@@ -640,7 +641,7 @@ async function run(ctx) {
   const outDir = path.join(workspace, 'seo-agent-output');
   fs.mkdirSync(outDir, { recursive: true });
   const file = path.join(outDir, 'dossier-' + collected.today + '.md');
-  fs.writeFileSync(file, dossierMd, 'utf8');
+  writeFileRetry(file, dossierMd, 'utf8');
   log('dossier saved to ' + file + ', ' + dossierMd.length + ' chars');
 
   log(

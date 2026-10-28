@@ -12,6 +12,7 @@
 // 用模块对象而不是解构，单测要能把 execFile 换成假的。
 const cp = require('node:child_process');
 const path = require('node:path');
+const { writeFileRetry } = require('./fsretry');
 
 const SSH_TIMEOUT_MS = 120000;
 
@@ -100,7 +101,7 @@ function injectCardToken(localPath, taskId, serviceToken) {
     } else {
       html += '\n' + tag + '\n';
     }
-    fs.writeFileSync(localPath, html, 'utf8');
+    writeFileRetry(localPath, html, 'utf8');
     return tok;
   } catch (e) { return ''; }
 }

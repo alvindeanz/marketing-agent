@@ -12,6 +12,7 @@
 // retried automatically, because a half applied change is a human's problem.
 
 const fs = require('node:fs');
+const { writeFileRetry } = require('../lib/fsretry');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -331,7 +332,7 @@ async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops
   const rdir = path.join(workspace, 'reports');
   fs.mkdirSync(rdir, { recursive: true });
   const cardName = 'onsite_confirm_task-' + taskId + '.html';
-  fs.writeFileSync(path.join(rdir, cardName), cardHtml, 'utf8');
+  writeFileRetry(path.join(rdir, cardName), cardHtml, 'utf8');
   const { injectCardToken } = require('../lib/publish');
   const fbTok = injectCardToken(path.join(rdir, cardName), taskId, cfg.serviceToken);
   const res = await publishFile(cfg, path.basename(workspace), '', cardName, path.join(rdir, cardName), log);
@@ -1027,7 +1028,7 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
   fs.mkdirSync(outDir, { recursive: true });
   const logFile = path.join(outDir, 'blog-publish-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
-  fs.writeFileSync(
+  writeFileRetry(
     logFile,
     ['# 博客发布执行记录', '', '任务 #' + taskId, 'slug ' + slug, '正式地址 ' + publicUrl, '', '## 步骤', ...steps.map((s) => '- ' + s), '', '## 验证', problems.length ? problems.map((p) => '- 未通过：' + p).join('\n') : '- 全部通过'].join('\n'),
     'utf8'
@@ -1214,7 +1215,7 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
   fs.mkdirSync(outDir, { recursive: true });
   const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
-  fs.writeFileSync(logFile, output, 'utf8');
+  writeFileRetry(logFile, output, 'utf8');
   const parsed = extractTrailingJson(output);
   const j = (parsed && parsed.json) || {};
   const status = STATUSES.indexOf(String(j.status || '')) !== -1 ? String(j.status) : 'failed';
@@ -1421,7 +1422,7 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
   fs.mkdirSync(outDir, { recursive: true });
   const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
-  fs.writeFileSync(logFile, output, 'utf8');
+  writeFileRetry(logFile, output, 'utf8');
   const parsed = extractTrailingJson(output);
   const j = (parsed && parsed.json) || {};
   const status = STATUSES.indexOf(String(j.status || '')) !== -1 ? String(j.status) : 'failed';
@@ -1564,7 +1565,7 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
   fs.mkdirSync(outDir, { recursive: true });
   const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
-  fs.writeFileSync(logFile, output, 'utf8');
+  writeFileRetry(logFile, output, 'utf8');
   const parsed = extractTrailingJson(output);
   const j = (parsed && parsed.json) || {};
   const status = STATUSES.indexOf(String(j.status || '')) !== -1 ? String(j.status) : 'failed';
@@ -1906,7 +1907,7 @@ async function runOne(ctx, context, workspace, taskId) {
     outDir,
     'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md'
   );
-  fs.writeFileSync(logFile, output, 'utf8');
+  writeFileRetry(logFile, output, 'utf8');
   log('task ' + taskId + ': execution record saved to ' + logFile);
 
   const outcome = readOutcome(output, log);
