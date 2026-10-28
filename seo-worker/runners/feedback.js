@@ -12,6 +12,7 @@
 // empty facts array, and that is a correct outcome.
 
 const fs = require('node:fs');
+const { mkdirRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
@@ -295,7 +296,7 @@ async function run(ctx) {
 async function fetchImages(ctx, feedbackId, taskId, images, tmpDir) {
   const { api, log } = ctx;
   if (!images.length) return [];
-  fs.mkdirSync(tmpDir, { recursive: true });
+  mkdirRetry(tmpDir, { recursive: true });
   const out = [];
   for (const name of images) {
     const dest = path.join(tmpDir, name);

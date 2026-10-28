@@ -15,7 +15,7 @@
 //   叙事失败                          ->  降级，job done
 
 const fs = require('node:fs');
-const { writeFileRetry } = require('../lib/fsretry');
+const { writeFileRetry, mkdirRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
@@ -582,7 +582,7 @@ async function run(ctx) {
   // 会被人当成 8 月月报（2026-09-24 拍板：新流程产物按日期区间标注）。
   const ym = period.rolling ? period.start + '_' + period.end : period.start.slice(0, 7);
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   let localHtml = path.join(outDir, 'report-' + ym + '-v' + versionHint + '.html');
   let localPack = path.join(outDir, 'report-' + ym + '-v' + versionHint + '.pack.json');
   writeFileRetry(localHtml, html, 'utf8');

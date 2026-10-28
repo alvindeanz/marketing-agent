@@ -12,7 +12,7 @@
 // retried automatically, because a half applied change is a human's problem.
 
 const fs = require('node:fs');
-const { writeFileRetry } = require('../lib/fsretry');
+const { writeFileRetry, mkdirRetry } = require('../lib/fsretry');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -330,7 +330,7 @@ async function issueOnsiteConfirmCard(ctx, task, taskId, workspace, profile, ops
   };
   const cardHtml = render.renderCard(cardData);
   const rdir = path.join(workspace, 'reports');
-  fs.mkdirSync(rdir, { recursive: true });
+  mkdirRetry(rdir, { recursive: true });
   const cardName = 'onsite_confirm_task-' + taskId + '.html';
   writeFileRetry(path.join(rdir, cardName), cardHtml, 'utf8');
   const { injectCardToken } = require('../lib/publish');
@@ -1026,7 +1026,7 @@ async function runBlogPublish(ctx, task, workspace, profile, previewUrl) {
   }
 
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const logFile = path.join(outDir, 'blog-publish-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
   writeFileRetry(
     logFile,
@@ -1213,7 +1213,7 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
   const output = String(res.stdout || '').trim();
   if (!output) throw new Error('task ' + taskId + ': the ads apply pass produced no output');
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
   writeFileRetry(logFile, output, 'utf8');
   const parsed = extractTrailingJson(output);
@@ -1420,7 +1420,7 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
   const output = String(res.stdout || '').trim();
   if (!output) throw new Error('task ' + taskId + ': the shopify apply pass produced no output');
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
   writeFileRetry(logFile, output, 'utf8');
   const parsed = extractTrailingJson(output);
@@ -1563,7 +1563,7 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
   const output = String(res.stdout || '').trim();
   if (!output) throw new Error('task ' + taskId + ': the wordpress apply pass produced no output');
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const logFile = path.join(outDir, 'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md');
   writeFileRetry(logFile, output, 'utf8');
   const parsed = extractTrailingJson(output);
@@ -1626,7 +1626,7 @@ function readLedger(workspace) {
   catch (e) { return []; }
 }
 function appendLedger(workspace, row) {
-  try { fs.mkdirSync(path.dirname(ledgerFile(workspace)), { recursive: true }); fs.appendFileSync(ledgerFile(workspace), JSON.stringify(row) + '\n'); } catch (e) { /* 台账写失败不拦执行 */ }
+  try { mkdirRetry(path.dirname(ledgerFile(workspace)), { recursive: true }); fs.appendFileSync(ledgerFile(workspace), JSON.stringify(row) + '\n'); } catch (e) { /* 台账写失败不拦执行 */ }
 }
 function normPageUrl(u) {
   try { const x = new URL(String(u).trim()); let p = x.pathname; if (!p.endsWith('/')) p += '/'; return x.origin.toLowerCase() + p; } catch (e) { return null; }
@@ -1902,7 +1902,7 @@ async function runOne(ctx, context, workspace, taskId) {
   if (!output) throw new Error('task ' + taskId + ': the apply pass produced no output');
 
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const logFile = path.join(
     outDir,
     'apply-log-task-' + taskId + '-' + localYmd() + '-' + Date.now() + '.md'

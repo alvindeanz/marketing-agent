@@ -7,7 +7,7 @@
 // hook below and leave everything else alone.
 
 const fs = require('node:fs');
-const { writeFileRetry } = require('./fsretry');
+const { writeFileRetry, mkdirRetry } = require('./fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('./llm');
@@ -52,7 +52,7 @@ async function generateDraft(ctx, opts) {
   if (!text) throw new Error(opts.label + ': claude produced no output');
 
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = path.join(outDir, opts.filePrefix + '-' + stamp + '.md');
   writeFileRetry(file, text, 'utf8');

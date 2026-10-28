@@ -12,7 +12,7 @@
 // GET. Nothing in this file can alter a live site.
 
 const fs = require('node:fs');
-const { writeFileRetry } = require('../lib/fsretry');
+const { writeFileRetry, mkdirRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
@@ -297,7 +297,7 @@ function materialiseConfirmationCard(data, cardKind, workspace, log) {
   }
   render.validate(data);
   const rdir = path.join(workspace, 'reports');
-  fs.mkdirSync(rdir, { recursive: true });
+  mkdirRetry(rdir, { recursive: true });
   // 文件名 YYYY-MM 取 data.issued，规格「文件名月份 == issued」由构造保证
   const stem = cardKind + '_' + path.basename(workspace) + '_' + String(data.issued);
   const dataFile = path.join(rdir, stem + '.data.json');
@@ -1205,7 +1205,7 @@ function rollRecordFile(workspace, slug) {
 function saveRollRecord(workspace, slug, roll, taskId, log) {
   try {
     const f = rollRecordFile(workspace, slug);
-    fs.mkdirSync(path.dirname(f), { recursive: true });
+    mkdirRetry(path.dirname(f), { recursive: true });
     writeFileRetry(
       f,
       JSON.stringify({ slug, comment: styleroll.rollComment(roll), task_id: taskId, ts: new Date().toISOString() }, null, 1),
@@ -1342,7 +1342,7 @@ async function publishPreview(ctx, workspace, taskId, html, log) {
   try {
     const slug = path.basename(workspace);
     const dir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
-    fs.mkdirSync(dir, { recursive: true });
+    mkdirRetry(dir, { recursive: true });
     const local = path.join(dir, 'preview-task-' + taskId + '.html');
     writeFileRetry(local, html, 'utf8');
     const res = await publishFile(cfg, slug, 'preview', 'task-' + taskId + '.html', local, log);
@@ -1935,7 +1935,7 @@ async function runBlogTask(ctx, context, workspace, task) {
 
   // Keep the full draft on disk before touching the platform.
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const draftFile = path.join(outDir, 'blog-task-' + taskId + '-' + Date.now() + '.md');
 
   // 写往平台的正文一律剥 Style Roll 注释（带外化，2026-10-21 ticket #46）：
@@ -1963,7 +1963,7 @@ async function runBlogTask(ctx, context, workspace, task) {
       // 所以这里不碰平台，把新正文存成交付文件，放行后由 apply 阶段 PATCH 并发布。
       publishedRevise = true;
       const revDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
-      fs.mkdirSync(revDir, { recursive: true });
+      mkdirRetry(revDir, { recursive: true });
       const revFile = path.join(revDir, 'revised-body-' + slug + '.md');
       writeFileRetry(revFile, JSON.stringify(payload, null, 1), 'utf8');
       const host = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
@@ -2181,7 +2181,7 @@ async function issueBlogCard(ctx, opts) {
     };
     const cardHtml = bcRender.renderCard(cardData);
     const rdir = path.join(workspace, 'reports');
-    fs.mkdirSync(rdir, { recursive: true });
+    mkdirRetry(rdir, { recursive: true });
     const cardName = 'blog_confirmation_task-' + taskId + '.html';
     writeFileRetry(path.join(rdir, cardName), cardHtml, 'utf8');
     /* 令牌注入（2026-09-21 取消预览模式）：裸链接自动补参 */
@@ -2320,7 +2320,7 @@ async function runBlogWriteback(ctx, opts) {
   log('task ' + taskId + '：草稿正文已替换并回读一致（' + Buffer.byteLength(platformBody, 'utf8') + ' 字节），仍是草稿未发布');
 
   const outDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const outFile = path.join(outDir, 'writeback-body-' + slug + '.md');
   writeFileRetry(outFile, platformBody, 'utf8');
 
@@ -2371,7 +2371,7 @@ async function runOutlineOnly(ctx, opts) {
   }
   const o = parsed.json;
   const outDir = path.join(workspace, OUTPUT_DIRNAME, 'task-' + taskId);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const file = path.join(outDir, 'outline-task-' + taskId + '.md');
   const qs = Array.isArray(o.questions_for_client) ? o.questions_for_client : [];
   writeFileRetry(file, [
@@ -2494,7 +2494,7 @@ async function downloadTaskAttachments(ctx, task, workspace) {
   const names = Array.from(new Set((detail.match(/\/feedback_file\/([A-Za-z0-9._-]+)/g) || []).map((s) => s.replace('/feedback_file/', ''))));
   if (!names.length) return;
   const dir = path.join(workspace, 'temp', 'attachments');
-  fs.mkdirSync(dir, { recursive: true });
+  mkdirRetry(dir, { recursive: true });
   for (const name of names.slice(0, 8)) {
     const dest = path.join(dir, name);
     if (fs.existsSync(dest)) continue;
@@ -2574,7 +2574,7 @@ async function runOne(ctx, context, workspace, taskId) {
   );
 
   const outDir = path.join(workspace, OUTPUT_DIRNAME);
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   let prompt;

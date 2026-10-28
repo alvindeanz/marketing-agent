@@ -12,6 +12,7 @@
 // failed because an upload timed out.
 
 const fs = require('node:fs');
+const { mkdirRetry } = require('./fsretry');
 const path = require('node:path');
 
 const OUTPUT_DIRNAME = 'seo-agent-output';
@@ -41,7 +42,7 @@ function taskDeliverableDir(workspace, taskId) {
 /** Create the directory so a runner can point the agent at a path that exists. */
 function ensureTaskDeliverableDir(workspace, taskId) {
   const dir = taskDeliverableDir(workspace, taskId);
-  fs.mkdirSync(dir, { recursive: true });
+  mkdirRetry(dir, { recursive: true });
   return dir;
 }
 

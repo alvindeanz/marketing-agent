@@ -13,7 +13,7 @@
 // command is allowed to run.
 
 const fs = require('node:fs');
-const { writeFileRetry } = require('../lib/fsretry');
+const { writeFileRetry, mkdirRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { seoq, rootDomain, sanitizeSubcommand, CallBudget, rowsOf, payloadOf } = require('../lib/seoq');
@@ -113,7 +113,7 @@ async function collect(ctx, profile, context, workspace) {
   // Local date, so the snapshot period matches the day the board is showing.
   const today = localYmd();
   const rawDir = path.join(workspace, 'temp', 'discover-' + today);
-  fs.mkdirSync(rawDir, { recursive: true });
+  mkdirRetry(rawDir, { recursive: true });
   log('script stage: root ' + root + ', db ' + db + ', raw material in ' + rawDir);
 
   const raw = {};
@@ -639,7 +639,7 @@ async function run(ctx) {
   log('discovery snapshot posted, spec ' + SPEC_VERSION + ', ' + allUnknowns.length + ' unknown(s)');
 
   const outDir = path.join(workspace, 'seo-agent-output');
-  fs.mkdirSync(outDir, { recursive: true });
+  mkdirRetry(outDir, { recursive: true });
   const file = path.join(outDir, 'dossier-' + collected.today + '.md');
   writeFileRetry(file, dossierMd, 'utf8');
   log('dossier saved to ' + file + ', ' + dossierMd.length + ' chars');

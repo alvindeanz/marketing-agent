@@ -19,6 +19,7 @@
 //      还坏就放弃草案只发正文。人拿到一段能读的回复，比拿到一个红 job 有用得多。
 
 const fs = require('node:fs');
+const { mkdirRetry } = require('../lib/fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('../lib/llm');
@@ -308,7 +309,7 @@ async function fetchThreadImages(ctx, messages, workspace) {
     const hasImgs = m.images && m.images.length;
     const hasFiles = m.files && m.files.length;
     if (!hasImgs && !hasFiles) continue;
-    fs.mkdirSync(dir, { recursive: true });
+    mkdirRetry(dir, { recursive: true });
     for (const name of m.images || []) {
       const dest = path.join(dir, name);
       try {

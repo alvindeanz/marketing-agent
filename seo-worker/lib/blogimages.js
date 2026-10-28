@@ -19,6 +19,7 @@
 // Nothing here publishes. It PATCHes a draft that is already on the platform.
 
 const fs = require('node:fs');
+const { mkdirRetry } = require('./fsretry');
 const path = require('node:path');
 
 const { runClaude } = require('./llm');
@@ -415,7 +416,7 @@ async function runImageStage(ctx, opts) {
   log('task ' + taskId + '：配图源 ' + provider + modelNote);
   if (!origin) throw new Error('task ' + taskId + '：拿不到站点 origin，无法下载生成出来的图片');
 
-  fs.mkdirSync(tmpDir, { recursive: true });
+  mkdirRetry(tmpDir, { recursive: true });
   const results = [];
   const blocked = [];
 

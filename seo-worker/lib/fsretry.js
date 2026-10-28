@@ -40,4 +40,24 @@ function writeFileRetry(file, data, opts) {
   throw err;
 }
 
-module.exports = { writeFileRetry, SALVAGE_DIR };
+/* mkdir 同族（2026-10-28 补刀，job 11229 实证：mac NFS 瞬态 ENOENT 打在 mkdirSync 上，
+   目录在 NFS 上实际存在，recursive:true 救不了瞬态）。只重试不抢救：目录没内容可丢。
+   注意 ENOENT 对 mkdir 多数是真路径病，但 NFS 瞬态下父目录「看不见」也报 ENOENT，
+   所以 mkdir 把 ENOENT 也列入重试面（写文件那边 ENOENT 仍然立即跳出，语义不同别合并）。 */
+function mkdirRetry(dir, opts) {
+  let lastErr = null;
+  for (let i = 0; i <= BACKOFF_MS.length; i++) {
+    try { fs.mkdirSync(dir, opts); return; }
+    catch (e) {
+      if (String(e.code) === 'EEXIST') return;
+      lastErr = e;
+      if (['ETIMEDOUT', 'EIO', 'EAGAIN', 'EBUSY', 'ESTALE', 'ENOTCONN', 'ENOENT'].indexOf(String(e.code)) === -1) break;
+      if (i < BACKOFF_MS.length) sleepSync(BACKOFF_MS[i]);
+    }
+  }
+  const err = new Error('mkdirRetry 耗尽重试仍失败：' + String(lastErr && lastErr.message || lastErr));
+  err.code = lastErr && lastErr.code;
+  throw err;
+}
+
+module.exports = { writeFileRetry, mkdirRetry, SALVAGE_DIR };

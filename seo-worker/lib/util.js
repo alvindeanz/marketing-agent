@@ -2,6 +2,7 @@
 // Small shared helpers: timestamps, date math, workspace paths.
 
 const fs = require('node:fs');
+const { mkdirRetry } = require('./fsretry');
 const path = require('node:path');
 
 function ts() {
@@ -69,7 +70,7 @@ function clientDirName(profile, cfg) {
 /** Absolute workspace path for a client, created if missing. */
 function ensureClientWorkspace(profile, cfg) {
   const dir = path.join(cfg.workspaceRoot, clientDirName(profile, cfg));
-  fs.mkdirSync(dir, { recursive: true });
+  mkdirRetry(dir, { recursive: true });
   return dir;
 }
 
