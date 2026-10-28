@@ -107,6 +107,8 @@
     "wp-term-description-set": "reversible",
     "wp-redirect-add": "reversible",
     "wp-sitemap-flush": "reversible",
+    "wp-media-upload": "reversible",
+    "wp-post-trash": "reversible",
     "paid-report-draft": "reversible",
     "product-meta-update": "reversible",
     "product-content-edit": "reversible",

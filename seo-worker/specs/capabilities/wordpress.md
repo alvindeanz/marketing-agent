@@ -1,6 +1,6 @@
-# WordPress 能力清单 v3
+# WordPress 能力清单 v4
 
-<!-- WP-CAP-V1（2026-09-21）：首版。执行通道是 wf-agent 插件的 REST 命名空间（v2 2026-09-25：content 模块上线，正文编辑与 draft 建稿转机器道；v3 2026-10-13：插件 1.3.2 上线，slug/分类/特色图转机器道，加博客发布形态线；插件与 CLI 现由 Aira 全权共维，wp-tools 仓）
+<!-- WP-CAP-V1（2026-09-21）：首版。执行通道是 wf-agent 插件的 REST 命名空间（v2 2026-09-25：content 模块上线，正文编辑与 draft 建稿转机器道；v3 2026-10-13：插件 1.3.2 上线，slug/分类/特色图转机器道，加博客发布形态线；v4 2026-10-28：插件 1.3.4 上线，媒体上传与移回收站转机器道，sdalu #1684/#1685 与工单 #50 缺口由 aiden/wp 线当日补发；插件与 CLI 维护在 wp-tools 仓）
      `<domain>/wp-json/wf-agent/v1`，token 鉴权（header `X-WF-Agent-Token`），Aiden 维护。
      接入包与回执见 /mnt/share/aiden/to-aira-wp-sites-access-20260920-1847.md（阅后即删的交接文件，
      长期真相源是各客户工作区 CLAUDE.md 与 notes/wordpress_credentials.md）。 -->
@@ -28,7 +28,8 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 | gsc-audit | agent_readonly | 只读审计 GSC，口径同 webforger.md |
 | wp-content-edit | agent_prepare | 正文/标题/摘要编辑，走插件 `/content/<post_id>`（写前自动快照 post_content 类，可回滚，另有 WP 原生 revisions）。**1.3.2 起同端点可写 slug、categories、featured_media**（CLI `wfagent content set --slug/--category/--featured`）：已发布文章改 slug 插件拒收（草稿期定稿）；featured_media 只收媒体库已有图的 id；非法分类 id 拒收。方案逐处点名读改写；双闸授权域内免卡。Elementor 页端点自动拒写（正文在 _elementor_data），撞到即转人工。核心 /wp/v2 被主机封锁的旧说明作废，一切走插件隧道 |
 | wp-draft-create | agent_prepare | 新建 draft（post/page），走插件 `/content`（需站上 wf-agent >= 1.3.1；1.3.2 起建稿可直接带 slug/categories/featured_media，写前按风险注记验版），post_status 硬编码 draft 永不直接发布；发布是 status 字段另一次显式写（对外可见，凭证走客户卡批文） |
-| wp-media-upload | human_only | 往媒体库上传新文件插件无端点（1.3.2 的 featured_media 只认已有图），能力缺口已登记回 wp-tools，方案另议。封面是新图的任务这一步转人工 |
+| wp-media-upload | agent_apply | 往媒体库上传新文件，走 `POST /content/media`（需站上 wf-agent >= 1.3.4）。入参二选一：multipart 的 file 字段，或 JSON `{"url":"..."}` 远端拉取，均可带 alt、title；只收 jpeg/png/gif/webp（按文件字节判型），上限 10MB，url 只收 http/https（带凭据或内网地址拒收）。成功 201 返回 id、source_url、mime、宽高、snapshot_id；快照 kind media_upload，rollback 把附件移入回收站不永久删。拿到 id 后挂封面照旧走 content 端点的 featured_media。2026-10-28 登记（sdalu #1684/#1685 缺口，wp 线程 1.3.4 补端点） |
+| wp-post-trash | agent_apply | 把 post/page/product 移入回收站，走 `POST /content/<post_id>/trash`（需站上 wf-agent >= 1.3.4），无请求体。只处理这三类（附件等其他类型 409），不存在 404，已在回收站幂等返回 already_trashed；成功返回 previous_status 与 snapshot_id，WP 会把 slug 改成 `<slug>__trashed` 腾出原 slug（清重复稿正好用）。快照 kind post_trash，rollback 恢复原 status 和 slug。站点 EMPTY_TRASH_DAYS=0 时端点拒收（等于永久删），这种站转人工。永久删除没有机器道 |
 | wp-structured-data | human_only | FAQ/JSON-LD 走 Rank Math（正文内联 JSON-LD 会被剥），插件暂无端点 |
 | wp-woocommerce-write | human_only | Woo 商品数据（价格、库存、描述正文）插件无端点，SEO meta 除外（走 wp-seo-meta-update） |
 | wp-plugin-theme-ops | human_only | 插件、主题、核心更新与配置，一律人工 |
@@ -58,15 +59,18 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 - wp-term-description-set: reversible
 - wp-redirect-add: reversible
 - wp-sitemap-flush: reversible
+- wp-media-upload: reversible
+- wp-post-trash: reversible
 <!-- RISK_CLASS_END -->
 
 ## 风险注记（execute 与 apply 阶段必读）
 
-- **博客发布形态线（2026-10-13 #1239/#1240 实证）**：发布类方案必须交代三样：slug（发布前定稿，发布后插件拒改）、分类（归入正式栏目，不留站点默认）、特色图（博客必配封面，featured_media 非零）。重出方案不许降级继承：上一轮方案或人工单里已定的 slug、分类、封面，新方案照单全收，写入或断言已就位，不许改口「系统自动生成」「保持默认」。apply 侧两道硬闸：方案没交代分类与特色图零写入打回（wpBlogPlanPresentationGap）；发布收口后公开 REST 对账，封面为零或分类停默认不记完成停人（wpPresentationViolations）。封面是媒体库没有的新图时按 wp-media-upload 转人工，其余两格照常机器做。
+- **博客发布形态线（2026-10-13 #1239/#1240 实证）**：发布类方案必须交代三样：slug（发布前定稿，发布后插件拒改）、分类（归入正式栏目，不留站点默认）、特色图（博客必配封面，featured_media 非零）。重出方案不许降级继承：上一轮方案或人工单里已定的 slug、分类、封面，新方案照单全收，写入或断言已就位，不许改口「系统自动生成」「保持默认」。apply 侧两道硬闸：方案没交代分类与特色图零写入打回（wpBlogPlanPresentationGap）；发布收口后公开 REST 对账，封面为零或分类停默认不记完成停人（wpPresentationViolations）。封面是媒体库没有的新图时先 wp-media-upload 传图拿 id 再挂 featured_media，整条机器做（2026-10-28 起，站上插件需 >= 1.3.4，版本不够按「写前验版」条处理）。
 - **写前验版（2026-10-07 #1097 实证）**：wp-content-edit 与 wp-draft-create 需要站上 wf-agent >= 1.3.1（Content 模块）。execute 与 apply 动手前先 GET /status 核插件版本与 modules 含 Content；站点版本不够时按 capability-gap 三分法这是「站点插件滞后」，gap 说明必须写「等 wp-tools 线程升级站点插件到 x.y.z」，不许判成要人工进 WP 后台建稿（#1097 当时能力表已登记 wp-draft-create，站上还是 1.2.0 没有 /content 端点，apply 把插件滞后误判成人工位，正确路由是 wp-tools 升级后重跑）。
 - **token 纪律**：token 只活在 `.secrets.env` 里。curl 用 `-H "X-WF-Agent-Token: $(sed -n 's/^WF_AGENT_TOKEN=//p' .secrets.env)"` 内联取值；禁止 cat/echo/打印该文件或该变量，禁止把 token 写进方案、执行记录或任何输出。
 - **写前现读**：客户会自行改站。写前 GET 当前值与方案「改前值」比对，不符即停手（aborted），差异写进执行记录，不动那一处也不「纠正」客户的改动。
 - **快照即回滚方式**：插件每次写自动留快照，方案的回滚章节写「按快照 id 回滚（POST /snapshots/<id>/rollback）」并把写前 GET 到的旧值列全；不许把手动建快照写成前置步骤。
+- **媒体上传实操（2026-10-28 wp 线交接注记）**：图在网上可达时优先走 url 入参（sdalu 的 PHP 上传上限未实测，大图尤其如此）；multipart 首传若撞 Wordfence 403，换 url 入参再试。本地文件要先可达：任务工作区的图可临时发到 blogpreview 再给 url。
 - **sdalu 专属坑**：Wordfence 在线。批量写每条间隔 2 秒以上；大 HTML payload 会撞 WAF 403，改大段内容拆小。页面正文是 WPBakery shortcode（在 post_content），任何正文操作严禁破坏 shortcode 结构（当前正文归 human_only，此条为未来解锁备忘）。
 - **kiaorakids 专属坑**：PHP display_errors 开着，REST 响应可能带 PHP warning 的 HTML 前缀，解析 JSON 前先把响应截到第一个 `{` 或 `[`。`team` CPT 关了 show_in_rest。另：Elementor 与 WPBakery 双构建器混用，见 wp-content-edit 行。
 - **回读验证**：每个写操作后 GET 同一端点核对新值，并 curl 线上页面（`--max-time 120`）验证 200 与关键改动点可见（meta 类看页面源码的 title/description）。
