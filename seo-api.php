@@ -1038,6 +1038,16 @@ function capgap_split_on_accept($tid){
     /* 三问分流（2026-10-13 #1265 教训）：[cli] 是执行器没实现，活归工具维护者走版本库补命令，
        不许排真人到客户后台做（2026-09-24 定则）；[api]/[scope]/未标注才是人工落地单。 */
     $isCli=($gapCls==='cli');
+    /* chat 单实时交付不拆单（2026-10-28 Alvin 定）：交付物已随母单验收归档，机器做不了的
+       执行步不再立「人工落地」单，缺口直接回出生频道由人当场处理；[cli] 补执行器单是
+       唯一保留的必要拆单（工具债归维护者），照旧往下走。 */
+    if(!$isCli&&is_chat_origin($t['origin'])){
+        task_append_note($tid,'[capgap-nosplit] chat 单实时交付不拆人工落地单（2026-10-28 规矩），机器做不了的一步回频道人工直落：'.mb_substr($gapNote,0,200,'UTF-8'));
+        $rootG=chat_root_inbox($t['origin']);
+        if($rootG)chat_msg_insert($rootG,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」已验收，机器缺执行能力的一步不另立单（chat 单实时交付）：'.mb_substr($gapNote,0,200,'UTF-8').'。交付物在母单，直接在这里处理或一句话重新委托。','seo-worker');
+        audit('seo-worker','seo_task_capgap_nosplit',(string)$tid,['gap_cls'=>($gapCls!==''?$gapCls:null)]);
+        return 0;
+    }
     if($isCli){
         $title=mb_substr('补执行器：#'.$tid.' '.$t['title'],0,255,'UTF-8');
         $detail="母任务 #".$tid." 的交付已验收归档，收口标注的缺口是执行器命令没实现（capability-gap[cli]），不是平台能力或授权问题：\n- ".mb_substr($gapNote,0,300,'UTF-8')."\n\n本单归工具维护者（Aira）：在工具版本库补命令、过测试、发版、登记能力表，装好后缺口消失，母单的落地由机器直落或新委托单接力。母任务若附了实现提案（diff、测试要点），只作审核材料，不得按暂存产物直接安装上线。\n按 2026-09-24 定则：CLI 没实现不是真人工，不许把这单转成客户后台的人工操作。";
@@ -1494,13 +1504,37 @@ define('PLAN_ANCHOR_ORDER',"FIELD(status,'active') DESC,(IFNULL(NULLIF(service,'
       不再赖在本期装新活（前端口径：空标签永远算本期）。无方案锚补不出就保持空。 */
 define('CHAT_ORIGIN_SQL',"(origin LIKE 'spawn:%' OR origin LIKE 'chatw:%' OR origin LIKE 'report:%' OR origin LIKE 'ruling:%' OR origin LIKE 'splitw:%')");
 /* 拆单泳道继承（2026-10-28 Alvin 定，Sammichelle #1647~#1705 十五张实证）：chat 系母单
-   拆出的人工落地/补执行器/口径确认子单用 origin=splitw:<母单>，留在 chat 泳道不盖 sprint 章；
+   拆出的子单用 origin=splitw:<母单>，留在 chat 泳道不盖 sprint 章（同日晚些的实时交付规矩
+   后，chat 系母单只剩 [cli] 补执行器一种必要拆单，见 is_chat_origin 处注释）；
    sprint 母单照旧 split:<母单>。两个前缀在套娃护栏、去重键、转位否决、harness 过滤里完全
    同义（is_split_origin），只有泳道归属与盖章不同。10-24 chat 脱轮（100d360）只洗了 chat
    单本身，split 子单血缘断在这里，由本补丁收口。 */
 function is_split_origin($o){return (bool)preg_match('/^splitw?:/',(string)$o);}
 function split_origin_for($parentOrigin,$tid){
     return (preg_match('/^(spawn|chatw|report|ruling):/',(string)$parentOrigin)?'splitw:':'split:').(int)$tid;
+}
+/* chat 单实时交付（2026-10-28 Alvin 定，对标 PJ 线程）：chat 系任务直接做完交付，如无必要
+   不拆任务。三个拆单出生点对 chat 系母单一律不再生「人工落地/客户口径确认」子单——白名单外
+   条目留在本单、缺口与问题直接回出生频道由人当场处理；唯一保留的必要拆单是 [cli] 补执行器
+   （工具债归维护者，不立单会静默丢活，#1369 教训）。sprint 母单的拆单行为不变。 */
+function is_chat_origin($o){return (bool)preg_match('/^(spawn|chatw|chat|report|ruling|splitw):/',(string)$o);}
+/* chat 系任务的出生频道根：splitw/split 链逐级上溯母单 origin，根指向 seo_inbox 才算；
+   ruling: 或断链找不到就返回 null（调用方只留痕不发频道）。 */
+function chat_root_inbox($origin,$hops=5){
+    $o=(string)$origin;
+    while($hops-->0){
+        if(preg_match('/^(chatw|chat|report|spawn):(\d+)$/',$o,$m)){
+            $q=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
+            $q->execute([(int)$m[2]]);$r=$q->fetch();$q->closeCursor();
+            return $r?:null;
+        }
+        if(!preg_match('/^splitw?:(\d+)$/',$o,$m))return null;
+        $q=db()->prepare("SELECT origin FROM seo_tasks WHERE id=?");
+        $q->execute([(int)$m[1]]);$r=$q->fetch();$q->closeCursor();
+        if(!$r)return null;
+        $o=(string)$r['origin'];
+    }
+    return null;
 }
 function ensure_task_archived(){
     static $done=false;
@@ -3153,6 +3187,12 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
            「人工落地：#A 人工落地：#B」套娃链。split 单的白名单外条目就是它自己的活，只留痕不再拆。 */
         if($blocked&&is_split_origin($task['origin'])&&(string)$task['status']!=='done'){
             task_append_note($tid,'[split-guard] 本单已是拆条人工工单，'.count($blocked).' 处白名单外条目留在本单执行，不再拆孙单');
+        }elseif($blocked&&is_chat_origin($task['origin'])&&(string)$task['status']!=='done'){
+            /* chat 单实时交付不拆单（2026-10-28 Alvin 定）：白名单外条目留在本单，机器部分照落，
+               人工部分回频道当场推进，不再生「人工落地」子单，母单是唯一载体直到交付。 */
+            task_append_note($tid,'[split-guard] chat 单实时交付不拆单（2026-10-28 规矩），'.count($blocked).' 处白名单外条目留在本单，人工部分频道直落');
+            $rootB=chat_root_inbox($task['origin']);
+            if($rootB)chat_msg_insert($rootB,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$task['title'],0,50,'UTF-8').'」方案拆条：'.(count($clean)-count($blocked)).' 处机器落地，'.count($blocked).' 处白名单外留在本单（chat 单不拆单），人工部分直接在这里处理，进展看任务卡条目账本。','seo-worker');
         }elseif($blocked&&(string)$task['owner_type']==='agent'&&(string)$task['status']!=='done'){
             $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin IN(?,?) LIMIT 1");
             $sq->execute(['split:'.$tid,'splitw:'.$tid]);
@@ -8043,7 +8083,18 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
                放行官判定停人根因是缺客户口径时给 client_question，这里自动拆成有人认领的
                客户口径确认单（机器拆单是出口，纯注记提醒不是，#1232 铁律），同母单去重。 */
             $cq=trim((string)($r['client_question']??''));
-            if($cq!==''){
+            if($cq!==''&&is_chat_origin($t['origin'])){
+                /* chat 单实时交付不拆确认单（2026-10-28 Alvin 定）：缺口径的问题直接回出生频道问人，
+                   不再生「客户口径确认」子单；同单已问过（note 有标记）只追加留痕不刷频道。 */
+                if(strpos($note,'[client-question]')===false){
+                    task_append_note($tid,'[client-question] chat 单不拆确认单（2026-10-28 规矩），问题已回频道：'.mb_substr($cq,0,160,'UTF-8'));
+                    $rootQ=chat_root_inbox($t['origin']);
+                    if($rootQ)chat_msg_insert($rootQ,'chat_agent','任务 #'.$tid.' 放行停人，缺客户口径，需要回答：'.mb_substr($cq,0,240,'UTF-8').' 拿到口径在这里说一声即可，母单备注有停人判语全文。','seo-worker');
+                    audit('opus-release','seo_release_client_question',(string)$tid,['q'=>$cq,'task'=>0,'channel'=>$rootQ?1:0]);
+                }else{
+                    task_append_note($tid,'[client-question] 追加问题（chat 单不拆单）：'.mb_substr($cq,0,160,'UTF-8'));
+                }
+            }elseif($cq!==''){
                 $dqC=db()->prepare("SELECT id FROM seo_tasks WHERE origin IN(?,?) AND title LIKE '客户口径确认%' AND status NOT IN('done') LIMIT 1");
                 $dqC->execute(['split:'.$tid,'splitw:'.$tid]);
                 $exC=$dqC->fetch();
