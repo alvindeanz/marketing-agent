@@ -7886,18 +7886,34 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $seen0=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload LIKE ?".($lx0!==''?' AND created_at>?':''));
         $seen0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
         $r0=$seen0->fetch();
-        $an0=(int)(($r0['c'])??0);
+        $anAll=(int)(($r0['c'])??0);
+        /* 零写入弹回不烧熔断额度（2026-10-28 ticket #40：Badger #1428 被旧同页冷却闸两次零写入
+           弹回计成「落地 2 次」停人八天；sdalu #1685 的零写入中止同病）。熔断管的是同一版方案
+           重复写外部世界，没写过的尝试不占额度。识别锚只收两类已用真实 job 日志回放验证的机器
+           话术（tests/apply_fuse_count.test.js，样本 job 8603/10236/10238）：旧冷却闸抛错
+           「同页冷却：」（2026-10-20 冷却降软后绝版，纯存量数据）、runner 三车道的中止收尾行
+           「apply aborted ::」（runner 约定 aborted=本轮停手；WF 车道中止可能半途有写，但每次
+           重落中间必须夹一轮判定且写前现读现场，风险可受）。写了但对账不过的失败（job 10236）
+           两锚均不含，照旧计数。确定性拒绝检查用 $anAll：零写入拒绝正是它要抓的对象。 */
+        $zw0=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status='failed' AND (log_text LIKE '%同页冷却：%' OR log_text LIKE '%apply aborted ::%') AND payload LIKE ?".($lx0!==''?' AND created_at>?':''));
+        $zw0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
+        $an0=max(0,$anAll-(int)((($zw0->fetch())['c'])??0));
         /* 确定性拒绝不重试（2026-10-14 #1266/#1269/#1270 五连挂教训）。第一性：同一任务
            无新信息时重复同一动作不会有不同结果；行为闸类拒绝（方案契约违规、未申报 op、缺放行
            凭证）是确定性的，环境抖动（spawn flake、登录过期）才值得第二次额度。本版方案有过
            确定性拒绝的，一次就停人：置 blocked（退出 auto 候选集，状态变化而非注记）+ attention
            红点。方案重出（execute done 刷新 $lx0）后天然解锁。 */
-        if($an0>=1){
+        if($anAll>=1){
             $lf0=db()->prepare("SELECT log_text FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status='failed' AND payload LIKE ?".($lx0!==''?' AND created_at>?':'')." ORDER BY id DESC LIMIT 1");
             $lf0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
             $flog0=(string)((($lf0->fetch())['log_text'])??'');
             $lf0->closeCursor();
-            if($flog0!==''&&preg_match('/plan contains undeclared|执行中止|未申报|放行凭证|零写入打回|还没有.*同意/u',$flog0)){
+            /* apply aborted :: 补进确定性拒绝锚（2026-10-28 ticket #40 回放发现）：车道级中止
+               （如 #1685 的 /wp/v2 通道冲突）在 job 日志里只有这行机器话术，不带「执行中止」四字
+               （那四个字只进任务 note），此前全靠熔断误计数兜着才停下来。中止原因在世界没变前
+               重试必然同果，一次就停人，豁免出口照旧是方案重出或人工 decide。冷却弹回（同页冷却）
+               不是确定性拒绝，时间到了重试本该成，不入此锚。 */
+            if($flog0!==''&&preg_match('/plan contains undeclared|执行中止|未申报|放行凭证|零写入打回|还没有.*同意|apply aborted ::/u',$flog0)){
                 db()->prepare("UPDATE seo_tasks SET status='blocked',attention=1 WHERE id=?")->execute([$tid]);
                 if(strpos((string)$t['result_note'],'[auto-release 停人] 确定性拒绝')===false)
                     task_append_note($tid,'[auto-release 停人] 确定性拒绝（方案契约或凭证问题），重试不会有不同结果，已停自动放行并转人工：剔除违规步骤重出方案，或人工拆单重走判定。方案重出后自动解锁。');
@@ -8066,6 +8082,9 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
         $h=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload LIKE ?".($lastExec!==''?' AND created_at>?':''));
         $h->execute($lastExec!==''?[$cid,$likeT,$lastExec]:[$cid,$likeT]);
         $hc=$h->fetch();
+        /* 这里不剔零写入弹回，与 L0 路的 $an0 口径不同是故意的（2026-10-28 ticket #40）：
+           本路硬顶只拦 spend/不可逆（可逆类 2026-10-20 已降软成 fuse-note 照放），花钱类宁可
+           早一步归人，多算的代价是一次人工放行，少算的代价是第三次真金落地。 */
         $applyN=(int)($hc['c']??0);
         $opsArr=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
         $money=false;
