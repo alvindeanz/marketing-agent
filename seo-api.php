@@ -887,6 +887,33 @@ function blog_card_waiting($t){
     }catch(Exception $e){/* 表未建 = 无表态，按等客户处理 */}
     return true;
 }
+/* 发布凭证核验（2026-10-28，#1737 教训）：blog-publish 任务在排 apply 前先问凭证。
+   口径与 apply 侧 requireBlogPublishConsent 一致，两处要一起改：
+   ①委托客户（policy.blog_publish_executor=agent）视同有凭证；
+   ②候选顺序 本任务 → detail/note 里引用的任务号，取到 publish_blog 行即停（agree 过，其余不过）。 */
+function blog_publish_consent_ok($cid,$tid,$t){
+    try{
+        $pq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
+        $pq->execute([(int)$cid]);
+        $pv=$pq->fetch();
+        if($pv&&preg_match('/^\s*agent\b/i',(string)$pv['value']))return true;
+    }catch(Exception $e){/* facts 读不到按未委托处理 */}
+    $cands=[(int)$tid];
+    if(preg_match_all('/#(\d{1,7})\b/u',(string)($t['detail']??'').' '.(string)($t['result_note']??''),$mm)){
+        foreach($mm[1] as $x){$x=(int)$x;if($x&&!in_array($x,$cands,true))$cands[]=$x;}
+    }
+    $cands=array_slice($cands,0,8);
+    try{
+        $fq=db()->prepare("SELECT choice FROM seo_card_feedback WHERE task_id=? AND item='publish_blog' ORDER BY id DESC LIMIT 1");
+        foreach($cands as $cd){
+            $fq->execute([$cd]);
+            $r=$fq->fetch();
+            $fq->closeCursor();
+            if($r)return (string)$r['choice']==='agree';
+        }
+    }catch(Exception $e){/* 表未建 = 无凭证 */}
+    return false;
+}
 function blog_outline_stage($t){
     $ops=strtolower((string)($t['ops']??''));
     if(strpos($ops,'blog-draft')===false)return false;
@@ -2884,6 +2911,18 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
             task_append_note($tid,'[wait-condition] 等待：'.mb_substr(implode('；',$condsW),0,300,'UTF-8').'。条件满足由巡检自动续跑（授权已含在委托单里）');
             /* 等条件不是等人，不进频道：巡检自动续，续完收口回合说话，停滞有泳道扫帚兜底（2026-10-27） */
             res(200,['ok'=>true,'dispatch_grade'=>'wait-condition','conditions'=>$condsW]);
+        }
+        /* 发布凭证前置（2026-10-28，#1737 教训：blog-publish 无凭证被 auto 档直落 apply，
+           同意闸在 apply 里拦下算立功，但白烧一个 failed job 加一次熔断，任务顶着「执行失败」等人。
+           凭证即放行（规矩2）反过来也成立：没凭证不起跑。管 chatw 派单的 blog-publish；
+           豁免=委托客户与已有 agree（blog_publish_consent_ok）；误杀出口=人工 PATCH 状态或代确认 proxy；
+           命中记 audit。客户点 agree 落库即由卡反馈端点自动续排 apply（配对改动在那边）。 */
+        if(in_array('blog-publish',$opsW,true)&&!blog_publish_consent_ok($cidW,$tid,$cr)){
+            db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
+            task_append_note($tid,'[wait-publish-consent] 发布凭证未到：客户尚未在确认卡点「同意，安排发布」。同意落库即自动续排 apply');
+            hold_notify($tid,'发布等客户：确认卡上还没有发布表态，客户点同意后自动发布');
+            audit('seo-worker','seo_task_wait_publish_consent',(string)$tid,['grade'=>$gradeW]);
+            res(200,['ok'=>true,'dispatch_grade'=>'wait-publish-consent']);
         }
         if($gradeW==='auto'){
             list($ajW,)=queue_task_jobs($cidW,'apply_task',[$tid],'chat-dispatch-auto','seo_tasks_release');
@@ -6140,6 +6179,22 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
        harness 下一轮读到 card_feedback_at 非空自然分岔，不需要 webhook 或巡检。 */
     ensure_review_schema();
     db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
+    /* 发布凭证落库即续跑（2026-10-28，与 chatw 分派的 wait-publish-consent 配对）：
+       chat 泳道任务没有 harness 轮，凭证到了没人续就永远躺着。凭证即放行（规矩2），
+       授权就是这一次 agree。找同客户下挂 [wait-publish-consent] 且引用本卡任务（或自带卡）的任务续排。 */
+    if($choice==='agree'&&$item==='publish_blog'){
+        try{
+            $wq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE client_id=(SELECT client_id FROM seo_tasks WHERE id=?) AND status='blocked' AND result_note LIKE '%[wait-publish-consent]%' AND (id=? OR detail LIKE ? OR result_note LIKE ?) LIMIT 5");
+            $wq->execute([$tid,$tid,'%#'.$tid.'%','%#'.$tid.'%']);
+            foreach($wq->fetchAll() as $wt){
+                $wtid=(int)$wt['id'];
+                db()->prepare("UPDATE seo_tasks SET status='review' WHERE id=?")->execute([$wtid]);
+                list($ajP,)=queue_task_jobs((int)$wt['client_id'],'apply_task',[$wtid],'publish-consent','seo_tasks_release');
+                task_append_note($wtid,'[consent-met] 客户已在卡（任务 #'.$tid.'）点同意发布，凭证即放行，apply job #'.($ajP?$ajP[0]:'在飞跳过'));
+                audit('client','seo_task_publish_consent_met',(string)$wtid,['card_task'=>$tid,'job_ids'=>$ajP]);
+            }
+        }catch(Exception $e){/* 续跑失败不拦反馈入库，agent 工单盘点兜底 */}
+    }
     res(200,['ok'=>true,'at'=>date('Y-m-d H:i:s'),'ip'=>$ip]);
 }
 
