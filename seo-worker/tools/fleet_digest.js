@@ -6,7 +6,13 @@
    ③ 报错未自愈：近 7 天失败 job（失败不自动重试，每条都要人看）与 wait_reason 带失败的任务
    ④ 落地抽查：近 7 天 apply 落地数 vs 抽查数（抽查率低要暴露，不粉饰）
    跑法：SEO_AGENT_TOKEN=... node tools/fleet_digest.js [--days 7]
-   只读，不写任何东西。输出 Discord 友好（列表，无表格，无 emoji，无破折号）。 */
+   只读，不写任何东西。输出 Discord 友好（列表，无表格，无 emoji，无破折号）。
+
+   --issues：agent 工单视图（2026-10-28 Alvin 定）。只输出「流程病」清单给复盘用：
+   机器债 + 执行失败 + 停人待裁决 + 停滞超龄兜底（开口任务超 7 天无既有口径，抓没人
+   预料过的失败模式），每条带 [chat]/[sprint] 泳道标签。Alvin 说「查工单」时顺带跑这个，
+   逐条定性：真审批给人拍 / 流程病修流程后单跑 harness 验证 / 僵尸废。不开票不落库，
+   状态盘点本身就是工单。 */
 const { cardClockAnchor } = require('../lib/cardfold');
 const API = process.env.SEO_API_BASE || 'https://always.horntech-dev.com/seo-api.php';
 const TOKEN = process.env.SEO_AGENT_TOKEN || '';
@@ -14,6 +20,8 @@ if (!TOKEN) { console.error('用法：SEO_AGENT_TOKEN=... node tools/fleet_diges
 const argv = process.argv.slice(2);
 const DAYS = (() => { const i = argv.indexOf('--days'); return i === -1 ? 7 : (parseInt(argv[i + 1], 10) || 7); })();
 const GRACE_DAYS = 14;
+const ISSUES = argv.indexOf('--issues') !== -1;
+const STALL_DAYS = 7;
 
 async function call(p) {
   const r = await fetch(API + p, { headers: { Authorization: 'Bearer ' + TOKEN } });
@@ -40,6 +48,15 @@ function isPendingCard(t) {
 (async () => {
   const clients = (await call('/clients')).clients.filter((c) => c.status === 'active');
   const wait = [], running = [], broken = [], applied = [], healed = [];
+  /* agent 工单（--issues）：同一次扫描在既有分桶点旁挂泳道标签收一份流程病清单，
+     同任务去重（第一口径优先），不另跑第二遍。 */
+  const issues = [], issueIds = new Set();
+  const laneOf = (t) => (/^(spawn|chatw|chat|report|ruling|splitw):/.test(String(t && t.origin || '')) ? 'chat' : 'sprint');
+  const addIssue = (lane, kind, text, key) => {
+    if (key && issueIds.has(key)) return;
+    if (key) issueIds.add(key);
+    issues.push({ lane, kind, text });
+  };
   /* 三桶（2026-10-07 Alvin 定口径，批二 F 并入 digest）：
      桶一 机器债，轮内应清零，每条都是流程洞：无判决超时 / 方案在手未排放行官 / 人工位挂超
        7 天（harness D 路会转，这里是漏网之鱼）/ 非法 sprint 标签（C 已封入口，这里兜存量）。
@@ -74,6 +91,7 @@ function isPendingCard(t) {
       }
       if (/失败/.test(String(t.wait_reason || ''))) {
         broken.push({ c: c.name, id: t.id, key: c.client_id + ':' + t.id, what: '任务 #' + t.id + ' ' + String(t.wait_reason).slice(0, 60) + '：' + String(t.title).slice(0, 36) });
+        addIssue(laneOf(t), '执行失败', c.name + ' #' + t.id + ' ' + String(t.wait_reason).slice(0, 60) + '：' + String(t.title).slice(0, 36), c.client_id + ':' + t.id);
       }
       if (/\[accepted\]|已自动回滚|apply/.test(note) && t.status === 'done' && t.updated_at && daysAgo(t.updated_at) <= DAYS
           && /apply|落地/.test(String(t.title || '') + String(t.ops || '') + note)) {
@@ -94,6 +112,9 @@ function isPendingCard(t) {
         const dup = broken.find((b) => b.key === key);
         if (dup) { if (String(dup.id).startsWith('job') && j.id > parseInt(String(dup.id).slice(4), 10)) { dup.id = 'job ' + j.id; } continue; }
         broken.push({ c: c.name, id: 'job ' + j.id, key, what: j.type + ' 失败' + (tid ? '（任务 #' + tid + '）' : '') });
+        const tRef = tid && ts.find((x) => Number(x.id) === Number(tid));
+        addIssue(j.type === 'chat' || (tRef && laneOf(tRef) === 'chat') ? 'chat' : 'sprint', '执行失败',
+          c.name + ' job ' + j.id + ' ' + j.type + ' 失败' + (tid ? '（任务 #' + tid + '）' : ''), key);
       }
     }
     /* 三桶分类（批二 F）。卡类等确认在上面有自己的节，不重复入桶；失败 job 在报错节，不重复。 */
@@ -108,26 +129,51 @@ function isPendingCard(t) {
       const d = Math.floor(daysAgo(t.updated_at || t.created_at));
       const note = String(t.result_note || '');
       const head = c.name + ' #' + t.id + ' ' + String(t.title).slice(0, 40);
-      if (t.sprint && !/^S\d{1,2}$/i.test(String(t.sprint))) { debt.push(head + '：非法 sprint 标签 ' + t.sprint + '，不在任何轮次口径（改成 S 号）'); continue; }
+      const issueKey = c.client_id + ':' + t.id;
+      /* agent 工单口径：未来期任务按半月制日历等轮是设计行为不是停滞，排期类不入工单；
+         当期、过期与无章任务照入。舰队摘要原四桶口径不动。 */
+      const nSprint = sprintN(t.sprint);
+      const futureSprint = nSprint !== null && curN !== null && nSprint > curN;
+      if (t.sprint && !/^S\d{1,2}$/i.test(String(t.sprint))) { debt.push(head + '：非法 sprint 标签 ' + t.sprint + '，不在任何轮次口径（改成 S 号）'); addIssue(laneOf(t), '机器债', head + '：非法 sprint 标签 ' + t.sprint, issueKey); continue; }
       const why = String(t.wait_reason || '');
-      if (t.human_state === 'queued' && d >= 3) { debt.push(head + '：' + String(t.run_note || '排期') + ' 挂 ' + d + ' 天，判定链没续上'); continue; }
+      if (t.human_state === 'queued' && d >= 3) { debt.push(head + '：' + String(t.run_note || '排期') + ' 挂 ' + d + ' 天，判定链没续上'); if (!futureSprint) addIssue(laneOf(t), '机器债', head + '：' + String(t.run_note || '排期') + ' 挂 ' + d + ' 天，判定链没续上', issueKey); continue; }
       if (t.status === 'review' && t.human_state === 'wait_me' && why === '待放行') {
         const pend = note.match(/\[pending-release [^\]]*until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})Z\]/g);
         const inWindow = pend && (() => { const m = pend[pend.length - 1].match(/until (\d{4}-\d{2}-\d{2} \d{2}:\d{2})Z/); return m && Date.now() < Date.parse(m[1].replace(' ', 'T') + ':00Z'); })();
         if (inWindow) { waiting.push(head + '：静默期中，到点 harness 自动落地'); continue; }
-        if (!rrCover.has(Number(t.id)) && d >= 2) { debt.push(head + '：方案在手 ' + d + ' 天没排放行官（续接链漏网）'); continue; }
+        if (!rrCover.has(Number(t.id)) && d >= 2) { debt.push(head + '：方案在手 ' + d + ' 天没排放行官（续接链漏网）'); addIssue(laneOf(t), '机器债', head + '：方案在手 ' + d + ' 天没排放行官（续接链漏网）', issueKey); continue; }
         waiting.push(head + '：待放行 ' + d + ' 天，放行官在途'); continue;
       }
-      if (/停人/.test(why)) { waiting.push(head + '：停人待裁决 ' + d + ' 天，该人裁（判语在卡 note）'); continue; }
-      if (/人工位待认领/.test(why)) { (d >= 7 ? debt : waiting).push(head + '：人工位待认领 ' + d + ' 天' + (d >= 7 ? '（超 7 天，harness 转位路该吃掉，还在就是洞）' : '，该运营认领')); continue; }
+      if (/停人/.test(why)) { waiting.push(head + '：停人待裁决 ' + d + ' 天，该人裁（判语在卡 note）'); addIssue(laneOf(t), '停人待裁决', head + '：停 ' + d + ' 天（判语在卡 note）', issueKey); continue; }
+      if (/人工位待认领/.test(why)) { (d >= 7 ? debt : waiting).push(head + '：人工位待认领 ' + d + ' 天' + (d >= 7 ? '（超 7 天，harness 转位路该吃掉，还在就是洞）' : '，该运营认领')); if (d >= 7 && !futureSprint) addIssue(laneOf(t), '机器债', head + '：人工位待认领 ' + d + ' 天，harness 转位路该吃掉，还在就是洞', issueKey); continue; }
       if (/人工执行中/.test(why)) { waiting.push(head + '：人工执行中 ' + d + ' 天，该认领人收尾'); continue; }
       if (/待人工执行/.test(why)) { waiting.push(head + '：拆条人工工单 ' + d + ' 天，该运营啃'); continue; }
       if (String(t.owner_type) === 'client' && ['proposed', 'approved', 'blocked', 'in_progress'].indexOf(t.status) !== -1) { waiting.push(head + '：等客户 ' + d + ' 天'); continue; }
       if (String(t.review_effective || '') === 'later') {
         const n = sprintN(t.sprint);
         if (n !== null && curN !== null && n <= curN) rejudge.push(head + '：later 到期（' + t.sprint + ' 已当期），下一轮自动重判');
+        continue;
+      }
+      /* 停滞超龄兜底（agent 工单专用）：没落进任何既有口径、开着超 STALL_DAYS 天的任务。
+         白白停一个月的恰恰是机器不知道自己有病的，按状态和年龄兜，不靠事件自觉上报。 */
+      if (['proposed', 'approved', 'review', 'blocked', 'in_progress'].indexOf(String(t.status)) !== -1 && d >= STALL_DAYS) {
+        addIssue(laneOf(t), '停滞超龄', head + '：[' + t.status + (why ? ' ' + why.slice(0, 24) : '') + '] 停 ' + d + ' 天无既有口径，需定性', issueKey);
       }
     }
+  }
+  if (ISSUES) {
+    const KINDS = ['机器债', '执行失败', '停人待裁决', '停滞超龄'];
+    const L = ['# agent 工单 ' + new Date().toISOString().slice(0, 10) + '（job 近 ' + DAYS + ' 天，停滞阈 ' + STALL_DAYS + ' 天）', ''];
+    for (const lane of ['chat', 'sprint']) {
+      const rows = issues.filter((x) => x.lane === lane);
+      L.push('## [' + lane + '] ' + rows.length + ' 条');
+      for (const k of KINDS) for (const x of rows) if (x.kind === k) L.push('- [' + x.kind + '] ' + x.text);
+      if (!rows.length) L.push('- 无');
+      L.push('');
+    }
+    L.push('处置三选一：真审批给人拍 / 流程病修流程后单跑 harness 验证 / 僵尸废。');
+    console.log(L.join('\n'));
+    return;
   }
   wait.sort((a, b) => a.left - b.left);
   const L = [];
