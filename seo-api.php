@@ -7890,12 +7890,14 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         /* 零写入弹回不烧熔断额度（2026-10-28 ticket #40：Badger #1428 被旧同页冷却闸两次零写入
            弹回计成「落地 2 次」停人八天；sdalu #1685 的零写入中止同病）。熔断管的是同一版方案
            重复写外部世界，没写过的尝试不占额度。识别锚只收两类已用真实 job 日志回放验证的机器
-           话术（tests/apply_fuse_count.test.js，样本 job 8603/10236/10238）：旧冷却闸抛错
-           「同页冷却：」（2026-10-20 冷却降软后绝版，纯存量数据）、runner 三车道的中止收尾行
+           话术（tests/apply_fuse_count.test.js，样本 job 8603/10236/10238/10519）：旧冷却闸抛错
+           「: 同页冷却：」（前缀是 throw 的 ASCII 冒号空格，2026-10-20 冷却降软后绝版，纯存量；
+           降软后的 [cooldown-note] 注记是全角冒号接「同页冷却」且随真实落地出现，不许命中，
+           10523 三连放实证松锚会放飞重试额度）、runner 三车道的中止收尾行
            「apply aborted ::」（runner 约定 aborted=本轮停手；WF 车道中止可能半途有写，但每次
            重落中间必须夹一轮判定且写前现读现场，风险可受）。写了但对账不过的失败（job 10236）
            两锚均不含，照旧计数。确定性拒绝检查用 $anAll：零写入拒绝正是它要抓的对象。 */
-        $zw0=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status='failed' AND (log_text LIKE '%同页冷却：%' OR log_text LIKE '%apply aborted ::%') AND payload LIKE ?".($lx0!==''?' AND created_at>?':''));
+        $zw0=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status='failed' AND (log_text LIKE '%: 同页冷却：%' OR log_text LIKE '%apply aborted ::%') AND payload LIKE ?".($lx0!==''?' AND created_at>?':''));
         $zw0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
         $an0=max(0,$anAll-(int)((($zw0->fetch())['c'])??0));
         /* 确定性拒绝不重试（2026-10-14 #1266/#1269/#1270 五连挂教训）。第一性：同一任务

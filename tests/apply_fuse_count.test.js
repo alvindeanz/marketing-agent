@@ -15,8 +15,11 @@ function t(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
 
-/* ==== PHP 侧逻辑的镜像实现（锚必须与 seo-api.php 完全一致，下方有同步闸断言） ==== */
-const ZW_ANCHORS = ['同页冷却：', 'apply aborted ::'];
+/* ==== PHP 侧逻辑的镜像实现（锚必须与 seo-api.php 完全一致，下方有同步闸断言） ====
+   冷却锚带 ASCII 冒号空格前缀：只认旧硬闸的 throw 形态（task N: 同页冷却：），
+   不认降软后的 [cooldown-note] 注记（全角冒号接同页冷却，随真实落地出现，
+   2026-10-28 #1428 三连放实证松锚会放飞重试额度）。 */
+const ZW_ANCHORS = [': 同页冷却：', 'apply aborted ::'];
 function zeroWriteBounce(status, logText) {
   if (status !== 'failed') return false;
   return ZW_ANCHORS.some((a) => String(logText).includes(a));
@@ -44,12 +47,19 @@ const JOB_DONE = { // 正常落地收口
   status: 'done',
   log: '[2026-10-27 01:00:00Z] task 999: ads applied and verified, marked done',
 };
+const JOB_10519 = { // Badger #1428：降软后带 [cooldown-note] 的真实落地（写入后因 CLI 校验误报还原），必须计数
+  status: 'failed',
+  log: '[2026-10-28 01:29:32Z] task 1428: [cooldown-note] 测量窗冲突照落地（2026-10-20 降软政）：同页冷却：https://wildbadgerpower.com/products/40v-cordless-snow-shovel-brushless-motor-4-0ah-battery/ 已被 #1287（2026-10-14）触碰，测量窗未走完。前后对比归因时剔除本次叠写影响。\n'
+    + '[2026-10-28 01:29:50Z] task 1428: shopify apply failed :: 白名单写入后 CLI 写后校验读到写入前的内容，误报 verify failed，按方案还原到基线并停手\n'
+    + '[2026-10-28 01:29:50Z] FAILED: Error: Error: 1 of 1 task(s) did not complete :: 1428: failed',
+};
 
 t('零写入弹回判定：冷却弹回与车道中止剔除，写了没对账过与正常落地照旧计数', () => {
   assert.strictEqual(zeroWriteBounce(JOB_8603.status, JOB_8603.log), true, '8603 冷却弹回应剔除');
   assert.strictEqual(zeroWriteBounce(JOB_10238.status, JOB_10238.log), true, '10238 车道中止应剔除');
   assert.strictEqual(zeroWriteBounce(JOB_10236.status, JOB_10236.log), false, '10236 有写入，必须计数');
   assert.strictEqual(zeroWriteBounce(JOB_DONE.status, JOB_DONE.log), false, '成功 job 必须计数');
+  assert.strictEqual(zeroWriteBounce(JOB_10519.status, JOB_10519.log), false, '降软 cooldown-note 的真实落地必须计数（10523 三连放教训）');
 });
 
 t('熔断额度回放：#1428 两次冷却弹回后 landed=0 不触发熔断；#1685 一真一弹 landed=1', () => {
@@ -66,7 +76,7 @@ t('确定性拒绝锚：车道中止命中一次就停，冷却弹回与对账�
 
 t('源码同步闸：seo-api.php 的锚与本测镜像一致', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'seo-api.php'), 'utf8');
-  assert.ok(src.includes("log_text LIKE '%同页冷却：%' OR log_text LIKE '%apply aborted ::%'"),
+  assert.ok(src.includes("log_text LIKE '%: 同页冷却：%' OR log_text LIKE '%apply aborted ::%'"),
     'L0 零写入剔除 SQL 的两个锚变了，先改 tests/apply_fuse_count.test.js 的回放再改源码');
   assert.ok(src.includes('|apply aborted ::/u'), '确定性拒绝正则缺 apply aborted :: 锚');
   assert.ok(src.includes('$an0=max(0,$anAll'), 'L0 熔断应使用剔除零写入后的 landed 计数');
