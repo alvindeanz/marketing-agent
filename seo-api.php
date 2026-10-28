@@ -6179,23 +6179,27 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
        harness 下一轮读到 card_feedback_at 非空自然分岔，不需要 webhook 或巡检。 */
     ensure_review_schema();
     db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
-    /* 发布凭证落库即续跑（2026-10-28，与 chatw 分派的 wait-publish-consent 配对）：
-       chat 泳道任务没有 harness 轮，凭证到了没人续就永远躺着。凭证即放行（规矩2），
-       授权就是这一次 agree。找同客户下挂 [wait-publish-consent] 且引用本卡任务（或自带卡）的任务续排。 */
-    if($choice==='agree'&&$item==='publish_blog'){
-        try{
-            $wq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE client_id=(SELECT client_id FROM seo_tasks WHERE id=?) AND status='blocked' AND result_note LIKE '%[wait-publish-consent]%' AND (id=? OR detail LIKE ? OR result_note LIKE ?) LIMIT 5");
-            $wq->execute([$tid,$tid,'%#'.$tid.'%','%#'.$tid.'%']);
-            foreach($wq->fetchAll() as $wt){
-                $wtid=(int)$wt['id'];
-                db()->prepare("UPDATE seo_tasks SET status='review' WHERE id=?")->execute([$wtid]);
-                list($ajP,)=queue_task_jobs((int)$wt['client_id'],'apply_task',[$wtid],'publish-consent','seo_tasks_release');
-                task_append_note($wtid,'[consent-met] 客户已在卡（任务 #'.$tid.'）点同意发布，凭证即放行，apply job #'.($ajP?$ajP[0]:'在飞跳过'));
-                audit('client','seo_task_publish_consent_met',(string)$wtid,['card_task'=>$tid,'job_ids'=>$ajP]);
-            }
-        }catch(Exception $e){/* 续跑失败不拦反馈入库，agent 工单盘点兜底 */}
-    }
+    publish_consent_resume($tid,$choice,$item);
     res(200,['ok'=>true,'at'=>date('Y-m-d H:i:s'),'ip'=>$ip]);
+}
+
+/* 发布凭证落库即续跑（2026-10-28，与 chatw 分派的 wait-publish-consent 配对）：
+   chat 泳道任务没有 harness 轮，凭证到了没人续就永远躺着。凭证即放行（规矩2），
+   授权就是这一次 agree（客户点卡或代确认留档同管道）。找同客户下挂
+   [wait-publish-consent] 且引用本卡任务（或自带卡）的任务续排。 */
+function publish_consent_resume($tid,$choice,$item){
+    if($choice!=='agree'||$item!=='publish_blog')return;
+    try{
+        $wq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE client_id=(SELECT client_id FROM seo_tasks WHERE id=?) AND status='blocked' AND result_note LIKE '%[wait-publish-consent]%' AND (id=? OR detail LIKE ? OR result_note LIKE ?) LIMIT 5");
+        $wq->execute([$tid,$tid,'%#'.$tid.'%','%#'.$tid.'%']);
+        foreach($wq->fetchAll() as $wt){
+            $wtid=(int)$wt['id'];
+            db()->prepare("UPDATE seo_tasks SET status='review' WHERE id=?")->execute([$wtid]);
+            list($ajP,)=queue_task_jobs((int)$wt['client_id'],'apply_task',[$wtid],'publish-consent','seo_tasks_release');
+            task_append_note($wtid,'[consent-met] 发布凭证已落库（卡任务 #'.$tid.'），凭证即放行，apply job #'.($ajP?$ajP[0]:'在飞跳过'));
+            audit('client','seo_task_publish_consent_met',(string)$wtid,['card_task'=>$tid,'job_ids'=>$ajP]);
+        }
+    }catch(Exception $e){/* 续跑失败不拦反馈入库，agent 工单盘点兜底 */}
 }
 
 /* POST /tasks/{id}/card_feedback_proxy (admin) -> agency 代客户确认（2026-09-21 Alvin 定）。
@@ -6222,6 +6226,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/card_feedback_proxy$#',$ROUTE,$mm)){
     ensure_review_schema();
     db()->prepare("UPDATE seo_tasks SET card_feedback_at=NOW() WHERE id=?")->execute([$tid]);
     audit($u['username'],'seo_card_feedback_proxy',(string)$tid,['choice'=>$choice,'item'=>$item,'text'=>mb_substr($txt,0,200,'UTF-8')]);
+    publish_consent_resume($tid,$choice,$item);
     res(200,['ok'=>true,'actor'=>$actor]);
 }
 
