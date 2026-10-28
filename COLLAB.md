@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-10-28 AIRA 工单 #40/#50 收口补记：#1428 全链自愈 + 零写入锚收紧 + WP 媒体回收站转机器道
+
+- **#1428 全链自愈（下条承诺的部署后补记）**：api 部署 rev 4fa3da0 后 decide 解锁 #1428（坑：owner_type=agency 的 decide 只批不排队，手工 POST /jobs 补 execute）。全链自主跑完：execute 10513、评审、L0 放行、apply 10515 败、重试 10519 败、10523 成。两次失败都是 shopseo put-code 写后校验的诞生缺陷（jq -r 尾换行混进哈希口径致首次实写必败；另有写后读旧），两次均按方案自愈还原零残留，shopseo 修到 1.13.1（剥尾换行同口径加写后读旧重试 5 次，/data/aira 仓 21c0660）。落地结果：theme.liquid 的 AVADA include 白名单到雪铲 PDP 单页，哈希回读过，PDP 渲染原生 title/description，其他页照旧。
+- **零写入锚收紧（rev 5870079）**：第一版锚「同页冷却：」连降软后的 [cooldown-note]（随真实落地出现，全角冒号）一起剔了，an0 误算 0，L0 对同版方案连放三张 apply（10523 实证松锚会放飞每版重试额度）。收紧为带 ASCII 冒号空格前缀的「: 同页冷却：」，只认旧硬闸 throw 形态，回放测试补 JOB_10519 真实落地样本。教训一句：守卫锚上线当天必须盯第一单真实回放，锚宽一字就是额度阀门失守。
+- **WP 媒体与回收站转机器道（783b48d，工单 #50）**：aiden 侧 wf-agent 1.3.4 上了 content/media 与 content/(id)/trash 两端点（sdalu 与 kiaorakids 验活）。登记三步齐：能力清单 v4、release_policy 两 op 记 reversible、capability_broadcast 跑两轮（media 强命中 4 张盖章，宽命中 #1262/#1615 留人眼；trash 强命中 1 张）。#1684/#1685 重出方案后全链零人工落地（job 10526 到 10532）：重复草稿 168283 入回收站、三张图走插件媒体端点、两篇博客发布上线、presentation audit 过、叙事卡收口。接力僵尸 #1677/#1678 与人工拆单 #1680/#1682/#1686/#1687 六张按被接替收口，工单 #50 已回写 resolved。
+- 部署：api rev 5870079（250），worker rev 5870079（ros 与 Mac 双机同版）。测试：node tests/ 全套绿，远端 php -l 过。
+- 待办余量：工单 #40 回写等 Badger 三页渲染抽查（本机出口被店面 429 限流，后台退避重试中）；#479 Oak 是 stores.conf 缺 oakfurniture 别名的执行器配置病，另案；hold_notify 是否扩到拆单出身任务待 Alvin 拍板。
+
 ### 2026-10-28 AIRA 熔断计数只数真落地 + 确定性拒绝锚补车道中止（ticket #40，Alvin 批「你先处理完#40吧」）
 
 - **病**（Badger #1428 实证，sdalu #1685 同病）：L0 自动放行的熔断按 apply job 行数计「已自动落地 N 次」，零写入弹回也进账。#1428 两次被旧同页冷却闸零写入弹回（job 8603 等），被计成「落地 2 次」置 blocked 停人，红点从 10-20 挂到 10-28 没人动；工单 #40 挂 in_progress 12 天。回放还发现第二处：车道级中止（#1685 job 10238 的 /wp/v2 通道冲突）在 job 日志里只有「apply aborted ::」机器行，不带「执行中止」四字，确定性拒绝闸抓不到它，此前全靠熔断误计数兜着才停下来，停的理由还是错的。
