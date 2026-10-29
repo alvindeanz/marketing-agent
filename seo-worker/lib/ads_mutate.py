@@ -1019,29 +1019,38 @@ def op_pmax_text_asset_update(client, cid, args):
              "would_add": [{"field_type": str(a["field_type"]).upper(), "text": str(a["text"])} for a in adds],
              "resulting_counts": counts})
         return
-    aga_svc = client.get_service("AssetGroupAssetService")
-    ops = []
+    # 删加必须同一请求原子提交：PMax 资产组的余量规则按请求终态验一次，拆成先删后加两次请求
+    # 会在中间态撞平台下限（#1338 apply 11506 学费：单独先删描述被 Google 整单拒，账户零改动）。
+    # 做法：GoogleAdsService 万能 mutate，新资产用临时资源名（负 id）建出来就地挂链，摘旧放同一包。
+    gas = client.get_service("GoogleAdsService")
+    ag_path = client.get_service("AssetGroupService").asset_group_path(cid, ag_id)
+    a_path = client.get_service("AssetService").asset_path
+    mops = []
+    added = []
+    for i, a in enumerate(adds):
+        tmp_rn = a_path(cid, -(i + 1))
+        mo = client.get_type("MutateOperation")
+        mo.asset_operation.create.resource_name = tmp_rn
+        mo.asset_operation.create.text_asset.text = str(a["text"])
+        mops.append(mo)
+        lo = client.get_type("MutateOperation")
+        lo.asset_group_asset_operation.create.asset = tmp_rn
+        lo.asset_group_asset_operation.create.asset_group = ag_path
+        lo.asset_group_asset_operation.create.field_type = getattr(
+            client.enums.AssetFieldTypeEnum, str(a["field_type"]).upper())
+        mops.append(lo)
+        added.append({"asset": tmp_rn, "field_type": str(a["field_type"]).upper(), "text": str(a["text"])})
     for rid in rm_ids:
         for c in by_id[rid]:
-            o = client.get_type("AssetGroupAssetOperation")
-            o.remove = c["rn"]
-            ops.append(o)
-    if ops:
-        aga_svc.mutate_asset_group_assets(customer_id=cid, operations=ops)
-    added = []
-    if adds:
-        a_svc = client.get_service("AssetService")
-        for a in adds:
-            ao = client.get_type("AssetOperation")
-            ao.create.text_asset.text = str(a["text"])
-            res = a_svc.mutate_assets(customer_id=cid, operations=[ao])
-            arn = res.results[0].resource_name
-            lo = client.get_type("AssetGroupAssetOperation")
-            lo.create.asset = arn
-            lo.create.asset_group = client.get_service("AssetGroupService").asset_group_path(cid, ag_id)
-            lo.create.field_type = getattr(client.enums.AssetFieldTypeEnum, str(a["field_type"]).upper())
-            aga_svc.mutate_asset_group_assets(customer_id=cid, operations=[lo])
-            added.append({"asset": arn, "field_type": str(a["field_type"]).upper(), "text": str(a["text"])})
+            mo = client.get_type("MutateOperation")
+            mo.asset_group_asset_operation.remove = c["rn"]
+            mops.append(mo)
+    resp = gas.mutate(customer_id=cid, mutate_operations=mops)
+    # 回填真实资源名（响应与请求同序，asset 建操作的响应带新 asset 的 resource_name）
+    new_rns = [r.asset_result.resource_name for r in resp.mutate_operation_responses
+               if r.asset_result.resource_name]
+    for ai, rn in enumerate(new_rns[:len(added)]):
+        added[ai]["asset"] = rn
     rows2 = gaql(client, cid,
                  "SELECT asset.id, asset.text_asset.text, asset_group_asset.field_type "
                  "FROM asset_group_asset WHERE asset_group.id = %d "
