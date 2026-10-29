@@ -23,6 +23,9 @@ const argv = process.argv.slice(2);
 const OP = (() => { const i = argv.indexOf('--op'); return i === -1 ? '' : String(argv[i + 1] || '').trim(); })();
 const APPLY = argv.includes('--apply');
 const WIDE = argv.includes('--wide');
+/* --ids 1338,1705：人眼核完泛断言清单后只盖点名的任务（wide 档的闸就是人核，这是核完的落地面；
+   不带 --ids 维持原语义全量盖）。strong 命中不受 --ids 限制：点名 op 的断言本来就该全盖。 */
+const ONLY_IDS = (() => { const i = argv.indexOf('--ids'); return i === -1 ? null : String(argv[i + 1] || '').split(',').map((x) => parseInt(x, 10)).filter(Boolean); })();
 if (!TOKEN || !OP) { console.error('用法：SEO_AGENT_TOKEN=... node tools/capability_broadcast.js --op <name> [--apply] [--wide]'); process.exit(2); }
 
 async function call(method, p, body) {
@@ -58,10 +61,14 @@ async function call(method, p, body) {
       if (t.status === 'done') continue;
       if (String(t.result_note || '').includes('[capability-update') && new RegExp('\\] ' + OP + ' ').test(String(t.result_note || ''))) continue; /* 已广播过的不重复盖 */
       if (String(t.detail || '').includes('[capability-update') && new RegExp('\\] ' + OP + ' ').test(String(t.detail || ''))) continue;
-      const hit = matchCapabilityClaim({ detail: t.detail, review_reason: t.review_reason, result_note: t.result_note }, OP, { platformMatches: homes.includes(plat) });
+      /* googleads 清单与 CMS 平台正交（客户 platform 是建站系统，Ads 谁都可能投），
+         按 CMS 匹配会让 Ads 系 op 的泛断言永远零命中（midea #1338 学费）。Ads 系 op 的
+         泛断言对全客户开放，误盖由 --wide 的人眼核把关（本来就是 wide 档的闸）。 */
+      const platOk = homes.includes(plat) || homes.includes('googleads');
+      const hit = matchCapabilityClaim({ detail: t.detail, review_reason: t.review_reason, result_note: t.result_note }, OP, { platformMatches: platOk });
       if (!hit) continue;
       if (hit === 'strong') strong++; else wide++;
-      const doStamp = APPLY && (hit === 'strong' || (WIDE && hit === 'wide'));
+      const doStamp = APPLY && (hit === 'strong' || (WIDE && hit === 'wide' && (!ONLY_IDS || ONLY_IDS.includes(t.id))));
       console.log((doStamp ? '[盖章] ' : '[命中] ') + c.name + ' #' + t.id + ' (' + hit + '/' + (t.status || '') + '/' + (t.owner_type || '') + ') ' + String(t.title || '').slice(0, 44));
       if (doStamp) {
         await call('PATCH', '/tasks/' + t.id, { detail: String(t.detail || '') + stamp });
