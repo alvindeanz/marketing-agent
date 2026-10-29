@@ -114,8 +114,11 @@ function isPendingCard(t) {
       if (j.status !== 'failed' || daysAgo(j.created_at) > DAYS) continue;
       /* 同任务后来跑成了的失败不算未自愈 */
       const tid = (() => { try { const p = typeof j.payload === 'string' ? JSON.parse(j.payload) : j.payload; return p && p.task_ids && p.task_ids[0]; } catch (e) { return null; } })();
-      const healed = tid && jobs.some((k) => k.status === 'done' && k.type === j.type && k.id > j.id
-        && (() => { try { const p = typeof k.payload === 'string' ? JSON.parse(k.payload) : k.payload; return p && p.task_ids && p.task_ids[0] === tid; } catch (e) { return false; } })());
+      const healed = jobs.some((k) => k.status === 'done' && k.type === j.type && k.id > j.id
+        && (tid
+          ? (() => { try { const p = typeof k.payload === 'string' ? JSON.parse(k.payload) : k.payload; return p && p.task_ids && p.task_ids[0] === tid; } catch (e) { return false; } })()
+          /* 无 task_ids 的 job（feedback/chat 等）按整包载荷相等判自愈：retry 复制原载荷，跑成即同一件事办成了 */
+          : String(k.payload || '') === String(j.payload || '')));
       /* 同任务多次失败只报最新一条；任务已在 wait_reason 桶里的不重复报 job */
       if (!healed) {
         const key = c.client_id + ':' + (tid || 'job' + j.id);
