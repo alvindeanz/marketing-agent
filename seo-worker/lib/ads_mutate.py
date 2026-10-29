@@ -986,14 +986,18 @@ def op_pmax_text_asset_update(client, cid, args):
             die("add 文案为空或超长（%s 上限 %d）：%s" % (ft, LIMITS[ft], str(a.get("text"))[:60]))
     rows = gaql(client, cid,
                 "SELECT asset_group_asset.resource_name, asset_group_asset.field_type, "
-                "asset.id, asset.text_asset.text, asset_group.name "
+                "asset_group_asset.source, asset.id, asset.text_asset.text, asset_group.name "
                 "FROM asset_group_asset WHERE asset_group.id = %d "
                 "AND asset_group_asset.field_type IN ('HEADLINE','DESCRIPTION','LONG_HEADLINE') "
                 "AND asset_group_asset.status != 'REMOVED'" % ag_id)
     if not rows:
         die("asset_group %d 不存在或没有文本资产" % ag_id)
+    # 上下限只数广告主来源：Google 的 PMax 条数限额不含 AUTOMATICALLY_CREATED（自动生成资产
+    # 不占位也不计入），把它们数进去会在满额组误拒（#1338 apply 11510：Refrigerator 广告主
+    # 正好 15/5/5，混入自动生成后 18 条被执行器自己拒掉）。自动生成的挂载仍可摘（摘下不补）。
     cur = [{"asset_id": int(r.asset.id), "field_type": enum_name(r.asset_group_asset.field_type),
-            "text": r.asset.text_asset.text, "rn": r.asset_group_asset.resource_name} for r in rows]
+            "text": r.asset.text_asset.text, "rn": r.asset_group_asset.resource_name,
+            "adv": enum_name(r.asset_group_asset.source) == "ADVERTISER"} for r in rows]
     out({"step": "before", "op": "pmax-text-asset-update", "asset_group_id": ag_id,
          "group_name": rows[0].asset_group.name, "assets": [{k: v for k, v in c.items() if k != "rn"} for c in cur]})
     by_id = {}
@@ -1004,20 +1008,22 @@ def op_pmax_text_asset_update(client, cid, args):
             die("remove_asset_ids 里的 asset %d 不挂在本 asset group 的文本位上" % rid)
     counts = {}
     for c in cur:
-        counts[c["field_type"]] = counts.get(c["field_type"], 0) + 1
+        if c["adv"]:
+            counts[c["field_type"]] = counts.get(c["field_type"], 0) + 1
     for rid in rm_ids:
         for c in by_id[rid]:
-            counts[c["field_type"]] -= 1
+            if c["adv"]:
+                counts[c["field_type"]] -= 1
     for a in adds:
         ft = str(a["field_type"]).upper()
         counts[ft] = counts.get(ft, 0) + 1
     for ft, mn in MINS.items():
         if counts.get(ft, 0) < mn:
-            die("删加后 %s 余 %d 条，低于 PMax 下限 %d，拒绝（缩小删除面或补新增）" % (ft, counts.get(ft, 0), mn))
+            die("删加后 %s 广告主资产余 %d 条，低于 PMax 下限 %d，拒绝（缩小删除面或补新增）" % (ft, counts.get(ft, 0), mn))
     MAXS = {"HEADLINE": 15, "DESCRIPTION": 5, "LONG_HEADLINE": 5}
     for ft, mx in MAXS.items():
         if counts.get(ft, 0) > mx:
-            die("删加后 %s 共 %d 条，超 PMax 上限 %d，拒绝（扩大删除面或减少新增）" % (ft, counts.get(ft, 0), mx))
+            die("删加后 %s 广告主资产共 %d 条，超 PMax 上限 %d，拒绝（扩大删除面或减少新增）" % (ft, counts.get(ft, 0), mx))
     if args.dry_run:
         out({"ok": True, "dry_run": True, "would_remove": rm_ids,
              "would_add": [{"field_type": str(a["field_type"]).upper(), "text": str(a["text"])} for a in adds],
@@ -1044,13 +1050,14 @@ def op_pmax_text_asset_update(client, cid, args):
         added.append({"asset": tmp_rn, "field_type": str(a["field_type"]).upper(), "text": str(a["text"])})
     for rid in rm_ids:
         for c in by_id[rid]:
-            link_ops[c["field_type"]]["removes"].append(c["rn"])
+            link_ops[c["field_type"]]["removes"].append((c["rn"], c["adv"]))
     orig_counts = {}
     for c in cur:
-        orig_counts[c["field_type"]] = orig_counts.get(c["field_type"], 0) + 1
+        if c["adv"]:
+            orig_counts[c["field_type"]] = orig_counts.get(c["field_type"], 0) + 1
     for ft in LIMITS:
         q = link_ops[ft]
-        cnt = orig_counts.get(ft, 0)
+        cnt = orig_counts.get(ft, 0)  # 只数广告主来源，自动生成资产不占限额位
         while q["adds"] or q["removes"]:
             if q["adds"] and cnt < MAXS[ft]:
                 lo = client.get_type("MutateOperation")
@@ -1060,10 +1067,12 @@ def op_pmax_text_asset_update(client, cid, args):
                 mops.append(lo)
                 cnt += 1
             else:
+                rn, adv = q["removes"].pop(0)
                 mo = client.get_type("MutateOperation")
-                mo.asset_group_asset_operation.remove = q["removes"].pop(0)
+                mo.asset_group_asset_operation.remove = rn
                 mops.append(mo)
-                cnt -= 1
+                if adv:
+                    cnt -= 1
     resp = gas.mutate(customer_id=cid, mutate_operations=mops)
     # 回填真实资源名（响应与请求同序，asset 建操作的响应带新 asset 的 resource_name）
     new_rns = [r.asset_result.resource_name for r in resp.mutate_operation_responses
@@ -1117,8 +1126,10 @@ def op_sitelink_update(client, cid, args):
         for dk in ("description1", "description2"):
             if a.get(dk) and len(str(a[dk])) > 35:
                 die("add.%s 超 35 字符：%s" % (dk, str(a[dk])[:40]))
+    # campaign_asset 资源过滤 campaign.id 时 Google 要求该字段入 SELECT（#1338 apply 11510：
+    # INVALID_ARGUMENT: must be present in SELECT clause）
     rows = gaql(client, cid,
-                "SELECT campaign_asset.resource_name, asset.id, asset.sitelink_asset.link_text, "
+                "SELECT campaign_asset.resource_name, campaign.id, asset.id, asset.sitelink_asset.link_text, "
                 "asset.final_urls, campaign.name FROM campaign_asset "
                 "WHERE campaign.id = %d AND campaign_asset.field_type = 'SITELINK' "
                 "AND campaign_asset.status != 'REMOVED'" % camp_id)
@@ -1172,7 +1183,7 @@ def op_sitelink_update(client, cid, args):
     if link_ops:
         ca_svc.mutate_campaign_assets(customer_id=cid, operations=link_ops)
     rows2 = gaql(client, cid,
-                 "SELECT asset.id, asset.sitelink_asset.link_text FROM campaign_asset "
+                 "SELECT campaign.id, asset.id, asset.sitelink_asset.link_text FROM campaign_asset "
                  "WHERE campaign.id = %d AND campaign_asset.field_type = 'SITELINK' "
                  "AND campaign_asset.status != 'REMOVED'" % camp_id)
     final_ids = {int(r.asset.id) for r in rows2}
