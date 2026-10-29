@@ -1013,38 +1013,57 @@ def op_pmax_text_asset_update(client, cid, args):
         counts[ft] = counts.get(ft, 0) + 1
     for ft, mn in MINS.items():
         if counts.get(ft, 0) < mn:
-            die("删加后 %s 余 %d 条，低于 PMax 下限 %d，拒绝（先加后删或缩小删除面）" % (ft, counts.get(ft, 0), mn))
+            die("删加后 %s 余 %d 条，低于 PMax 下限 %d，拒绝（缩小删除面或补新增）" % (ft, counts.get(ft, 0), mn))
+    MAXS = {"HEADLINE": 15, "DESCRIPTION": 5, "LONG_HEADLINE": 5}
+    for ft, mx in MAXS.items():
+        if counts.get(ft, 0) > mx:
+            die("删加后 %s 共 %d 条，超 PMax 上限 %d，拒绝（扩大删除面或减少新增）" % (ft, counts.get(ft, 0), mx))
     if args.dry_run:
         out({"ok": True, "dry_run": True, "would_remove": rm_ids,
              "would_add": [{"field_type": str(a["field_type"]).upper(), "text": str(a["text"])} for a in adds],
              "resulting_counts": counts})
         return
-    # 删加必须同一请求原子提交：PMax 资产组的余量规则按请求终态验一次，拆成先删后加两次请求
-    # 会在中间态撞平台下限（#1338 apply 11506 学费：单独先删描述被 Google 整单拒，账户零改动）。
-    # 做法：GoogleAdsService 万能 mutate，新资产用临时资源名（负 id）建出来就地挂链，摘旧放同一包。
+    # 删加必须同一请求原子提交且逐操作保界：Google 对既有组的每个操作即时验上下限，
+    # 先删后加两次请求撞下限（#1338 apply 11506：单独先删描述整单拒），同请求内全加在前
+    # 又在满额组撞上限（同单 11508：Refrigerator 组加先走被拒）。做法：GoogleAdsService
+    # 万能 mutate 一包提交（半途失败整包回滚），组内挂链/摘链按字段类型贪心排序：能加先加，
+    # 加到上限才删，任何中间态都卡在 [min, max] 之间（新资产本体用临时负 id 先建，不占组位）。
     gas = client.get_service("GoogleAdsService")
     ag_path = client.get_service("AssetGroupService").asset_group_path(cid, ag_id)
     a_path = client.get_service("AssetService").asset_path
     mops = []
     added = []
+    link_ops = {ft: {"adds": [], "removes": []} for ft in LIMITS}
     for i, a in enumerate(adds):
         tmp_rn = a_path(cid, -(i + 1))
         mo = client.get_type("MutateOperation")
         mo.asset_operation.create.resource_name = tmp_rn
         mo.asset_operation.create.text_asset.text = str(a["text"])
-        mops.append(mo)
-        lo = client.get_type("MutateOperation")
-        lo.asset_group_asset_operation.create.asset = tmp_rn
-        lo.asset_group_asset_operation.create.asset_group = ag_path
-        lo.asset_group_asset_operation.create.field_type = getattr(
-            client.enums.AssetFieldTypeEnum, str(a["field_type"]).upper())
-        mops.append(lo)
+        mops.append(mo)  # 资产本体先建齐，临时 id 不占组位
+        link_ops[str(a["field_type"]).upper()]["adds"].append(tmp_rn)
         added.append({"asset": tmp_rn, "field_type": str(a["field_type"]).upper(), "text": str(a["text"])})
     for rid in rm_ids:
         for c in by_id[rid]:
-            mo = client.get_type("MutateOperation")
-            mo.asset_group_asset_operation.remove = c["rn"]
-            mops.append(mo)
+            link_ops[c["field_type"]]["removes"].append(c["rn"])
+    orig_counts = {}
+    for c in cur:
+        orig_counts[c["field_type"]] = orig_counts.get(c["field_type"], 0) + 1
+    for ft in LIMITS:
+        q = link_ops[ft]
+        cnt = orig_counts.get(ft, 0)
+        while q["adds"] or q["removes"]:
+            if q["adds"] and cnt < MAXS[ft]:
+                lo = client.get_type("MutateOperation")
+                lo.asset_group_asset_operation.create.asset = q["adds"].pop(0)
+                lo.asset_group_asset_operation.create.asset_group = ag_path
+                lo.asset_group_asset_operation.create.field_type = getattr(client.enums.AssetFieldTypeEnum, ft)
+                mops.append(lo)
+                cnt += 1
+            else:
+                mo = client.get_type("MutateOperation")
+                mo.asset_group_asset_operation.remove = q["removes"].pop(0)
+                mops.append(mo)
+                cnt -= 1
     resp = gas.mutate(customer_id=cid, mutate_operations=mops)
     # 回填真实资源名（响应与请求同序，asset 建操作的响应带新 asset 的 resource_name）
     new_rns = [r.asset_result.resource_name for r in resp.mutate_operation_responses
