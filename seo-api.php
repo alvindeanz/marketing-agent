@@ -1627,9 +1627,11 @@ function archive_closed_tasks($cid=null){
     $sql="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND ".CHAT_ORIGIN_SQL;
     if($cid!==null){db()->prepare($sql." AND client_id=?")->execute([(int)$cid]);}
     else db()->exec($sql);
-    $sql2="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND attention=0"
-        ." AND NOT (CONCAT(IFNULL(result_note,''),IFNULL(output_url,'')) LIKE CONCAT('%?t=',id,'&k=%')"
-        ." AND IFNULL(result_note,'') NOT LIKE '%[卡反馈折叠%')";
+    /* 2026-10-30 Alvin 定：做完直接收口，卡不扣板。此前「发了卡未收反馈的 done 单留板上」
+       让交付完的任务在板上烂着，人工不知道怎么办客户也不知道怎么办；卡的死活归卡系统
+       （每周卡汇总 + harness 折叠走 include_archived=1 全量，归档不影响后续折叠与到期钟），
+       抽查反查走 spotcheck。attention=1 的 done 单仍留板（那是点名要人看的，有明确下一步）。 */
+    $sql2="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND attention=0";
     if($cid!==null){db()->prepare($sql2." AND client_id=?")->execute([(int)$cid]);}
     else db()->exec($sql2);
 }
