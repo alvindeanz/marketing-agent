@@ -974,6 +974,7 @@ async function report(all, sprint, retried) {
     const caps = require('../lib/capabilities');
     const bcNow = await boardClient();
     const manifest = caps.loadManifest(String((bcNow && bcNow.platform) || ''));
+    const factsAll = await (async () => { try { return (await call('GET', '/facts?client_id=' + cid)).facts || []; } catch (e) { return []; } })();
     const HUMANISH = /客户拍板|客户审阅|客户提供|客户确认|客户回传|素材|拍照|GBP|发帖|电话|会议|人工落地|培训/;
     /* 政策表 op 全集（批二 D）：risk_class_by_op 登记过的加 readonly_ops，机器能力边界的唯一事实源。 */
     const knownOps = (() => {
@@ -1000,7 +1001,19 @@ async function report(all, sprint, retried) {
        （机器有能力做、放行分级有档可查），任何 module 都转。SEO 扫描里 Citymed/Dareu 等
        11 条 20 到 35 天的存量就是这类：owner 位是建 plan 时的快照，没人去认领也没人翻案，
        转机器位走判定与放行，错了 PATCH 回 agency 一条就翻案。 */
-    const laneOk = manifest.found && ((t) => ['technical', 'onpage', 'content'].includes(String(t.module || '')));
+    /* 路一的「车道接通」必须看本客户的接通事实，不是能力清单文件存不存在：shopify.md 对
+       全舰队都存在，按 manifest.found 判等于宣布所有 Shopify 客户都接通了（Oak #1630 学费：
+       店主没装 app、fact 明写 false 待装，10-24 仍被判「已接通」翻位，根因单随后被假前提废掉）。
+       有 platform.<平台>.connected 事实的，以事实为准；没有该事实的平台维持 manifest.found 旧判。 */
+    const connFact = (() => {
+      try {
+        const plat = String((bcNow && bcNow.platform) || '').toLowerCase();
+        const f = (factsAll || []).find((x) => String(x.fact_key) === 'platform.' + plat + '.connected');
+        return f ? String(f.value || '').trim().startsWith('true') : null; /* null=无事实，退回旧判 */
+      } catch (e) { return null; }
+    })();
+    const laneConnected = manifest.found && connFact !== false;
+    const laneOk = laneConnected && ((t) => ['technical', 'onpage', 'content'].includes(String(t.module || '')));
     const opsOk = (t) => {
       const ops = String(t.ops || '').split(',').map((s) => s.trim()).filter(Boolean);
       return ops.length > 0 && ops.every((op) => knownOps.has(op));
