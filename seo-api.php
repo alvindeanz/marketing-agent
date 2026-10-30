@@ -849,6 +849,21 @@ function no_change_plan($t){
     $q->execute([(int)$t['id']]);
     return (int)((($q->fetch())['c'])??0)===0;
 }
+/* 交付型任务（2026-10-30 WebForger #1753 学费）：零机器条目 + 交付物在册 = 放行即交付收口，
+   没有可排 apply 的载荷。ops 带写操作词不算数：交付稿申报的是稿内未来动作的风险词汇，
+   关节红线「路由看载荷存在性，ops 只做风险申报」。与 analysis_task 的区别：不要求 ops 全只读。
+   空账本且无交付物的不走此路（SP 批1 教训：没干活的空产出不许静默收口）。博客两段各有产线，
+   显式排除。调用方传整行（SELECT *），blog 判据要用 output_url/ops/card_kind。 */
+function zero_item_deliverable($t){
+    if(blog_outline_stage($t)||blog_card_waiting($t))return false;
+    ensure_change_items();
+    $q=db()->prepare("SELECT COUNT(*) c FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized')");
+    $q->execute([(int)$t['id']]);
+    if((int)((($q->fetch())['c'])??0)>0)return false;
+    $d=db()->prepare("SELECT COUNT(*) c FROM seo_deliverables WHERE task_id=?");
+    $d->execute([(int)$t['id']]);
+    return (int)((($d->fetch())['c'])??0)>0;
+}
 /* 确认卡已出、客户尚未表态的博客任务是「等客户」不是「待放行」（2026-10-09 批三热修）：
    blog_outline_stage 靠 output_url 不含 /blog/ 判大纲段，而卡机制上线后成稿任务的 output_url
    是卡链接，同样不含 /blog/，放行官一判 release 就被 blog_release_as_write 当大纲重写。
@@ -1752,6 +1767,22 @@ function hold_notify($tid,$why,$by='seo-worker'){
     chat_msg_insert($root,'chat_agent','任务 #'.(int)$tid.'「'.mb_substr((string)$t['title'],0,40,'UTF-8').'」停下等人：'
         .mb_substr(trim((string)$why),0,200,'UTF-8')
         .'。细节在任务卡，放行类的可在看板点放行或回「放行 #'.(int)$tid.' 标题片段」。',$by);
+}
+/* 交付通知（2026-10-30 Alvin 定「停人时刻问人不等钟」）：频道出身任务的交付物就绪时回出生
+   频道请人过目，表态即凭证（回「通过」推进后续单，回改动意见走反馈落地）。与 hold_notify
+   同构：按天去重，非频道出身静默跳过（splitw 链由 chat_root_inbox 上溯）。 */
+function deliver_notify($tid,$text,$by='seo-worker'){
+    $q=db()->prepare("SELECT id,client_id,title,origin,result_note FROM seo_tasks WHERE id=?");
+    $q->execute([(int)$tid]);
+    $t=$q->fetch();
+    if(!$t)return;
+    $root=chat_root_inbox((string)$t['origin']);
+    if(!$root)return;
+    $key='[交付已通知 '.gmdate('Y-m-d').']';
+    if(strpos((string)$t['result_note'],$key)!==false)return;
+    task_append_note($tid,$key);
+    chat_msg_insert($root,'chat_agent','任务 #'.(int)$tid.'「'.mb_substr((string)$t['title'],0,40,'UTF-8').'」'
+        .mb_substr(trim((string)$text),0,240,'UTF-8'),$by);
 }
 
 /* 防抖窗口（2026-10-23 Alvin 批）：chat job 入队后先在 queued 停这么多秒才可领，
@@ -2900,10 +2931,10 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
            也是交闸A续接。委托携带的是执行意图不是验收权，这里直接交闸A判：do 走放行官/L0
            的无变更验收口，drop 收口，later 等人，链条与熔断续接完全同款，只是不先撞一次墙。
            误杀出口：人工放行按钮（7806 的 no_change 验收）与 decide 照常可用。 */
-        $frW=db()->prepare("SELECT id,result_note FROM seo_tasks WHERE id=?");$frW->execute([$tid]);$frRow=$frW->fetch();
-        if($frRow&&no_change_plan($frRow)){
+        $frW=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$frW->execute([$tid]);$frRow=$frW->fetch();
+        if($frRow&&(no_change_plan($frRow)||zero_item_deliverable($frRow))){
             list($rjN,)=queue_review_job($cidW,[$tid],'seo-worker','seo_tasks_review_auto');
-            task_append_note($tid,'[无变更派单] 方案零写入无可落地条目，不排 apply，交闸A判定（do=验收收口，drop=废，later=等人）');
+            task_append_note($tid,'[零载荷派单] 方案零可落地条目（无变更或交付型），不排 apply，交闸A判定（do=验收/交付收口，drop=废，later=等人且频道有嘴）');
             audit('seo-worker','seo_task_dispatch_nochange',(string)$tid,['review_job_id'=>$rjN]);
             res(200,['ok'=>true,'dispatch_grade'=>'nochange-review','review_job_id'=>$rjN]);
         }
@@ -7790,6 +7821,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
     $writeIds=[];$applyIds=[];
     $acceptIds=[];
     $noChangeIds=[];
+    $deliverIds=[];
     $skipped=[];
     foreach($found as $t){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([(int)$t['id']]);$row=$full->fetch();
@@ -7800,6 +7832,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
         if(analysis_task($row))$acceptIds[]=(int)$t['id'];
         elseif(blog_outline_stage($row))$writeIds[]=(int)$t['id'];
         elseif(no_change_plan($row))$noChangeIds[]=(int)$t['id'];
+        elseif(zero_item_deliverable($row))$deliverIds[]=(int)$t['id'];
         else{
             /* 空 ops 护栏（与频道放行同口径）：执行走的是分析模式没有 change plan，排 apply 必失败 */
             $opsR=array_values(array_filter(array_map('trim',explode(',',(string)$row['ops']))));
@@ -7819,6 +7852,13 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
         if($err)res(400,['error'=>'任务 '.$nid.'：'.$err]);
         audit($u['username'],'seo_task_release_nochange',(string)$nid,[]);
     }
+    /* 交付型（2026-10-30 #1753）：放行 = 交付收口，频道出身的回出生频道请人过目，表态即凭证。 */
+    foreach($deliverIds as $did){
+        $err=task_close($did,'accepted','交付型任务（零机器条目，交付物在册），放行即交付收口，不排 apply',$u['username']);
+        if($err)res(400,['error'=>'任务 '.$did.'：'.$err]);
+        deliver_notify($did,'交付物就绪请过目（任务附件可下载）。回复表态即可推进后续：通过，或指出要改哪里。',$u['username']);
+        audit($u['username'],'seo_task_release_deliverable',(string)$did,[]);
+    }
     $jids=[];
     foreach($writeIds as $wid){
         $full=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$full->execute([$wid]);$row=$full->fetch();
@@ -7827,7 +7867,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release'){
     if($applyIds){list($aj,$as)=queue_task_jobs($cid,'apply_task',$applyIds,$u['username'],'seo_tasks_release');$jids=array_merge($jids,$aj);$skipped=array_merge($skipped,$as);}
     /* 一条都没新建说明放行的任务全在飞，旧前端认 409 加 job_id 那套提示。
        例外：本批有验收收口（分析/无变更方案）就不是「全在飞」，照常回 200（批二 B 补）。 */
-    if(!$jids&&($acceptIds||$noChangeIds))res(200,['ok'=>true,'job_ids'=>[],'job_id'=>0,'count'=>0,'accepted'=>array_merge($acceptIds,$noChangeIds),'skipped'=>$skipped]);
+    if(!$jids&&($acceptIds||$noChangeIds||$deliverIds))res(200,['ok'=>true,'job_ids'=>[],'job_id'=>0,'count'=>0,'accepted'=>array_merge($acceptIds,$noChangeIds,$deliverIds),'skipped'=>$skipped]);
     if(!$jids)res(409,['error'=>'Apply job already queued or running','job_id'=>$skipped?$skipped[0]['job_id']:0,'job_ids'=>[],'count'=>0,'skipped'=>$skipped]);
     /* job_id 保留成第一个新建 job，旧前端的「job #」提示不至于变成 undefined。 */
     res(200,['ok'=>true,'job_ids'=>$jids,'job_id'=>$jids[0],'count'=>count($jids),'skipped'=>$skipped]);
@@ -7954,7 +7994,12 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
             $jid?:null,
             $tid,$cid
         ]);
-        if($up->rowCount()>0)$written++;else $refused[]="row $n: task $tid not found for client";
+        if($up->rowCount()>0){
+            $written++;
+            /* 等人判决要有嘴（2026-10-30 #1754 学费）：later 落库即对频道出身任务说一句等什么、
+               怎么激活，不再静躺到工单巡检才浮出。hold_notify 自带出身过滤与按天去重，sprint 单不响。 */
+            if($verdict==='later')hold_notify($tid,'闸A判暂不执行：'.mb_substr(trim((string)($v['reason']??'')),0,140,'UTF-8').'。要继续，在频道回一句明确指示即可');
+        }else $refused[]="row $n: task $tid not found for client";
     }
     /* 放行分级 L0（specs/release_policy.json，deploy.sh api 同机部署）：
        待放行任务复审判 do，且全部 ops 的 risk_class 均为 reversible、非博客非分析，自动排 apply。
@@ -7978,6 +8023,15 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         if(no_change_plan($t)){
             $errN=task_close($tid,'accepted','无变更方案（实读对账零写入），复审判 do 即验收，不排 apply','seo-worker');
             if(!$errN)audit('seo-worker','seo_task_release_nochange',(string)$tid,['via'=>'auto-release']);
+            continue;
+        }
+        /* 交付型（2026-10-30 #1753 同批修）：复审判 do = 交付收口，频道出身的回频道请过目。 */
+        if(zero_item_deliverable($t)){
+            $errD=task_close($tid,'accepted','交付型任务（零机器条目，交付物在册），复审判 do 即交付收口，不排 apply','seo-worker');
+            if(!$errD){
+                deliver_notify($tid,'交付物就绪请过目（任务附件可下载）。回复表态即可推进后续：通过，或指出要改哪里。');
+                audit('seo-worker','seo_task_release_deliverable',(string)$tid,['via'=>'auto-release']);
+            }
             continue;
         }
         $ops=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
@@ -8219,6 +8273,16 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'no_change_accept']);
             $act['released'][]=$tid;continue;
         }
+        /* 交付型放行（2026-10-30 #1753 学费）：零机器条目 + 交付物在册，放行 = 交付收口并回
+           频道请人过目。没有可排 apply 的载荷，也轮不到下方 spend 静默期（它管的是要落地的
+           危险写入，这单零写入）。 */
+        if(zero_item_deliverable($t)){
+            $err=task_close($tid,'accepted','交付型任务（零机器条目，交付物在册），放行即交付收口（opus 放行官）：'.$reason,'opus-release');
+            if($err){$act['skipped'][]=$tid;continue;}
+            deliver_notify($tid,'交付物就绪请过目（任务附件可下载）。回复表态即可推进后续：通过，或指出要改哪里。');
+            audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'deliverable_accept']);
+            $act['released'][]=$tid;continue;
+        }
         /* release。熔断先行，但按方案版本计不按任务终身计（2026-09-27 Alvin 上帝视角修正）：
            bm 事故防的是同一份方案盲目重放；方案重出过（execute done 晚于上次 apply）旧失败就是
            过期证据，每版方案仍只自动落一次，防环性质不变。payload 形如 {"task_ids":[N]}。 */
@@ -8262,7 +8326,11 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
                 $bq->execute([$cid,$bk]);
                 $bkOk=(int)((($bq->fetch())['c'])??0)>0;
             }
-            if(!$bkOk){
+            /* 频道委托压过静默期（2026-10-30 Alvin 定「人在场问得到人就不替人留反悔窗」）：
+               chatw 委托/machine_run 转位是服务端双验过的人类执行意图，与批文同权，条目未越
+               申报范围即跳过静默期。sprint 出身无此凭证，照旧挂钟。 */
+            $mandOk=!$bkOk&&!empty($pol['dispatch_rules']['mandate_carries_release'])&&task_mandate_ok($t)&&mandate_scope_ok($tid,$opsArr);
+            if(!$bkOk&&!$mandOk){
                 if(strpos($note,'[pending-release')===false){
                     $until=gmdate('Y-m-d H:i',time()+24*3600);
                     task_append_note($tid,'[pending-release opus '.$stamp.' until '.$until.'Z] 静默期 24 小时'.($bk!==''?'（引用批文 '.$bk.' 未验上）':'（无批文引用）').'：期间改判或不做即否决，到期后下一轮 harness 自动放行落地。判词：'.$reason);
@@ -8270,7 +8338,7 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
                 }
                 $act['delayed'][]=$tid;continue;
             }
-            $reason='批文 '.$bk.' 已验（confirmed），跳过静默期。'.$reason;
+            $reason=($bkOk?'批文 '.$bk.' 已验（confirmed）':'频道委托意图在案（mandate），视同人类放行').'，跳过静默期。'.$reason;
         }
         /* 空 ops 与分析任务同路：放行 = 验收（与人工 decide 同口径，别照 /tasks/release 拒空 ops）。 */
         if(analysis_task($t)||!$opsArr){
@@ -8495,6 +8563,8 @@ if($m==='POST'&&$ROUTE==='/tasks/apply_verdicts'){
                 }else{
                     task_append_note($tid,'[later] 判定暂不放行：'.$why);
                 }
+                /* 频道出身的 later 要有嘴（2026-10-30 #1754 学费），sprint 单由 hold_notify 出身过滤静默。 */
+                hold_notify($tid,'判定暂不放行：'.mb_substr((string)$why,0,140,'UTF-8').'。要继续，在频道回一句明确指示即可');
                 $done['later']++;continue;
             }
             if($eff==='drop'){
