@@ -1764,9 +1764,11 @@ function hold_notify($tid,$why,$by='seo-worker'){
     $root=$rq->fetch();
     if(!$root)return;
     task_append_note($tid,$key);
+    $pvH=preg_match('/预览: (https?:\/\/\S+)/u',(string)$t['result_note'],$pmH)?$pmH[1]:'';
     chat_msg_insert($root,'chat_agent','任务 #'.(int)$tid.'「'.mb_substr((string)$t['title'],0,40,'UTF-8').'」停下等人：'
         .mb_substr(trim((string)$why),0,200,'UTF-8')
-        .'。细节在任务卡，放行类的可在看板点放行或回「放行 #'.(int)$tid.' 标题片段」。',$by);
+        .'。细节在任务卡，放行类的可在看板点放行或回「放行 #'.(int)$tid.' 标题片段」。'
+        .($pvH!==''?' 网页版：'.$pvH:''),$by);
 }
 /* 交付通知（2026-10-30 Alvin 定「停人时刻问人不等钟」）：频道出身任务的交付物就绪时回出生
    频道请人过目，表态即凭证（回「通过」推进后续单，回改动意见走反馈落地）。与 hold_notify
@@ -1781,8 +1783,10 @@ function deliver_notify($tid,$text,$by='seo-worker'){
     $key='[交付已通知 '.gmdate('Y-m-d').']';
     if(strpos((string)$t['result_note'],$key)!==false)return;
     task_append_note($tid,$key);
+    $pvD=preg_match('/预览: (https?:\/\/\S+)/u',(string)$t['result_note'],$pmD)?$pmD[1]:'';
     chat_msg_insert($root,'chat_agent','任务 #'.(int)$tid.'「'.mb_substr((string)$t['title'],0,40,'UTF-8').'」'
-        .mb_substr(trim((string)$text),0,240,'UTF-8'),$by);
+        .mb_substr(trim((string)$text),0,240,'UTF-8')
+        .($pvD!==''?' 网页版：'.$pvD:''),$by);
 }
 
 /* 防抖窗口（2026-10-23 Alvin 批）：chat job 入队后先在 queued 停这么多秒才可领，

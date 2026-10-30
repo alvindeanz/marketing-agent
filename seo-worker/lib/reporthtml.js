@@ -997,7 +997,7 @@ function buildBrandSectionsHtml(pack, narrative) {
         '</div>';
     }
     parts.push(
-      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:22px">' +
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow-x:auto;margin-bottom:22px">' +
       '<div style="padding:14px 18px 0"><span style="font-size:1.15rem;font-weight:800;color:' + accent + '">' + escapeHtml(g.label) + '</span></div>' +
       head + table + conclusion + marketBlock + pagesBlock + '</div>'
     );

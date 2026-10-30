@@ -2709,14 +2709,20 @@ async function runOne(ctx, context, workspace, taskId) {
   // 不再默认渲染预览页上 agencyreport。放行看卡上的放行卡，全文在任务附件（.md）与
   // job log。人工点名要网页版（任务 detail 里带「完整预览」，卡上按钮或频道补一句都会
   // 落进 detail）才补发 doc 形态，且不回显客户铁律块。
-  const wantsFullPreview = /完整预览/.test(String(task.detail || ''));
+  // 例外（2026-10-30 Alvin 定，#1753 裸 md 审稿的学费）：频道出身的任务有人正在等着审，
+  // 自动出固定格式的决策页（变更方案带放行卡折叠，交付稿走「审阅件」模板带表态栏），
+  // 裸 md 附件照旧归档。sprint 出身照旧停发，点名「完整预览」才补。
+  const chatBorn = /^(chatw|chat|spawn|report):/.test(String(task.origin || ''));
+  const wantsFullPreview = /完整预览/.test(String(task.detail || '')) || chatBorn;
   let pvUrl = '';
   if (wantsFullPreview) {
     pvUrl = await publishPreview(ctx, workspace, taskId, preview.renderDocPreview({
-      title: task.title || 'task ' + taskId, markdown: output, kind: prepare ? '变更方案' : (isChatTask ? '验证报告' : '分析报告'), taskId,
+      title: task.title || 'task ' + taskId, markdown: output,
+      kind: prepare ? '变更方案' : (isChatTask ? '验证报告' : (chatBorn ? '审阅件' : '分析报告')), taskId,
       client: (context && context.client && context.client.name) || path.basename(workspace),
       note: prepare ? '这是待放行的变更方案，不是变更本身。放行后 apply 照它执行并回读验证。'
-        : (isChatTask ? '频道派单产出，已自动验收；结论在最前面。' : '分析型任务的产出是这份报告，同意 = 验收完成。'),
+        : (isChatTask ? '频道派单产出，已自动验收；结论在最前面。'
+          : (chatBorn ? '审阅件：表态方式见下方绿栏，正文是交付稿全文。' : '分析型任务的产出是这份报告，同意 = 验收完成。')),
       clientRules: '',
     }), log);
   }
