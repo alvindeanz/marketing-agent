@@ -2895,6 +2895,18 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         $backW=false;
         if(preg_match('/\[backing\]\s*(\S+)/u',(string)($cr['detail']??''),$bm))$backW=dispatch_backing_ok($cidW,$bm[1]);
         $gradeW=dispatch_grade($opsW,release_policy_load(),$backW);
+        /* 无变更方案不排 apply（2026-10-30 WebForger #1754 学费）：零条目没有可落地的东西，
+           排 apply 必撞「零行可硬审」，白烧一个 failed job 顶着「执行失败」等人，熔断后反正
+           也是交闸A续接。委托携带的是执行意图不是验收权，这里直接交闸A判：do 走放行官/L0
+           的无变更验收口，drop 收口，later 等人，链条与熔断续接完全同款，只是不先撞一次墙。
+           误杀出口：人工放行按钮（7806 的 no_change 验收）与 decide 照常可用。 */
+        $frW=db()->prepare("SELECT id,result_note FROM seo_tasks WHERE id=?");$frW->execute([$tid]);$frRow=$frW->fetch();
+        if($frRow&&no_change_plan($frRow)){
+            list($rjN,)=queue_review_job($cidW,[$tid],'seo-worker','seo_tasks_review_auto');
+            task_append_note($tid,'[无变更派单] 方案零写入无可落地条目，不排 apply，交闸A判定（do=验收收口，drop=废，later=等人）');
+            audit('seo-worker','seo_task_dispatch_nochange',(string)$tid,['review_job_id'=>$rjN]);
+            res(200,['ok'=>true,'dispatch_grade'=>'nochange-review','review_job_id'=>$rjN]);
+        }
         /* F2 条目就绪度（2026-09-11，#680 教训，PJ 基准：等条件就挂起到点自己续，不硬跑一次失败）：
            机器条目全部带未消费前置条件的，不排 apply，任务挂 blocked 等条件巡检（worker 零 LLM
            轮询）到点续跑。授权是委托单那一次给的，巡检只推迟执行时点。 */
@@ -7961,6 +7973,13 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         if(!$t||$t['status']!=='review')continue;
         if(analysis_task($t)||blog_outline_stage($t))continue;
         if(blog_card_waiting($t))continue; /* 确认卡已出等客户，L0 不重排 apply（2026-10-10 #815 验证时的多余一跳） */
+        /* 无变更方案（2026-10-30 #1754 同批修）：复审判 do = 验收，与人工放行同口径（批二 B 的
+           no_change 验收），排 apply 必撞「零行可硬审」。 */
+        if(no_change_plan($t)){
+            $errN=task_close($tid,'accepted','无变更方案（实读对账零写入），复审判 do 即验收，不排 apply','seo-worker');
+            if(!$errN)audit('seo-worker','seo_task_release_nochange',(string)$tid,['via'=>'auto-release']);
+            continue;
+        }
         $ops=array_values(array_filter(array_map('trim',explode(',',(string)$t['ops']))));
         if(!$ops)continue; /* 无 ops 的任务说不清风险，走人 */
         /* hold 前科闸（2026-10-25，PlayMate #562 实证）：放行官 hold-human 是人味否决在案，
@@ -8288,6 +8307,14 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             list($jb,)=blog_release_as_write($cid,$t,'opus-release');
             task_append_note($tid,'[auto-release L2-opus '.$stamp.']'.$retryTag.' '.$reason);
             audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'blog_write','jobs'=>$jb]);
+            $act['released'][]=$tid;continue;
+        }
+        /* 无变更方案：放行官判 release = 验收（与人工放行的 no_change 验收同口径），
+           排 apply 必撞「零行可硬审」（2026-10-30 #1754 同批修）。 */
+        if(no_change_plan($t)){
+            $errN2=task_close($tid,'accepted','无变更方案（实读对账零写入），放行官判 release 即验收（opus 放行官）：'.$reason,'opus-release');
+            if($errN2){$act['skipped'][]=$tid;continue;}
+            audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'nochange_accept']);
             $act['released'][]=$tid;continue;
         }
         list($ja,)=queue_task_jobs($cid,'apply_task',[$tid],'opus-release','seo_task_release_opus');
