@@ -45,6 +45,11 @@ function parseReportScope(profile) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) {
     throw new Error('profile.report_scope 必须是 JSON 对象');
   }
+  /* lead_events（2026-11-03 Louvresky #1629 / HT-NZ #1580）：询盘事件口径按客户配置，
+     不配沿用默认三件套。配了就必须是字符串数组，口径说不清就不出报，不静默回落。 */
+  if (s.lead_events !== undefined && !Array.isArray(s.lead_events)) {
+    throw new Error('profile.report_scope 的 lead_events 必须是字符串数组');
+  }
   return {
     gsc_properties: Array.isArray(s.gsc_properties) ? s.gsc_properties.map((p) => String(p || '').trim()).filter(Boolean) : [],
     gsc_country: String(s.gsc_country || '').trim().toLowerCase(),
@@ -52,6 +57,7 @@ function parseReportScope(profile) {
     currency_label: String(s.currency_label || '').trim(),
     compare: String(s.compare || '').trim(),
     market_label: String(s.market_label || '').trim(),
+    lead_events: Array.isArray(s.lead_events) ? s.lead_events.map((e) => String(e || '').trim()).filter(Boolean) : [],
   };
 }
 
@@ -1257,13 +1263,18 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   const gaCtx = reportScope && reportScope.ga4_country
     ? Object.assign({}, ctx, { reportGa4Country: reportScope.ga4_country })
     : ctx;
+  /* 询盘事件口径：客户配了 lead_events 就按配置，没配沿用默认三件套（零行为变化） */
+  const leadEvents = (reportScope && reportScope.lead_events && reportScope.lead_events.length)
+    ? reportScope.lead_events
+    : LEAD_EVENTS;
   if (reportScope) {
     say(
       '报告口径 scope：GSC ' + (gscScope.properties.join(' + ') || '无') +
         (gscScope.country ? '（country=' + gscScope.country + '）' : '') +
         '，GA4 ' + (reportScope.ga4_country ? 'country=' + reportScope.ga4_country : '全量') +
         (reportScope.compare === 'daily_avg' ? '，环比按日均' : '') +
-        (reportScope.currency_label ? '，收入计 ' + reportScope.currency_label : '')
+        (reportScope.currency_label ? '，收入计 ' + reportScope.currency_label : '') +
+        (reportScope.lead_events.length ? '，询盘事件=' + reportScope.lead_events.join('+') : '')
     );
   }
 
@@ -1380,7 +1391,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     say('ga4: 属性 ' + ga4Property + '，拉渠道、事件、落地页');
     const curCh = await ga4Channels(gaCtx, ga4Property, per);
     const prevCh = await ga4Channels(gaCtx, ga4Property, per.compare);
-    const wantEvents = LEAD_EVENTS.concat(['form_start']);
+    const wantEvents = leadEvents.concat(leadEvents.indexOf('form_start') === -1 ? ['form_start'] : []);
     const curEv = await ga4ChannelEvents(gaCtx, ga4Property, per, wantEvents);
     const prevEv = await ga4ChannelEvents(gaCtx, ga4Property, per.compare, wantEvents);
     const curLp = await ga4LandingPages(gaCtx, ga4Property, per);
@@ -1401,7 +1412,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const leadsByChannel = (rows) => {
       const m = new Map();
       for (const r of rows) {
-        if (LEAD_EVENTS.indexOf(r.event) === -1) continue;
+        if (leadEvents.indexOf(r.event) === -1) continue;
         m.set(r.channel, (m.get(r.channel) || 0) + r.count);
       }
       return m;
@@ -1422,8 +1433,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const orgCur = curCh.filter((c) => isOrganicChannel(c.channel));
     const orgPrev = prevCh.filter((c) => isOrganicChannel(c.channel));
     const sum = (arr, k) => arr.reduce((a, r) => a + (Number(r[k]) || 0), 0);
-    const curLeadsOrganic = LEAD_EVENTS.reduce((a, n) => a + eventTotal(curEv, n, true), 0);
-    const prevLeadsOrganic = LEAD_EVENTS.reduce((a, n) => a + eventTotal(prevEv, n, true), 0);
+    const curLeadsOrganic = leadEvents.reduce((a, n) => a + eventTotal(curEv, n, true), 0);
+    const prevLeadsOrganic = leadEvents.reduce((a, n) => a + eventTotal(prevEv, n, true), 0);
     const curFormStart = eventTotal(curEv, 'form_start', true);
     const prevFormStart = eventTotal(prevEv, 'form_start', true);
     if (curFormStart === 0 && prevFormStart === 0) {
@@ -1628,14 +1639,14 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       let yoyOrganic = null;
       if (ga4Property) {
         const yoyCh = await ga4Channels(gaCtx, ga4Property, yoyPer);
-        const yoyEv = await ga4ChannelEvents(gaCtx, ga4Property, yoyPer, LEAD_EVENTS);
+        const yoyEv = await ga4ChannelEvents(gaCtx, ga4Property, yoyPer, leadEvents);
         inputs.ga4_calls += 2;
         const org = yoyCh.filter((c) => isOrganicChannel(c.channel));
         yoyOrganic = {
           sessions: org.reduce((a, r) => a + (Number(r.sessions) || 0), 0),
           new_users: org.reduce((a, r) => a + (Number(r.new_users) || 0), 0),
           leads: yoyEv
-            .filter((r) => isOrganicChannel(r.channel) && LEAD_EVENTS.indexOf(r.event) !== -1)
+            .filter((r) => isOrganicChannel(r.channel) && leadEvents.indexOf(r.event) !== -1)
             .reduce((a, r) => a + r.count, 0),
         };
       }
@@ -1942,7 +1953,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       },
       generated_at: new Date().toISOString(),
       version_hint: Number(opts.versionHint) || 1,
-      leads_source: 'GA4 关键事件 ' + LEAD_EVENTS.join('、') + ' 之和',
+      leads_source: 'GA4 关键事件 ' + leadEvents.join('、') + ' 之和',
       leads_override: leadsOverride,
       brand_regex_source: brand.source,
       // 出报人给这一期的自由文本要求。以前只在这里被 parseLeadsOverride 扫一遍就丢掉，

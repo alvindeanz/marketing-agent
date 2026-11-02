@@ -161,3 +161,16 @@ console.log('reportscope.test.js 全部通过');
 }
 
 console.log('reportscope 第二批断言通过');
+
+// ---- 第三批（Louvresky #1629 / HT-NZ #1580）：lead_events 按客户配置 ----
+{
+  const { parseReportScope } = require('../seo-worker/lib/factspack');
+  // 不配 = 空数组（factspack 内退回默认三件套）
+  assert.deepStrictEqual(parseReportScope({ report_scope: '{"gsc_country":"nzl"}' }).lead_events, []);
+  // 配了就按配置收，去空白
+  const s3 = parseReportScope({ report_scope: JSON.stringify({ lead_events: [' generate_lead ', '', 'phone_click'] }) });
+  assert.deepStrictEqual(s3.lead_events, ['generate_lead', 'phone_click']);
+  // 配成非数组必须炸，不许静默回落
+  assert.throws(() => parseReportScope({ report_scope: '{"lead_events":"generate_lead"}' }), /lead_events 必须是字符串数组/);
+}
+console.log('reportscope lead_events 断言通过');
