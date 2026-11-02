@@ -6285,8 +6285,8 @@ if($m==='PUT'&&$ROUTE==='/profile'){
     if($acid!==''&&!preg_match('/^\d{10}$/',$acid))res(400,['error'=>'ads_customer_id 应为 10 位数字（可带横杠）']);
     $own=trim($vals['owner']);
     if($own!==''&&!preg_match('/^[a-z0-9._-]{1,32}$/',$own))res(400,['error'=>'owner 只允许小写字母数字和 . _ -']);
-    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,semrush_db,workspace_dir,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang,services,ads_customer_id,owner,orders_attribution)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    $sql="INSERT INTO seo_profiles(client_id,platform,domain,ga4_property,gsc_property,semrush_project,semrush_db,workspace_dir,target_keywords,brand_regex,business_goals,conversion_goals,notes,status,report_lang,services,ads_customer_id,owner,orders_attribution,report_scope)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON DUPLICATE KEY UPDATE platform=VALUES(platform),domain=VALUES(domain),ga4_property=VALUES(ga4_property),
             gsc_property=VALUES(gsc_property),semrush_project=VALUES(semrush_project),
             semrush_db=VALUES(semrush_db),workspace_dir=VALUES(workspace_dir),target_keywords=VALUES(target_keywords),
@@ -6294,12 +6294,12 @@ if($m==='PUT'&&$ROUTE==='/profile'){
             business_goals=VALUES(business_goals),conversion_goals=VALUES(conversion_goals),notes=VALUES(notes),
             status=VALUES(status),report_lang=VALUES(report_lang),
             services=VALUES(services),ads_customer_id=VALUES(ads_customer_id),owner=VALUES(owner),
-            orders_attribution=VALUES(orders_attribution)";
+            orders_attribution=VALUES(orders_attribution),report_scope=VALUES(report_scope)";
     db()->prepare($sql)->execute([
         $cid,$vals['platform'],$vals['domain'],$vals['ga4_property'],$vals['gsc_property'],
         $vals['semrush_project'],$sdb,$wd,$kwJson,$vals['brand_regex'],
         $vals['business_goals'],$vals['conversion_goals'],$vals['notes'],$st,$lang,
-        $svc,$acid,$own,$oa
+        $svc,$acid,$own,$oa,($rs!==''?$rs:null)
     ]);
     audit($u['username'],'seo_profile_save',(string)$cid,['domain'=>$vals['domain'],'status'=>$st,'report_lang'=>$lang]);
     res(200,['ok'=>true]);
