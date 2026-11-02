@@ -432,9 +432,15 @@ function fallbackSdesc(pack) {
 // ---------------------------------------------------------------------------
 
 function buildHeroKpis(pack, narrative) {
+  /* 电商客户的默认键位把询盘卡换成订单卡（2026-10-05 电商不考核询盘；
+     ticket #54 第三批点名无叙事降级版也要换）。订单数取不到时兜底清单照旧补位。 */
+  const isEcom = pack && pack.meta && pack.meta.biz_type === 'ecommerce';
+  const baseKeys = isEcom && kpiValues(pack, 'organic_purchases')
+    ? DEFAULT_KPI_KEYS.map((k) => (k === 'leads' ? 'organic_purchases' : k))
+    : DEFAULT_KPI_KEYS;
   const wanted = (narrative && Array.isArray(narrative.hero_kpi_keys) && narrative.hero_kpi_keys.length
     ? narrative.hero_kpi_keys
-    : DEFAULT_KPI_KEYS
+    : baseKeys
   ).slice(0, 8);
   const cards = [];
   const used = new Set();
@@ -448,7 +454,7 @@ function buildHeroKpis(pack, narrative) {
     if (cards.length === 4) break;
   }
   // 叙事挑的键取不到数时，用默认清单补齐，绝不让封面开天窗。
-  for (const k of DEFAULT_KPI_KEYS.concat(Object.keys(KPI_DEFS))) {
+  for (const k of baseKeys.concat(Object.keys(KPI_DEFS))) {
     if (cards.length >= 4) break;
     if (used.has(k)) continue;
     const c = kpiCard(pack, k);
@@ -595,7 +601,12 @@ function buildChannelKpis(pack) {
     };
     totalNote = 'vs ' + pack.meta.compare.short + '，已剔除异常天';
   }
-  const dLeads = deltaCountCovered(total.leads, total.prev_leads, shortPrev || avgScale);
+  /* 电商客户第二张卡换成全渠道订单（ticket #54 第三批）：订单数据在 channels_total 里
+     （purchases null 表示没取到，照旧退回转化事件口径） */
+  const hasPurch = isEcom && total.purchases !== null && total.purchases !== undefined;
+  const dLeads = hasPurch
+    ? deltaCountCovered(total.purchases, total.prev_purchases || 0, shortPrev || avgScale)
+    : deltaCountCovered(total.leads, total.prev_leads, shortPrev || avgScale);
   const dShare = deltaPp(shareCur, sharePrev);
   const vsNote = withDayNote('vs ' + pack.meta.compare.short, shortPrev);
   return [
@@ -607,8 +618,8 @@ function buildChannelKpis(pack) {
       note: totalNote,
     },
     {
-      value: fmtInt(total.leads),
-      label: isEcom ? '全渠道转化事件' : '全渠道询盘',
+      value: fmtInt(hasPurch ? total.purchases : total.leads),
+      label: hasPurch ? '全渠道订单' : isEcom ? '全渠道转化事件' : '全渠道询盘',
       delta: dLeads.text,
       delta_color: dLeads.color,
       note: vsNote,
@@ -730,11 +741,12 @@ function buildKeywordRows(pack) {
 function buildPageRows(pack) {
   const rows = (pack.ga4 && pack.ga4.landing_pages) || [];
   const shortPrev = shortPrevCoverage(pack, 'ga4');
+  const avgScale = shortPrev ? null : dailyAvgScale(pack, 'ga4_sessions');
   return rows.map((r, i) => {
     let delta = '新进榜';
     let color = MUTED;
     if (r.prev_sessions !== null && r.prev_sessions !== undefined) {
-      const d = deltaCountCovered(r.sessions, r.prev_sessions, shortPrev);
+      const d = deltaCountCovered(r.sessions, r.prev_sessions, shortPrev || avgScale);
       delta = d.text;
       color = d.color;
     }
@@ -872,7 +884,8 @@ function buildAovCallout(pack, isEcom) {
   const prev = ec.prev;
   const all = ec.all || {};
   const aov = cur.purchases > 0 ? cur.revenue / cur.purchases : null;
-  const d = deltaCount(cur.purchases, prev.purchases);
+  const avgScale = dailyAvgScale(pack, 'ga4_purchases');
+  const d = avgScale ? deltaCountCovered(cur.purchases, prev.purchases, avgScale) : deltaCount(cur.purchases, prev.purchases);
   /* 货币标注（ticket #54）：meta.currency_label 存在就在金额后缀货币码，GA4 金额是属性币种不是默认本币 */
   const ccy = (pack.meta && pack.meta.currency_label) ? ' ' + pack.meta.currency_label : '';
   const parts = [
