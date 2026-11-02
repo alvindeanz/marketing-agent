@@ -890,6 +890,30 @@ async function report(all, sprint, retried) {
     console.log('\n## 卡时效刷新候选（dry）：#' + cardRefresh.map((t) => t.id).join(' #'));
   }
 
+  // 复验扫帚（2026-11-03 Alvin 批）：apply 失败路径留下的「待复验」旗没有收口出口
+  // （成功路径走 /complete 的分流路由，失败路径只写 note，BensNZ #114 挂 42 天实证）。
+  // 判定核在 lib/verifysweep：全史零落地（账本 + changeset 两证）判不适用；
+  // 全数据口径且已 done 带 [applied] 的归回测管道；其余带证据摘要升人，不自动收。
+  try {
+    const vs = require('../lib/verifysweep');
+    for (const t of all.filter((x) => x.manual_pending)) {
+      let ledgerStates = [];
+      try {
+        const ir = await call('GET', '/tasks/' + t.id + '/items');
+        ledgerStates = ((ir && ir.items) || []).map((x) => String(x.state || ''));
+      } catch (e) { /* 账本读不到按空处理；void 仍需 changeset 全零这条腿，不会凭空判 */ }
+      const d = vs.decide({ note: t.result_note, ledgerStates, status: t.status });
+      if (d.action === 'void' || d.action === 'backtest') {
+        const tag = d.action === 'void' ? '判不适用' : '数据类归回测管道';
+        if (DRY) { console.log('[dry] 复验扫帚 #' + t.id + ' ' + tag + '：' + d.reason); continue; }
+        await call('POST', '/tasks/' + t.id + '/manual_done', { note: '[复验扫帚] ' + tag + '：' + d.reason });
+        log('复验扫帚 #' + t.id + ' ' + tag + '：' + d.reason);
+      } else if (d.action === 'report') {
+        log('复验待人 #' + t.id + '（' + d.reason + '）：' + (t.manual_checks || []).join('、'));
+      }
+    }
+  } catch (e) { log('复验扫帚段跳过：' + e.message); }
+
   // 放行判定（2026-09-27 Alvin 定方案 B）：待放行不再默认停人，排 opus 放行官批量判定
   // （release 即落 / spend 与 irreversible 进 24h 静默期 / hold_human 才停人）。静默期到点的
   // 在这里走人放行同一端点落地。harness 本身是人触发的，不违硬规矩 1。
