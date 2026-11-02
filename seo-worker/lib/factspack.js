@@ -536,6 +536,8 @@ function mergeChannels(cur, prev) {
       prev_sessions: Number(p.sessions) || 0,
       leads: Number(r.leads) || 0,
       prev_leads: Number(p.leads) || 0,
+      purchases: r.purchases === null || r.purchases === undefined ? null : Number(r.purchases),
+      prev_purchases: p.purchases === null || p.purchases === undefined ? null : Number(p.purchases),
       revenue: r.revenue === null || r.revenue === undefined ? null : Number(r.revenue),
       prev_revenue: p.revenue === null || p.revenue === undefined ? null : Number(p.revenue),
       is_organic: isOrganicChannel(r.channel),
@@ -551,6 +553,8 @@ function mergeChannels(cur, prev) {
       prev_sessions: Number(p.sessions) || 0,
       leads: 0,
       prev_leads: Number(p.leads) || 0,
+      purchases: p.purchases === null || p.purchases === undefined ? null : 0,
+      prev_purchases: p.purchases === null || p.purchases === undefined ? null : Number(p.purchases),
       revenue: p.revenue === null || p.revenue === undefined ? null : 0,
       prev_revenue: p.revenue === null || p.revenue === undefined ? null : Number(p.revenue),
       is_organic: isOrganicChannel(name),
@@ -580,11 +584,13 @@ function mergeChannels(cur, prev) {
         a.prev_sessions += r.prev_sessions;
         a.leads += r.leads;
         a.prev_leads += r.prev_leads;
+        if (r.purchases !== null) a.purchases = (a.purchases || 0) + r.purchases;
+        if (r.prev_purchases !== null) a.prev_purchases = (a.prev_purchases || 0) + r.prev_purchases;
         if (r.revenue !== null) a.revenue = (a.revenue || 0) + r.revenue;
         if (r.prev_revenue !== null) a.prev_revenue = (a.prev_revenue || 0) + r.prev_revenue;
         return a;
       },
-      { sessions: 0, prev_sessions: 0, leads: 0, prev_leads: 0, revenue: null, prev_revenue: null }
+      { sessions: 0, prev_sessions: 0, leads: 0, prev_leads: 0, purchases: null, prev_purchases: null, revenue: null, prev_revenue: null }
     );
     out.push({
       channel: '其他',
@@ -592,6 +598,8 @@ function mergeChannels(cur, prev) {
       prev_sessions: agg.prev_sessions,
       leads: agg.leads,
       prev_leads: agg.prev_leads,
+      purchases: agg.purchases,
+      prev_purchases: agg.prev_purchases,
       revenue: agg.revenue,
       prev_revenue: agg.prev_revenue,
       is_organic: false,
@@ -607,11 +615,13 @@ function mergeChannels(cur, prev) {
       a.prev_sessions += r.prev_sessions;
       a.leads += r.leads;
       a.prev_leads += r.prev_leads;
+      if (r.purchases !== null) a.purchases = (a.purchases || 0) + r.purchases;
+      if (r.prev_purchases !== null) a.prev_purchases = (a.prev_purchases || 0) + r.prev_purchases;
       if (r.revenue !== null) a.revenue = (a.revenue || 0) + r.revenue;
       if (r.prev_revenue !== null) a.prev_revenue = (a.prev_revenue || 0) + r.prev_revenue;
       return a;
     },
-    { sessions: 0, prev_sessions: 0, leads: 0, prev_leads: 0, revenue: null, prev_revenue: null }
+    { sessions: 0, prev_sessions: 0, leads: 0, prev_leads: 0, purchases: null, prev_purchases: null, revenue: null, prev_revenue: null }
   );
 
   return { channels: out, total };
@@ -885,15 +895,18 @@ function coverageGaps(source, per, cur, prev) {
 // ---------------------------------------------------------------------------
 
 async function ga4Channels(ctx, propertyId, range) {
+  /* 订单与收入随渠道一起取（ticket #54 第二批）：leadgen 属性这两列回 0，不报错 */
   const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'sessionDefaultChannelGroup' }],
-    metrics: [{ name: 'sessions' }, { name: 'newUsers' }],
+    metrics: [{ name: 'sessions' }, { name: 'newUsers' }, { name: 'ecommercePurchases' }, { name: 'purchaseRevenue' }],
   });
   return rows.map((r) => ({
     channel: String(r.sessionDefaultChannelGroup || ''),
     sessions: Number(r.sessions) || 0,
     new_users: Number(r.newUsers) || 0,
+    purchases: Number(r.ecommercePurchases) || 0,
+    revenue: Number(r.purchaseRevenue) || 0,
   }));
 }
 
@@ -978,7 +991,8 @@ async function ga4LandingPages(ctx, propertyId, range) {
   const byPath = new Map();
   for (const r of rows) {
     if (!isOrganicChannel(r.sessionDefaultChannelGroup)) continue;
-    const p = String(r.landingPagePlusQueryString || '');
+    /* 去参数合并（ticket #54 第二批）：同一落地页的 fbclid/utm 变体不再拆行，按纯路径聚合 */
+    const p = String(r.landingPagePlusQueryString || '').split('?')[0].split('#')[0];
     if (!p) continue;
     byPath.set(p, (byPath.get(p) || 0) + (Number(r.sessions) || 0));
   }
@@ -1401,8 +1415,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const prevLeadMap = leadsByChannel(prevEv);
 
     const merged = mergeChannels(
-      curCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: curLeadMap.get(c.channel) || 0, revenue: null })),
-      prevCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: prevLeadMap.get(c.channel) || 0, revenue: null }))
+      curCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: curLeadMap.get(c.channel) || 0, purchases: c.purchases, revenue: c.revenue })),
+      prevCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: prevLeadMap.get(c.channel) || 0, purchases: c.purchases, revenue: c.revenue }))
     );
 
     const orgCur = curCh.filter((c) => isOrganicChannel(c.channel));
@@ -1660,11 +1674,44 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   const months = monthsBack(trendAnchorYm, TREND_MONTHS);
   let trend = { months, gsc_clicks: [], ga4_sessions_organic: [], last_partial: trendLastPartial };
   try {
-    const from = months[0] + '-01';
-    const res = await api.getMetrics(clientId, from, per.end, ['gsc_clicks', 'ga4_sessions_organic']);
-    inputs.api_calls += 1;
-    trend = buildTrend(res && res.metrics, months, trendLastPartial);
-    say('trend: 取到 ' + months.length + ' 个月的时序');
+    if (reportScope) {
+      /* scope 客户不用板面时序：seo_metrics_daily 是 pull_data 的全站口径，
+         scope 报告拿它画趋势等于口径错位（ticket #54 第二批）。按 scope 现拉。 */
+      const trange = { start: months[0] + '-01', end: per.end };
+      const gscSeries = [];
+      if (hasGsc) {
+        const res = await gscQueryScoped(cfg, gscScope, {
+          startDate: trange.start, endDate: trange.end, dimensions: ['date'], rowLimit: 25000,
+        });
+        inputs.gsc_calls += gscScope.properties.length;
+        for (const r of (res && res.rows) || []) {
+          gscSeries.push({ d: String((r.keys || [])[0] || ''), v: Number(r.clicks) || 0 });
+        }
+      }
+      const ga4Series = [];
+      if (ga4Property) {
+        const rows = await ga4R(gaCtx, ga4Property, {
+          dateRanges: [{ startDate: trange.start, endDate: trange.end }],
+          dimensions: [{ name: 'date' }, { name: 'sessionDefaultChannelGroup' }],
+          metrics: [{ name: 'sessions' }],
+        });
+        inputs.ga4_calls += 1;
+        for (const r of rows) {
+          if (!isOrganicChannel(String(r.sessionDefaultChannelGroup || ''))) continue;
+          const raw = String(r.date || '');
+          if (raw.length !== 8) continue;
+          ga4Series.push({ d: raw.slice(0, 4) + '-' + raw.slice(4, 6) + '-' + raw.slice(6), v: Number(r.sessions) || 0 });
+        }
+      }
+      trend = buildTrend({ gsc_clicks: gscSeries, ga4_sessions_organic: ga4Series }, months, trendLastPartial);
+      say('trend: 按报告口径现拉 ' + months.length + ' 个月时序（不走板面全站时序）');
+    } else {
+      const from = months[0] + '-01';
+      const res = await api.getMetrics(clientId, from, per.end, ['gsc_clicks', 'ga4_sessions_organic']);
+      inputs.api_calls += 1;
+      trend = buildTrend(res && res.metrics, months, trendLastPartial);
+      say('trend: 取到 ' + months.length + ' 个月的时序');
+    }
   } catch (e) {
     // 这个端点现在还是 admin only，worker 拿到 403 是已知状态，不该把报告拖挂。
     trend = { months, gsc_clicks: [], ga4_sessions_organic: [], last_partial: trendLastPartial };

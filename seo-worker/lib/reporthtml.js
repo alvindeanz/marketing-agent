@@ -351,6 +351,19 @@ function kpiCoverage(pack, key) {
   return shortPrevCoverage(pack, key.indexOf('gsc_') === 0 ? 'gsc' : 'ga4');
 }
 
+/* scope 报告的日均比（meta.compare_mode='daily_avg'，ticket #54 第二批）：两期天数
+   不等时计数类指标按日均环比。机制复用残月折算 coveredBase：把对比值乘以
+   本期天数 / 对比期天数，等价于两边都除以各自天数再比。天数相等时回 null 走原路。 */
+function dailyAvgScale(pack, key) {
+  if (!pack || !pack.meta || pack.meta.compare_mode !== 'daily_avg') return null;
+  const node = key.indexOf('gsc_') === 0 ? pack.gsc : pack.ga4;
+  const cov = node && node.coverage;
+  const cd = cov && cov.cur && (cov.cur.days || cov.cur.span);
+  const pd = cov && cov.prev && (cov.prev.days || cov.prev.span);
+  if (!(cd > 0) || !(pd > 0) || cd === pd) return null;
+  return { span: cd, days: pd };
+}
+
 function kpiCard(pack, key) {
   const def = KPI_DEFS[key];
   const vals = def ? kpiValues(pack, key) : null;
@@ -360,6 +373,7 @@ function kpiCard(pack, key) {
   // 对比期是残月时，计数类指标按天数折算成整周期再比，卡片上标「日均」。
   // 不折算就会出现正文写日均、头卡写总量的自相矛盾（kuddles 2026-08 v1 的原样）。
   const shortPrev = def.kind === 'pos' || def.kind === 'pct' ? null : kpiCoverage(pack, key);
+  const avgScale = def.kind === 'pos' || def.kind === 'pct' || shortPrev ? null : dailyAvgScale(pack, key);
   if (def.kind === 'pos') {
     value = fmtPos(vals.cur);
     d = deltaPosition(vals.cur, vals.prev);
@@ -368,7 +382,7 @@ function kpiCard(pack, key) {
     d = deltaPp(vals.cur, vals.prev);
   } else {
     value = fmtInt(vals.cur);
-    d = deltaCountCovered(vals.cur, vals.prev, shortPrev);
+    d = deltaCountCovered(vals.cur, vals.prev, shortPrev || avgScale);
   }
   let prevValue = def.kind === 'pos' ? fmtPos(vals.prev) : def.kind === 'pct' ? fmtPct(vals.prev) : fmtInt(vals.prev);
   prevValue = withDayNote(prevValue, shortPrev);
@@ -537,11 +551,16 @@ function buildChannelRows(pack) {
   const channels = (pack.ga4 && pack.ga4.channels) || [];
   const total = (pack.ga4 && pack.ga4.channels_total) || { sessions: 0, leads: 0 };
   const totalLeads = Number(total.leads) || 0;
+  /* 订单与收入列（ticket #54 第二批）：数据在 pack 里就格式化好供模板引用，
+     通用模板没有这两列照常不渲染，分渠道下单的模板（如 Haakaa AU）直接取用。 */
+  const ccy = (pack.meta && pack.meta.currency_label) ? ' ' + pack.meta.currency_label : '';
   const rows = channels.map((c) => ({
     channel: c.channel,
     sessions: fmtInt(c.sessions),
     leads: fmtInt(c.leads),
     leads_share: totalLeads > 0 ? fmtPct(c.leads / totalLeads, 1) : '待更新',
+    purchases: c.purchases === null || c.purchases === undefined ? '' : fmtInt(c.purchases),
+    revenue: c.revenue === null || c.revenue === undefined ? '' : Number(c.revenue).toFixed(2) + ccy,
     is_organic: !!c.is_organic,
     is_muted: !!c.is_muted,
   }));
@@ -549,6 +568,8 @@ function buildChannelRows(pack) {
     rows,
     total_sessions: fmtInt(total.sessions),
     total_leads: fmtInt(totalLeads),
+    total_purchases: total.purchases === null || total.purchases === undefined ? '' : fmtInt(total.purchases),
+    total_revenue: total.revenue === null || total.revenue === undefined ? '' : Number(total.revenue).toFixed(2) + ccy,
   };
 }
 
@@ -560,10 +581,11 @@ function buildChannelKpis(pack) {
   const shareCur = total.sessions > 0 ? org.cur.sessions / total.sessions : null;
   const sharePrev = total.prev_sessions > 0 ? org.prev.sessions / total.prev_sessions : null;
   const shortPrev = shortPrevCoverage(pack, 'ga4');
+  const avgScale = shortPrev ? null : dailyAvgScale(pack, 'ga4_sessions');
   /* 基数异常时卡面环比直接用剔除后口径（2026-10-05 客户汇报框架）：审核官改不了
      卡面文字，叙事打补丁治标，根治在这里。note 标明已剔除，原始数字叙事层作对照。 */
   const anom = pack.ga4.anomaly;
-  let dTotal = deltaCountCovered(total.sessions, total.prev_sessions, shortPrev);
+  let dTotal = deltaCountCovered(total.sessions, total.prev_sessions, shortPrev || avgScale);
   let totalNote = withDayNote('vs ' + pack.meta.compare.short, shortPrev);
   if (anom && anom.all_sessions_adj_delta_pct !== null && anom.all_sessions_adj_delta_pct !== undefined) {
     const pct = anom.all_sessions_adj_delta_pct;
@@ -573,7 +595,7 @@ function buildChannelKpis(pack) {
     };
     totalNote = 'vs ' + pack.meta.compare.short + '，已剔除异常天';
   }
-  const dLeads = deltaCountCovered(total.leads, total.prev_leads, shortPrev);
+  const dLeads = deltaCountCovered(total.leads, total.prev_leads, shortPrev || avgScale);
   const dShare = deltaPp(shareCur, sharePrev);
   const vsNote = withDayNote('vs ' + pack.meta.compare.short, shortPrev);
   return [
@@ -777,6 +799,7 @@ function buildWorkItems(pack, narrative) {
 }
 
 const NEXT_SLOT_CLASS = ['cat-p0', 'cat-p1', 'cat-p1', 'cat-p1', 'cat-link'];
+/* P5 的「询盘」按生意形态换词（ticket #54 第二批：电商无叙事版不得出现询盘） */
 const NEXT_FALLBACK = [
   { priority: 'P1', title: '基于本期数据的优化重点', body: '按本期排名与页面表现，挑出回落词与逼近首页的词，逐一对应到落地页做标题、搜索结果描述与内链的调整。' },
   { priority: 'P2', title: '外链建设', body: '围绕本期带量的核心页面继续做站外布点，优先本地相关站点。' },
@@ -787,10 +810,14 @@ const NEXT_FALLBACK = [
 
 function buildNextItems(pack, narrative) {
   const fromModel = narrative && Array.isArray(narrative.next_items) ? narrative.next_items : null;
+  const isEcom = pack && pack.meta && pack.meta.biz_type === 'ecommerce';
   const items = [];
   for (let i = 0; i < 5; i++) {
     const m = fromModel && fromModel[i];
-    const fb = NEXT_FALLBACK[i];
+    let fb = NEXT_FALLBACK[i];
+    if (isEcom && fb && fb.body && fb.body.indexOf('询盘') !== -1) {
+      fb = Object.assign({}, fb, { body: fb.body.replace(/询盘/g, '订单') });
+    }
     const title = (m && m.title) || fb.title;
     const body = (m && m.body) || fb.body;
     items.push({
@@ -1127,6 +1154,8 @@ function renderReport(pack, narrative, opts = {}) {
     channel_rows: channels.rows,
     total_sessions: channels.total_sessions,
     total_leads: channels.total_leads,
+    total_purchases: channels.total_purchases,
+    total_revenue: channels.total_revenue,
     channels_callout_title: (n && n.channels_callout && n.channels_callout.title) || '全渠道与自然搜索对照',
     channels_callout_body: paragraphs(
       (n && n.channels_callout && n.channels_callout.body) ||

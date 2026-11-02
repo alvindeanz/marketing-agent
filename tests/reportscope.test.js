@@ -136,3 +136,28 @@ const { parseReportScope, dailyAvgCompare } = require('../seo-worker/lib/factspa
 }
 
 console.log('reportscope.test.js 全部通过');
+
+// ---- 第二批（ticket #54 续）：渠道订单收入合并、日均比折算 ----
+{
+  const { mergeChannels } = require('../seo-worker/lib/factspack');
+  const m = mergeChannels(
+    [
+      { channel: 'Organic Search', sessions: 100, leads: 5, purchases: 10, revenue: 500 },
+      { channel: 'Paid Search', sessions: 80, leads: 3, purchases: 4, revenue: 200 },
+    ],
+    [{ channel: 'Organic Search', sessions: 90, leads: 4, purchases: 8, revenue: 400 }]
+  );
+  const org = m.channels.find((c) => c.channel === 'Organic Search');
+  assert.strictEqual(org.purchases, 10);
+  assert.strictEqual(org.prev_purchases, 8);
+  assert.strictEqual(org.revenue, 500);
+  assert.strictEqual(m.total.purchases, 14);
+  assert.strictEqual(m.total.revenue, 700);
+  assert.strictEqual(m.total.prev_purchases, 8);
+  // 没给订单字段的旧入参：null 透传不编造 0
+  const m2 = mergeChannels([{ channel: 'Direct', sessions: 10, leads: 0, purchases: null, revenue: null }], []);
+  assert.strictEqual(m2.channels[0].purchases, null);
+  assert.strictEqual(m2.total.purchases, null);
+}
+
+console.log('reportscope 第二批断言通过');
