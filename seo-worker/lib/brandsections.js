@@ -8,7 +8,7 @@
 //   3. 组内落地页：复用 factspack 已拉的 GA4 落地页行，按组正则过滤。
 // 板块定义在客户目录 reports/report_sections_seo.json，没有该文件的客户整个模块不存在。
 
-const { gscQuery } = require('./metrics');
+const { gscQueryScoped } = require('./metrics');
 
 function round1(n) { return Math.round(Number(n) * 10) / 10; }
 function round4(n) { return Math.round(Number(n) * 10000) / 10000; }
@@ -25,8 +25,8 @@ function groupFilters(group) {
   return [{ filters }];
 }
 
-async function groupTotals(cfg, property, range, group) {
-  const res = await gscQuery(cfg, property, {
+async function groupTotals(cfg, scope, range, group) {
+  const res = await gscQueryScoped(cfg, scope, {
     startDate: range.start,
     endDate: range.end,
     dimensions: [],
@@ -41,8 +41,8 @@ async function groupTotals(cfg, property, range, group) {
   };
 }
 
-async function groupQueryRows(cfg, property, range, group) {
-  const res = await gscQuery(cfg, property, {
+async function groupQueryRows(cfg, scope, range, group) {
+  const res = await gscQueryScoped(cfg, scope, {
     startDate: range.start,
     endDate: range.end,
     dimensions: ['query'],
@@ -126,15 +126,17 @@ function buildGroupPages(group, lpCur, lpPrev, topN) {
  * 每组 4 次 GSC 调用（totals/query 乘 本期/对比期）。
  */
 async function buildBrandSections(opts) {
-  const { cfg, property, per, groups, ledger, lpCur, lpPrev, log } = opts;
+  /* scope 收 {properties, country} 或旧的单属性字符串（gscQueryScoped 内归一化） */
+  const { cfg, per, groups, ledger, lpCur, lpPrev, log } = opts;
+  const scope = opts.scope || opts.property;
   const say = log || function () {};
   const out = [];
   for (const g of groups) {
     const [curT, prevT, curRows, prevRows] = [
-      await groupTotals(cfg, property, per, g),
-      await groupTotals(cfg, property, per.compare, g),
-      await groupQueryRows(cfg, property, per, g),
-      await groupQueryRows(cfg, property, per.compare, g),
+      await groupTotals(cfg, scope, per, g),
+      await groupTotals(cfg, scope, per.compare, g),
+      await groupQueryRows(cfg, scope, per, g),
+      await groupQueryRows(cfg, scope, per.compare, g),
     ];
     const section = {
       key: g.key,

@@ -18,12 +18,60 @@ const path = require('node:path');
 
 const {
   gscQuery,
+  gscQueryScoped,
+  normGscScope,
+  withGa4Country,
   ga4Report,
   spamFilterGroups,
   LEAD_EVENTS,
   ORGANIC_CHANNEL,
   deriveBrandRegex,
 } = require('./metrics');
+
+/* ---- 报告口径 scope（ticket #54）----
+   profile.report_scope 是 JSON：{ gsc_properties:[], gsc_country:'aus', ga4_country:'Australia',
+   currency_label:'USD', compare:'daily_avg', market_label:'AU' }。全部字段可选。
+   配置了但解析不了必须炸：静默退回全站口径就是 #54 点名的「AU 月报数字其实是 NZ 的」。 */
+function parseReportScope(profile) {
+  const raw = profile && profile.report_scope;
+  if (!raw) return null;
+  let s = raw;
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return null;
+    try { s = JSON.parse(raw); } catch (e) {
+      throw new Error('profile.report_scope 不是合法 JSON，报告口径说不清就不出报：' + e.message);
+    }
+  }
+  if (!s || typeof s !== 'object' || Array.isArray(s)) {
+    throw new Error('profile.report_scope 必须是 JSON 对象');
+  }
+  return {
+    gsc_properties: Array.isArray(s.gsc_properties) ? s.gsc_properties.map((p) => String(p || '').trim()).filter(Boolean) : [],
+    gsc_country: String(s.gsc_country || '').trim().toLowerCase(),
+    ga4_country: String(s.ga4_country || '').trim(),
+    currency_label: String(s.currency_label || '').trim(),
+    compare: String(s.compare || '').trim(),
+    market_label: String(s.market_label || '').trim(),
+  };
+}
+
+/* 日均比（scope.compare='daily_avg'）：两期天数不等（31 天比 30 天、残月）时按日均算环比。
+   days 优先用覆盖天数（实际有数的天数），零则退回周期跨度。 */
+function dailyAvgCompare(curVal, prevVal, curDays, prevDays) {
+  const cd = Number(curDays) || 0;
+  const pd = Number(prevDays) || 0;
+  const cur = cd > 0 ? (Number(curVal) || 0) / cd : null;
+  const prev = pd > 0 ? (Number(prevVal) || 0) / pd : null;
+  let deltaPct = null;
+  if (cur !== null && prev !== null && prev > 0) deltaPct = round4((cur - prev) / prev);
+  return { cur_per_day: cur === null ? null : round2(cur), prev_per_day: prev === null ? null : round2(prev), delta_pct: deltaPct };
+}
+
+/* GA4 调用统一走这层：ctx.reportGa4Country 存在就把 country 过滤 AND 进去 */
+async function ga4R(ctx, propertyId, body) {
+  const c = ctx && ctx.reportGa4Country;
+  return ga4Report(ctx, propertyId, c ? withGa4Country(body, c) : body);
+}
 const { factLines } = require('./distill');
 const { truncate } = require('./util');
 
@@ -698,9 +746,9 @@ function subtractSpamTotals(all, spam) {
   };
 }
 
-async function gscTotals(cfg, property, range, spamRegex) {
+async function gscTotals(cfg, scope, range, spamRegex) {
   const read = async (groups) => {
-    const res = await gscQuery(cfg, property, {
+    const res = await gscQueryScoped(cfg, scope, {
       startDate: range.start,
       endDate: range.end,
       dimensions: [],
@@ -722,12 +770,12 @@ async function gscTotals(cfg, property, range, spamRegex) {
   return subtractSpamTotals(all, spam);
 }
 
-async function gscByDimension(cfg, property, range, dimension, spamRegex) {
+async function gscByDimension(cfg, scope, range, dimension, spamRegex) {
   // query 维度本来就不含匿名行，excludingRegex 在这里是安全且直接的。
   // 其余维度（page）要走全量减垃圾，否则同样丢掉匿名查询贡献的那一半。
   const onQuery = dimension === 'query';
   const read = async (groups) => {
-    const res = await gscQuery(cfg, property, {
+    const res = await gscQueryScoped(cfg, scope, {
       startDate: range.start,
       endDate: range.end,
       dimensions: [dimension],
@@ -792,8 +840,8 @@ function buildCoverage(range, days) {
   };
 }
 
-async function gscDayCount(cfg, property, range) {
-  const res = await gscQuery(cfg, property, {
+async function gscDayCount(cfg, scope, range) {
+  const res = await gscQueryScoped(cfg, scope, {
     startDate: range.start,
     endDate: range.end,
     dimensions: ['date'],
@@ -803,7 +851,7 @@ async function gscDayCount(cfg, property, range) {
 }
 
 async function ga4DayCount(ctx, propertyId, range) {
-  const rows = await ga4Report(ctx, propertyId, {
+  const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'date' }],
     metrics: [{ name: 'sessions' }],
@@ -837,7 +885,7 @@ function coverageGaps(source, per, cur, prev) {
 // ---------------------------------------------------------------------------
 
 async function ga4Channels(ctx, propertyId, range) {
-  const rows = await ga4Report(ctx, propertyId, {
+  const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'sessionDefaultChannelGroup' }],
     metrics: [{ name: 'sessions' }, { name: 'newUsers' }],
@@ -851,7 +899,7 @@ async function ga4Channels(ctx, propertyId, range) {
 
 /** 渠道 x 事件的次数。用来同时得到分渠道询盘数与自然搜索的表单开始数。 */
 async function ga4ChannelEvents(ctx, propertyId, range, eventNames) {
-  const rows = await ga4Report(ctx, propertyId, {
+  const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'sessionDefaultChannelGroup' }, { name: 'eventName' }],
     metrics: [{ name: 'eventCount' }],
@@ -871,7 +919,7 @@ async function ga4ChannelEvents(ctx, propertyId, range, eventNames) {
 
 /** 渠道 x 日的会话数，基数异常检测用。 */
 async function ga4DailyChannelSessions(ctx, propertyId, range) {
-  const rows = await ga4Report(ctx, propertyId, {
+  const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'date' }, { name: 'sessionDefaultChannelGroup' }],
     metrics: [{ name: 'sessions' }],
@@ -922,7 +970,7 @@ function detectDailyAnomalies(dailyRows) {
 }
 
 async function ga4LandingPages(ctx, propertyId, range) {
-  const rows = await ga4Report(ctx, propertyId, {
+  const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'landingPagePlusQueryString' }, { name: 'sessionDefaultChannelGroup' }],
     metrics: [{ name: 'sessions' }],
@@ -942,7 +990,7 @@ async function ga4LandingPages(ctx, propertyId, range) {
 /** 电商四件套。属性没开电商上报时 GA4 会直接报错，这里吞掉并回 null。 */
 async function ga4Ecommerce(ctx, propertyId, range, log) {
   try {
-    const rows = await ga4Report(ctx, propertyId, {
+    const rows = await ga4R(ctx, propertyId, {
       dateRanges: [{ startDate: range.start, endDate: range.end }],
       dimensions: [{ name: 'sessionDefaultChannelGroup' }],
       metrics: [
@@ -989,7 +1037,7 @@ async function ga4Ecommerce(ctx, propertyId, range, log) {
  */
 async function ga4OrganicOrdersFirstUser(ctx, propertyId, range, log) {
   try {
-    const rows = await ga4Report(ctx, propertyId, {
+    const rows = await ga4R(ctx, propertyId, {
       dateRanges: [{ startDate: range.start, endDate: range.end }],
       dimensions: [{ name: 'firstUserDefaultChannelGroup' }],
       metrics: [{ name: 'ecommercePurchases' }, { name: 'purchaseRevenue' }],
@@ -1184,6 +1232,27 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     throw new Error('客户档案里 gsc_property 与 ga4_property 都是空的，没有任何数据源可拉，报告无法生成');
   }
 
+  /* 报告口径 scope：没配置时 gscScope 退化为单属性无过滤，与旧行为完全一致 */
+  const reportScope = parseReportScope(profile);
+  const gscScope = normGscScope(
+    reportScope && reportScope.gsc_properties.length
+      ? { properties: reportScope.gsc_properties, country: reportScope.gsc_country }
+      : { properties: gscProperty ? [gscProperty] : [], country: (reportScope && reportScope.gsc_country) || '' }
+  );
+  const hasGsc = gscScope.properties.length > 0;
+  const gaCtx = reportScope && reportScope.ga4_country
+    ? Object.assign({}, ctx, { reportGa4Country: reportScope.ga4_country })
+    : ctx;
+  if (reportScope) {
+    say(
+      '报告口径 scope：GSC ' + (gscScope.properties.join(' + ') || '无') +
+        (gscScope.country ? '（country=' + gscScope.country + '）' : '') +
+        '，GA4 ' + (reportScope.ga4_country ? 'country=' + reportScope.ga4_country : '全量') +
+        (reportScope.compare === 'daily_avg' ? '，环比按日均' : '') +
+        (reportScope.currency_label ? '，收入计 ' + reportScope.currency_label : '')
+    );
+  }
+
   const brand = deriveBrandRegex({
     brandRegex: profile && profile.brand_regex,
     clientName: profile && profile.name,
@@ -1206,17 +1275,17 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   let prevPageRows = [];
   let gscCoverage = null;
   let ga4Coverage = null;
-  if (gscProperty) {
+  if (hasGsc) {
     say('gsc: 拉本期 ' + per.start + ' 至 ' + per.end + '，对比期 ' + per.compare.start + ' 至 ' + per.compare.end);
-    const curTotals = await gscTotals(cfg, gscProperty, per, spamRegex);
-    const prevTotals = await gscTotals(cfg, gscProperty, per.compare, spamRegex);
-    curQueryRows = await gscByDimension(cfg, gscProperty, per, 'query', spamRegex);
-    prevQueryRows = await gscByDimension(cfg, gscProperty, per.compare, 'query', spamRegex);
-    curPageRows = await gscByDimension(cfg, gscProperty, per, 'page', spamRegex);
-    prevPageRows = await gscByDimension(cfg, gscProperty, per.compare, 'page', spamRegex);
+    const curTotals = await gscTotals(cfg, gscScope, per, spamRegex);
+    const prevTotals = await gscTotals(cfg, gscScope, per.compare, spamRegex);
+    curQueryRows = await gscByDimension(cfg, gscScope, per, 'query', spamRegex);
+    prevQueryRows = await gscByDimension(cfg, gscScope, per.compare, 'query', spamRegex);
+    curPageRows = await gscByDimension(cfg, gscScope, per, 'page', spamRegex);
+    prevPageRows = await gscByDimension(cfg, gscScope, per.compare, 'page', spamRegex);
     gscCoverage = {
-      cur: buildCoverage(per, await gscDayCount(cfg, gscProperty, per)),
-      prev: buildCoverage(per.compare, await gscDayCount(cfg, gscProperty, per.compare)),
+      cur: buildCoverage(per, await gscDayCount(cfg, gscScope, per)),
+      prev: buildCoverage(per.compare, await gscDayCount(cfg, gscScope, per.compare)),
     };
     for (const g of coverageGaps('GSC', per, gscCoverage.cur, gscCoverage.prev)) gaps.push(g);
     say(
@@ -1295,18 +1364,18 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   let ecom = null;
   if (ga4Property) {
     say('ga4: 属性 ' + ga4Property + '，拉渠道、事件、落地页');
-    const curCh = await ga4Channels(ctx, ga4Property, per);
-    const prevCh = await ga4Channels(ctx, ga4Property, per.compare);
+    const curCh = await ga4Channels(gaCtx, ga4Property, per);
+    const prevCh = await ga4Channels(gaCtx, ga4Property, per.compare);
     const wantEvents = LEAD_EVENTS.concat(['form_start']);
-    const curEv = await ga4ChannelEvents(ctx, ga4Property, per, wantEvents);
-    const prevEv = await ga4ChannelEvents(ctx, ga4Property, per.compare, wantEvents);
-    const curLp = await ga4LandingPages(ctx, ga4Property, per);
-    const prevLp = await ga4LandingPages(ctx, ga4Property, per.compare);
-    const curDaily = await ga4DailyChannelSessions(ctx, ga4Property, per);
-    const prevDaily = await ga4DailyChannelSessions(ctx, ga4Property, per.compare);
+    const curEv = await ga4ChannelEvents(gaCtx, ga4Property, per, wantEvents);
+    const prevEv = await ga4ChannelEvents(gaCtx, ga4Property, per.compare, wantEvents);
+    const curLp = await ga4LandingPages(gaCtx, ga4Property, per);
+    const prevLp = await ga4LandingPages(gaCtx, ga4Property, per.compare);
+    const curDaily = await ga4DailyChannelSessions(gaCtx, ga4Property, per);
+    const prevDaily = await ga4DailyChannelSessions(gaCtx, ga4Property, per.compare);
     ga4Coverage = {
-      cur: buildCoverage(per, await ga4DayCount(ctx, ga4Property, per)),
-      prev: buildCoverage(per.compare, await ga4DayCount(ctx, ga4Property, per.compare)),
+      cur: buildCoverage(per, await ga4DayCount(gaCtx, ga4Property, per)),
+      prev: buildCoverage(per.compare, await ga4DayCount(gaCtx, ga4Property, per.compare)),
     };
     for (const g of coverageGaps('GA4', per, ga4Coverage.cur, ga4Coverage.prev)) gaps.push(g);
     say(
@@ -1353,10 +1422,10 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const prevLpMap = new Map();
     for (const r of prevLp) prevLpMap.set(r.path, r.sessions);
 
-    ecom = await ga4Ecommerce(ctx, ga4Property, per, say);
+    ecom = await ga4Ecommerce(gaCtx, ga4Property, per, say);
     if (ecom) inputs.ga4_calls += 1;
     // 电商客户的漏斗与订单卡要环比，对比期的电商数也拉一份（属性没开电商时同样回 null）。
-    const ecomPrev = ecom ? await ga4Ecommerce(ctx, ga4Property, per.compare, say) : null;
+    const ecomPrev = ecom ? await ga4Ecommerce(gaCtx, ga4Property, per.compare, say) : null;
     if (ecomPrev) inputs.ga4_calls += 1;
     inputs.ga4_calls += 2;
 
@@ -1365,7 +1434,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     // 渲染与叙事的主数一律是覆盖后的。配置的由来见 seo-api ensure_metrics_schema 的列注释。
     if (String((profile && profile.orders_attribution) || 'session') === 'first_user' && ecom && ecom.organic) {
       say('订单归因按客户配置走首次触点（first_user），会话口径留作对照');
-      const fuCur = await ga4OrganicOrdersFirstUser(ctx, ga4Property, per, say);
+      const fuCur = await ga4OrganicOrdersFirstUser(gaCtx, ga4Property, per, say);
       inputs.ga4_calls += 1;
       if (fuCur) {
         ecom.organic.purchases_session = ecom.organic.purchases;
@@ -1374,7 +1443,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
         ecom.organic.revenue = fuCur.revenue;
       }
       if (ecomPrev && ecomPrev.organic) {
-        const fuPrev = await ga4OrganicOrdersFirstUser(ctx, ga4Property, per.compare, say);
+        const fuPrev = await ga4OrganicOrdersFirstUser(gaCtx, ga4Property, per.compare, say);
         inputs.ga4_calls += 1;
         if (fuPrev) {
           ecomPrev.organic.purchases_session = ecomPrev.organic.purchases;
@@ -1538,14 +1607,14 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   if (yoyPer) {
     try {
       let yoyGsc = null;
-      if (gscProperty) {
-        yoyGsc = await gscTotals(cfg, gscProperty, yoyPer, spamRegex);
+      if (hasGsc) {
+        yoyGsc = await gscTotals(cfg, gscScope, yoyPer, spamRegex);
         inputs.gsc_calls += 1;
       }
       let yoyOrganic = null;
       if (ga4Property) {
-        const yoyCh = await ga4Channels(ctx, ga4Property, yoyPer);
-        const yoyEv = await ga4ChannelEvents(ctx, ga4Property, yoyPer, LEAD_EVENTS);
+        const yoyCh = await ga4Channels(gaCtx, ga4Property, yoyPer);
+        const yoyEv = await ga4ChannelEvents(gaCtx, ga4Property, yoyPer, LEAD_EVENTS);
         inputs.ga4_calls += 2;
         const org = yoyCh.filter((c) => isOrganicChannel(c.channel));
         yoyOrganic = {
@@ -1715,19 +1784,51 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
 
   // ---- 品牌/品类板块（客户点名的分析资产，定义与数据来源见 lib/brandsections.js 头注）----
   let brandSections = null;
-  if (opts.sections && Array.isArray(opts.sections.groups) && opts.sections.groups.length && gscProperty) {
+  if (opts.sections && Array.isArray(opts.sections.groups) && opts.sections.groups.length && hasGsc) {
     const { buildBrandSections } = require('./brandsections');
     const lpCurRows = (ga4.landing_pages || []).map((r) => ({ path: r.path, sessions: r.sessions }));
     const lpPrevRows = (ga4.landing_pages || [])
       .filter((r) => r.prev_sessions !== null && r.prev_sessions !== undefined)
       .map((r) => ({ path: r.path, sessions: r.prev_sessions }));
     brandSections = await buildBrandSections({
-      cfg, property: gscProperty, per,
+      cfg, scope: gscScope, per,
       groups: opts.sections.groups,
       ledger: opts.marketLedger || null,
       lpCur: lpCurRows, lpPrev: lpPrevRows, log: say,
     });
     inputs.gsc_calls += opts.sections.groups.length * 4;
+  }
+
+  /* 日均比（scope.compare='daily_avg'）：核心总量的日均与日均环比预先算好进 pack，
+     天数用覆盖天数（实际有数的天数），模型与渲染端直接引用不自己做除法。 */
+  let dailyAvg = null;
+  if (reportScope && reportScope.compare === 'daily_avg') {
+    const gd = (c) => (c && (c.days || c.span)) || 0;
+    const curGscDays = gscCoverage ? gd(gscCoverage.cur) : 0;
+    const prevGscDays = gscCoverage ? gd(gscCoverage.prev) : 0;
+    const curGa4Days = ga4Coverage ? gd(ga4Coverage.cur) : 0;
+    const prevGa4Days = ga4Coverage ? gd(ga4Coverage.prev) : 0;
+    dailyAvg = {
+      basis: { gsc_days: { cur: curGscDays, prev: prevGscDays }, ga4_days: { cur: curGa4Days, prev: prevGa4Days } },
+      gsc: gsc && gsc.cur && gsc.prev
+        ? {
+            clicks: dailyAvgCompare(gsc.cur.clicks, gsc.prev.clicks, curGscDays, prevGscDays),
+            impressions: dailyAvgCompare(gsc.cur.impressions, gsc.prev.impressions, curGscDays, prevGscDays),
+          }
+        : null,
+      ga4: ga4 && ga4.organic && ga4.organic.cur && ga4.organic.prev
+        ? {
+            sessions: dailyAvgCompare(ga4.organic.cur.sessions, ga4.organic.prev.sessions, curGa4Days, prevGa4Days),
+            leads: dailyAvgCompare(ga4.organic.cur.leads, ga4.organic.prev.leads, curGa4Days, prevGa4Days),
+          }
+        : null,
+      ecommerce: ga4 && ga4.ecommerce && ga4.ecommerce.cur && ga4.ecommerce.prev
+        ? {
+            purchases: dailyAvgCompare(ga4.ecommerce.cur.purchases, ga4.ecommerce.prev.purchases, curGa4Days, prevGa4Days),
+            revenue: dailyAvgCompare(ga4.ecommerce.cur.revenue, ga4.ecommerce.prev.revenue, curGa4Days, prevGa4Days),
+          }
+        : null,
+    };
   }
 
   const pack = {
@@ -1746,11 +1847,33 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       /* 订单归因（session/first_user）：渲染层与叙事层据此决定要不要写统计说明 */
       orders_attribution: String((profile && profile.orders_attribution) || 'session'),
       biz_type: bizType,
-      // 市场优先取档案字段，没有就按域名后缀推：.com.au 澳洲、.co.nz 新西兰，其余留空不猜。
+      // 市场优先取 scope 的 market_label，其次档案字段，再按域名后缀推，其余留空不猜。
       market: String(
-        (profile && (profile.market || profile.country)) ||
+        (reportScope && reportScope.market_label) ||
+          (profile && (profile.market || profile.country)) ||
           (/\.com\.au(\/|$)/i.test(String(domain)) ? 'AU' : /\.co\.nz(\/|$)/i.test(String(domain)) ? 'NZ' : '')
       ),
+      /* 报告口径 scope（ticket #54）：null 表示旧行为（单属性全站全量）。
+         scope_note 是给叙事与渲染直接引用的口径说明，铁律禁止模型自己复述口径。 */
+      scope: reportScope
+        ? {
+            gsc_properties: gscScope.properties,
+            gsc_country: gscScope.country || null,
+            ga4_country: reportScope.ga4_country || null,
+            compare_mode: reportScope.compare || null,
+            currency_label: reportScope.currency_label || null,
+          }
+        : null,
+      scope_note: reportScope
+        ? 'GSC 口径：' + gscScope.properties.join(' 与 ') + (gscScope.country ? '（仅 country=' + gscScope.country + '）' : '') +
+          (gscScope.properties.length > 1 ? '，多属性数据相加（URL 集合互斥）' : '') +
+          (reportScope.ga4_country ? '；GA4 口径：仅 ' + reportScope.ga4_country : '') +
+          (reportScope.compare === 'daily_avg' ? '；环比按日均（两期天数不等）' : '') +
+          (reportScope.currency_label ? '；金额货币为 ' + reportScope.currency_label : '') +
+          (gscScope.country ? '。注意：GSC 国家过滤会丢部分匿名长尾行，词级数字为该口径下可见部分' : '')
+        : null,
+      currency_label: (reportScope && reportScope.currency_label) || null,
+      compare_mode: (reportScope && reportScope.compare) || null,
       platform: String((profile && (profile.platform || profile.cms)) || ''),
       vertical: String((profile && (profile.vertical || profile.industry)) || ''),
       period: {
@@ -1781,6 +1904,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     },
     gsc: { ...gsc, coverage: gscCoverage },
     ga4: { ...ga4, coverage: ga4Coverage },
+    // 日均口径（scope.compare='daily_avg' 时才有）：核心总量的每日均值与日均环比
+    daily_avg: dailyAvg,
     brand_sections: brandSections,
     // 去年同月对照。月中出报、去年无数据、取数失败时为 null，缘由在 gaps。
     yoy,
@@ -1814,6 +1939,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
 module.exports = {
   buildFactsPack,
   // 纯函数，单测直接打
+  parseReportScope,
+  dailyAvgCompare,
   num,
   splitYmd,
   daysInMonth,

@@ -240,6 +240,76 @@ async function gscQuery(cfg, property, body) {
   return googlePost(cfg.ga4KeyFile, GSC_SCOPES, gscUrl(property), body, cfg.httpTimeoutMs);
 }
 
+/* ---- 报告口径 scope（ticket #54，Haakaa AU 月报）----
+   一个市场可以横跨多个 GSC 属性（如 .co.nz 按国家取 AUS 加 www.haakaa.com.au 整站），
+   profile.report_scope 配置，报告数据层统一走 gscQueryScoped。 */
+
+/* 入参既收旧的单属性字符串也收 {properties:[], country:''}，统一成后者 */
+function normGscScope(scope) {
+  if (!scope) return { properties: [], country: '' };
+  if (typeof scope === 'string') return { properties: scope ? [scope] : [], country: '' };
+  const props = Array.isArray(scope.properties) ? scope.properties.map((p) => String(p || '').trim()).filter(Boolean) : [];
+  return { properties: props, country: String(scope.country || '').trim().toLowerCase() };
+}
+
+/* country 过滤并进每个 dimensionFilterGroups 组（GSC 的组间是 OR、组内是 AND，
+   所以必须进每一组；没有组就新建一组）。country 用 ISO3 小写（aus、nzl）。 */
+function withGscCountry(body, country) {
+  if (!country) return body;
+  const f = { dimension: 'country', operator: 'equals', expression: country };
+  const groups = Array.isArray(body.dimensionFilterGroups) && body.dimensionFilterGroups.length
+    ? body.dimensionFilterGroups.map((g) => ({ ...g, filters: [...(g.filters || []), f] }))
+    : [{ groupType: 'and', filters: [f] }];
+  return { ...body, dimensionFilterGroups: groups };
+}
+
+/* 多属性响应合并：按 keys 并行相加 clicks/impressions，position 按曝光加权，ctr 重算。
+   各属性各自受 rowLimit 截断，合并是近似并集；副属性量级远小于主属性时误差可忽略。 */
+function mergeGscResponses(resList) {
+  const byKey = new Map();
+  for (const res of resList) {
+    for (const r of (res && res.rows) || []) {
+      const k = JSON.stringify(r.keys || []);
+      const prev = byKey.get(k);
+      if (!prev) { byKey.set(k, { ...r }); continue; }
+      const clicks = (Number(prev.clicks) || 0) + (Number(r.clicks) || 0);
+      const impressions = (Number(prev.impressions) || 0) + (Number(r.impressions) || 0);
+      const wPrev = (Number(prev.position) || 0) * (Number(prev.impressions) || 0);
+      const wCur = (Number(r.position) || 0) * (Number(r.impressions) || 0);
+      byKey.set(k, {
+        keys: r.keys,
+        clicks,
+        impressions,
+        ctr: impressions > 0 ? clicks / impressions : 0,
+        position: impressions > 0 ? (wPrev + wCur) / impressions : 0,
+      });
+    }
+  }
+  const rows = Array.from(byKey.values()).sort((a, b) => (b.clicks - a.clicks) || (b.impressions - a.impressions));
+  return { rows };
+}
+
+/* 与 gscQuery 同形，scope 版：注入 country 过滤，多属性逐个查询后合并。
+   单属性无 country 时与 gscQuery 完全等价（零行为变化）。 */
+async function gscQueryScoped(cfg, scope, body) {
+  const s = normGscScope(scope);
+  if (!s.properties.length) throw new Error('gscQueryScoped: scope 里没有任何 GSC 属性');
+  const scopedBody = withGscCountry(body, s.country);
+  if (s.properties.length === 1) return gscQuery(cfg, s.properties[0], scopedBody);
+  const resList = [];
+  for (const p of s.properties) resList.push(await gscQuery(cfg, p, scopedBody));
+  return mergeGscResponses(resList);
+}
+
+/* GA4 维度过滤 AND 合并：有既有 dimensionFilter 就包一层 andGroup。country 用
+   GA4 维度值（如 Australia）。过滤字段不要求出现在请求的 dimensions 里。 */
+function withGa4Country(body, country) {
+  if (!country) return body;
+  const f = { filter: { fieldName: 'country', stringFilter: { matchType: 'EXACT', value: country } } };
+  const dimensionFilter = body.dimensionFilter ? { andGroup: { expressions: [body.dimensionFilter, f] } } : f;
+  return { ...body, dimensionFilter };
+}
+
 /**
  * 按日拉 GSC 曝光和点击。dimensions 只有 date，一天一行。
  * 返回 [{ date, clicks, impressions }, ...]，日期升序。
@@ -661,6 +731,11 @@ module.exports = {
   // 报告数据层要按 query / page / channel 维度现拉本期与对比期，
   // 走的是同一套凭据与翻页逻辑，所以把两个底层取数函数也导出来复用。
   gscQuery,
+  gscQueryScoped,
+  normGscScope,
+  withGscCountry,
+  withGa4Country,
+  mergeGscResponses,
   ga4Report,
   spamFilterGroups,
   pullGscDaily,

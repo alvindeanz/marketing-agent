@@ -437,7 +437,11 @@ function ensure_metrics_schema(){
              'services'=>"VARCHAR(16) DEFAULT NULL",'ads_customer_id'=>"VARCHAR(20) DEFAULT NULL",'owner'=>"VARCHAR(32) DEFAULT NULL",
              /* 月报订单归因（2026-10-13 LuxeLink 2对4事故）：session=购买所在会话的渠道（GA4 默认），
                 first_user=购买用户首次到站的渠道。客户已被某一把尺子教育过的，这里锁死跟客户走。 */
-             'orders_attribution'=>"VARCHAR(16) NOT NULL DEFAULT 'session'"] as $col=>$ddl){
+             'orders_attribution'=>"VARCHAR(16) NOT NULL DEFAULT 'session'",
+             /* 报告口径 scope（ticket #54，Haakaa AU 月报）：JSON，factspack.parseReportScope 消费。
+                形如 {"gsc_properties":[...],"gsc_country":"aus","ga4_country":"Australia",
+                "currency_label":"USD","compare":"daily_avg","market_label":"AU"}，空=全站旧口径 */
+             'report_scope'=>"TEXT DEFAULT NULL"] as $col=>$ddl){
         $c=db()->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='seo_profiles' AND COLUMN_NAME=?");
         $c->execute([$col]);
         $hit=$c->fetch();
@@ -2581,7 +2585,7 @@ ensure_plan_service();
 
 /* brand_regex 排在最后，是后加的列（见 ensure_metrics_schema）。留空表示
    "让 worker 自己从客户名或域名推"，不是"这个客户没有品牌词"。 */
-$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','business_goals','conversion_goals','notes','brand_regex','services','ads_customer_id','owner','orders_attribution'];
+$PROFILE_FIELDS=['platform','domain','ga4_property','gsc_property','semrush_project','semrush_db','workspace_dir','business_goals','conversion_goals','notes','brand_regex','services','ads_customer_id','owner','orders_attribution','report_scope'];
 
 /* =========================================================
    Worker endpoints (service token)
@@ -6118,6 +6122,16 @@ if($m==='PUT'&&$ROUTE==='/profile'){
         if(@preg_match('/'.str_replace('/','\\/',$br).'/iu','')===false)res(400,['error'=>'brand_regex 不是合法正则']);
     }
     $vals['brand_regex']=$br;
+
+    /* report_scope 必须是合法 JSON 对象（空=不启用，走全站旧口径）。坏值落库后
+       worker 的 parseReportScope 会按设计直接炸（宁炸不出口径错的报告），这里先拦。 */
+    $rs=trim((string)$vals['report_scope']);
+    if($rs!==''){
+        $rsDec=json_decode($rs,true);
+        $rsIsList=is_array($rsDec)&&count($rsDec)>0&&array_keys($rsDec)===range(0,count($rsDec)-1);
+        if(!is_array($rsDec)||$rsIsList)res(400,['error'=>'report_scope 必须是 JSON 对象，如 {"gsc_properties":[...],"gsc_country":"aus"}']);
+    }
+    $vals['report_scope']=$rs;
 
     /* workspace_dir 是执行机目录名，字符集从严：小写字母数字和 . _ -，防路径注入。 */
     $wd=trim($vals['workspace_dir']);

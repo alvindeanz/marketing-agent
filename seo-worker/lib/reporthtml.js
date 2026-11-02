@@ -846,12 +846,14 @@ function buildAovCallout(pack, isEcom) {
   const all = ec.all || {};
   const aov = cur.purchases > 0 ? cur.revenue / cur.purchases : null;
   const d = deltaCount(cur.purchases, prev.purchases);
+  /* 货币标注（ticket #54）：meta.currency_label 存在就在金额后缀货币码，GA4 金额是属性币种不是默认本币 */
+  const ccy = (pack.meta && pack.meta.currency_label) ? ' ' + pack.meta.currency_label : '';
   const parts = [
-    '本期自然搜索带来订单 ' + fmtInt(cur.purchases) + ' 笔（上期 ' + fmtInt(prev.purchases) + ' 笔，' + d.text + '），订单金额 ' + Number(cur.revenue || 0).toFixed(2) + '。',
+    '本期自然搜索带来订单 ' + fmtInt(cur.purchases) + ' 笔（上期 ' + fmtInt(prev.purchases) + ' 笔，' + d.text + '），订单金额 ' + Number(cur.revenue || 0).toFixed(2) + ccy + '。',
   ];
-  if (aov !== null) parts.push('自然渠道客单价 ' + aov.toFixed(2) + '。');
+  if (aov !== null) parts.push('自然渠道客单价 ' + aov.toFixed(2) + ccy + '。');
   if (all.purchases) {
-    parts.push('同期全站订单 ' + fmtInt(all.purchases) + ' 笔，金额 ' + Number(all.revenue || 0).toFixed(2) + '，自然渠道占订单数的 ' + ((cur.purchases / all.purchases) * 100).toFixed(1) + '%。');
+    parts.push('同期全站订单 ' + fmtInt(all.purchases) + ' 笔，金额 ' + Number(all.revenue || 0).toFixed(2) + ccy + '，自然渠道占订单数的 ' + ((cur.purchases / all.purchases) * 100).toFixed(1) + '%。');
   }
   return { title: '自然渠道订单与客单价', body_html: '<p>' + parts.join('') + '</p>' };
 }
