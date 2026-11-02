@@ -6,6 +6,36 @@
      - worker endpoints: hardcoded service token, mapped to role seo_worker
    mini.php is untouched; DB constants / JWT key / audit are copied verbatim. */
 
+/* 致命错误不回 200（2026-11-02 job 11718 僵尸事故）：250 上 display_errors=On 且本文件原无
+   全局异常处理，PDO 异常变成 HTTP 200 加 Fatal 文本，worker 只验 2xx 当成功放行，终态丢失。
+   这里统一收口：错误只进日志不进正文，未捕获异常与 fatal 一律回 JSON 500，口径同 res()。
+   处理器内只用不会再抛的调用（不碰 db()、不调 res()），防递归。 */
+ini_set('display_errors','0');
+ini_set('log_errors','1');
+function api_fail_500(){
+    if(!headers_sent()){
+        http_response_code(500);
+        header('Content-Type: application/json');
+    }
+    echo '{"ok":false,"error":"internal_error"}';
+}
+set_exception_handler(function($e){
+    try{
+        error_log('seo-api uncaught '.get_class($e).': '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine()
+            .' route='.($_SERVER['REQUEST_METHOD']??'').' '.($_SERVER['PATH_INFO']??($_SERVER['REQUEST_URI']??'')));
+    }catch(Throwable $x){}
+    api_fail_500();
+    exit(1);
+});
+register_shutdown_function(function(){
+    $e=error_get_last();
+    /* 正常路径（res() 的 exit、异常处理器的 exit）这里为空或只是 warning/notice，直接放过。 */
+    if(!$e||!($e['type']&(E_ERROR|E_PARSE|E_CORE_ERROR|E_COMPILE_ERROR|E_USER_ERROR|E_RECOVERABLE_ERROR)))return;
+    /* 已经有正文发出去了（fatal 之前 res() 不会出现，因为 res 自己 exit）就不再叠一段，状态码也改不了。 */
+    if(headers_sent())return;
+    api_fail_500();
+});
+
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
@@ -363,7 +393,37 @@ function ensure_jobs_worker_schema(){
     $has2=$q2->fetch();
     $q2->closeCursor();
     if(!$has2)db()->exec("ALTER TABLE agent_jobs ADD COLUMN run_after DATETIME DEFAULT NULL");
+    /* claim 超时清扫走 (status, claimed_at)（2026-11-02 job 11718 事故）：原全表扫描的
+       UPDATE 会把 running 行连同终态 PATCH 一起锁住，是 status 写失败的头号嫌疑。 */
+    $q3=db()->prepare("SELECT COUNT(*) c FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_jobs' AND INDEX_NAME='idx_agent_jobs_status_claimed'");
+    $q3->execute();
+    $has3=(int)$q3->fetch()['c'];
+    $q3->closeCursor();
+    if(!$has3)db()->exec("ALTER TABLE agent_jobs ADD INDEX idx_agent_jobs_status_claimed (status, claimed_at)");
 }
+
+/* JOBS-PURE-START 终态回写的纯函数，零库零 HTTP，tests/jobsapi.test.php 按标记抠出来测。 */
+/* 终态补投防重复拼 log：库里日志已以本次 log_append 收尾，说明首投已经写进去了。
+   终态之后不会再有别的写入接在后面（flush 定时器在 finalize 前已停，清扫只动 running），
+   所以 ends-with 就是首投落库的确证。空 chunk 视为无需追加。 */
+function job_log_has_tail($log,$chunk){
+    $chunk=(string)$chunk;
+    if($chunk==='')return true;
+    $log=(string)$log;
+    return strlen($log)>=strlen($chunk)&&substr($log,-strlen($chunk))===$chunk;
+}
+/* 可原地重试的锁冲突：死锁 40001/1213，锁等待超时 1205。 */
+function job_is_lock_retryable($e){
+    if(!($e instanceof PDOException))return false;
+    $info=is_array($e->errorInfo)?$e->errorInfo:[];
+    $state=(string)($info[0]??$e->getCode());
+    $drv=(int)($info[1]??0);
+    if($state==='40001'||$drv===1213||$drv===1205)return true;
+    $msg=$e->getMessage();
+    return (strpos($msg,'1213')!==false&&stripos($msg,'deadlock')!==false)
+        ||(strpos($msg,'1205')!==false&&stripos($msg,'lock wait timeout')!==false);
+}
+/* JOBS-PURE-END */
 
 /* worker 心跳表（2026-10-14，ros 熔断静默 3.5 天教训）。第一性：护栏触发必须有人看见，
    且「跳闸告警」只覆盖跳闸一种死法，进程死、机器关同样静默，所以 worker 要持续自证活着。
@@ -2614,8 +2674,30 @@ if($m==='POST'&&$ROUTE==='/jobs/claim'){
        （excludeRunningClients 会一直躲开那个客户）。余量给足：runClaude 30 分钟超时 + backfill/大店
        shopseo 偶尔更久，取 60 分钟不误杀活人。失败 job 不自动重试铁律不变，重排归人。 */
     $stuckMin=60;
-    $swept=db()->prepare("UPDATE agent_jobs SET status='failed', log_text=CONCAT(IFNULL(log_text,''),?) WHERE status='running' AND claimed_at IS NOT NULL AND claimed_at < (NOW() - INTERVAL ? MINUTE)");
-    $swept->execute(["\n[".gmdate('Y-m-d H:i:s')."Z] [reaped-timeout] 认领超过 ".$stuckMin." 分钟未完成，疑似 worker 离线，超时清扫判 failed（非执行错误，重排即可）。失败 job 不自动重试。",$stuckMin]);
+    /* 两段式（2026-11-02 job 11718 事故）：先无锁读捞候选，再逐条 CAS 翻终态。原来一条全表
+       UPDATE 会把所有 running 行锁一遍，与 worker 的终态 PATCH 撞锁；逐条 CAS 只锁一行一瞬，
+       抢输（worker 的终态先落库）就 rowCount=0 放手，不覆盖。两个 worker 同时清扫同一单，
+       也只有一个 CAS 赢。判终态一并写 finished_at（原清扫漏写）。
+       超时僵尸一律 failed，不按日志字符串对账成 done（硬规矩 9 关节红线：收口判定不用申报
+       字符串）。「活干完终态丢失」的窗口由终态 PATCH 的事务 CAS 与 worker 的 ok:true 验收堵，
+       清扫只兜真孤儿。 */
+    $cand=db()->prepare("SELECT id FROM agent_jobs WHERE status='running' AND claimed_at IS NOT NULL AND claimed_at < (NOW() - INTERVAL ? MINUTE) ORDER BY id LIMIT 50");
+    $cand->execute([$stuckMin]);
+    $stuck=$cand->fetchAll();
+    $cand->closeCursor();
+    if($stuck){
+        $reap=db()->prepare("UPDATE agent_jobs SET status='failed', finished_at=NOW(), log_text=CONCAT(IFNULL(log_text,''),?) WHERE id=? AND status='running' AND claimed_at < (NOW() - INTERVAL ? MINUTE)");
+        $note="\n[".gmdate('Y-m-d H:i:s')."Z] [reaped-timeout] 认领超过 ".$stuckMin." 分钟未完成，疑似 worker 离线，超时清扫判 failed（非执行错误，重排即可）。失败 job 不自动重试。";
+        foreach($stuck as $sr){
+            try{
+                $reap->execute([$note,(int)$sr['id'],$stuckMin]);
+                $reap->closeCursor();
+            }catch(PDOException $e){
+                /* 清扫是 claim 的副业，单条撞锁不许拖垮取单；下次 claim 再扫。 */
+                error_log('seo-api claim sweep job '.(int)$sr['id'].': '.$e->getMessage());
+            }
+        }
+    }
     /* 防抖窗口的回头钟：空手时告诉 worker 最近一个 run_after 还差几秒，worker 据此定时回来，
        不然 30 秒的窗要等 5 分钟兜底 poll 才兑现。 */
     $retryIn=function()use($lane){
@@ -2744,23 +2826,76 @@ if($m==='PATCH'&&preg_match('#^/jobs/(\d+)$#',$ROUTE,$mm)){
     $chk=db()->prepare("SELECT id FROM agent_jobs WHERE id=?");
     $chk->execute([$jid]);
     if(!$chk->fetch())res(404,['error'=>'Job not found']);
-    if(isset($i['log_append'])&&$i['log_append']!==''){
-        db()->prepare("UPDATE agent_jobs SET log_text=CONCAT(COALESCE(log_text,''),?) WHERE id=?")
-            ->execute([(string)$i['log_append'],$jid]);
-    }
-    if(isset($i['token_usage'])){
-        db()->prepare("UPDATE agent_jobs SET token_usage=? WHERE id=?")->execute([(int)$i['token_usage'],$jid]);
-    }
-    if(isset($i['status'])){
-        $st=(string)$i['status'];
-        if(!in_array($st,['queued','running','done','failed'],true))res(400,['error'=>'bad status']);
-        if($st==='done'||$st==='failed'){
-            db()->prepare("UPDATE agent_jobs SET status=?,finished_at=NOW() WHERE id=?")->execute([$st,$jid]);
-        }else{
-            db()->prepare("UPDATE agent_jobs SET status=? WHERE id=?")->execute([$st,$jid]);
+    $chk->closeCursor();
+    $st=isset($i['status'])?(string)$i['status']:null;
+    if($st!==null&&!in_array($st,['queued','running','done','failed'],true))res(400,['error'=>'bad status']);
+    $terminal=($st==='done'||$st==='failed');
+    $logAppend=(isset($i['log_append'])&&$i['log_append']!=='')?(string)$i['log_append']:'';
+    /* 原子化 + 终态 CAS（2026-11-02 job 11718 事故：log 写进去了、status 写失败，半写成僵尸）。
+       三条写进一个事务，要么全落要么全不落，失败 rollBack 后抛给全局处理器回真 500，
+       worker 才会走 pending_terminal 补投。
+       顺序：终态 CAS 放事务第一步，先拿到行锁、再按结果决定拼不拼 log。
+       - rowCount=1：本次把 running 翻成终态，照常拼 log、写 token。
+       - rowCount=0：不覆盖。FOR UPDATE 读当前状态；已是终态且库里日志已以本次 log_append
+         收尾，说明是首投已落库后的补投，跳过拼 log 防重复；否则（例如被超时清扫先收了的
+         迟到尾段）照录日志，状态一律不动。
+       两个 worker 并发打同一单（首投超时未知 + 补投同时到）：CAS 的行锁把两笔串行化，
+       后到的那笔 rowCount=0，FOR UPDATE 读到前一笔已提交的日志，判重跳过。清扫也走逐行 CAS，
+       与这里谁先拿锁谁赢，输家不覆盖。状态判定只看 DB 行的 status 列，不看任何申报字符串。
+       非终态 status（queued/running）保持原无条件写，不改既有恢复路径。 */
+    $apply=function()use($jid,$i,$st,$terminal,$logAppend){
+        $p=db();
+        $out=[];
+        $p->beginTransaction();
+        try{
+            $doLog=($logAppend!=='');
+            if($terminal){
+                $cas=$p->prepare("UPDATE agent_jobs SET status=?,finished_at=NOW() WHERE id=? AND status='running'");
+                $cas->execute([$st,$jid]);
+                $won=$cas->rowCount();
+                $cas->closeCursor();
+                if($won===1){
+                    $out['status_changed']=true;
+                }else{
+                    $cur=$p->prepare("SELECT status,log_text FROM agent_jobs WHERE id=? FOR UPDATE");
+                    $cur->execute([$jid]);
+                    $row=$cur->fetch();
+                    $cur->closeCursor();
+                    $curSt=$row?(string)$row['status']:'';
+                    $out['status_changed']=false;
+                    $out['current_status']=$curSt;
+                    if($doLog&&($curSt==='done'||$curSt==='failed')&&job_log_has_tail($row['log_text']??'',$logAppend)){
+                        $doLog=false;
+                        $out['log_skipped']=true;
+                    }
+                }
+            }
+            if($doLog){
+                $p->prepare("UPDATE agent_jobs SET log_text=CONCAT(COALESCE(log_text,''),?) WHERE id=?")
+                    ->execute([$logAppend,$jid]);
+            }
+            if(isset($i['token_usage'])){
+                $p->prepare("UPDATE agent_jobs SET token_usage=? WHERE id=?")->execute([(int)$i['token_usage'],$jid]);
+            }
+            if($st!==null&&!$terminal){
+                $p->prepare("UPDATE agent_jobs SET status=? WHERE id=?")->execute([$st,$jid]);
+            }
+            $p->commit();
+        }catch(Throwable $e){
+            if($p->inTransaction())$p->rollBack();
+            throw $e;
         }
+        return $out;
+    };
+    try{
+        $out=$apply();
+    }catch(PDOException $e){
+        /* 死锁 / 锁等待超时：整个事务原地重试一次，再败抛给全局处理器回 500。 */
+        if(!job_is_lock_retryable($e))throw $e;
+        error_log('seo-api PATCH /jobs/'.$jid.' lock conflict, retry once: '.$e->getMessage());
+        $out=$apply();
     }
-    res(200,['ok'=>true]);
+    res(200,array_merge(['ok'=>true],$out));
 }
 
 // POST /tasks/{id}/result -> prepare stage done, task waits for a human to release.

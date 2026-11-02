@@ -1,7 +1,22 @@
 'use strict';
 // Thin client for the ops-tracker SEO agent API (seo-api.php).
 
-const { requestJson, downloadTo, postMultipart } = require('./http');
+const { request, requestJson, downloadTo, postMultipart } = require('./http');
+
+/* PATCH /jobs/{id} 的回包验收（纯函数，tests/job_patch_accept.test.js 直测）。
+   r 是 http.request 的 { status, text, json }。2xx 且 JSON 且 ok === true 才算成功，
+   其余一律抛 Error，message 带状态码与正文前 300 字。 */
+function acceptJobPatch(r, path) {
+  const status = r ? r.status : 0;
+  const json = r ? r.json : null;
+  if (status >= 200 && status < 300 && json && typeof json === 'object' && json.ok === true) return json;
+  const snippet = String((r && r.text) || '').replace(/\s+/g, ' ').slice(0, 300);
+  const why = status >= 200 && status < 300 ? 'response not ok:true' : 'HTTP error';
+  const err = new Error('HTTP ' + status + ' PATCH ' + (path || '/jobs') + ' ' + why + ' :: ' + snippet);
+  err.status = status;
+  err.responseText = r ? r.text : '';
+  throw err;
+}
 
 class Api {
   constructor(cfg) {
@@ -60,9 +75,26 @@ class Api {
     return this.req('POST', '/jobs/reap', { worker: this.workerId });
   }
 
-  /** PATCH /jobs/{id} body { status?, log_append?, token_usage? } */
+  /**
+   * PATCH /jobs/{id} body { status?, log_append?, token_usage? }
+   * -> { ok:true, status_changed?, current_status?, log_skipped? }
+   * 验收收口在这里（2026-11-02 job 11718 事故：PHP fatal 回 HTTP 200 加错误文本，只验 2xx
+   * 当成功放行，终态丢失）：响应必须是 JSON 且 ok === true，否则抛错让调用方走补投。
+   * 只收窄 patchJob：claim 等端点的成功响应不带 ok，不能放进 req 统一验。
+   * status_changed:false 不是失败（服务端 CAS 没覆盖已有终态），调用方自己记日志对账。
+   */
   async patchJob(id, body) {
-    return this.req('PATCH', '/jobs/' + encodeURIComponent(id), body);
+    const path = '/jobs/' + encodeURIComponent(id);
+    const r = await request(this.base + path, {
+      method: 'PATCH',
+      body,
+      timeoutMs: this.timeoutMs,
+      headers: {
+        Authorization: 'Bearer ' + this.token,
+        Accept: 'application/json',
+      },
+    });
+    return acceptJobPatch(r, path);
   }
 
   /** POST /tasks/{id}/result body { output_url, note } */
@@ -442,4 +474,4 @@ class Api {
   }
 }
 
-module.exports = { Api };
+module.exports = { Api, acceptJobPatch };

@@ -289,7 +289,13 @@ function runJob(job, lane) {
       }
       if (tokenUsage > 0) body.token_usage = tokenUsage;
       try {
-        await api.patchJob(job.id, body);
+        const pr = await api.patchJob(job.id, body);
+        /* 服务端终态 CAS 没翻动（行已不是 running，如被超时清扫先收），不算失败也不补投，
+           但把库里实际状态打进日志供对账。 */
+        if (pr && pr.status_changed === false) {
+          log(jobTag + ': terminal PATCH accepted but status unchanged, want=' + body.status
+            + ' current_status=' + pr.current_status + (pr.log_skipped ? ' (log tail already present, skipped)' : ''));
+        }
       } catch (e) {
         log(jobTag + ': could not PATCH terminal status :: ' + e.message);
         pendingTerminalPark(job.id, body);
@@ -325,7 +331,11 @@ async function pendingTerminalFlush() {
   const keep = [];
   for (const it of list) {
     if (!it || !it.job_id) continue;
-    try { await api.patchJob(it.job_id, it.body || {}); log('job#' + it.job_id + ' 暂存终态补投成功'); }
+    try {
+      const pr = await api.patchJob(it.job_id, it.body || {});
+      log('job#' + it.job_id + ' 暂存终态补投成功' + (pr && pr.status_changed === false
+        ? '（服务端状态未翻动，current_status=' + pr.current_status + (pr.log_skipped ? '，尾段日志已在库跳过' : '') + '）' : ''));
+    }
     catch (e) { keep.push(it); }
   }
   try { fs.writeFileSync(PENDING_TERMINAL_FILE, JSON.stringify(keep)); } catch (e) {}
