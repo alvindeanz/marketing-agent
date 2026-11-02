@@ -78,5 +78,37 @@ t('缺封面、待人工配图标记、管道表、缺 FAQ 各拦一条', () => 
   assert.strictEqual(bad.length, 4, bad.join(' | '));
 });
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+/* 异步用例（liveVerifyExtraPaths 是 async）：summary 挪进 async 收口，
+   不然 process.exit 在微任务跑完前就把进程杀了，断言静默没执行。 */
+async function ta(name, fn) { try { await fn(); pass++; console.log('  ok   ' + name); } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + e.message); } }
+
+(async () => {
+  console.log('内链线上兜底（2026-11-03 Sammichelle #1582）');
+  await ta('白名单外的内链以线上实测为准：200 零跳转放行，301/404/网络错照拦，白名单内不发请求', async () => {
+    const calls = [];
+    const fakeReq = async (url) => {
+      calls.push(url);
+      if (url.endsWith('/collections/suitcases/')) return { status: 200 };
+      if (url.endsWith('/collections/gone/')) return { status: 404 };
+      if (url.endsWith('/collections/noslash')) return { status: 301 };
+      throw new Error('ECONNRESET');
+    };
+    const body = '看[箱子](/collections/suitcases/)、[没了](/collections/gone/)、' +
+      '[斜杠](/collections/noslash)、[坏网](/collections/neterr/)、[已知](/blog/known-post)。';
+    const logs = [];
+    const extra = await E.liveVerifyExtraPaths(
+      body, ['/blog/known-post'], 'https://example.co.nz/', (s2) => logs.push(s2), 999, fakeReq
+    );
+    assert.deepStrictEqual(extra, ['/collections/suitcases/']);
+    assert.strictEqual(calls.length, 4, '白名单内的 /blog/known-post 不该发请求');
+    assert.ok(calls.every((u) => u.startsWith('https://example.co.nz/collections/')));
+    assert.ok(logs.some((s2) => /suitcases.*200 零跳转.*放行/.test(s2)));
+    assert.ok(logs.some((s2) => /noslash.*HTTP 301.*照拦/.test(s2)));
+    assert.ok(logs.some((s2) => /neterr.*实测失败.*照拦/.test(s2)));
+    const none = await E.liveVerifyExtraPaths(body, [], '', () => {}, 999, fakeReq);
+    assert.deepStrictEqual(none, [], '无 domain 直接空手而归');
+  });
+
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+})();

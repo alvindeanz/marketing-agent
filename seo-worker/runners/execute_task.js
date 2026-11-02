@@ -26,6 +26,7 @@ const blogcheck = require('../lib/blogcheck');
 const blogimages = require('../lib/blogimages');
 const wf = require('../lib/webforger');
 const contentRegistry = require('../lib/registry');
+const { request: httpRequest } = require('../lib/http');
 const deliverables = require('../lib/deliverables');
 const { ensureClientWorkspace, summarize, truncate, headTail, safeJson } = require('../lib/util');
 
@@ -864,6 +865,38 @@ function allowedPathsFrom(pages, posts) {
     out.add(blogcheck.normPath('/blog/' + post.slug));
   }
   return Array.from(out);
+}
+
+/* 注册表白名单落空时以线上为准（2026-11-03 Sammichelle #1582）：WF 全站电商的
+   /collections/* 由 commerce 模块服务，pages 注册表与 /api/collections 都看不见它们，
+   活页被判「不存在」。注册表是申报，线上才是现实：白名单不认识的内链逐条实测，
+   200 且零跳转才并进白名单，301/404/超时照拦（lib/http 不跟随跳转，301 即非 200）。 */
+async function liveVerifyExtraPaths(body, allowedPaths, domain, log, taskId, fetcher) {
+  const doReq = fetcher || httpRequest;
+  const host = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  if (!host) return [];
+  const allowed = new Set((allowedPaths || []).map((p) => blogcheck.normPath(p)));
+  const unknown = Array.from(new Set(
+    blogcheck.internalLinks(String(body || '')).filter((p) => !allowed.has(blogcheck.normPath(p)))
+  )).slice(0, 6);
+  const extra = [];
+  for (const p of unknown) {
+    try {
+      const r = await doReq('https://' + host + p, {
+        timeoutMs: 15000,
+        headers: { 'user-agent': 'Mozilla/5.0 (seo-worker link check)' },
+      });
+      if (r.status === 200) {
+        extra.push(p);
+        log('task ' + taskId + '：内链 ' + p + ' 不在注册表白名单，线上实测 200 零跳转，按现实放行');
+      } else {
+        log('task ' + taskId + '：内链 ' + p + ' 白名单外且线上实测 HTTP ' + r.status + '，照拦');
+      }
+    } catch (e) {
+      log('task ' + taskId + '：内链 ' + p + ' 白名单外，线上实测失败（' + e.message + '），照拦');
+    }
+  }
+  return extra;
 }
 
 function categorySlugs(categories) {
@@ -1847,7 +1880,18 @@ async function runBlogTask(ctx, context, workspace, task) {
       log('task ' + taskId + '：' + lastErrors[0]);
       continue;
     }
-    const verdict = blogcheck.checkDraft(read.draft, checkCtx);
+    let attemptCtx = checkCtx;
+    try {
+      const extraPaths = await liveVerifyExtraPaths(
+        read.draft && read.draft.body_markdown, allowedPaths, profile.domain, log, taskId
+      );
+      if (extraPaths.length) {
+        attemptCtx = Object.assign({}, checkCtx, { allowedPaths: allowedPaths.concat(extraPaths) });
+      }
+    } catch (e) {
+      log('task ' + taskId + '：内链线上兜底核验整体失败，退回纯白名单口径 :: ' + e.message);
+    }
+    const verdict = blogcheck.checkDraft(read.draft, attemptCtx);
     if (verdict.ok) {
       draft = read.draft;
       log(
@@ -2946,6 +2990,7 @@ async function run(ctx) {
 
 module.exports = {
   run,
+  liveVerifyExtraPaths,
   writebackSource,
   revisionCheck,
   resolveRefBlogUrl,
