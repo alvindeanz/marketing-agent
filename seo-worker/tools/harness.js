@@ -785,6 +785,131 @@ async function main() {
   } catch (e) { log('experience_sync 失败（不影响本次）：' + String(e.message).slice(0, 120)); }
 }
 
+/* ==== 停滞清单（2026-11-03 Alvin 定）====
+   定义：非终态、非等客户卡的任务，连续两轮 harness 之间零变化即停滞。判定点选在 harness
+   收尾：停滞的本质不是挂钟年龄，是系统的自然节拍（harness 轮）走过去了它没跟上。出处
+   webforger #1757：blocked 挂四天无人看，因为 blocked 不属于每日摘要四类，格式上不可见。
+   轮次快照落客户工作区 .harness_rounds.json（advisory 数据，读写失败一律降级跳过不挡收尾）。
+   处置流见 HEARTBEAT.md：先手工推进，推不动的分两类上报（单件裁决 / 同类三件以上修机制）。 */
+function stallFingerprint(t) {
+  const note = String(t.result_note || '')
+    .replace(/\n*\[harness [^\]]*\] 阻塞：[\s\S]*?(?=\n\n\[|$)/g, '')
+    .replace(/\[card-refresh [^\]]*\][^\n]*/g, '');
+  return [t.status, t.owner_type || '', t.review_effective || '', t.review_verdict || '',
+    t.output_url || '', note.length].join('|');
+}
+
+/* paid 应然态漂移（2026-11-03）：facts 里的「账户应然状态」对 GAQL 实读，零模型。
+   出处同上：10-20 人工修完转化口径（裁决落 policy 与 biz 两族），账户随后被回写回归，
+   十天无人知。只核机器对得上的约定键，自由文本 facts 不参与：
+   - policy.ads_primary_conversion_in_biddable_goal（缺位退 biz.ads_primary_lead_conversion）：
+     biddable goal 内唯一 primary 的动作名，值可带「(id)」尾注；
+   - (policy|biz).ads[_conversion]_<slug>_status = secondary|removed：单动作应然状态，
+     slug 与动作名按小写下划线归一匹配。
+   任何一步失败整段降级跳过，不挡 harness 收尾。 */
+async function paidDriftCheck() {
+  const pr = await call('GET', '/profile?client_id=' + cid);
+  const prof = (pr && pr.profile) || {};
+  const services = String(prof.services || '').toLowerCase();
+  const customerId = String(prof.ads_customer_id || '').replace(/-/g, '');
+  if (!customerId || !['sem', 'paid', 'both'].includes(services)) return [];
+  const fr = await call('GET', '/facts?client_id=' + cid);
+  const cf = (fr.facts || []).filter((f) => String(f.status || '') === 'confirmed');
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const expects = [];
+  let primaryName = '';
+  for (const f of cf) {
+    const k = String(f.fact_key || '');
+    if (k === 'policy.ads_primary_conversion_in_biddable_goal') { primaryName = String(f.value || '').replace(/[（(].*$/, '').trim(); continue; }
+    if (!primaryName && k === 'biz.ads_primary_lead_conversion') { primaryName = String(f.value || '').replace(/[（(].*$/, '').trim(); continue; }
+    const m = /^(?:policy|biz)\.ads_(?:conversion_)?(.+)_status$/.exec(k);
+    if (!m) continue;
+    const v = String(f.value || '').trim().toLowerCase();
+    if (/^secondary/.test(v)) expects.push({ slug: m[1], want: 'secondary', key: k });
+    else if (/^removed/.test(v)) expects.push({ slug: m[1], want: 'removed', key: k });
+  }
+  if (!expects.length && !primaryName) return [];
+  const { execFileSync } = require('child_process');
+  const GAQL = path.join(__dirname, '..', 'lib', 'gaql_query.py');
+  const q = (query) => execFileSync('python3', [GAQL, customerId, query], { timeout: 60000 }).toString()
+    .split('\n').map((l) => l.trim()).filter(Boolean)
+    .map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+  const actions = q("SELECT conversion_action.name, conversion_action.category, conversion_action.origin, conversion_action.primary_for_goal FROM conversion_action WHERE conversion_action.status = 'ENABLED'");
+  const goals = q('SELECT customer_conversion_goal.category, customer_conversion_goal.origin, customer_conversion_goal.biddable FROM customer_conversion_goal');
+  const isTrue = (v) => v === true || v === 'true';
+  const biddable = new Set(goals.filter((g) => isTrue(g.customer_conversion_goal_biddable))
+    .map((g) => g.customer_conversion_goal_category + '~' + g.customer_conversion_goal_origin));
+  const out = [];
+  const bySlug = new Map(actions.map((a) => [norm(a.conversion_action_name), a]));
+  for (const e of expects) {
+    const a = bySlug.get(e.slug);
+    if (e.want === 'removed' && a) out.push(e.key + ' 记 removed，账户里 ' + a.conversion_action_name + ' 仍 ENABLED');
+    if (e.want === 'secondary' && a && isTrue(a.conversion_action_primary_for_goal)) {
+      out.push(e.key + ' 记 Secondary，账户里 ' + a.conversion_action_name + ' 已回归 primary（回归，按既有裁决修复，不需要重新决策）');
+    }
+  }
+  if (primaryName) {
+    const primaries = actions.filter((a) => isTrue(a.conversion_action_primary_for_goal)
+      && biddable.has(a.conversion_action_category + '~' + a.conversion_action_origin))
+      .map((a) => String(a.conversion_action_name));
+    const extra = primaries.filter((n) => norm(n) !== norm(primaryName));
+    if (extra.length) out.push('biddable goal 内 primary 应只有 ' + primaryName + '，实读多出：' + extra.join('、'));
+    if (!primaries.some((n) => norm(n) === norm(primaryName))) out.push('biddable goal 内找不到应然 primary ' + primaryName + '（ENABLED 且 primary 口径）');
+  }
+  return out;
+}
+
+async function stallLedger(all, curNum) {
+  let wsDir = '';
+  try {
+    const pr = await call('GET', '/profile?client_id=' + cid);
+    wsDir = String((pr.profile && pr.profile.workspace_dir) || '');
+  } catch (e) { /* 无快照可用，本轮全按首轮计，只报漂移 */ }
+  const stateFile = wsDir ? '/data/aira/clients/' + wsDir + '/.harness_rounds.json' : '';
+  let prev = { tasks: {} };
+  if (stateFile && fs.existsSync(stateFile)) {
+    try { prev = JSON.parse(fs.readFileSync(stateFile, 'utf8')) || { tasks: {} }; } catch (e) { prev = { tasks: {} }; }
+  }
+  const sn = (s) => { const m = /^S(\d+)$/i.exec(String(s || '')); return m ? parseInt(m[1], 10) : null; };
+  const laneT = (t) => /^(spawn|chatw|chat|report|ruling|splitw):/.test(String(t.origin || ''));
+  const cands = all.filter((t) => {
+    if (!['proposed', 'approved', 'blocked', 'in_progress'].includes(String(t.status))) return false;
+    /* 等客户卡不算停滞：卡已发出等客户回，有到期视同同意的节奏管着 */
+    if (t.card_kind && t.sent_at && !/\[卡反馈折叠/.test(String(t.result_note || ''))) return false;
+    /* 未来期是排期不是停滞；blocked 与泳道单例外（它们没有「以后再说」的正当身份） */
+    const n = sn(t.sprint);
+    if (String(t.status) !== 'blocked' && !laneT(t) && n !== null && curNum !== null && n > curNum) return false;
+    return true;
+  });
+  const now = {};
+  const stalled = [];
+  for (const t of cands) {
+    const fp = stallFingerprint(t);
+    const p = prev.tasks && prev.tasks[t.id];
+    const rounds = (p && p.fp === fp) ? (Number(p.rounds) || 1) + 1 : 1;
+    now[t.id] = { fp, rounds };
+    if (rounds >= 2) stalled.push({ t, rounds });
+  }
+  let drift = [];
+  try { drift = await paidDriftCheck(); } catch (e) { log('应然态漂移检查跳过：' + String(e.message).slice(0, 160)); }
+  if (stalled.length || drift.length) {
+    console.log('\n## 停滞清单（连续 ≥2 轮 harness 零变化；等客户卡与未来期不计。处置：先手工推进，推不动分两类上报，见 HEARTBEAT）');
+    for (const s of stalled) {
+      const t = s.t;
+      const age = t.updated_at ? Math.floor((Date.now() - Date.parse(String(t.updated_at).replace(' ', 'T'))) / 86400000) : '?';
+      console.log('- #' + t.id + ' [' + (t.sprint || '泳道') + '/' + t.status
+        + (String(t.owner_type || 'agent') !== 'agent' ? '/owner=' + t.owner_type : '')
+        + (t.module ? '/' + t.module : '') + '] 停滞 ' + s.rounds + ' 轮，' + age + ' 天未动：' + String(t.title || '').slice(0, 50));
+    }
+    for (const d of drift) console.log('- [应然态漂移] ' + d);
+  }
+  if (!DRY && stateFile) {
+    try { fs.writeFileSync(stateFile, JSON.stringify({ at: new Date().toISOString(), tasks: now })); }
+    catch (e) { log('轮次快照写入失败（' + e.message + '），下轮按首轮计'); }
+  }
+  return stalled.length + drift.length;
+}
+
 async function report(all, sprint, retried) {
   // 与 main 的本期口径一致：日历本期 + 欠账（2026-09-24）
   const sn = (s) => { const m = /^S(\d+)$/i.exec(String(s || '')); return m ? parseInt(m[1], 10) : null; };
@@ -1067,6 +1192,10 @@ async function report(all, sprint, retried) {
     }
   } catch (e) { log('转位自愈段跳过：' + e.message); }
 
+  // 停滞清单（2026-11-03）：连续两轮零变化的未结单 + paid 应然态漂移，收尾必出
+  let stallN = 0;
+  try { stallN = await stallLedger(all, cn); } catch (e) { log('停滞清单段跳过：' + String(e.message).slice(0, 160)); }
+
   // 追加到 TODO.md 批注段
   if (!NO_TODO && !DRY && fs.existsSync(TODO)) {
     const s = fs.readFileSync(TODO, 'utf8');
@@ -1075,7 +1204,7 @@ async function report(all, sprint, retried) {
     if (i !== -1) {
       const bc = await boardClient();
       const stamp = new Date().toISOString().slice(0, 10);
-      const lines = ['', `- [harness ${stamp}] ${bc ? bc.name : cid}：待放行 ${ready.length} 条${blockers.length ? '；阻塞 ' + blockers.length + ' 条：' + blockers.map((b) => '#' + b.id + ' ' + b.kind).join('、') : '，无阻塞'}${heldPlan.length ? '；方案未批准挡下 ' + heldPlan.length + ' 条' : ''}`];
+      const lines = ['', `- [harness ${stamp}] ${bc ? bc.name : cid}：待放行 ${ready.length} 条${blockers.length ? '；阻塞 ' + blockers.length + ' 条：' + blockers.map((b) => '#' + b.id + ' ' + b.kind).join('、') : '，无阻塞'}${heldPlan.length ? '；方案未批准挡下 ' + heldPlan.length + ' 条' : ''}${stallN ? '；停滞/漂移 ' + stallN + ' 条（见本轮输出，先手工推进）' : ''}`];
       const j = s.indexOf('\n', s.indexOf('\n', i) + 1); // 跳过标题行和说明行
       const out = s.slice(0, j) + lines.join('\n') + s.slice(j);
       fs.writeFileSync(TODO, out);

@@ -1158,6 +1158,18 @@ function buildAdsPrompt(opts) {
     '  现状即可，不阻塞 success。真没做完的才报 aborted。',
     buildAdsAgentLaneSection(opts.agentOps, customerId),
     '',
+    '客户事实台账（confirmed；policy.* 与 biz.* 是已裁决的应然状态，效力高于方案叙述）：',
+    opts.factsBlock || '（台账为空或读取失败，冲突协议第四条照常生效）',
+    '',
+    '前置核验冲突协议（2026-11-03 定，webforger #1757 四天停摆教训：禁止把已裁决问题当新问题问人）：',
+    '- 发现账户现实与方案前提不符时，先查上面的台账再定性，三方对照：方案前提、账户现实、台账裁决。',
+    '- 台账已有裁决（policy.*/biz.* 写明应然状态）而账户现实偏离的：定性为回归，不是悬案。本单照旧不越方案范围',
+    '  去修，但执行记录与 note 必须引用 fact key 与其记录日期，写明「现实自该日裁决后回归，按既有裁决修复即可，',
+    '  不需要重新决策」。',
+    '- 方案叙述与台账裁决冲突的：以台账为准，报 aborted 并点名冲突的 fact key，定性为方案过时需重出。',
+    '- 只有台账查无裁决的冲突才真正转人，note 必须写成一句话可回复的选择题（做法 A 还是做法 B），',
+    '  禁止「方案契约或凭证问题」这类机器话。',
+    '',
     '能力清单（风险注记必须遵守）：',
     manifest || '（清单缺失，只许执行方案里明确写出的白名单操作）',
     '',
@@ -1202,7 +1214,19 @@ async function runAdsApply(ctx, workspace, profile, task, taskId) {
   const manifest = capabilities.fullText('googleads');
   const taskOps = String(task.ops || '').split(',').map((s) => s.trim()).filter(Boolean);
   const agentOps = adsAgentLaneOps(taskOps);
-  const prompt = buildAdsPrompt({ task, plan, planFile, customerId, manifest, agentOps });
+  /* facts 台账进 ads apply prompt（2026-11-03）：此前 ads 泳道零 facts，执行 agent 看不见
+     人工裁决层（policy 与 biz 两族），pre-flight 冲突只能当新问题转人（#1757 把 10-20 已裁决的
+     转化口径回归当悬案问了第二遍）。paid 相关前缀优先，截断分层见 lib/distill.factLines。 */
+  let factsBlock = '';
+  try {
+    const fr = await api.listFacts(task.client_id);
+    const confirmed = (fr.facts || []).filter((f) => String(f.status || '') === 'confirmed');
+    factsBlock = require('../lib/distill').factLines(confirmed, 60, {
+      excludePrefixes: ['internal.'],
+      priorityPrefixes: ['ads.', 'gtm.', 'data.', 'ga4.'],
+    });
+  } catch (e) { log('task ' + taskId + ': facts 台账读取失败（' + e.message + '），prompt 缺省该段'); }
+  const prompt = buildAdsPrompt({ task, plan, planFile, customerId, manifest, agentOps, factsBlock });
   log('task ' + taskId + ': ads apply, customer ' + customerId + ', model ' + cfg.applyModel + (agentOps.length ? ', agent 泳道 op: ' + agentOps.join(',') : ''));
   const res = await runClaude(cfg, {
     prompt,

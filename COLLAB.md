@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-03 AIRA facts 截断分层 + ads apply 台账注入 + harness 停滞清单（Alvin 批「1-6你开工吧」，出处 webforger #1757 四天停摆复盘）
+
+- **病两条**（细节见 /data/aira/DEFECTS.md 11-03 两行）：①facts 简报 60 条上限按字典序截断，55 共 66 条，policy.* 裁决键整层静默丢；ads apply prompt 本来就不含 facts，10-30 pre-flight 把 10-20 已裁决的转化口径回归当新问题问人。②blocked 单不在每日摘要四类里，#1757 熔断四天格式性不可见；55 移交后两边 harness 都不扫（10-21 至 10-29 九天真空）；账户应然态（Qualified Lead 10-20 已降 Secondary）被回写回归十天无人知。
+- **修三刀**：lib/distill.factLines 截断分层（policy/biz 永不截、opts.priorityPrefixes 模块优先、history 先裁，不超限行为逐字不变）；runners/apply_task 的 ads 泳道注入 confirmed facts 台账段（paid 前缀优先）加「前置核验冲突协议」（三方对照，回归引用 fact key 禁再问人，转人必须选择题）；tools/harness 收尾新增停滞清单（非等客户卡未结单连续两轮指纹零变化即停滞，轮次快照落客户工作区 .harness_rounds.json，advisory 读写失败全降级）加 paid 应然态漂移检查（约定键 policy.ads_primary_conversion_in_biddable_goal 与 (policy|biz).ads_*_status=secondary/removed 对 GAQL 实读，零模型）。处置流在 /data/aira/HEARTBEAT.md：先手工推进，推不动分两类上报；扫尾全舰队不分片，裁决不跨片。
+- 测试：node tests/ 全套绿（report.test.js 加 66 条截断回放三测），js 文件 node --check 过；seo-api.php 本轮未动。
+- 待部署：worker（distill/apply_task 两文件，harness 从仓直跑不等部署）。
+- 下一步：55 的 Qualified Lead 按 10-20 裁决降回 Secondary 后重跑 #1757（Alvin 已批）；若漂移检查再见它回归 primary，查 WF 平台 ads-feedback 集成是否回写（Aiden 领地，报告不动手）。
+
 ### 2026-10-28 AIRA 工单 #40/#50 收口补记：#1428 全链自愈 + 零写入锚收紧 + WP 媒体回收站转机器道
 
 - **#1428 全链自愈（下条承诺的部署后补记）**：api 部署 rev 4fa3da0 后 decide 解锁 #1428（坑：owner_type=agency 的 decide 只批不排队，手工 POST /jobs 补 execute）。全链自主跑完：execute 10513、评审、L0 放行、apply 10515 败、重试 10519 败、10523 成。两次失败都是 shopseo put-code 写后校验的诞生缺陷（jq -r 尾换行混进哈希口径致首次实写必败；另有写后读旧），两次均按方案自愈还原零残留，shopseo 修到 1.13.1（剥尾换行同口径加写后读旧重试 5 次，/data/aira 仓 21c0660）。落地结果：theme.liquid 的 AVADA include 白名单到雪铲 PDP 单页，哈希回读过，PDP 渲染原生 title/description，其他页照旧。

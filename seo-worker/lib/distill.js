@@ -414,21 +414,46 @@ const FACT_VALUE_CHARS = 400;
 
 /**
  * opts.excludePrefixes: 按 fact_key 前缀丢弃的条目，例如 ['internal.']。
- * 过滤必须发生在 slice 之前：60 条是硬上限且按字典序静默截断，先截后滤
- * 会让内部条目白占名额，客户面能看到的事实凭空变少。
- * 不传 opts 时行为与从前逐字一致。
+ * 过滤必须发生在 slice 之前：60 条是硬上限，先截后滤会让内部条目白占名额。
+ * opts.priorityPrefixes: 截断时优先保留的 key 前缀（按任务模块传，如 paid 泳道传 ads. 族）。
+ *
+ * 截断分层（2026-11-03，webforger #1757 教训：66 条 facts 按字典序截 60，policy.* 字典序
+ * 靠后被整层静默丢弃，10-20 的人工裁决在 10-30 执行时等于不存在，同一个问题被当新冲突
+ * 再问一遍人）。规则：
+ *   第 0 层 policy.* / biz.*（裁决与经营事实）永不截，超限也保留；
+ *   第 1 层 priorityPrefixes 命中的模块相关条目；
+ *   第 2 层 其余；
+ *   第 3 层 history.*（大事记）最先裁。
+ * 条数不超限时行为与从前逐字一致；输出保持入参原顺序。
  */
 function factLines(list, limit, opts) {
   const skip = (opts && Array.isArray(opts.excludePrefixes) && opts.excludePrefixes) || [];
-  return (list || [])
-    .filter((f) => {
-      if (!skip.length) return true;
-      const key = (f && (f.fact_key || f.key)) || '';
-      return !skip.some((p) => p && String(key).indexOf(p) === 0);
-    })
-    .slice(0, limit || 60)
+  const pri = (opts && Array.isArray(opts.priorityPrefixes) && opts.priorityPrefixes) || [];
+  const keyOf = (f) => String((f && (f.fact_key || f.key)) || '');
+  const kept = (list || []).filter((f) => {
+    if (!skip.length) return true;
+    return !skip.some((p) => p && keyOf(f).indexOf(p) === 0);
+  });
+  const lim = limit || 60;
+  let chosen = kept;
+  if (kept.length > lim) {
+    const tierOf = (f) => {
+      const key = keyOf(f);
+      if (/^(policy|biz)\./.test(key)) return 0;
+      if (pri.some((p) => p && key.indexOf(p) === 0)) return 1;
+      if (/^history\./.test(key)) return 3;
+      return 2;
+    };
+    const order = new Map(kept.map((f, i) => [f, i]));
+    const never = kept.filter((f) => tierOf(f) === 0);
+    const rest = kept.filter((f) => tierOf(f) !== 0)
+      .sort((a, b) => (tierOf(a) - tierOf(b)) || (order.get(a) - order.get(b)));
+    chosen = never.concat(rest.slice(0, Math.max(0, lim - never.length)))
+      .sort((a, b) => order.get(a) - order.get(b));
+  }
+  return chosen
     .map((f) => {
-      const key = (f && (f.fact_key || f.key)) || '(no key)';
+      const key = keyOf(f) || '(no key)';
       const value = truncate(String((f && f.value) !== undefined ? f.value : ''), FACT_VALUE_CHARS);
       const source = f && f.source ? ' [from ' + f.source + ']' : '';
       return '- ' + key + ': ' + value + source;

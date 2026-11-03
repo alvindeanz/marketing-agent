@@ -522,6 +522,32 @@ t('不传 opts 时行为不变', () => {
   const text = D.factLines([{ fact_key: 'internal.a', value: '1' }], 60);
   assert.ok(text.indexOf('internal.a') > -1);
 });
+/* 截断分层（2026-11-03 webforger #1757 回放）：66 条按字典序，policy.* 排在第 60 位之后，
+   旧逻辑整层静默丢弃，人工裁决在执行时等于不存在。 */
+t('factLines 截断时 policy/biz 裁决层永不丢', () => {
+  const list = [];
+  for (let i = 0; i < 64; i++) list.push({ fact_key: 'ads.k' + String(i).padStart(2, '0'), value: 'v' });
+  list.push({ fact_key: 'policy.ads_primary_conversion_in_biddable_goal', value: 'WF Apply Lead' });
+  list.push({ fact_key: 'policy.ads_google_hosted_conversions_handling', value: 'keep_as_is' });
+  const text = D.factLines(list, 60, {});
+  assert.ok(text.indexOf('policy.ads_primary_conversion_in_biddable_goal') > -1, '裁决键被截断丢弃（#1757 原样复发）');
+  assert.ok(text.indexOf('policy.ads_google_hosted_conversions_handling') > -1);
+  assert.strictEqual(text.split('\n').length, 60, '上限仍是 60，裁决层挤掉的是低层条目');
+});
+t('factLines 截断时 history 最先裁，priorityPrefixes 优先保', () => {
+  const list = [];
+  for (let i = 0; i < 30; i++) list.push({ fact_key: 'history.event.e' + String(i).padStart(2, '0'), value: 'v' });
+  for (let i = 0; i < 30; i++) list.push({ fact_key: 'seo.k' + String(i).padStart(2, '0'), value: 'v' });
+  for (let i = 0; i < 10; i++) list.push({ fact_key: 'zz.ads.k' + i, value: 'v' });
+  const text = D.factLines(list, 60, { priorityPrefixes: ['zz.ads.'] });
+  assert.ok(text.indexOf('zz.ads.k9') > -1, '模块相关条目该优先于 history 存活');
+  assert.strictEqual((text.match(/history\.event/g) || []).length, 20, 'history 该被裁掉溢出的 10 条');
+});
+t('factLines 不超限时逐字不变（含 history 原顺序）', () => {
+  const list = [{ fact_key: 'history.event.a', value: '1' }, { fact_key: 'ads.b', value: '2' }];
+  const text = D.factLines(list, 60);
+  assert.strictEqual(text.split('\n')[0].indexOf('- history.event.a'), 0, '不超限不重排');
+});
 t('factsForPrompt 剔掉 internal 前缀', () => {
   const lines = F.factsForPrompt({ facts: { confirmed: [{ fact_key: 'internal.token', value: 'x' }, { fact_key: 'biz.model', value: '服务型' }], pending: [] } });
   assert.strictEqual(lines.join('|').indexOf('internal.'), -1);
