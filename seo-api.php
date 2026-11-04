@@ -9236,7 +9236,7 @@ if($m==='POST'&&$ROUTE==='/ops_notify'){
     if(!$t)res(401,['error'=>'No auth']);
     if(!hash_equals($WORKER_TKN,$t)){auth_admin();}
     $i=input();
-    $roles=['sem'=>'monica@horntech.co.nz','seo'=>'']; /* seo=Summer，邮箱待补 */
+    $roles=['sem'=>'monica@horntech.co.nz','seo'=>'summer@horntech.co.nz']; /* 2026-11-04 Alvin 给 */
     $role=strtolower(trim((string)($i['role']??'')));
     if(!isset($roles[$role]))res(400,['error'=>'role 必须是 sem 或 seo']);
     $to=$roles[$role];
