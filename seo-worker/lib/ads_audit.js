@@ -95,10 +95,18 @@ const CHECKS = {
     },
   },
   adGroupCriteria: {
-    query: (rn) => "SELECT ad_group_criterion.resource_name, ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + rn + "'",
+    query: (rn) => "SELECT ad_group_criterion.resource_name, ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.listing_group.type FROM ad_group_criterion WHERE ad_group_criterion.resource_name = '" + rn + "'",
     verify(rows, expectText) {
       if (!rows.length) return '账户里查无此 ad group criterion';
       const st = String(rows[0].ad_group_criterion_status || '');
+      /* listing group 的 SUBDIVISION 节点 Google 一律回报 PAUSED（投放状态只在 UNIT 上），
+         拿 ENABLED 去比必然误杀（2026-11-02 Ctomi #1780 job 11753：分组结构全对仍判对账未过）。
+         SUBDIVISION 只核存在与未删，状态比对跳过。 */
+      const lg = String(rows[0].ad_group_criterion_listing_group_type_ || rows[0].ad_group_criterion_listing_group_type || '');
+      if (lg === 'SUBDIVISION') {
+        if (st === 'REMOVED') return '期望存活的 SUBDIVISION 实际 REMOVED';
+        return '';
+      }
       const mt = String(rows[0].ad_group_criterion_keyword_match_type || '');
       const wantMt = (expectText.match(/\b(PHRASE|BROAD|EXACT)\b/) || [])[1];
       if (wantMt && mt && mt !== wantMt) return '期望 ' + wantMt + ' 实际 ' + mt;

@@ -103,6 +103,29 @@ t('blocked 行不参与对账', () => {
   assert.strictEqual(r.checked, 1);
 });
 
+/* listing group SUBDIVISION：Google 一律回报 PAUSED，状态比对必须跳过（Ctomi #1780 job 11753 误杀回归） */
+const AGC = 'customers/111/adGroupCriteria/178405943958~475572835808';
+
+t('SUBDIVISION 报 PAUSED 且期望文本带 ENABLED：过（状态不比对）', () => {
+  const q = fakeAccount({ [AGC]: [{ ad_group_criterion_status: 'PAUSED', ad_group_criterion_listing_group_type_: 'SUBDIVISION' }] });
+  const r = auditAgentItems('111', [{ entity: AGC, op: 'listing-group-restructure', state: 'verified', evidence: '分组改建后 ENABLED' }], q);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.checked, 1);
+});
+
+t('SUBDIVISION 实际 REMOVED：不过', () => {
+  const q = fakeAccount({ [AGC]: [{ ad_group_criterion_status: 'REMOVED', ad_group_criterion_listing_group_type_: 'SUBDIVISION' }] });
+  const r = auditAgentItems('111', [{ entity: AGC, op: 'listing-group-restructure', state: 'verified', evidence: 'ENABLED' }], q);
+  assert.strictEqual(r.ok, false);
+  assert.ok(r.failures[0].why.includes('REMOVED'));
+});
+
+t('UNIT（非 SUBDIVISION）状态比对照旧：期望 ENABLED 实际 PAUSED 不过', () => {
+  const q = fakeAccount({ [AGC]: [{ ad_group_criterion_status: 'PAUSED', ad_group_criterion_listing_group_type_: 'UNIT' }] });
+  const r = auditAgentItems('111', [{ entity: AGC, op: 'keyword-add', state: 'verified', evidence: 'ENABLED' }], q);
+  assert.strictEqual(r.ok, false);
+});
+
 t('查询抛异常按对账失败处理，不炸', () => {
   const q = () => { throw new Error('quota'); };
   const r = auditAgentItems('111', [{ entity: AG, op: 'asset-create', state: 'landed', evidence: '' }], q);
