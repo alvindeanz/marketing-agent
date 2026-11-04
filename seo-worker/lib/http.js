@@ -77,6 +77,11 @@ function requestOnce(urlStr, opts = {}) {
         path: u.pathname + u.search,
         method: opts.method || 'GET',
         headers,
+        /* 不走全局 keep-alive 池（Node 19 起默认开）：长 job 收尾的第一发 POST 会复用
+           早被 nginx 掐死的闲置连接，EPIPE 炸在 flush，而完成类 POST 按设计不重试，
+           一炸整单报废（2026-11-03 Mac worker job 12270/12278，均死在审计过后发结果那一发）。
+           worker 调用稀疏，每请求独立连接，竞态整类消灭。 */
+        agent: false,
       },
       (res) => {
         const chunks = [];
