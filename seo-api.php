@@ -951,6 +951,15 @@ function blog_card_waiting($t){
             $pv=$pq->fetch();
             if($pv&&preg_match('/^\s*agent\b/i',(string)$pv['value']))return false;
         }catch(Exception $e){/* facts 读不到按未委托处理 */}
+        /* 到期视同同意（2026-11-04 Alvin 批博客闸门松绑）：确认卡带 [卡签发 YYYY-MM-DD] 戳
+           （execute 出卡时盖，重出卡刷新），满 7 天即不再算等客户，放行官与 L0 照常流转，
+           apply 侧 requireBlogPublishConsent 同口径到期放行，两处一起改。无戳旧卡照旧硬等。 */
+        if(preg_match_all('/\[卡签发 (\d{4}-\d{2}-\d{2})\]/u',$sig,$sm)){
+            $issued=end($sm[1]);
+            $anchor=new DateTime($issued.' 00:00:00',new DateTimeZone('Pacific/Auckland'));
+            $now=new DateTime('now',new DateTimeZone('Pacific/Auckland'));
+            if(($now->getTimestamp()-$anchor->getTimestamp())/86400>=7)return false;
+        }
     }
     /* 软闸到期（2026-10-15 Alvin 定）：带 [到期执行 YYYY-MM-DD] 标记的新版落地页卡
        （page-create 类）出卡满 14 天即不再等客户，apply 侧 onsiteCardExpired 同口径。 */

@@ -48,6 +48,26 @@ t('换图（URL 变了数量没变）照拦', () => {
   assert.ok(v.errors.some((e) => e.indexOf('图片 URL 必须保留') > -1), v.errors.join(' | '));
 });
 
+console.log('内部说明明文与尾斜杠（2026-11-04 #115/#313 教训）');
+t('明文「编辑注意」段照拦（#115：非注释形态此前直通客户预览）', () => {
+  const d = draftWith('**编辑注意（内部说明，请勿随稿发布）：任务 120 的选题占用说明。**\n\n## A\n\n正常正文');
+  const v = C.checkDraft(d, { roll: null, allowedPaths: ['/a/'], categories: ['blog'], lang: '', keepImages: [], expectImageBriefs: false, lintRules: {} });
+  assert.ok(v.errors.some((e) => e.indexOf('内部说明') > -1), v.errors.join(' | '));
+});
+t('正常英文正文不被内部说明检查误伤', () => {
+  const d = draftWith('## A\n\nAn internal courtyard note: the editor of this guide measured every window.');
+  const v = C.checkDraft(d, { roll: null, allowedPaths: ['/a/'], categories: ['blog'], lang: '', keepImages: [], expectImageBriefs: false, lintRules: {} });
+  assert.ok(!v.errors.some((e) => e.indexOf('内部说明') > -1), v.errors.join(' | '));
+});
+t('站内链接缺尾斜杠照拦，带斜杠与资源图不拦', () => {
+  const d = draftWith('## A\n\n看 [b](/bad-link) 与 ![img](/assets/x.jpg)');
+  const v = C.checkDraft(d, { roll: null, allowedPaths: ['/a/', '/bad-link/'], categories: ['blog'], lang: '', keepImages: [], expectImageBriefs: false, lintRules: {} });
+  assert.ok(v.errors.some((e) => e.indexOf('尾斜杠') > -1 && e.indexOf('/bad-link') > -1), v.errors.join(' | '));
+  assert.ok(!v.errors.some((e) => e.indexOf('/assets/x.jpg') > -1), v.errors.join(' | '));
+  const ok = C.checkDraft(draftWith('## A\n\n看 [b](/bad-link/)'), { roll: null, allowedPaths: ['/a/', '/bad-link/'], categories: ['blog'], lang: '', keepImages: [], expectImageBriefs: false, lintRules: {} });
+  assert.ok(!ok.errors.some((e) => e.indexOf('尾斜杠') > -1), ok.errors.join(' | '));
+});
+
 console.log('Style Roll 带外剥离（ticket #46）');
 t('裸注释剥净', () => {
   const out = SR.stripRollComment('<!-- Style Roll: 骨架=Checklist | 语气=Direct -->\n## A\n\ntext');

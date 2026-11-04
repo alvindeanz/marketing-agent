@@ -910,9 +910,21 @@ async function requireBlogPublishConsent(api, task, record) {
   }
   const lastPub = pub.length ? pub[pub.length - 1] : null;
   if (!lastPub || String(lastPub.choice) !== 'agree') {
+    /* 到期视同同意（2026-11-04 Alvin 批博客闸门松绑）：确认卡带 [卡签发 YYYY-MM-DD] 戳，
+       满 7 天客户零表态即视同同意（统一到期视同同意口径，落地页卡 14 天先例）。
+       有任何表态（modify 等）不走到期，照旧等表态路由。无戳的旧卡照旧硬等 agree。
+       服务端 blog_card_waiting 同口径，两处一起改。 */
+    if (!lastPub) {
+      const stamps = [...String(task.result_note || '').matchAll(/\[卡签发 (\d{4}-\d{2}-\d{2})\]/g)];
+      const issued = stamps.length ? stamps[stamps.length - 1][1] : '';
+      if (issued && (Date.now() - Date.parse(issued + 'T00:00:00+13:00')) / 86400000 >= 7) {
+        record('确认卡签发于 ' + issued + '，满 7 天客户无表态，按到期视同同意放行（2026-11-04 政）');
+        return;
+      }
+    }
     throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
       + (lastPub ? '，当前最后表态是 ' + lastPub.choice : '，卡上没有任何发布表态') + '）。'
-      + '不发布。等客户在确认卡上点「同意，安排发布」后再放行。');
+      + '不发布。等客户在确认卡上点「同意，安排发布」或到期视同同意后再放行。');
   }
   record('客户确认卡已同意发布（publish_blog=agree），继续');
 }

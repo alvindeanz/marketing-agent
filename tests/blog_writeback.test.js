@@ -161,6 +161,11 @@ t('JSON 载荷、过短、占位符各自打回', () => {
   assert.ok(ex.revisionCheck('太短').some((s) => /过短/.test(s)));
   assert.ok(ex.revisionCheck('正文 [to supply] 待补数据'.padEnd(400, 'x')).some((s) => /占位/.test(s)));
 });
+t('明文内部说明打回（2026-11-04 #115：编辑注意整段非注释形态直通了客户预览）', () => {
+  const body = ('**编辑注意（内部说明，请勿随稿发布）：选题占用说明。**\n\n正文段落').padEnd(400, '字');
+  assert.ok(ex.revisionCheck(body).some((s) => /内部说明/.test(s)));
+  assert.deepStrictEqual(ex.revisionCheck('A clean body about curtains.'.padEnd(400, 'x')), []);
+});
 
 Promise.all(asyncRuns).then(() => {
   console.log('');

@@ -2177,7 +2177,14 @@ async function runBlogTask(ctx, context, workspace, task) {
   // Anything the pass left in the task's deliverable directory goes up before
   // the result, so the card and its downloads appear together.
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
-  const noteWithCard = cardUrl ? ('博客确认卡（发给客户，客户点同意才发布）: ' + cardUrl + '\n' + note) : note;
+  /* [卡签发] 戳（2026-11-04 Alvin 批博客闸门松绑）：出卡即计时，7 天无表态视同同意，
+     服务端 blog_card_waiting 与 apply 侧 requireBlogPublishConsent 按此戳同口径放行，三处一起改。
+     重出卡走围栏替换会刷新本戳，客户的 7 天窗口随之重开。 */
+  const noteWithCard = cardUrl
+    ? ('博客确认卡（发给客户，客户点同意才发布；[卡签发 '
+       + new Date().toLocaleDateString('sv-SE', { timeZone: 'Pacific/Auckland' })
+       + '] 满 7 天无表态视同同意自动发布）: ' + cardUrl + '\n' + note)
+    : note;
   // 图没齐就打 attention：稿子进待放行，但人得先补图，发布门会拦。
   // 卡块是「状态」不是「事件」（2026-10-24 #79 note 增殖修复）：走围栏替换，重出卡只留最新一份。
   await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: '', note_block: { key: 'blog_card', content: noteWithCard }, attention: imagesMissing });
@@ -2315,6 +2322,12 @@ function revisionCheck(body) {
   if (t.startsWith('{')) issues.push('内容像 JSON 载荷不是正文，不是写回源文件');
   if (/<!--/.test(t)) issues.push('仍含 HTML 注释，内部元数据不得写进客户平台');
   if (/\[to supply\]|\[待补|TODO[:：]/i.test(t)) issues.push('含未完成占位符');
+  {
+    // 内部说明的明文形态（2026-11-04 #115 教训：整段「编辑注意」以普通段落混在正文里，
+    // 本契约此前只拦注释形态，明文直通客户预览）。短语清单与 blogcheck.INTERNAL_NOTE_RE 同源。
+    const m = t.match(require('../lib/blogcheck').INTERNAL_NOTE_RE);
+    if (m) issues.push('含内部说明文字「' + m[0] + '」，内部备注不得写进客户平台');
+  }
   return issues;
 }
 
@@ -2382,7 +2395,12 @@ async function runBlogWriteback(ctx, opts) {
     log,
   });
 
-  const social = 'We have updated the draft with the agreed revisions. You can review it here: '
+  /* 话术要如实（2026-11-04 #1643 教训：原样写回正文没变，话术却写死「已按约定修订」）：
+     写回内容与平台现稿一致时是重出卡不是改稿，不得声称 updated。 */
+  const unchanged = String((targetPost && targetPost.body) || '') === platformBody;
+  const social = (unchanged
+    ? 'The draft is ready for your review: '
+    : 'We have updated the draft with the agreed revisions. You can review it here: ')
     + (previewUrl || '(preview link unavailable)')
     + ' . If everything looks good, we will schedule it for publishing.';
   const note = [
@@ -2394,7 +2412,14 @@ async function runBlogWriteback(ctx, opts) {
     '要点：原样写回已有修订稿（来源 ' + path.relative(workspace, srcFile) + '），零模型搬运，正文回读一致，仍为草稿未发布。配图未动。',
   ].filter(Boolean).join('\n');
   await deliverables.uploadTaskDeliverables(ctx, taskId, workspace);
-  const noteWithCard = cardUrl ? ('博客确认卡（发给客户，客户点同意才发布）: ' + cardUrl + '\n' + note) : note;
+  /* [卡签发] 戳（2026-11-04 Alvin 批博客闸门松绑）：出卡即计时，7 天无表态视同同意，
+     服务端 blog_card_waiting 与 apply 侧 requireBlogPublishConsent 按此戳同口径放行，三处一起改。
+     重出卡走围栏替换会刷新本戳，客户的 7 天窗口随之重开。 */
+  const noteWithCard = cardUrl
+    ? ('博客确认卡（发给客户，客户点同意才发布；[卡签发 '
+       + new Date().toLocaleDateString('sv-SE', { timeZone: 'Pacific/Auckland' })
+       + '] 满 7 天无表态视同同意自动发布）: ' + cardUrl + '\n' + note)
+    : note;
   // 同上：卡块走围栏替换（2026-10-24），重出确认卡不再把旧块留在 note 里增殖。
   await api.postTaskResult(taskId, { output_url: cardUrl || previewUrl, note: '', note_block: { key: 'blog_card', content: noteWithCard }, attention: false });
   log('task ' + taskId + '：原样写回已交付，任务进 review，' + (cardUrl ? '确认卡已重出' : '确认卡缺失退回预览链接'));

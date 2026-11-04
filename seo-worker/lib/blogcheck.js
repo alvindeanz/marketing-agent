@@ -32,6 +32,11 @@ const PREVIEW_TOKEN = '{PREVIEW_URL}';
 const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u;
 const DASH_RE = /[—–]/;
 
+/* 内部说明残留（2026-11-04 #115 教训）：整段中文「编辑注意」以明文（非注释）混在正文里，
+   随卡到了客户预览。注释形态 checkDraft 早有拦截，这条拦明文形态。只认高确定性短语，
+   不做泛匹配（#311 误伤教训：泛词会误杀正常正文）。 */
+const INTERNAL_NOTE_RE = /编辑注意|内部说明|请勿随稿发布|请勿发布|内部备注|不随稿交付|DRAFT NOTE|INTERNAL NOTE|PENDING CLIENT CONFIRMATION|DO NOT PUBLISH/;
+
 function stripNoise(body) {
   return String(body || '')
     .replace(/<!--[\s\S]*?-->/g, ' ')
@@ -475,6 +480,19 @@ function checkDraft(draft, ctx) {
   const comments = (body.match(/<!--[\s\S]*?-->/g) || []).filter((c) => !/Style Roll/i.test(c));
   if (comments.length) errors.push('正文含 ' + comments.length + ' 段非 Style Roll 的 HTML 注释（内部备注不许进正文）：' + comments[0].slice(0, 60));
 
+  // 内部说明的明文形态（#115 教训，注释形态上一条已拦）。
+  for (const f of ['title', 'excerpt', 'meta_description', 'body_markdown']) {
+    const m = stripNoise(d[f]).match(INTERNAL_NOTE_RE);
+    if (m) errors.push(f + ' 里出现内部说明文字「' + m[0] + '」，内部备注不许进交付正文');
+  }
+
+  // 站内链接尾斜杠（2026-11-04 #313/#838/#839 教训：无尾斜杠一律 301，交付 URL 零跳转口径）。
+  // 只查无扩展名、无 query/fragment 的页面路径，资源引用不在内链列表里（internalLinks 已剥）。
+  const noSlash = links.filter((p) => !/\/$/.test(p) && !/\.[a-z0-9]{2,5}$/i.test(p) && p.indexOf('?') === -1 && p.indexOf('#') === -1);
+  if (noSlash.length) {
+    errors.push('站内链接缺尾斜杠（上线后 301，交付 URL 要零跳转）：' + Array.from(new Set(noSlash)).slice(0, 5).join('、'));
+  }
+
   // 交付 lint 规则（与 PJ 手工产线共用同一份 scripts/deliverable_lint_rules.json）：
   // 禁用词、绝对化表述、meta / excerpt 的禁用开头。ctx.lintRules 是合并好的 _default 加客户层。
   for (const e of checkLintRules(d, ctx.lintRules)) errors.push(e);
@@ -532,6 +550,7 @@ module.exports = {
   IMAGE_SLOTS,
   NO_TEXT_TAIL,
   ABSTRACT_RE,
+  INTERNAL_NOTE_RE,
   FLUX_PROMPT_MIN,
   FLUX_PROMPT_MAX,
 };
