@@ -703,6 +703,13 @@ function checkCollision(candidate, registry, opts = {}) {
       reason = '主词重合度 ' + Math.round(score * 100) + '%';
     }
     if (level === LEVEL_NONE) continue;
+    /* 未发布不占用（2026-11-04 Alvin 定，task 120 教训：被一篇陈年未发布草稿「占用」选题，
+       产线改写别的题还停下来问人改题还是扩写）：草稿博文不构成 exact/high 打回，降级成 near
+       当情报带进简报。同 slug 的物理冲突不用管：建稿步对已有未发布草稿本来就是覆盖不新建。 */
+    if (e.kind === 'post' && String(e.status) === 'draft' && (level === LEVEL_EXACT || level === LEVEL_HIGH)) {
+      reason += '（未发布草稿不占用选题，同 slug 时建稿步直接覆盖它）';
+      level = LEVEL_NEAR;
+    }
     conflicts.push({
       level,
       score: Math.round(score * 100) / 100,
@@ -923,25 +930,33 @@ function registryBlock(registry, opts = {}) {
 function forbiddenBlock(registry, opts = {}) {
   const entries = (registry && Array.isArray(registry.entries) && registry.entries) || [];
   const excludeSlug = normSlug(opts.excludeSlug || '');
-  const posts = entries.filter((e) => e.kind === 'post' && normSlug(e.slug) !== excludeSlug);
-  if (!posts.length) return '站上还没有博文，slug 和主词没有已占用的。';
+  /* 未发布不占用（2026-11-04 Alvin 定）：占用表只收已发布博文。草稿单列为「可覆盖」情报，
+     同题直接沿用草稿的 slug 交稿，建稿步对未发布草稿是覆盖不新建，不要为此停下来问人。 */
+  const allPosts = entries.filter((e) => e.kind === 'post' && normSlug(e.slug) !== excludeSlug);
+  const posts = allPosts.filter((e) => String(e.status) !== 'draft');
+  const drafts = allPosts.filter((e) => String(e.status) === 'draft');
+  if (!allPosts.length) return '站上还没有博文，slug 和主词没有已占用的。';
   const slugs = posts.map((e) => e.slug).slice(0, 120);
   const terms = [];
   for (const e of posts) {
     if (e.primary_term && terms.indexOf(e.primary_term) === -1) terms.push(e.primary_term);
   }
   return [
-    '已被占用的 slug（一个都不许重复使用，含未发布草稿）：',
-    slugs.map((s) => '  ' + s).join('\n'),
+    '已被占用的 slug（只含已发布博文，一个都不许重复使用）：',
+    (slugs.length ? slugs.map((s) => '  ' + s).join('\n') : '  （还没有已发布博文）'),
     '',
     '已被占用的主词（本篇的主词不许等同于、也不许只差一两个修饰词地重复下面任何一条）：',
-    terms.slice(0, 120).map((t) => '  ' + t).join('\n'),
+    (terms.length ? terms.slice(0, 120).map((t) => '  ' + t).join('\n') : '  （无）'),
     '',
-    '这条是机械校验项：交稿之后程序会拿你的 slug 和 keyword 跟上面这两张表逐条比对，',
+    (drafts.length
+      ? '站上未发布草稿（不占用选题：撞上同题就沿用它的 slug 照常交稿，建稿步会覆盖旧草稿，不要为此改题或停下来问人）：\n'
+        + drafts.map((e) => '  ' + e.slug).slice(0, 60).join('\n') + '\n'
+      : ''),
+    '这条是机械校验项：交稿之后程序会拿你的 slug 和 keyword 跟已发布两张表逐条比对，',
     '判定为 exact 或 high 的直接打回，本次任务失败，稿子不会上平台。',
-    '如果你调研后认为这个题就是应该写，且站上那篇写得不够，正确做法不是硬写一篇新的，',
+    '如果你调研后认为这个题就是应该写，且站上已发布的那篇写得不够，正确做法不是硬写一篇新的，',
     '而是在正文开头明确说明"本题与 XXX 重合，建议改为扩写该篇"，然后照常交 json，让人来定。',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 // ---------------------------------------------------------------------------
