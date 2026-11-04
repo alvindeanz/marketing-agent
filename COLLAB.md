@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-04 AIRA 博客闸门松绑 + 月报执行器登记（Alvin 批）（d4a0c9d、59010b3）
+
+- **博客闸门松绑（d4a0c9d）**，Alvin 原话「客户自己会审阅，为啥我们自己卡了又卡」：①出卡盖 [卡签发 YYYY-MM-DD] 戳，满 7 天客户零表态视同同意自动放行（seo-api blog_card_waiting、apply requireBlogPublishConsent、execute 出卡三处同口径，重出卡刷新戳）；②放行官博客族降红线判准（release_review.md 新节 + release_policy v24）：只拦客户禁区、编造我方承诺、法律合规，价格一律市面竞品范围直接过（废客户预批），产品线预确认闸（#838 类）废除；③blogcheck 补内部说明明文拦截（#115 教训）与尾斜杠拦截（#313 族教训），writeback 搬运契约同步；④writeback 话术如实（#1643 教训）。坑：#115 的「编辑注意」整段是明文不是注释，新稿校验和搬运契约此前都只拦注释形态。
+- **monthly-report-generate op 登记（59010b3）**：四平台能力清单 + 月报产线契约 + risk reversible。模板客户蒸馏版优先缺省走默认；询盘口径 WF 后台实收 + 手机邮箱去重 + 零自动反垃圾（Alvin：会误杀真实 lead，垃圾人工 override）。覆盖 #1817/#1865 一族停人卡。
+- 测试：node tests 全绿（blogcheck 12、writeback 25 含新增回归），seo-api.php 远端 php -l 通过。待部署 api + worker，部署后跑 capability_broadcast 盖章 + 转位 #1817/#1865 + 存量卡补 [卡签发] 戳。
+- 同日决定落档：电话核验类一律不做；WF 平台侧意见（补日志、改触发时机、防垃圾设置）全部撤回不再提，#1580/#1795 不排真人。
+
 ### 2026-11-04 AIRA 工单巡检三刀（ticket #55/#56 + Ctomi #1780 + Mac EPIPE）+ 停滞手工推进批（Alvin 批「无阻塞的话就直接修复bug」）
 
 - **修三刀**（细节见 /data/aira/DEFECTS.md 11-04 四行）：①chat 分线 prompt 教模型写不合法 module "seo" 致委托单整条被丢（97f9d80，加 buildPrompt 回归测试）；②ads_audit 对 listing group SUBDIVISION 拿 ENABLED 硬比必误杀，Google 对 SUBDIVISION 一律回报 PAUSED，改为只核存在与未删（b8f45ba，测试三条）；③worker http 层全局 keep-alive 池复用被 nginx 掐死的闲置连接，长 job 收尾第一发 POST EPIPE 整单报废，改 agent:false 每请求独立连接（58e013d）。
