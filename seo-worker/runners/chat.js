@@ -477,7 +477,9 @@ function buildPrompt(opts) {
     '会话标题：' + truncate(String(title || ''), MAX_TITLE_CHARS),
     channelModule
       ? '本频道是' + (channelModule === 'paid' ? '付费投放（paid）' : 'SEO') + '线频道（频道按线分家，对话与派单互不穿插）：' +
-        '拟任务草案的 module 默认写 ' + (channelModule === 'paid' ? 'paid' : 'seo') + '；' +
+        (channelModule === 'paid'
+          ? '拟任务草案的 module 默认写 paid；'
+          : '拟任务草案的 module 按任务内容在 technical、onpage、content、local、offpage 里选（不写 paid，也没有 seo 这个值）；') +
         '另一条线的事被问到可以答，但要派活就提醒人去对应线的频道说。'
       : '',
     '',

@@ -263,6 +263,14 @@ t('buildPrompt 带卡反馈块进简报区，taskBlock 带本任务卡反馈', (
   assert.ok(tb.indexOf('先等等') > 0 && tb.indexOf('保持现状') > 0, '任务块缺本卡反馈');
 });
 
+t('分线频道提示：SEO 线不许教模型写不合法的 module "seo"（ticket #55/#56）', () => {
+  const pSeo = chat.buildPrompt({ clientName: 'L', title: 't', briefing: 'B', messages: [], channelModule: 'seo' });
+  assert.ok(pSeo.indexOf('默认写 seo') === -1, 'SEO 线 prompt 仍在教模型写 "seo"，cleanDrafts 会整条丢弃委托单');
+  assert.ok(pSeo.indexOf('technical、onpage、content、local、offpage') > 0, 'SEO 线 prompt 缺合法 module 候选');
+  const pPaid = chat.buildPrompt({ clientName: 'L', title: 't', briefing: 'B', messages: [], channelModule: 'paid' });
+  assert.ok(pPaid.indexOf('默认写 paid') > 0, 'paid 线默认值丢了');
+});
+
 /* ================= 草案解析三层防线 ================= */
 section('草案解析：规整与丢弃');
 
