@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-04 AIRA 工单巡检三刀（ticket #55/#56 + Ctomi #1780 + Mac EPIPE）+ 停滞手工推进批（Alvin 批「无阻塞的话就直接修复bug」）
+
+- **修三刀**（细节见 /data/aira/DEFECTS.md 11-04 四行）：①chat 分线 prompt 教模型写不合法 module "seo" 致委托单整条被丢（97f9d80，加 buildPrompt 回归测试）；②ads_audit 对 listing group SUBDIVISION 拿 ENABLED 硬比必误杀，Google 对 SUBDIVISION 一律回报 PAUSED，改为只核存在与未删（b8f45ba，测试三条）；③worker http 层全局 keep-alive 池复用被 nginx 掐死的闲置连接，长 job 收尾第一发 POST EPIPE 整单报废，改 agent:false 每请求独立连接（58e013d）。
+- **数据病推进**：Ctomi #1780 带 GAQL 证据收口（账户实况全对）；Sanmichelle #311 裁定方案口径误判收口，尾巴拆 #1862/#1863，口径三忌进 plan_experience 待整理；Ben's AU #830 补避让指引重排；Oak #479 与 Dareu #970 补 digest-hold。
+- **判定链补课**：Citymed/Ideal/KiaOra/Merii/SDA 五家（11-02 月轮未轮到）各跑一轮 harness，判定链全续上；转位三张（SDA #1242 blog-publish、#1262 无 op 交付包、Merii #1497 final-url+sitelink+keyword-final-url），转位后重跑 harness 重判。
+- 测试：node tests/ 全套绿（chat 加 1 测、ads_audit 加 3 测）；seo-api.php 未动。部署：worker 两机 58e013d（分两发，b8f45ba 后追 58e013d）。ticket #55/#56 已 resolve 回 Summer。
+- 下一步：#1075 Ideal 按已知根因（GA4 增强衡量，修复在 Ads 侧）改任务书等提案卡；Sunseeker #441 属客户决策该转卡，归发卡清单；Citymed 6 张人工位内容单堆积需人力安排，报 Alvin。
+
 ### 2026-11-03 AIRA facts 截断分层 + ads apply 台账注入 + harness 停滞清单（Alvin 批「1-6你开工吧」，出处 webforger #1757 四天停摆复盘）
 
 - **病两条**（细节见 /data/aira/DEFECTS.md 11-03 两行）：①facts 简报 60 条上限按字典序截断，55 共 66 条，policy.* 裁决键整层静默丢；ads apply prompt 本来就不含 facts，10-30 pre-flight 把 10-20 已裁决的转化口径回归当新问题问人。②blocked 单不在每日摘要四类里，#1757 熔断四天格式性不可见；55 移交后两边 harness 都不扫（10-21 至 10-29 九天真空）；账户应然态（Qualified Lead 10-20 已降 Secondary）被回写回归十天无人知。
