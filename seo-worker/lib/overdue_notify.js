@@ -13,12 +13,28 @@
 // - 重发：note 里最后一枚 [逾期通知 YYYY-MM-DD → role] 戳满 RENOTIFY_DAYS 天且仍在等人。
 //   盖章会 bump updated_at，所以有戳后一律按戳算，不回看 updated_at。
 
-const HUMAN_KINDS = ['人工任务', '待人工验证', '待人工配图', '需要人定'];
+const HUMAN_KINDS = ['人工任务', '待人工验证', '待人工配图', '需要人定', '交办中'];
 const OVERDUE_DAYS = 3;
 const RENOTIFY_DAYS = 7;
 const STAMP_RE = /\[逾期通知 (\d{4}-\d{2}-\d{2}) → (sem|seo)\]/g;
 const CONFIRM_RE = /\[确认等人 \d{4}-\d{2}-\d{2}[^\]]*\]/;
 const CONFIRM_REVOKE_RE = /\[确认等人撤销/;
+/* 交办戳（2026-11-04 Alvin 批 custom CMS 交办流程）：[交办 YYYY-MM-DD → summer|monica|客户]。
+   盖了交办戳 = 活已走到最后、包已发到人手里，视同 Alvin 的「确认等人」（他批的自动确认面），
+   不用再逐条盖确认戳。误盖出口 [交办撤销]。追人对象按戳里的人：summer=seo、monica=sem、
+   客户=按 module 映射（内部仍有人牵头催客户）。 */
+const HANDOVER_RE = /\[交办 (\d{4}-\d{2}-\d{2}) → (summer|monica|客户)\]/g;
+const HANDOVER_REVOKE_RE = /\[交办撤销/;
+
+/** note 里最后一枚有效交办戳，无则 null。 */
+function lastHandover(note) {
+  const s = String(note || '');
+  if (HANDOVER_REVOKE_RE.test(s)) return null;
+  const all = [...s.matchAll(HANDOVER_RE)];
+  if (!all.length) return null;
+  const m = all[all.length - 1];
+  return { date: m[1], who: m[2] };
+}
 
 function roleOf(task) {
   return String((task && task.module) || '') === 'paid' ? 'sem' : 'seo';
@@ -40,7 +56,10 @@ function decideNotify(tasks, blockers, now) {
     const t = byId.get(Number(b.id));
     if (!t) continue;
     const note = String(t.result_note || '');
-    if (!CONFIRM_RE.test(note) || CONFIRM_REVOKE_RE.test(note)) continue; // 确认闸：没盖 [确认等人] 或已撤销的不追
+    // 确认闸：盖了 [确认等人]（未撤销）或有交办戳（交办即确认，Alvin 批）才追，其余不追。
+    const ho = lastHandover(note);
+    const confirmed = (CONFIRM_RE.test(note) && !CONFIRM_REVOKE_RE.test(note)) || !!ho;
+    if (!confirmed) continue;
     const stamps = [...note.matchAll(STAMP_RE)];
     let due = false;
     let days = 0;
@@ -58,7 +77,8 @@ function decideNotify(tasks, blockers, now) {
     if (!due) continue;
     seen.add(Number(b.id));
     const url = (note.match(/预览: (\S+)/) || [])[1] || String(t.output_url || '');
-    out[roleOf(t)].push({
+    const role = ho ? (ho.who === 'monica' ? 'sem' : ho.who === 'summer' ? 'seo' : roleOf(t)) : roleOf(t);
+    out[role].push({
       id: Number(b.id),
       title: String(t.title || ''),
       kind: String(b.kind || ''),
@@ -97,4 +117,4 @@ function buildEmail(clientName, role, items, dateStr) {
   return { subject, html };
 }
 
-module.exports = { decideNotify, buildEmail, roleOf, HUMAN_KINDS, OVERDUE_DAYS, RENOTIFY_DAYS, CONFIRM_RE };
+module.exports = { decideNotify, buildEmail, roleOf, lastHandover, HUMAN_KINDS, OVERDUE_DAYS, RENOTIFY_DAYS, CONFIRM_RE, HANDOVER_RE };

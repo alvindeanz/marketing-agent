@@ -941,12 +941,18 @@ async function report(all, sprint, retried) {
     else if (t.review_pending) blockers.push({ id: t.id, kind: '待判', text: 'fable 还没判' });
     else if (t.review_stale) blockers.push({ id: t.id, kind: '判决过期', text: 'facts 更新后需重判' });
     else if (!t.review_effective) blockers.push({ id: t.id, kind: '无判决', text: '没有 fable 判决，需先跑 review' });
-    else if (t.owner_type !== 'agent' && t.status === 'approved') blockers.push({ id: t.id, kind: '人工任务', text: 'owner=' + t.owner_type + '，机器不执行，等人做' });
+    else if (t.owner_type !== 'agent' && t.status === 'approved') {
+      /* 交办戳（2026-11-04 Alvin 批 custom CMS 交办流程）：包已发到人手里的单换「交办中」身份，
+         不进阻塞唠叨（note 回写跳过），由追人机制按戳接管（交办即确认），做完 manual_done 收口。 */
+      const ho = require('../lib/overdue_notify').lastHandover(t.result_note);
+      if (ho) blockers.push({ id: t.id, kind: '交办中', text: ho.date + ' 交给 ' + ho.who });
+      else blockers.push({ id: t.id, kind: '人工任务', text: 'owner=' + t.owner_type + '，机器不执行，等人做' });
+    }
   }
 
-  // 写回看板：attention + note 尾部 [harness] 段（同任务多条合并）
+  // 写回看板：attention + note 尾部 [harness] 段（同任务多条合并）。交办中不回写（防 note 增殖）。
   const byTask = {};
-  for (const b of blockers) (byTask[b.id] = byTask[b.id] || []).push(b);
+  for (const b of blockers.filter((x) => x.kind !== '交办中')) (byTask[b.id] = byTask[b.id] || []).push(b);
   for (const [id, list] of Object.entries(byTask)) {
     const t = mine.find((x) => x.id === Number(id));
     const block = '\n\n[harness ' + new Date().toISOString().slice(0, 16).replace('T', ' ') + '] 阻塞：\n' + list.map((b) => '- ' + b.kind + '：' + b.text).join('\n');
@@ -1106,8 +1112,14 @@ async function report(all, sprint, retried) {
   // 输出
   console.log('\n## 放行卡（' + ready.length + '）');
   for (const r of ready) console.log('- #' + r.id + ' ' + r.title + (r.preview ? ' ' + r.preview : ''));
-  console.log('\n## 阻塞与待人定（' + blockers.length + '）');
-  for (const b of blockers) console.log('- #' + b.id + ' ' + b.kind + '：' + b.text);
+  const handovers = blockers.filter((b) => b.kind === '交办中');
+  const realBlockers = blockers.filter((b) => b.kind !== '交办中');
+  console.log('\n## 阻塞与待人定（' + realBlockers.length + '）');
+  for (const b of realBlockers) console.log('- #' + b.id + ' ' + b.kind + '：' + b.text);
+  if (handovers.length) {
+    console.log('\n## 交办中（' + handovers.length + '，追人机制接管，做完 manual_done 收口）');
+    for (const b of handovers) console.log('- #' + b.id + ' ' + b.text);
+  }
 
   /* chat 泳道扫帚（2026-10-24 脱轮配套，零 LLM）：chat 产线单不入 sprint，轮子的 inScope
      看不见它们，这里按 origin 兜一道停滞可见性——failed/停人/blocked 即时报，排队在跑超

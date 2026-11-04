@@ -79,6 +79,24 @@ t('确认闸：没盖 [确认等人] 的停多久都不追，盖了撤销戳的�
   assert.strictEqual(r.seo.length + r.sem.length, 0);
 });
 
+t('交办戳即确认：按戳里的人分流，summer 归 seo，monica 归 sem，客户按 module', () => {
+  const tasks = [
+    { id: 20, title: 'H1', module: 'paid', updated_at: d(4), result_note: '[交办 2026-10-30 → summer] 包已发' },
+    { id: 21, title: 'H2', module: 'content', updated_at: d(4), result_note: '[交办 2026-10-30 → monica] 包已发' },
+    { id: 22, title: 'H3', module: 'paid', updated_at: d(4), result_note: '[交办 2026-10-30 → 客户] 等客户贴' },
+    { id: 23, title: 'H4', module: 'content', updated_at: d(4), result_note: '[交办 2026-10-01 → summer]\n[交办撤销 2026-10-20]' },
+  ];
+  const blockers = tasks.map((t2) => ({ id: t2.id, kind: '交办中', text: '' }));
+  const r = O.decideNotify(tasks, blockers, NOW);
+  assert.deepStrictEqual(r.seo.map((x) => x.id).sort(), [20]);
+  assert.deepStrictEqual(r.sem.map((x) => x.id).sort(), [21, 22]);
+});
+t('lastHandover 取最后一枚，撤销后为 null', () => {
+  assert.deepStrictEqual(O.lastHandover('[交办 2026-10-01 → monica] x [交办 2026-10-05 → summer] y'), { date: '2026-10-05', who: 'summer' });
+  assert.strictEqual(O.lastHandover('[交办 2026-10-01 → summer]\n[交办撤销 2026-10-02]'), null);
+  assert.strictEqual(O.lastHandover('没有戳'), null);
+});
+
 console.log('邮件装配');
 t('主题带客户名与数量，正文转义且含链接与天数', () => {
   const mail = O.buildEmail('Louvresky', 'seo', [
