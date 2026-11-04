@@ -26,6 +26,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - **monthly-report-generate op 登记（59010b3）**：四平台能力清单 + 月报产线契约 + risk reversible。模板客户蒸馏版优先缺省走默认；询盘口径 WF 后台实收 + 手机邮箱去重 + 零自动反垃圾（Alvin：会误杀真实 lead，垃圾人工 override）。覆盖 #1817/#1865 一族停人卡。
 - 测试：node tests 全绿（blogcheck 12、writeback 25 含新增回归），seo-api.php 远端 php -l 通过。待部署 api + worker，部署后跑 capability_broadcast 盖章 + 转位 #1817/#1865 + 存量卡补 [卡签发] 戳。
 - 同日决定落档：电话核验类一律不做；WF 平台侧意见（补日志、改触发时机、防垃圾设置）全部撤回不再提，#1580/#1795 不排真人。
+- **撞车判定「未发布不占用」（1d2d658）**，Alvin 原话「没发布就是没被占用」：checkCollision 草稿博文 exact/high 降级 near，forbiddenBlock 占用表只收已发布、草稿单列可覆盖；同 slug 物理冲突本就由建稿步覆盖处理。回归测试 4 条。顺带核出 #115 里的「task 120 裁量请求」是陈年过期信息（120 早于 09-07 发布收口），已在卡上作废。
 
 ### 2026-11-04 AIRA 工单巡检三刀（ticket #55/#56 + Ctomi #1780 + Mac EPIPE）+ 停滞手工推进批（Alvin 批「无阻塞的话就直接修复bug」）
 
