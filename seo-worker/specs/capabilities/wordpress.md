@@ -37,6 +37,7 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 | report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
 | report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 | report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
+| monthly-report-generate | agent_apply | 月报产线：按客户月报模板出当期 SEO 月报 HTML 落 clients/<客户>/reports/，再走 report-preview-deploy 发预览；模板与询盘口径契约见「月报产线契约」 |
 <!-- PLANNING_VIEW_END -->
 
 ## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）
@@ -75,3 +76,10 @@ autonomy 三级判定标准与 webforger.md 同一条：出错以后能不能低
 - **kiaorakids 专属坑**：PHP display_errors 开着，REST 响应可能带 PHP warning 的 HTML 前缀，解析 JSON 前先把响应截到第一个 `{` 或 `[`。`team` CPT 关了 show_in_rest。另：Elementor 与 WPBakery 双构建器混用，见 wp-content-edit 行。
 - **回读验证**：每个写操作后 GET 同一端点核对新值，并 curl 线上页面（`--max-time 120`）验证 200 与关键改动点可见（meta 类看页面源码的 title/description）。
 - **sitemap**：改了 SEO 字段或重定向后按需 flush 一次，不要每条写后都 flush。
+
+## 月报产线契约（monthly-report-generate，2026-11-04 登记）
+
+- 模板优先级：客户有蒸馏定稿的月报模板（蒸馏卡指定样例，如 Louvresky #1616 / Kuddles #1858 / SDA #1675 产出）按客户模板；没有的用默认 leadgen 模板（specs/report/ 下），电商客户用订单口径变体。模板缺某数据节不编数，节内写明本期未统计。
+- 询盘口径（2026-11-04 Alvin 定）：自然询盘一律以 WF 后台实收为准，按手机邮箱去重；不做任何自动反垃圾判别（会误杀真实 lead），垃圾批次由人用 leads_override 修正；GA4 generate_lead 只做对照列。后台实收取不到的客户，报告内注明口径回退 GA4，并在收口 note 点名该缺口。
+- 产出与发布面同 deliverable-file-write / report-preview-deploy 契约：只写本客户 reports/ 目录，deliverable lint 过，发布 URL 回读 200 回填收口 note。
+- 放行：对客交付型，照常出放行卡，人放行后发客户，不属博客族自动放行面。

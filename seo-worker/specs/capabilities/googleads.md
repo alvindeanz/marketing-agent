@@ -44,6 +44,7 @@
 | report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
 | report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 | report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
+| monthly-report-generate | agent_apply | 月报产线：按客户月报模板出当期 SEO 月报 HTML 落 clients/<客户>/reports/，再走 report-preview-deploy 发预览；模板与询盘口径契约见「月报产线契约」 |
 | pmax-text-asset-update | agent_prepare | PMax 文本资产删加（ads_mutate pmax-text-asset-update）：删后余量硬闸 H>=3/D>=2/LH>=1、字符闸 30/90/90、before 全量打印、回读核对；对外资产，批文才自动 |
 | sitelink-update | agent_prepare | sitelink 换挂（ads_mutate sitelink-update）：campaign 级摘链/挂既有/新建并挂，摘链不删资产本体（挂回即回滚）、字符闸 25/35、回读核对；对外资产，批文才自动 |
 <!-- PLANNING_VIEW_END -->
@@ -129,3 +130,10 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 - Keyword Planner 拉量用 API 精确词（UI 显示的是扩展后总和）；脚本 gads_keyword_planner.py。
 - _ht 后缀区分自建转化与 GA4 默认事件。
 - 建号可走 API（CreateCustomerClient），但 email_address 字段禁用（未白名单会整单拒），邀请走 CustomerUserAccessInvitationService；币种时区建号后不可改；账单只能 UI 设。
+
+## 月报产线契约（monthly-report-generate，2026-11-04 登记）
+
+- 模板优先级：客户有蒸馏定稿的月报模板（蒸馏卡指定样例，如 Louvresky #1616 / Kuddles #1858 / SDA #1675 产出）按客户模板；没有的用默认 leadgen 模板（specs/report/ 下），电商客户用订单口径变体。模板缺某数据节不编数，节内写明本期未统计。
+- 询盘口径（2026-11-04 Alvin 定）：自然询盘一律以 WF 后台实收为准，按手机邮箱去重；不做任何自动反垃圾判别（会误杀真实 lead），垃圾批次由人用 leads_override 修正；GA4 generate_lead 只做对照列。后台实收取不到的客户，报告内注明口径回退 GA4，并在收口 note 点名该缺口。
+- 产出与发布面同 deliverable-file-write / report-preview-deploy 契约：只写本客户 reports/ 目录，deliverable lint 过，发布 URL 回读 200 回填收口 note。
+- 放行：对客交付型，照常出放行卡，人放行后发客户，不属博客族自动放行面。

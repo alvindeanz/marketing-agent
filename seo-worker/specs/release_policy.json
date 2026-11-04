@@ -133,6 +133,7 @@
     "report-html-update": "reversible",
     "report-xlsx-write": "reversible",
     "report-preview-deploy": "reversible",
+    "monthly-report-generate": "reversible",
     "article-set-cover-alt": "reversible",
     "article-set-template": "reversible",
     "article-tags-update": "reversible",

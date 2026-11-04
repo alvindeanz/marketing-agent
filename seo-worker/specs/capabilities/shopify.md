@@ -52,6 +52,7 @@
 | report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
 | report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 | report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
+| monthly-report-generate | agent_apply | 月报产线：按客户月报模板出当期 SEO 月报 HTML 落 clients/<客户>/reports/，再走 report-preview-deploy 发预览；模板与询盘口径契约见「月报产线契约」 |
 | article-set-cover-alt | agent_apply | 博客封面图 alt 更新（shopseo article set-cover-alt，1.2.0 起即有）：无封面拒写、src 原样回传防清图、写前快照、回读核对。2026-10-24 登记补欠（能力早于登记，七张配额博客拆单的学费） |
 | article-set-template | agent_apply | 同 article-template-assign（规划器用过的别名拼写，收编匹配用；规范名用 article-template-assign，shopseo article set-template） |
 | article-tags-update | agent_apply | 同 article-meta-update 的 tags 与 excerpt 面（规划器用过的别名拼写，收编匹配用；清单将文章 tags 写入归并进 article-meta-update 不另立 op，旧判决写的是本名，别名登记供收编扫帚对号；shopseo article set-tags-excerpt，1.5.0 起） |
@@ -113,3 +114,10 @@
 - **文案铁律按客户走**：每家店的禁用主张、拼写口径、品牌规矩以该客户工作区 CLAUDE.md 与 facts 为准，execute/apply 前必读；facts 里没有铁律条目的客户，方案里不得使用任何未经当页核实的公开主张。sungait 专属铁律（其他店不适用）：美式拼写；可用公开主张仅 UV400 protection、free shipping、lifetime warranty（引用前核当页）；全线级 polarized 主张禁写，含非偏光款的页面 H1 与描述不写 polarized；集合归类按款式不按镜片。
 - 我方新增文案零破折号零 emoji；客户原文里的既有风格不改不学。
 - 正文改动后 curl 线上页面验证 200 且关键改动点可见。
+
+## 月报产线契约（monthly-report-generate，2026-11-04 登记）
+
+- 模板优先级：客户有蒸馏定稿的月报模板（蒸馏卡指定样例，如 Louvresky #1616 / Kuddles #1858 / SDA #1675 产出）按客户模板；没有的用默认 leadgen 模板（specs/report/ 下），电商客户用订单口径变体。模板缺某数据节不编数，节内写明本期未统计。
+- 询盘口径（2026-11-04 Alvin 定）：自然询盘一律以 WF 后台实收为准，按手机邮箱去重；不做任何自动反垃圾判别（会误杀真实 lead），垃圾批次由人用 leads_override 修正；GA4 generate_lead 只做对照列。后台实收取不到的客户，报告内注明口径回退 GA4，并在收口 note 点名该缺口。
+- 产出与发布面同 deliverable-file-write / report-preview-deploy 契约：只写本客户 reports/ 目录，deliverable lint 过，发布 URL 回读 200 回填收口 note。
+- 放行：对客交付型，照常出放行卡，人放行后发客户，不属博客族自动放行面。

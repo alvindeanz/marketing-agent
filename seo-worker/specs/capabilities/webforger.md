@@ -43,6 +43,7 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | report-html-update | agent_apply | 同 deliverable-file-write（报告 HTML 修订落正式位），同一契约 |
 | report-xlsx-write | agent_apply | 同 deliverable-file-write（报告 Excel/CSV 修订落正式位），同一契约 |
 | report-preview-deploy | agent_apply | 把 clients/<客户>/reports/ 下交付物发布到 agencyreport 预览主机（worker publishFile 既有通道），只许发本客户目录，发布 URL 回填收口 note |
+| monthly-report-generate | agent_apply | 月报产线：按客户月报模板出当期 SEO 月报 HTML 落 clients/<客户>/reports/，再走 report-preview-deploy 发预览；模板与询盘口径契约见「月报产线契约」 |
 <!-- PLANNING_VIEW_END -->
 
 ## 本地交付物写入契约（deliverable-file-write / report-html-update / report-xlsx-write，2026-10-24 登记）
@@ -334,3 +335,10 @@ GA4/GTM 两类产出变更方案文档：改什么、改成什么、为什么、
 - 博客：`GET /api/blog/{siteId}/{slug}` 确认状态与正文，已发布的再 `curl -sI` 线上 URL 看 200。
 - 样式与共享片段：响应里的 `validation` 无 error，`backup.archiveKey` 记进方案的回滚步骤。
 - 任何一步的响应与方案里写的预期不一致，立刻停，不要顺手改参数重试。
+
+## 月报产线契约（monthly-report-generate，2026-11-04 登记）
+
+- 模板优先级：客户有蒸馏定稿的月报模板（蒸馏卡指定样例，如 Louvresky #1616 / Kuddles #1858 / SDA #1675 产出）按客户模板；没有的用默认 leadgen 模板（specs/report/ 下），电商客户用订单口径变体。模板缺某数据节不编数，节内写明本期未统计。
+- 询盘口径（2026-11-04 Alvin 定）：自然询盘一律以 WF 后台实收为准，按手机邮箱去重；不做任何自动反垃圾判别（会误杀真实 lead），垃圾批次由人用 leads_override 修正；GA4 generate_lead 只做对照列。后台实收取不到的客户，报告内注明口径回退 GA4，并在收口 note 点名该缺口。
+- 产出与发布面同 deliverable-file-write / report-preview-deploy 契约：只写本客户 reports/ 目录，deliverable lint 过，发布 URL 回读 200 回填收口 note。
+- 放行：对客交付型，照常出放行卡，人放行后发客户，不属博客族自动放行面。
