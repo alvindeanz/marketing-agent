@@ -4,8 +4,12 @@
 // 250 不出机器），本文件只做纯判定与邮件装配（零网络，好测）；调用与盖章在 harness。
 //
 // 口径：
+// - 确认闸（2026-11-04 Alvin 补刀「只有我们走到最后，我确认真正等人的才追」）：任务 note 里
+//   必须有 [确认等人 YYYY-MM-DD] 戳才进追人面。戳由 Alvin 在清单上逐项确认后盖，
+//   没戳的一律不追，不管停了多久。误盖出口：把戳行改成 [确认等人撤销] 即退出追人面。
 // - 只认真正等人的阻塞类别（HUMAN_KINDS），机器环节（待判/判决过期/执行失败）不发人。
-// - 首发：任务停滞（updated_at 起算）满 OVERDUE_DAYS 天。
+// - 首发：任务停滞（updated_at 起算，确认盖章也会 bump 它）满 OVERDUE_DAYS 天，
+//   即确认后再停 3 天才发第一封。
 // - 重发：note 里最后一枚 [逾期通知 YYYY-MM-DD → role] 戳满 RENOTIFY_DAYS 天且仍在等人。
 //   盖章会 bump updated_at，所以有戳后一律按戳算，不回看 updated_at。
 
@@ -13,6 +17,8 @@ const HUMAN_KINDS = ['人工任务', '待人工验证', '待人工配图', '需�
 const OVERDUE_DAYS = 3;
 const RENOTIFY_DAYS = 7;
 const STAMP_RE = /\[逾期通知 (\d{4}-\d{2}-\d{2}) → (sem|seo)\]/g;
+const CONFIRM_RE = /\[确认等人 \d{4}-\d{2}-\d{2}[^\]]*\]/;
+const CONFIRM_REVOKE_RE = /\[确认等人撤销/;
 
 function roleOf(task) {
   return String((task && task.module) || '') === 'paid' ? 'sem' : 'seo';
@@ -34,6 +40,7 @@ function decideNotify(tasks, blockers, now) {
     const t = byId.get(Number(b.id));
     if (!t) continue;
     const note = String(t.result_note || '');
+    if (!CONFIRM_RE.test(note) || CONFIRM_REVOKE_RE.test(note)) continue; // 确认闸：没盖 [确认等人] 或已撤销的不追
     const stamps = [...note.matchAll(STAMP_RE)];
     let due = false;
     let days = 0;
@@ -90,4 +97,4 @@ function buildEmail(clientName, role, items, dateStr) {
   return { subject, html };
 }
 
-module.exports = { decideNotify, buildEmail, roleOf, HUMAN_KINDS, OVERDUE_DAYS, RENOTIFY_DAYS };
+module.exports = { decideNotify, buildEmail, roleOf, HUMAN_KINDS, OVERDUE_DAYS, RENOTIFY_DAYS, CONFIRM_RE };

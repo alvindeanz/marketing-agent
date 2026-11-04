@@ -13,8 +13,8 @@ const d = (daysAgo) => new Date(NOW - daysAgo * 86400000).toISOString().slice(0,
 console.log('判定');
 t('人工任务停满 3 天才首发，不足不发', () => {
   const tasks = [
-    { id: 1, title: 'A', module: 'onpage', updated_at: d(4), result_note: '预览: https://x/a' },
-    { id: 2, title: 'B', module: 'onpage', updated_at: d(1), result_note: '' },
+    { id: 1, title: 'A', module: 'onpage', updated_at: d(4), result_note: '[确认等人 2026-10-30] 预览: https://x/a' },
+    { id: 2, title: 'B', module: 'onpage', updated_at: d(1), result_note: '[确认等人 2026-11-03]' },
   ];
   const blockers = [
     { id: 1, kind: '人工任务', text: 'owner=agency' },
@@ -27,8 +27,8 @@ t('人工任务停满 3 天才首发，不足不发', () => {
 });
 t('paid 归 sem，其余归 seo', () => {
   const tasks = [
-    { id: 3, title: 'P', module: 'paid', updated_at: d(5), result_note: '' },
-    { id: 4, title: 'C', module: 'content', updated_at: d(5), result_note: '' },
+    { id: 3, title: 'P', module: 'paid', updated_at: d(5), result_note: '[确认等人 2026-10-28]' },
+    { id: 4, title: 'C', module: 'content', updated_at: d(5), result_note: '[确认等人 2026-10-28]' },
   ];
   const blockers = [
     { id: 3, kind: '人工任务', text: '' },
@@ -39,7 +39,7 @@ t('paid 归 sem，其余归 seo', () => {
   assert.deepStrictEqual(r.seo.map((x) => x.id), [4]);
 });
 t('机器类阻塞（待判/判决过期/执行失败）不发人', () => {
-  const tasks = [{ id: 5, title: 'M', module: 'onpage', updated_at: d(10), result_note: '' }];
+  const tasks = [{ id: 5, title: 'M', module: 'onpage', updated_at: d(10), result_note: '[确认等人 2026-10-20]' }];
   const r = O.decideNotify(tasks, [
     { id: 5, kind: '待判', text: '' },
     { id: 5, kind: '判决过期', text: '' },
@@ -48,8 +48,8 @@ t('机器类阻塞（待判/判决过期/执行失败）不发人', () => {
   assert.strictEqual(r.seo.length + r.sem.length, 0);
 });
 t('有 [逾期通知] 戳后按戳算：7 天内不重发，满 7 天重发', () => {
-  const recent = { id: 6, title: 'R', module: 'onpage', updated_at: d(30), result_note: '[逾期通知 2026-11-01 → seo] 已邮件通知' };
-  const old = { id: 7, title: 'O', module: 'onpage', updated_at: d(30), result_note: '[逾期通知 2026-10-20 → seo] 已邮件通知' };
+  const recent = { id: 6, title: 'R', module: 'onpage', updated_at: d(30), result_note: '[确认等人 2026-10-20]\n[逾期通知 2026-11-01 → seo] 已邮件通知' };
+  const old = { id: 7, title: 'O', module: 'onpage', updated_at: d(30), result_note: '[确认等人 2026-10-10]\n[逾期通知 2026-10-20 → seo] 已邮件通知' };
   const blockers = [
     { id: 6, kind: '人工任务', text: '' },
     { id: 7, kind: '人工任务', text: '' },
@@ -58,12 +58,25 @@ t('有 [逾期通知] 戳后按戳算：7 天内不重发，满 7 天重发', ()
   assert.deepStrictEqual(r.seo.map((x) => x.id), [7]);
 });
 t('同任务多条阻塞只报一次', () => {
-  const tasks = [{ id: 8, title: 'D', module: 'content', updated_at: d(5), result_note: '' }];
+  const tasks = [{ id: 8, title: 'D', module: 'content', updated_at: d(5), result_note: '[确认等人 2026-10-28]' }];
   const r = O.decideNotify(tasks, [
     { id: 8, kind: '人工任务', text: '' },
     { id: 8, kind: '待人工配图', text: '配图 0/4' },
   ], NOW);
   assert.strictEqual(r.seo.length, 1);
+});
+
+t('确认闸：没盖 [确认等人] 的停多久都不追，盖了撤销戳的也不追', () => {
+  const tasks = [
+    { id: 10, title: 'N', module: 'onpage', updated_at: d(30), result_note: '' },
+    { id: 11, title: 'V', module: 'onpage', updated_at: d(30), result_note: '[确认等人 2026-10-01]\n[确认等人撤销 2026-10-15]' },
+  ];
+  const blockers = [
+    { id: 10, kind: '人工任务', text: '' },
+    { id: 11, kind: '人工任务', text: '' },
+  ];
+  const r = O.decideNotify(tasks, blockers, NOW);
+  assert.strictEqual(r.seo.length + r.sem.length, 0);
 });
 
 console.log('邮件装配');
