@@ -28,6 +28,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 同日决定落档：电话核验类一律不做；WF 平台侧意见（补日志、改触发时机、防垃圾设置）全部撤回不再提，#1580/#1795 不排真人。
 - **撞车判定「未发布不占用」（1d2d658）**，Alvin 原话「没发布就是没被占用」：checkCollision 草稿博文 exact/high 降级 near，forbiddenBlock 占用表只收已发布、草稿单列可覆盖；同 slug 物理冲突本就由建稿步覆盖处理。回归测试 4 条。顺带核出 #115 里的「task 120 裁量请求」是陈年过期信息（120 早于 09-07 发布收口），已在卡上作废。
 
+### 2026-11-04 AIRA Oak 转 Custom 交办档 + 交办流程上线（244ac1b）
+
+- **交办机制（244ac1b）**：[交办 YYYY-MM-DD → summer|monica|客户] 戳，harness 把等人单换「交办中」身份（不逐轮回写 note，摘要单列），追人机制按戳接管（交办即确认，Alvin 批），manual_done 收口。逾期追人另有确认闸（295c755）：非交办件必须 [确认等人] 戳才追。
+- **Oak（board 1）**：平台档 Shopify 翻 Custom（店主 09-16 起未装 app），fact policy.write_channel=manual 记升档条件。任务清账：废 4（#903 僵尸、#1631/#473/#478 床型簇结构工程搁置）；首批 6 件交办 Summer（#1564/#1343/#1344/#1505/#1314/#1630，邮件 resend 01a1a848）；3 条转机器后判定官再清：#1436 废（客户 10 月口径已推翻）、#1593 并 #1592、#1592 later 等 app。板面阻塞归零。
+- chcnav（board 7）确认已归档；Alvin 定调 VVVIP 纯 PJ 人工，不作产线类比，custom 先例看 Citymed。
+- 坑：capgap 拆单的 splitw 无 sprint 单不进 harness 主拍板窗，转位后要 `--ids` 强制入窗才会排闸A。
+
 ### 2026-11-04 AIRA 工单巡检三刀（ticket #55/#56 + Ctomi #1780 + Mac EPIPE）+ 停滞手工推进批（Alvin 批「无阻塞的话就直接修复bug」）
 
 - **修三刀**（细节见 /data/aira/DEFECTS.md 11-04 四行）：①chat 分线 prompt 教模型写不合法 module "seo" 致委托单整条被丢（97f9d80，加 buildPrompt 回归测试）；②ads_audit 对 listing group SUBDIVISION 拿 ENABLED 硬比必误杀，Google 对 SUBDIVISION 一律回报 PAUSED，改为只核存在与未删（b8f45ba，测试三条）；③worker http 层全局 keep-alive 池复用被 nginx 掐死的闲置连接，长 job 收尾第一发 POST EPIPE 整单报废，改 agent:false 每请求独立连接（58e013d）。
