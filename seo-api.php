@@ -9226,6 +9226,35 @@ if($m==='POST'&&$ROUTE==='/tasks'){
 }
 
 // PATCH /tasks/{id}
+/* 等人件逾期通知邮件（2026-11-04 Alvin 定：真正等人的逾期发通知，SEM=Monica SEO=Summer）。
+   发信走 ops 同款 Resend 通道，key 在本机 /www/wwwroot/.secrets/mail.env 不出机器。
+   收件人映射在此维护；地址为空的角色回 422（调用方跳过留日志），Summer 地址拿到后填进来。
+   调用方：harness 的逾期盘点段（lib/overdue_notify 判定，停 3 天首发、7 天重发防轰炸）。 */
+if($m==='POST'&&$ROUTE==='/ops_notify'){
+    global $WORKER_TKN;
+    $t=bearer();
+    if(!$t)res(401,['error'=>'No auth']);
+    if(!hash_equals($WORKER_TKN,$t)){auth_admin();}
+    $i=input();
+    $roles=['sem'=>'monica@horntech.co.nz','seo'=>'']; /* seo=Summer，邮箱待补 */
+    $role=strtolower(trim((string)($i['role']??'')));
+    if(!isset($roles[$role]))res(400,['error'=>'role 必须是 sem 或 seo']);
+    $to=$roles[$role];
+    if($to==='')res(422,['error'=>'角色 '.$role.' 的收件地址未配置，未发送']);
+    $subject=trim((string)($i['subject']??''));
+    $html=(string)($i['html']??'');
+    if($subject===''||$html==='')res(400,['error'=>'subject 与 html 必填']);
+    $env=@file_get_contents('/www/wwwroot/.secrets/mail.env');
+    if(!$env||!preg_match('/RESEND_KEY=([^\s]+)/',$env,$mk))res(500,['error'=>'mail.env 读不到 RESEND_KEY，未发送']);
+    $ch=curl_init('https://api.resend.com/emails');
+    curl_setopt_array($ch,[CURLOPT_POST=>1,CURLOPT_RETURNTRANSFER=>1,CURLOPT_TIMEOUT=>15,CURLOPT_CONNECTTIMEOUT=>5,
+        CURLOPT_HTTPHEADER=>['Content-Type: application/json','Authorization: Bearer '.$mk[1]],
+        CURLOPT_POSTFIELDS=>json_encode(['from'=>'HornTech <hello@horntech.co.nz>','to'=>[$to],'bcc'=>['hello@horntech.co.nz'],'subject'=>mb_substr($subject,0,180,'UTF-8'),'html'=>$html],JSON_UNESCAPED_UNICODE)]);
+    $out=curl_exec($ch);$code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);
+    if($code<200||$code>=300)res(502,['error'=>'Resend 发送失败 HTTP '.$code,'detail'=>mb_substr((string)$out,0,200,'UTF-8')]);
+    $dec=json_decode((string)$out,true);
+    res(200,['ok'=>true,'to'=>$to,'resend_id'=>is_array($dec)?($dec['id']??''):'']);
+}
 if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     $u=auth_admin();
     ensure_task_module();

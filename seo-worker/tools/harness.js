@@ -963,6 +963,31 @@ async function report(all, sprint, retried) {
     if (!DRY) await call('PATCH', '/tasks/' + id, patch);
   }
 
+  /* 等人件逾期通知（2026-11-04 Alvin 定：真正等人的逾期了发邮件，SEM=Monica，SEO=Summer）。
+     判定与装配在 lib/overdue_notify（停满 3 天首发，盖 [逾期通知] 戳后每 7 天重发）；
+     发信走 seo-api /ops_notify，key 在 250 不出机器。角色地址未配置时端点回 422，
+     这里跳过且不盖章，地址配好后下一轮自然补发。任何失败只记日志不影响本轮。 */
+  try {
+    const overdue = require('../lib/overdue_notify');
+    const picks = overdue.decideNotify(mine, blockers, Date.now());
+    for (const role of ['sem', 'seo']) {
+      const items = picks[role];
+      if (!items || !items.length) continue;
+      if (DRY) { console.log('[dry] 逾期通知 ' + role + '：#' + items.map((i) => i.id).join(' #')); continue; }
+      const bcN = await boardClient();
+      const mail = overdue.buildEmail((bcN && bcN.name) || String(cid), role, items, new Date().toLocaleDateString('sv-SE', { timeZone: 'Pacific/Auckland' }));
+      try {
+        const r = await call('POST', '/ops_notify', { role, subject: mail.subject, html: mail.html });
+        const stamp = '[逾期通知 ' + new Date().toLocaleDateString('sv-SE', { timeZone: 'Pacific/Auckland' }) + ' → ' + role + '] 已邮件通知' + (r && r.to ? ' ' + r.to : '');
+        for (const it of items) await call('PATCH', '/tasks/' + it.id, { result_note_append: stamp });
+        log('逾期通知已发（' + role + '，' + items.length + ' 项）' + (r && r.resend_id ? '，resend ' + r.resend_id : ''));
+      } catch (e) {
+        if (/收件地址未配置/.test(String(e.message))) log('逾期通知跳过（' + role + ' 收件地址未配置）：#' + items.map((i) => i.id).join(' #'));
+        else log('逾期通知发送失败（' + role + '）：' + String(e.message).slice(0, 160));
+      }
+    }
+  } catch (e) { log('逾期通知段跳过：' + e.message); }
+
   // 卡时效刷新（2026-09-29 ticket #9）：数据窗在卡生成时定死，卡在发卡队列里躺久了
   // 数字就是旧的（Haakaa #343 实证：9/7 生成、月底才发，窗口停在 9/6）。已验收未发的卡
   // 生成时间超 7 天自动重排 execute 全量重拉（同任务同反馈链接，改的是数字不是日期标签）。
