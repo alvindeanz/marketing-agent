@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-05 AIRA Shopify 三店清剿轮（Dareu/Goodie/Haakaa，Alvin 令「除真正等人的其他一律完成」）+ #1796 三缺陷连环案
+- 清剿结果：Dareu 6 张机器单（#970/#777/#779/#1064/#1065/#1067）执行落地全收口；Haakaa #346 按放行官 hold 意见缩圈重出 v2（客户确认项整页退出、title 只加不减、不加 NZ 字样），14 对象 applied 带快照；Goodie #1888 Sanrio 博客经 Summer 频道委托发布上线。真正等人件汇总已单独报 Alvin。
+- Kuddles 月报试点流产：#1865 转位进窗后被 Summer 频道砍单，理由成立（#1859 没发布是原单未申报发布 op，report-html-update/report-preview-deploy 本就在白名单，不缺月报执行器），新委托单归 Summer 发起。monthly-report-generate 的 capability_broadcast 已跑：强命中 0，泛断言 23 条未盖（首发教训，泛命中必人眼）。
+- **#1796（Goodie Vendor 统一）三连坑，全记 DEFECTS**：①module=paid 使 execute 按 2591 行路由查 googleads 清单，shopify op 被剥、静默降级分析单还被交付型收口（绕开法：转 onpage 重跑；机制修法待议：op 查家清单而非 module 定清单）；②apply 派发无 per-task 锁，同任务两会话并发实弹写（12709 的 agent 自己发现并停手+记账，立功）；③#1888 的 apply 会话越方案接写 #1796 的 vendor 批量且回执零申报，审计链断（内容恰在已放行方案内，无实害）。
+- #1796 现状：25 个第三方 SKU vendor 已改完并回读核对（快照 clients/_shopseo_snapshots/2026-11-04/）；批量半边实测 vendor=Goodies 还有 **11018 个**（方案前提 838 差 13 倍，10 月存档底子不全），LLM 会话逐只写不成立（2rps 限流），维持停人，需零模型批量执行器（shopseo bulk set-vendor 或 GraphQL bulkOperation）+ 按真实规模重判。工具债认领待 Alvin 批。
+- 坑：shopseo products list 不带 vendor 字段，量库存走 Admin API count/products 分页；SNAP_ROOT 可被 SHOPSEO_SNAPSHOTS 重定向，worker 写的快照在 clients/_shopseo_snapshots/ 不在 tools/shopseo/snapshots/（12709 的 agent 翻错目录误报快照丢失）。
+
 ### 2026-11-04 AIRA 博客闸门松绑 + 月报执行器登记（Alvin 批）（d4a0c9d、59010b3）
 
 - **博客闸门松绑（d4a0c9d）**，Alvin 原话「客户自己会审阅，为啥我们自己卡了又卡」：①出卡盖 [卡签发 YYYY-MM-DD] 戳，满 7 天客户零表态视同同意自动放行（seo-api blog_card_waiting、apply requireBlogPublishConsent、execute 出卡三处同口径，重出卡刷新戳）；②放行官博客族降红线判准（release_review.md 新节 + release_policy v24）：只拦客户禁区、编造我方承诺、法律合规，价格一律市面竞品范围直接过（废客户预批），产品线预确认闸（#838 类）废除；③blogcheck 补内部说明明文拦截（#115 教训）与尾斜杠拦截（#313 族教训），writeback 搬运契约同步；④writeback 话术如实（#1643 教训）。坑：#115 的「编辑注意」整段是明文不是注释，新稿校验和搬运契约此前都只拦注释形态。
