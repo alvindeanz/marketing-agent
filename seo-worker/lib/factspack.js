@@ -57,6 +57,11 @@ function parseReportScope(profile) {
     currency_label: String(s.currency_label || '').trim(),
     compare: String(s.compare || '').trim(),
     market_label: String(s.market_label || '').trim(),
+    /* market_country（ticket #57 / CtoMi #1716）：与 gsc_country 不同，gsc_country 是把
+       全部 GSC 数字收窄到该国，market_country 是在全站口径之外加拉一份该国拆分
+       （市场表、页面级市场对照列、目标词市场排名列），两套数字并排进 pack。
+       值是 GSC 的 ISO3 国别码小写（nzl/aus/usa）。 */
+    market_country: String(s.market_country || '').trim().toLowerCase(),
     lead_events: Array.isArray(s.lead_events) ? s.lead_events.map((e) => String(e || '').trim()).filter(Boolean) : [],
   };
 }
@@ -546,6 +551,17 @@ function mergeChannels(cur, prev) {
       prev_purchases: p.purchases === null || p.purchases === undefined ? null : Number(p.purchases),
       revenue: r.revenue === null || r.revenue === undefined ? null : Number(r.revenue),
       prev_revenue: p.revenue === null || p.revenue === undefined ? null : Number(p.revenue),
+      /* 跳出率与收入/会话（ticket #57 渠道电商列）：铁律不许模型自己做除法，预先算好。 */
+      bounce_rate: r.bounce_rate === null || r.bounce_rate === undefined ? null : Number(r.bounce_rate),
+      prev_bounce_rate: p.bounce_rate === null || p.bounce_rate === undefined ? null : Number(p.bounce_rate),
+      revenue_per_session:
+        r.revenue === null || r.revenue === undefined || !(Number(r.sessions) > 0)
+          ? null
+          : round2(Number(r.revenue) / Number(r.sessions)),
+      prev_revenue_per_session:
+        p.revenue === null || p.revenue === undefined || !(Number(p.sessions) > 0)
+          ? null
+          : round2(Number(p.revenue) / Number(p.sessions)),
       is_organic: isOrganicChannel(r.channel),
     };
   });
@@ -563,6 +579,13 @@ function mergeChannels(cur, prev) {
       prev_purchases: p.purchases === null || p.purchases === undefined ? null : Number(p.purchases),
       revenue: p.revenue === null || p.revenue === undefined ? null : 0,
       prev_revenue: p.revenue === null || p.revenue === undefined ? null : Number(p.revenue),
+      bounce_rate: null,
+      prev_bounce_rate: p.bounce_rate === null || p.bounce_rate === undefined ? null : Number(p.bounce_rate),
+      revenue_per_session: null,
+      prev_revenue_per_session:
+        p.revenue === null || p.revenue === undefined || !(Number(p.sessions) > 0)
+          ? null
+          : round2(Number(p.revenue) / Number(p.sessions)),
       is_organic: isOrganicChannel(name),
     });
   }
@@ -608,6 +631,13 @@ function mergeChannels(cur, prev) {
       prev_purchases: agg.prev_purchases,
       revenue: agg.revenue,
       prev_revenue: agg.prev_revenue,
+      /* 合并行的跳出率是各渠道会话加权才有意义，这里不硬算，置 null。 */
+      bounce_rate: null,
+      prev_bounce_rate: null,
+      revenue_per_session:
+        agg.revenue === null || !(agg.sessions > 0) ? null : round2(agg.revenue / agg.sessions),
+      prev_revenue_per_session:
+        agg.prev_revenue === null || !(agg.prev_sessions > 0) ? null : round2(agg.prev_revenue / agg.prev_sessions),
       is_organic: false,
       share: totalSessions > 0 ? round4(agg.sessions / totalSessions) : null,
       is_muted: true,
@@ -824,6 +854,56 @@ async function gscByDimension(cfg, scope, range, dimension, spamRegex) {
     .filter((r) => r.impressions > 0 || r.clicks > 0);
 }
 
+/* query x page 两维拉取（ticket #57：目标词的「实际排名页面」列）。含 query 维度，
+   匿名查询本来就不在行里，垃圾正则直接走 dimensionFilterGroups。 */
+async function gscByQueryPage(cfg, scope, range, spamRegex) {
+  const res = await gscQueryScoped(cfg, scope, {
+    startDate: range.start,
+    endDate: range.end,
+    dimensions: ['query', 'page'],
+    dimensionFilterGroups: spamFilterGroups(spamRegex),
+    rowLimit: GSC_ROW_LIMIT,
+  });
+  return ((res && res.rows) || []).map((r) => ({
+    query: String((r.keys || [])[0] || ''),
+    page: String((r.keys || [])[1] || ''),
+    clicks: Number(r.clicks) || 0,
+    impressions: Number(r.impressions) || 0,
+    position: Number(r.position) || 0,
+  }));
+}
+
+/* 目标词的实际排名页面：簇内（归一化后含该词全部 token 的查询）各页面按曝光聚合，
+   取曝光最高的页面，并给出该页面在簇内的曝光加权位次。纯函数。 */
+function clusterTopPage(qpRows, keyword) {
+  const tokens = queryTokens(keyword);
+  if (!tokens.length) return null;
+  const byPage = new Map();
+  for (const r of qpRows) {
+    const qt = queryTokens(r.query);
+    if (!tokens.every((t) => qt.indexOf(t) !== -1)) continue;
+    const cur = byPage.get(r.page) || { impressions: 0, clicks: 0, posW: 0 };
+    cur.impressions += r.impressions;
+    cur.clicks += r.clicks;
+    cur.posW += r.position * Math.max(1, r.impressions);
+    byPage.set(r.page, cur);
+  }
+  if (!byPage.size) return null;
+  let best = null;
+  let bestPage = '';
+  for (const [page, v] of byPage.entries()) {
+    if (!best || v.impressions > best.impressions || (v.impressions === best.impressions && v.clicks > best.clicks)) {
+      best = v;
+      bestPage = page;
+    }
+  }
+  return {
+    page: bestPage,
+    impressions: best.impressions,
+    position: round1(best.posW / Math.max(1, best.impressions)),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 周期覆盖天数：环比能不能按总量说
 // ---------------------------------------------------------------------------
@@ -905,7 +985,7 @@ async function ga4Channels(ctx, propertyId, range) {
   const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'sessionDefaultChannelGroup' }],
-    metrics: [{ name: 'sessions' }, { name: 'newUsers' }, { name: 'ecommercePurchases' }, { name: 'purchaseRevenue' }],
+    metrics: [{ name: 'sessions' }, { name: 'newUsers' }, { name: 'ecommercePurchases' }, { name: 'purchaseRevenue' }, { name: 'bounceRate' }],
   });
   return rows.map((r) => ({
     channel: String(r.sessionDefaultChannelGroup || ''),
@@ -913,6 +993,7 @@ async function ga4Channels(ctx, propertyId, range) {
     new_users: Number(r.newUsers) || 0,
     purchases: Number(r.ecommercePurchases) || 0,
     revenue: Number(r.purchaseRevenue) || 0,
+    bounce_rate: r.bounceRate === undefined || r.bounceRate === null ? null : round4(Number(r.bounceRate)),
   }));
 }
 
@@ -989,10 +1070,11 @@ function detectDailyAnomalies(dailyRows) {
 }
 
 async function ga4LandingPages(ctx, propertyId, range) {
+  /* 订单与收入随落地页一起取（ticket #57 落地页组电商列）：leadgen 属性这两列回 0 */
   const rows = await ga4R(ctx, propertyId, {
     dateRanges: [{ startDate: range.start, endDate: range.end }],
     dimensions: [{ name: 'landingPagePlusQueryString' }, { name: 'sessionDefaultChannelGroup' }],
-    metrics: [{ name: 'sessions' }],
+    metrics: [{ name: 'sessions' }, { name: 'ecommercePurchases' }, { name: 'purchaseRevenue' }],
   });
   const byPath = new Map();
   for (const r of rows) {
@@ -1000,10 +1082,14 @@ async function ga4LandingPages(ctx, propertyId, range) {
     /* 去参数合并（ticket #54 第二批）：同一落地页的 fbclid/utm 变体不再拆行，按纯路径聚合 */
     const p = String(r.landingPagePlusQueryString || '').split('?')[0].split('#')[0];
     if (!p) continue;
-    byPath.set(p, (byPath.get(p) || 0) + (Number(r.sessions) || 0));
+    const cur = byPath.get(p) || { sessions: 0, purchases: 0, revenue: 0 };
+    cur.sessions += Number(r.sessions) || 0;
+    cur.purchases += Number(r.ecommercePurchases) || 0;
+    cur.revenue += Number(r.purchaseRevenue) || 0;
+    byPath.set(p, cur);
   }
   return Array.from(byPath.entries())
-    .map(([p, sessions]) => ({ path: p, sessions }))
+    .map(([p, v]) => ({ path: p, sessions: v.sessions, purchases: v.purchases, revenue: round2(v.revenue) }))
     .sort((a, b) => b.sessions - a.sessions);
 }
 
@@ -1298,6 +1384,12 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
   let prevQueryRows = [];
   let curPageRows = [];
   let prevPageRows = [];
+  let curQpRows = [];
+  let marketQueryRows = [];
+  let gscMarkets = null;
+  let gscPagesMarket = null;
+  const marketCountry = (reportScope && reportScope.market_country) || '';
+  const marketLabel = (reportScope && reportScope.market_label) || (marketCountry ? marketCountry.toUpperCase() : '');
   let gscCoverage = null;
   let ga4Coverage = null;
   if (hasGsc) {
@@ -1308,6 +1400,73 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     prevQueryRows = await gscByDimension(cfg, gscScope, per.compare, 'query', spamRegex);
     curPageRows = await gscByDimension(cfg, gscScope, per, 'page', spamRegex);
     prevPageRows = await gscByDimension(cfg, gscScope, per.compare, 'page', spamRegex);
+    /* 目标词实际排名页面的数据源（ticket #57）：query x page 两维，本期一次。 */
+    curQpRows = await gscByQueryPage(cfg, gscScope, per, spamRegex);
+    inputs.gsc_calls += 1;
+    /* 市场拆分（report_scope.market_country，ticket #57 / CtoMi #1716）：全站口径之外
+       加拉一份国别拆分。gsc_country 已经把全口径收窄到单国的客户不该再配 market_country
+       （两套数字会一样），配了就炸，口径说不清就不出报。 */
+    if (marketCountry) {
+      if (gscScope.country) {
+        throw new Error('report_scope 同时配了 gsc_country 与 market_country：全口径已收窄到单国，市场拆分无意义，二选一');
+      }
+      const marketScope = Object.assign({}, gscScope, { country: marketCountry });
+      const curCountryRows = await gscByDimension(cfg, gscScope, per, 'country', spamRegex);
+      const prevCountryRows = await gscByDimension(cfg, gscScope, per.compare, 'country', spamRegex);
+      marketQueryRows = await gscByDimension(cfg, marketScope, per, 'query', spamRegex);
+      const marketPageRows = await gscByDimension(cfg, marketScope, per, 'page', spamRegex);
+      inputs.gsc_calls += 4;
+      const totImp = curCountryRows.reduce((a, r) => a + r.impressions, 0);
+      const totClk = curCountryRows.reduce((a, r) => a + r.clicks, 0);
+      const prevCtyMap = new Map(prevCountryRows.map((r) => [r.key, r]));
+      gscMarkets = {
+        market: marketCountry,
+        market_label: marketLabel,
+        rows: curCountryRows
+          .slice()
+          .sort((a, b) => b.impressions - a.impressions)
+          .slice(0, 10)
+          .map((r) => {
+            const p = prevCtyMap.get(r.key);
+            return {
+              country: r.key,
+              clicks: r.clicks,
+              impressions: r.impressions,
+              ctr: round4(r.ctr),
+              position: round1(r.position),
+              impressions_share: totImp > 0 ? round4(r.impressions / totImp) : null,
+              clicks_share: totClk > 0 ? round4(r.clicks / totClk) : null,
+              prev_clicks: p ? p.clicks : null,
+              prev_impressions: p ? p.impressions : null,
+              prev_position: p ? round1(p.position) : null,
+            };
+          }),
+      };
+      gscPagesMarket = {
+        market: marketCountry,
+        market_label: marketLabel,
+        rows: marketPageRows
+          .slice()
+          .sort((a, b) => b.impressions - a.impressions)
+          .slice(0, 15)
+          .map((r) => {
+            const g = curPageRows.find((x) => x.key === r.key);
+            return {
+              page: r.key,
+              market_clicks: r.clicks,
+              market_impressions: r.impressions,
+              market_ctr: round4(r.ctr),
+              market_position: round1(r.position),
+              all_clicks: g ? g.clicks : null,
+              all_impressions: g ? g.impressions : null,
+              all_ctr: g ? round4(g.ctr) : null,
+              all_position: g ? round1(g.position) : null,
+            };
+          }),
+      };
+      say('gsc: 市场拆分 ' + marketLabel + '（' + marketCountry + '）：国别 ' + curCountryRows.length +
+        ' 行，市场 query ' + marketQueryRows.length + ' 行，市场 page ' + marketPageRows.length + ' 行');
+    }
     gscCoverage = {
       cur: buildCoverage(per, await gscDayCount(cfg, gscScope, per)),
       prev: buildCoverage(per.compare, await gscDayCount(cfg, gscScope, per.compare)),
@@ -1372,6 +1531,10 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
         }),
       // sitemap 对照要另拉一次站点地图，报告不为它多花一次外部请求。
       zero_exposure_pages: [],
+      /* 市场拆分两块（report_scope.market_country 配了才有，否则 null）：
+         markets = 国别表（top 10 按曝光），pages_market = 市场 top 页面与全站对照列。 */
+      markets: gscMarkets,
+      pages_market: gscPagesMarket,
     };
     gaps.push('GSC 页面收录状态与零曝光页未拉取，页面表只含本期有曝光的页面');
   } else {
@@ -1426,8 +1589,8 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const prevLeadMap = leadsByChannel(prevEv);
 
     const merged = mergeChannels(
-      curCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: curLeadMap.get(c.channel) || 0, purchases: c.purchases, revenue: c.revenue })),
-      prevCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: prevLeadMap.get(c.channel) || 0, purchases: c.purchases, revenue: c.revenue }))
+      curCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: curLeadMap.get(c.channel) || 0, purchases: c.purchases, revenue: c.revenue, bounce_rate: c.bounce_rate })),
+      prevCh.map((c) => ({ channel: c.channel, sessions: c.sessions, leads: prevLeadMap.get(c.channel) || 0, purchases: c.purchases, revenue: c.revenue, bounce_rate: c.bounce_rate }))
     );
 
     const orgCur = curCh.filter((c) => isOrganicChannel(c.channel));
@@ -1445,7 +1608,7 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     const organicPrev = { sessions: sum(orgPrev, 'sessions'), new_users: sum(orgPrev, 'new_users'), leads: prevLeadsOrganic };
 
     const prevLpMap = new Map();
-    for (const r of prevLp) prevLpMap.set(r.path, r.sessions);
+    for (const r of prevLp) prevLpMap.set(r.path, r);
 
     ecom = await ga4Ecommerce(gaCtx, ga4Property, per, say);
     if (ecom) inputs.ga4_calls += 1;
@@ -1554,8 +1717,13 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
         return {
           path: r.path,
           sessions: r.sessions,
-          prev_sessions: prev,
-          delta: prev === null ? null : absDelta(r.sessions, prev),
+          prev_sessions: prev === null ? null : prev.sessions,
+          delta: prev === null ? null : absDelta(r.sessions, prev.sessions),
+          /* 落地页电商列（ticket #57）：leadgen 属性两列为 0，呈现层自行决定显隐。 */
+          purchases: r.purchases === undefined ? null : r.purchases,
+          revenue: r.revenue === undefined ? null : r.revenue,
+          prev_purchases: prev === null || prev.purchases === undefined ? null : prev.purchases,
+          prev_revenue: prev === null || prev.revenue === undefined ? null : prev.revenue,
         };
       }),
     };
@@ -1579,9 +1747,12 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
     targetKeywords = targetKeywords.split(/[\n,，]+/).map((s) => s.trim()).filter(Boolean);
   }
   if (!Array.isArray(targetKeywords)) targetKeywords = [];
+  const RANK_MIN_IMPRESSIONS = 20;
   const rankRows = targetKeywords.map((kw) => {
     const cur = clusterWeightedPosition(curQueryRows, kw);
     const prev = clusterWeightedPosition(prevQueryRows, kw);
+    const top = curQpRows.length ? clusterTopPage(curQpRows, String(kw)) : null;
+    const mkt = marketQueryRows.length ? clusterWeightedPosition(marketQueryRows, kw) : null;
     return {
       keyword: String(kw),
       pos: cur.pos,
@@ -1591,11 +1762,24 @@ async function buildFactsPack(ctx, profile, context, period, opts = {}) {
       clicks: cur.clicks,
       is_brand: brand.regex ? brand.regex.test(String(kw)) : false,
       band: rankBand(cur.pos),
+      /* 实际排名页面（ticket #57）：簇内曝光最高的页面，附该页簇内位次。没数据为 null。 */
+      page: top ? top.page : null,
+      page_position: top ? top.position : null,
+      /* 市场位次（report_scope.market_country 配了才有）：同簇口径按市场过滤后的位次。 */
+      market_pos: mkt ? mkt.pos : null,
+      market_impressions: mkt ? mkt.impressions : null,
+      /* 低样本旗（曝光门槛 20，ticket #57 / 2026-11-05 Sungait 季报教训）：簇曝光不足
+         20 次的位次是长尾覆盖不是稳定排名，报告呈现时必须标注，不许当精确排名写。 */
+      low_sample: (cur.impressions || 0) < RANK_MIN_IMPRESSIONS,
     };
   });
   if (!targetKeywords.length) gaps.push('客户档案没有目标关键词表，排名追踪一节本期为空');
   const rankings = {
-    method: '按查询簇曝光加权的 GSC 平均位次，簇 = 归一化后包含该词全部 token 的查询',
+    method: '按查询簇曝光加权的 GSC 平均位次，簇 = 归一化后包含该词全部 token 的查询；低于 ' +
+      RANK_MIN_IMPRESSIONS + ' 次曝光的行带 low_sample 旗，呈现时须标注为长尾覆盖而非稳定排名' +
+      (marketQueryRows.length ? '；market_pos 为 ' + (marketLabel || marketCountry) + ' 市场过滤后的同口径位次' : ''),
+    min_impressions: RANK_MIN_IMPRESSIONS,
+    market_label: marketQueryRows.length ? (marketLabel || marketCountry) : null,
     rows: rankRows,
     summary: {
       total: rankRows.length,

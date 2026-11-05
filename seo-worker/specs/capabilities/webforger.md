@@ -338,6 +338,7 @@ GA4/GTM 两类产出变更方案文档：改什么、改成什么、为什么、
 
 ## 月报产线契约（monthly-report-generate，2026-11-04 登记）
 
+- 取数通道（2026-11-06 定，ticket #57 / San Michelle #1887 教训）：数字唯一来源是 `node /data/aira/seo-worker/tools/report_pack.js <client_id> --month YYYY-MM`，零 LLM 落 clients/<客户>/seo-agent-output/report-<YYYY-MM>.pack.json，方案与执行一律引用 pack 字段，禁止方案里另写取数脚本或引用 /data/aira/scripts 下的旧脚本（Mac worker 上缺依赖缺密钥必中止）。市场拆分表、页面级市场对照、目标词实际排名页面与市场位次、low_sample 曝光门槛旗、渠道跳出率与收入/会话列都在 pack 里（market 面由 profile.report_scope.market_country 开启）。
 - 模板优先级：客户有蒸馏定稿的月报模板（蒸馏卡指定样例，如 Louvresky #1616 / Kuddles #1858 / SDA #1675 产出）按客户模板；没有的用默认 leadgen 模板（specs/report/ 下），电商客户用订单口径变体。模板缺某数据节不编数，节内写明本期未统计。
 - 询盘口径（2026-11-04 Alvin 定）：自然询盘一律以 WF 后台实收为准，按手机邮箱去重；不做任何自动反垃圾判别（会误杀真实 lead），垃圾批次由人用 leads_override 修正；GA4 generate_lead 只做对照列。后台实收取不到的客户，报告内注明口径回退 GA4，并在收口 note 点名该缺口。
 - 产出与发布面同 deliverable-file-write / report-preview-deploy 契约：只写本客户 reports/ 目录，deliverable lint 过，发布 URL 回读 200 回填收口 note。

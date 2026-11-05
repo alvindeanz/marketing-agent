@@ -28,7 +28,13 @@ const { auditAgentItems } = require('../lib/ads_audit');
 
 // 2026-08-29：加机器补验工具。浏览器类检查（横滚、JSON-LD、页面文本、状态码）不再标待人工，worker 自己跑。
 const VERIFY_TOOL = '/data/aira/tools/verify/verify.js';
-const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*),Bash(node ' + VERIFY_TOOL + ':*)';
+/* 月报产线两件套（ticket #57 / San Michelle #1887 教训：方案让 agent 自带取数脚本，
+   Mac worker 缺依赖缺密钥直接中止）：report_pack 零 LLM 落数据包（数字唯一来源），
+   republish 发预览（内置 lint 与 curl 回验）。都在部署目录，两台 worker 依赖凭据齐。 */
+const REPORT_PACK_TOOL = '/data/aira/seo-worker/tools/report_pack.js';
+const REPUBLISH_TOOL = '/data/aira/seo-worker/tools/republish.js';
+const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*),Bash(node ' + VERIFY_TOOL + ':*)' +
+  ',Bash(node ' + REPORT_PACK_TOOL + ':*),Bash(node ' + REPUBLISH_TOOL + ':*),Bash(python3 /data/aira/scripts/deliverable_lint.py:*)';
 const OUTPUT_DIRNAME = 'seo-agent-output';
 const CHANGE_PLAN_PREFIX = 'change-plan-task-';
 const STATUSES = ['success', 'aborted', 'failed'];
