@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-06 AIRA ticket #57/#58 双票收编：shopseo page 面 + 月报产线数据面（Alvin 批「你搞定吧」）
+- **#58 pages 面**：shopseo 1.15.0（/data/aira 仓 82df195）七命令（pages list / page get / create 草稿硬编码拒重名 / update / set-meta / set-title / publish+unpublish），MA 仓 3a3efc9 登记 shopify.md v8 五 op + release_policy v26（page-content-edit/page-publish/page-unpublish 三档新增，create 与 meta-update 沿用 WF 既有登记），worker+api 双发。首个生产闭环当晚落地：Playmate #1900「Delivery & Discreet Packaging」页经 machine_run 转位、闸A do、apply 建页发布，7 项自验全过，前台独立复测 200（playmateadultstore.co.nz/pages/delivery-discreet-packaging）。判定官顺手砍掉一句无出处文案，干净。
+- **#57 月报数据面**：MA 仓 fe6dfa1。factspack 补市场拆分（report_scope.market_country，与 gsc_country 互斥同配即炸）、目标词实际排名页面列（query x page 簇内取曝光最高页）、市场位次列、low_sample 曝光门槛旗（20 次，Sungait 季报教训入产线）、渠道 bounce_rate 与预算好的 revenue_per_session、落地页订单收入列。新工具 tools/report_pack.js 把 buildFactsPack 包成 agent 一条命令（部署目录依赖凭据，两台 worker 通吃）。
+- **#1887 死因与封路**：San Michelle 月报 apply 中止是方案让 agent 跑 /data/aira/scripts 下孤儿取数脚本，Mac worker 缺依赖缺密钥。两份月报产线契约（googleads.md / webforger.md）补取数通道条款：数字唯一来源 report_pack.js，禁止方案自带取数脚本。apply 白名单加 report_pack / republish / deliverable_lint 三件。
+- 验证：CtoMi 2026-10 实包两跑（markets 10 行 NZ 曝光 67%、20 词全带排名页面与 NZ 位次、bounce 全填充），发现并修掉 mergeChannels 入参丢 bounce_rate 一处。测试全绿。CtoMi profile 已配 market_country=nzl。
+
 ### 2026-11-05 AIRA Sungait 执行面收编（Alvin 拍板）+ #1538 转机器位重跑
 - Alvin 拍板：Sungait（board 51）执行面全面收归 Aira 轮转，9 月的过渡期口径彻底作废（board fact 673 已同步更新，历史脉络保留在 fact 原文里）。此后 board 51 的任务闭环归 Aira，与其他 Shopify 船队同口径。
 - 直接起因：#1543（#1538 的 theme section 开关人工拆单）10-29 被以过期口径废弃，但 fact 673 早写明过渡期 9-17/9-24 已分面结束；线上实况是 #1538 条目 0-4 首轮 apply 已落地，唯独开关没翻，集合 body_html 2305 字符正文（带产品内链）因 banner 关闭从未渲染。执行器（theme-section-visibility-update，shopseo 1.14.0）今日已上线，#1538 经 machine_run 转位重判重跑。DEFECTS 已记一行：废人工单必须引 board fact 原文，禁止引记忆。
