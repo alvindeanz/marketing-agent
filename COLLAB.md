@@ -20,6 +20,10 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-05 AIRA Sungait 执行面收编（Alvin 拍板）+ #1538 转机器位重跑
+- Alvin 拍板：Sungait（board 51）执行面全面收归 Aira 轮转，9 月的过渡期口径彻底作废（board fact 673 已同步更新，历史脉络保留在 fact 原文里）。此后 board 51 的任务闭环归 Aira，与其他 Shopify 船队同口径。
+- 直接起因：#1543（#1538 的 theme section 开关人工拆单）10-29 被以过期口径废弃，但 fact 673 早写明过渡期 9-17/9-24 已分面结束；线上实况是 #1538 条目 0-4 首轮 apply 已落地，唯独开关没翻，集合 body_html 2305 字符正文（带产品内链）因 banner 关闭从未渲染。执行器（theme-section-visibility-update，shopseo 1.14.0）今日已上线，#1538 经 machine_run 转位重判重跑。DEFECTS 已记一行：废人工单必须引 board fact 原文，禁止引记忆。
+
 ### 2026-11-05 AIRA shopseo 1.14.0 theme section 面 + 两 op 登记（Goodie #1640 / Sungait #1543 工具债，Alvin 批）
 - 新命令三条（/data/aira 仓 2e5e829）：theme section-toggle（翻 disabled 布尔）、theme add-section（新增 section 插 .order，sections/<type>.liquid 先存防线、拒覆盖既有 id、.order 缺失不自造）、theme restore-json（JSON 模板快照回滚，补齐 restore 通道）。护栏与 set-text 同族：只动 main、写前快照、改后解析、写后字段级回读带 stale-read 重试。
 - 验证：goodiegoodie 实店 dry-run 六用例全过（toggle 差异/幂等/坏 section、add 顺序/坏 type/重复 id）；post-gate jq 变换拿真实 index.json 单测（after 插入、position 钳位两端）。demo 店（horntechdemo，public app）没有 themes scope，实弹回路测不了，首个生产写入按放行流程走。
