@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-05 AIRA shopseo 1.14.0 theme section 面 + 两 op 登记（Goodie #1640 / Sungait #1543 工具债，Alvin 批）
+- 新命令三条（/data/aira 仓 2e5e829）：theme section-toggle（翻 disabled 布尔）、theme add-section（新增 section 插 .order，sections/<type>.liquid 先存防线、拒覆盖既有 id、.order 缺失不自造）、theme restore-json（JSON 模板快照回滚，补齐 restore 通道）。护栏与 set-text 同族：只动 main、写前快照、改后解析、写后字段级回读带 stale-read 重试。
+- 验证：goodiegoodie 实店 dry-run 六用例全过（toggle 差异/幂等/坏 section、add 顺序/坏 type/重复 id）；post-gate jq 变换拿真实 index.json 单测（after 插入、position 钳位两端）。demo 店（horntechdemo，public app）没有 themes scope，实弹回路测不了，首个生产写入按放行流程走。
+- 登记三步齐（MA 仓 95f6ee6）：shopify.md 两行 + 细则段、release_policy v25 两 op reversible、broadcast 跑两轮（强命中 1：Goodie #1640 已盖章；Sungait #1543 未命中，疑已归档或措辞不匹配，该店执行面过渡期归 Aiden，op 已备好随取随用）。worker 两机已部署 rev 95f6ee6。
+- 坑：stores.conf 真身在 /data/aira/tools/stores.conf（ROOT 是脚本目录的上一层），shopseo/ 目录里那份此前并未真的入库（头注写 tracked in git 是愿望），本次两份一并入库对齐，另补 horntechdemo 测试店别名。
+
 ### 2026-11-05 AIRA Shopify 三店清剿轮（Dareu/Goodie/Haakaa，Alvin 令「除真正等人的其他一律完成」）+ #1796 三缺陷连环案
 - 清剿结果：Dareu 6 张机器单（#970/#777/#779/#1064/#1065/#1067）执行落地全收口；Haakaa #346 按放行官 hold 意见缩圈重出 v2（客户确认项整页退出、title 只加不减、不加 NZ 字样），14 对象 applied 带快照；Goodie #1888 Sanrio 博客经 Summer 频道委托发布上线。真正等人件汇总已单独报 Alvin。
 - Kuddles 月报试点流产：#1865 转位进窗后被 Summer 频道砍单，理由成立（#1859 没发布是原单未申报发布 op，report-html-update/report-preview-deploy 本就在白名单，不缺月报执行器），新委托单归 Summer 发起。monthly-report-generate 的 capability_broadcast 已跑：强命中 0，泛断言 23 条未盖（首发教训，泛命中必人眼）。
