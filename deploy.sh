@@ -17,7 +17,9 @@ MAC_STAGING="/data/aira/deploy-staging/seo-worker"; MAC_LIVE="/data/aira/seo-wor
 mac_ssh(){ ssh -i "$MAC_KEY" -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$MAC" "$@"; }
 WORKER_SRC="seo-worker"
 # worker 同步白名单：只有这些进 ros，config.json/secrets/workspace 永不触碰
-WHITELIST=(listener.js runner_host.js lib runners specs)
+# tools 入列（2026-11-06 ticket #57 收尾实证：report_pack/republish 等 agent 可调工具
+# 此前只活在版本库，部署目录没有，月报方案只能走版本库副本的回退路径）。
+WHITELIST=(listener.js runner_host.js lib runners specs tools)
 
 [ -f .deploy-env ] || { echo "缺 .deploy-env（含 ROS_PASS/BT_PASS），拒绝继续"; exit 1; }
 source .deploy-env
