@@ -96,7 +96,8 @@ worker)
   fi
   TS=$(date +%Y%m%d-%H%M%S); BAK="$ROS_DIR/.bak-deploy-$TS"
   echo "[1/6] ros 侧备份到 $BAK"
-  ros_sh "cd $ROS_DIR && mkdir -p $BAK && cp -r ${WHITELIST[*]} $BAK/"
+  # 存在才备：白名单新增目录（如 2026-11-06 的 tools/）首发时线上还没有，cp 不能炸整个部署
+  ros_sh "cd $ROS_DIR && mkdir -p $BAK && for i in ${WHITELIST[*]}; do [ -e \$i ] && cp -r \$i $BAK/; done; true"
   echo "[2/6] rsync 同步白名单（校验和模式）"
   for item in "${WHITELIST[@]}"; do ros_rsync -rc --delete "$WORKER_SRC/$item"; done
   echo "[3/6] 双端哈希清单比对"
