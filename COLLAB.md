@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-09 AIRA ticket #59 收编：GSC sitemap 重提交 + URL Inspection 批查（Alvin 批「做吧」）（42a32d3）
+
+- **gsc_sitemap.js**：列现状 + PUT 重提交，全 worker 唯一用可写 webmasters scope 的位置（取数链路维持 readonly 不动），提交后回读 lastSubmitted 对账不新鲜即报败。前提：SA 在该 GSC 资源权限「完全」（restricted 能列不能提）。Alvin 已给 Sungait 资源补到 Full。
+- **gsc_inspect.js**：URL Inspection API 批查收录 + 富结果 issue，只读 scope，URL 源三选一（直给 / --urls-file / --from-sitemap 子串过滤，Shopify 商品页 `--from-sitemap /products/`），--save 落客户 notes。配额 2000/天/资源，节流 300ms。逐页「请求编入索引」「验证修复」Google 无 API，工具不做。
+- 两个都是人触发 CLI 非 job 类型，不涉 release_policy/能力清单登记。
+- Sungait 实测：重提交成功（lastSubmitted 9-17 旧戳刷到 11-09）；49 商品页批查落 clients/sungait/notes/gsc_inspect_2026-11-09.md 作 Summer 结构化数据改动的改前基线（37 收录 / 12 未收录含 1 个 404、1 个 redirect；37 页富结果 issue，重 ERROR 是 Merchant listings 缺 image，均为 10 月底旧抓取，重抓后复跑对比）。
+- 测试：node tests/ 全套绿，新文件 node --check 过；seo-api.php 本轮未动。部署：worker 两机 42a32d3。ticket #59 已 resolve 回 Summer。
+- 顺手：kiaorakids WF 凭据摆放坑修正（密码必须明文在 notes/webforger_credentials.md，apply_task 只读那里，2026-11-09 job 13597 401 实证），/data/aira/.gitignore 加 `clients/*/notes/*_credentials.md` 兜底。
+
 ### 2026-11-06 AIRA ticket #57/#58 双票收编：shopseo page 面 + 月报产线数据面（Alvin 批「你搞定吧」）
 - **#58 pages 面**：shopseo 1.15.0（/data/aira 仓 82df195）七命令（pages list / page get / create 草稿硬编码拒重名 / update / set-meta / set-title / publish+unpublish），MA 仓 3a3efc9 登记 shopify.md v8 五 op + release_policy v26（page-content-edit/page-publish/page-unpublish 三档新增，create 与 meta-update 沿用 WF 既有登记），worker+api 双发。首个生产闭环当晚落地：Playmate #1900「Delivery & Discreet Packaging」页经 machine_run 转位、闸A do、apply 建页发布，7 项自验全过，前台独立复测 200（playmateadultstore.co.nz/pages/delivery-discreet-packaging）。判定官顺手砍掉一句无出处文案，干净。
 - **#57 月报数据面**：MA 仓 fe6dfa1。factspack 补市场拆分（report_scope.market_country，与 gsc_country 互斥同配即炸）、目标词实际排名页面列（query x page 簇内取曝光最高页）、市场位次列、low_sample 曝光门槛旗（20 次，Sungait 季报教训入产线）、渠道 bounce_rate 与预算好的 revenue_per_session、落地页订单收入列。新工具 tools/report_pack.js 把 buildFactsPack 包成 agent 一条命令（部署目录依赖凭据，两台 worker 通吃）。
