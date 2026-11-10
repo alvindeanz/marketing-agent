@@ -20,6 +20,12 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-11 AIRA Shopify 店面平台级 429：读站纪律订正与适用判据（Alvin 批）
+
+- 起因: Oak #1991 核验内链跑满 55 分钟超时，Midea #1992 按 Retry-After 退避 26 分钟。实测本机出口打任何 Shopify 店（含无关第三方店）的集合页、商品页、products.json 都秒回 429，首页、博客、sitemap 正常，换 UA 无效。查证是 Shopify 2026-07 底起的平台级防爬，不是我们抓太猛。
+- 干了什么: ① SHOPIFY_READ_DOCTRINE 订正为平台级表述，补「核验链接与拉清单走 shopseo-ro」「这几类 URL 不 curl、禁退避循环、禁后台脚本轮询」；② 适用判据由「任务走 shopify 能力清单」改为 isShopifySite（平台档 shopify 或 shopseo 有整名相等的店铺别名），paid 任务路由到 googleads 清单时也给纪律；别名用整名相等，防 WF 站 ctomiau 被前缀匹配成 ctomi；③ Oak（Custom 档无 API）在客户铁律里定：链接不做线上核验，交付注明即可。测试 node 49 套全绿（新增 shopify_doctrine）。
+- 坑: 官方解法是商家后台 Online Store > Preferences > Crawler access 建爬虫签名（三个请求头，按域名，最长 3 个月不可续），没有 Admin API 可建。Alvin 定先不启用，需要看前台渲染的场景再议。chat 泳道工具带里没有 shopseo-ro，遇 429 只能如实说没核成，本次未动。
+
 ### 2026-11-11 AIRA ticket #60：客户版发布判据改看文件，审阅件通知做减法（Alvin 批）（e025692，已部署 api + 双 worker）
 
 - 起因: Monica 在 Midea PAID 频道要求更新已交付的黑五 PMax 客户报告，连续两次拿到审阅件（#1992、#1994），客户链接停在旧版。根因在 execute 分析模式的客户版发布段：判据是「回复正文出现文件名」，#1992 的 agent 改好文件后写「已覆盖原文件」没点名，发布静默跳过且无日志，收口播报照抄成「已覆盖」。之前四次修订成功只是因为回复恰好点了名。同款受害：Haakaa #1986（确认卡没发出去）。

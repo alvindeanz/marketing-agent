@@ -34,21 +34,37 @@ const SHOPSEO_RO = '/data/aira/tools/shopseo/shopseo-ro';
 const ALLOWED_TOOLS = 'Read,Glob,Grep,WebFetch,Bash(curl:*),Bash(' + SHOPSEO_RO + ':*)';
 const OUTPUT_DIRNAME = 'seo-agent-output';
 
-/* Shopify 读站纪律（2026-10-25，Midea #494 三连超时与 LuxeLink #586 同日定型）：Shopify 对
-   Midea/Badger/LuxeLink 三店的 storefront 都开着店级 local_rate_limited（任意出口 IP 秒 429，
-   retry-after 60 的桶等不动），storefront curl 读现状等于把预算烧在退避循环上。execute 阶段
-   读现状一律 admin API 优先（shopseo-ro 只读包装器，拒 --yes 拒写命令），storefront 只做轻探。 */
+/* Shopify 读站纪律（2026-10-25，Midea #494 三连超时与 LuxeLink #586 同日定型；2026-11-11 订正）：
+   Shopify 自 2026-07 底起平台级收紧店面防爬，未带爬虫签名的自动化请求打任何 Shopify 店的
+   集合页、商品页、products.json 都是秒 429（retry-after 60 的桶等不动，换 UA 无效，实测
+   Oak/Midea/Haakaa/Sungait 与无关第三方店同样）；首页、博客文章、sitemap 不受影响。
+   storefront curl 读这几类页面等于把预算烧在退避循环上（Oak #1991 核验内链跑满 55 分钟超时）。
+   execute 阶段读现状与核验链接一律 admin API 优先（shopseo-ro 只读包装器，拒 --yes 拒写命令）。
+   适用判据是「本客户在 shopseo 有店铺别名」而不是任务走哪张能力清单：paid 任务路由到
+   googleads 清单时站还是 Shopify 站（Midea #1992 按 Retry-After 退避 26 分钟实证）。 */
 const SHOPIFY_READ_DOCTRINE = [
   '',
   'Shopify 读站纪律（本客户是 Shopify 站，优先级高于上面的通用读法）：',
-  '- 读线上现状优先走 ' + SHOPSEO_RO + '（shopseo 只读面：--shop <alias> product/collection/article get、',
-  '  products/collections/articles list、redirect list、theme templates；alias 与客户 workspace 目录名一致）。',
+  '- 读线上现状优先走 ' + SHOPSEO_RO + '（shopseo 只读面：--shop <alias> product/collection/article/page get、',
+  '  products/collections/articles/pages list、redirect list、theme templates；alias 与客户 workspace 目录名一致）。',
   '  admin API 的字段值就是事实源：product/collection 的 body_html、title、SEO metafield、status、published_at。',
-  '- storefront 页面 curl 全程最多试 3 次、每次 --max-time 30，不许写退避等待循环：连续 429 是',
-  '  Shopify 店级 local_rate_limited（与你的行为无关，等不动），立即改以 shopseo-ro 回读为事实源，',
-  '  方案里注明「前台渲染未验（429 限流）」即可，不许把 429 当页面故障定性，更不许 sleep 等桶。',
+  '- 核验链接存不存在（稿子里的内链、落地页、集合与商品 URL）同样走 shopseo-ro：按 handle 做',
+  '  collection/product/article/page get，查得到且已发布即链接有效；拉商品清单与集合成员也走它，不抓 products.json。',
+  '- Shopify 平台对未签名的自动化请求限流：集合页、商品页、products.json 的 curl 基本必回 429，',
+  '  这与你的请求频率无关，等不动。这几类 URL 不要 curl；确需看前台渲染时全程最多试 3 次、每次',
+  '  --max-time 30，不许写退避等待循环、不许 sleep 等桶、不许起后台脚本轮询。连续 429 就以',
+  '  shopseo-ro 回读为事实源，交付里注明「前台渲染未验（平台限流）」即可，不许把 429 当页面故障定性。',
   '- 方案第 2 节的「回读核对」设计同规矩：核对步骤写 shopseo 只读命令与期望字段值，不写前台 curl。',
 ].join('\n');
+
+/** 本客户是不是 Shopify 站：平台档是 shopify，或在 shopseo 有店铺别名（不看任务走哪张能力清单）。 */
+function isShopifySite(platform, profile, storesText) {
+  if (capabilities.slugPlatform(platform) === 'shopify') return true;
+  if (capabilities.slugPlatform(profile && (profile.platform || profile.cms)) === 'shopify') return true;
+  // 别名要整名相等：storeFor 的前缀匹配会把 WF 站 ctomiau 认成 Shopify 店 ctomi。
+  const st = require('../lib/shopifylink').storeFor(profile, storesText);
+  return !!st && st.alias === String((profile && profile.workspace_dir) || '').toLowerCase();
+}
 const CHANGE_PLAN_PREFIX = 'change-plan-task-';
 
 // The blog SOP travels with the worker. No SOP, no post: writing SEO copy off
@@ -2709,7 +2725,7 @@ async function runOne(ctx, context, workspace, taskId) {
        把 card_data 契约、规格全文、schema 注进 prompt，模型只产数据不写 HTML。 */
     if (confKind) prompt += '\n' + cardDataContract(confKind);
   }
-  if (capabilities.slugPlatform(platform) === 'shopify') prompt += '\n' + SHOPIFY_READ_DOCTRINE;
+  if (isShopifySite(platform, profile)) prompt += '\n' + SHOPIFY_READ_DOCTRINE;
 
   const reportsBefore = htmlMtimes(path.join(workspace, 'reports'));
   const res = await runClaude(cfg, {
@@ -3043,6 +3059,8 @@ module.exports = {
   run,
   htmlMtimes,
   clientFilesToPublish,
+  isShopifySite,
+  SHOPIFY_READ_DOCTRINE,
   liveVerifyExtraPaths,
   writebackSource,
   revisionCheck,
