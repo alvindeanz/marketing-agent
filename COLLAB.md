@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-11 AIRA ticket #60：客户版发布判据改看文件，审阅件通知做减法（Alvin 批）（e025692，已部署 api + 双 worker）
+
+- 起因: Monica 在 Midea PAID 频道要求更新已交付的黑五 PMax 客户报告，连续两次拿到审阅件（#1992、#1994），客户链接停在旧版。根因在 execute 分析模式的客户版发布段：判据是「回复正文出现文件名」，#1992 的 agent 改好文件后写「已覆盖原文件」没点名，发布静默跳过且无日志，收口播报照抄成「已覆盖」。之前四次修订成功只是因为回复恰好点了名。同款受害：Haakaa #1986（确认卡没发出去）。
+- 干了什么: ① execute_task 跑模型前后对 reports/*.html 拍 mtime 快照，新建或改过的一律发布（不跨机器比时钟），*.pending.html 除外，点名规则保留作并集，seo-agent-output/ 只认点名；② seo-api deliver_notify 在 result_note 已有「客户版: URL」行时不再发「交付物就绪请过目」，收口回合是唯一的嘴，命中记 audit seo_deliver_notify_skip。测试: node 48 套全绿（新增 client_publish 回放 #1992 真实回复），PHP 四套 47/24/21/10 全绿，php -l 过。
+- 坑: 这是关节红线的又一例，路由动作挂在申报文本的字符串匹配上。评审时砍掉了两刀没做: 发布后回读对账加停人闸（洞堵上后该状态构造上不存在，加闸无命中可言）、needs-op 原地续跑（单样本且由本洞逼出，动放行凭证语义不值）。
+- 顺带发现未修: 今天 Shopify 店面对本机出口持续回 429（Midea、Oak 两家），Oak #1991 因链接核验退避等待跑满 55 分钟超时，#1998 重开后同样在退避；另 agent 用 `pgrep -f 脚本名` 等后台脚本会自匹配永不退出。两条都待议。
+
 ### 2026-11-09 AIRA ticket #59 收编：GSC sitemap 重提交 + URL Inspection 批查（Alvin 批「做吧」）（42a32d3）
 
 - **gsc_sitemap.js**：列现状 + PUT 重提交，全 worker 唯一用可写 webmasters scope 的位置（取数链路维持 readonly 不动），提交后回读 lastSubmitted 对账不新鲜即报败。前提：SA 在该 GSC 资源权限「完全」（restricted 能列不能提）。Alvin 已给 Sungait 资源补到 Full。
