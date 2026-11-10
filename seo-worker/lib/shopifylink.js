@@ -38,6 +38,15 @@ function storeFor(profile, storesText) {
   return null;
 }
 
+/** 整名相等的店铺别名（给读站纪律与 chat 工具带用）。storeFor 的前缀匹配会把 WF 站
+    ctomiau 认成 Shopify 店 ctomi，授工具与发纪律不能吃这个误差。没有返回空串。 */
+function exactAlias(profile, storesText, wsName) {
+  // wsName：已解析的工作区目录名（profile.workspace_dir 为空、目录由域名推导的客户也认得出）
+  const ws = String(wsName || (profile && profile.workspace_dir) || '').toLowerCase();
+  const st = storeFor({ workspace_dir: ws }, storesText);
+  return st && st.alias === ws ? st.alias : '';
+}
+
 function safeRead(f) {
   try { return fs.readFileSync(f, 'utf8'); } catch (e) { return ''; }
 }
@@ -228,6 +237,7 @@ async function syncClientLinks(api, clientId, profile, log, deps) {
 module.exports = {
   parseStores,
   storeFor,
+  exactAlias,
   linkFor,
   articleRefOf,
   isShopifyBlogTask,

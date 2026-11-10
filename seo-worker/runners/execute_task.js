@@ -58,12 +58,10 @@ const SHOPIFY_READ_DOCTRINE = [
 ].join('\n');
 
 /** 本客户是不是 Shopify 站：平台档是 shopify，或在 shopseo 有店铺别名（不看任务走哪张能力清单）。 */
-function isShopifySite(platform, profile, storesText) {
+function isShopifySite(platform, profile, storesText, wsName) {
   if (capabilities.slugPlatform(platform) === 'shopify') return true;
   if (capabilities.slugPlatform(profile && (profile.platform || profile.cms)) === 'shopify') return true;
-  // 别名要整名相等：storeFor 的前缀匹配会把 WF 站 ctomiau 认成 Shopify 店 ctomi。
-  const st = require('../lib/shopifylink').storeFor(profile, storesText);
-  return !!st && st.alias === String((profile && profile.workspace_dir) || '').toLowerCase();
+  return !!require('../lib/shopifylink').exactAlias(profile, storesText, wsName);
 }
 const CHANGE_PLAN_PREFIX = 'change-plan-task-';
 
@@ -2725,7 +2723,7 @@ async function runOne(ctx, context, workspace, taskId) {
        把 card_data 契约、规格全文、schema 注进 prompt，模型只产数据不写 HTML。 */
     if (confKind) prompt += '\n' + cardDataContract(confKind);
   }
-  if (isShopifySite(platform, profile)) prompt += '\n' + SHOPIFY_READ_DOCTRINE;
+  if (isShopifySite(platform, profile, undefined, path.basename(workspace))) prompt += '\n' + SHOPIFY_READ_DOCTRINE;
 
   const reportsBefore = htmlMtimes(path.join(workspace, 'reports'));
   const res = await runClaude(cfg, {

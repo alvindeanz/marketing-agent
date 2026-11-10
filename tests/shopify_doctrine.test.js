@@ -27,4 +27,29 @@ t('纪律正文覆盖链接核验与禁退避', () => {
   assert.ok(/不许写退避等待循环/.test(SHOPIFY_READ_DOCTRINE));
   assert.ok(/products\.json/.test(SHOPIFY_READ_DOCTRINE));
 });
+
+/* chat 工具带的 Shopify 只读面（2026-11-11）：别名钉死本客户，非 Shopify 客户不给。 */
+const chat = require('../seo-worker/runners/chat');
+const link = require('../seo-worker/lib/shopifylink');
+t('exactAlias 整名相等才给：ctomiau 不吃 ctomi', () => {
+  assert.strictEqual(link.exactAlias({ workspace_dir: 'midea' }, STORES), 'midea');
+  assert.strictEqual(link.exactAlias({ workspace_dir: 'ctomiau' }, 'ctomi=ctomi-nz.myshopify.com\n'), '');
+  assert.strictEqual(link.exactAlias({ workspace_dir: 'oakfurniture' }, STORES), '');
+  assert.strictEqual(link.exactAlias({ workspace_dir: null }, STORES, 'midea'), 'midea', '档案没填 workspace_dir 用已解析目录名');
+  assert.strictEqual(link.exactAlias({}, STORES, 'ctomiau'), '');
+});
+t('chat 工具带：有别名才出 shopseo-ro，且前缀钉死 --shop 本客户', () => {
+  const withShop = chat.chatTools('https://mideahomes.co.nz/', 'midea');
+  assert.ok(withShop.split(',').includes('Bash(/data/aira/tools/shopseo/shopseo-ro --shop midea:*)'));
+  assert.ok(!/shopseo/.test(chat.chatTools('https://kuddles.co.nz/', '')));
+  assert.ok(!/shopseo/.test(chat.chatTools('https://x.co.nz/', 'a b; rm')), '别名带怪字符不授');
+  assert.ok(!/shopseo\/shopseo[ :]/.test(withShop), '只授只读包装器不授写 CLI');
+});
+t('chat prompt：Shopify 客户才出只读查询说明', () => {
+  const base = { clientName: 'L', title: 't', briefing: 'B', messages: [] };
+  const p = chat.buildPrompt(Object.assign({ shopAlias: 'midea' }, base));
+  assert.ok(p.includes('shopseo-ro --shop midea'));
+  assert.ok(p.includes('429'));
+  assert.ok(!chat.buildPrompt(base).includes('shopseo-ro'));
+});
 console.log('\n' + pass + ' passed');
