@@ -423,6 +423,10 @@ function job_is_lock_retryable($e){
     return (strpos($msg,'1213')!==false&&stripos($msg,'deadlock')!==false)
         ||(strpos($msg,'1205')!==false&&stripos($msg,'lock wait timeout')!==false);
 }
+/* 交付时客户版是否已发布：execute 发布成功才会在 result_note 落「客户版: URL」行。 */
+function note_has_client_version($note){
+    return (bool)preg_match('/^客户版: https?:\/\/\S+/mu',(string)$note);
+}
 /* JOBS-PURE-END */
 
 /* worker 心跳表（2026-10-14，ros 熔断静默 3.5 天教训）。第一性：护栏触发必须有人看见，
@@ -1853,6 +1857,12 @@ function deliver_notify($tid,$text,$by='seo-worker'){
     if(!$t)return;
     $root=chat_root_inbox((string)$t['origin']);
     if(!$root)return;
+    /* 客户版已发布的交付不发审阅件通知（2026-11-11 ticket #60）：收口回合会带客户链接亲口报，
+       再发一条「请过目内部审阅页」是第二张嘴，操作员要的是改好的报告不是审阅件。 */
+    if(note_has_client_version((string)$t['result_note'])){
+        audit('seo-worker','seo_deliver_notify_skip',(string)$tid,['reason'=>'client version published']);
+        return;
+    }
     $key='[交付已通知 '.gmdate('Y-m-d').']';
     if(strpos((string)$t['result_note'],$key)!==false)return;
     task_append_note($tid,$key);

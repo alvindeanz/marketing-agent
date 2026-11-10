@@ -2578,6 +2578,42 @@ async function downloadTaskAttachments(ctx, task, workspace) {
   }
 }
 
+/** 目录下全部 .html 的 mtime 快照（跑模型前拍一张，跑完比对出本任务改过哪些）。 */
+function htmlMtimes(dir) {
+  const snap = {};
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (f.endsWith('.html')) snap[f] = fs.statSync(path.join(dir, f)).mtimeMs;
+    }
+  } catch (_) { /* 目录不存在 = 空快照 */ }
+  return snap;
+}
+
+/* 客户版发布清单（2026-11-11 ticket #60）。reports/ 下本任务跑模型期间新建或改过的 HTML
+   一律发布：判据是文件本身变没变（跑前跑后 mtime 快照比对，不跨机器比时钟）。
+   旧判据要求回复正文出现文件名，Midea #1992 的 agent 改完写「已覆盖原文件」没点名，
+   发布被静默跳过，客户链接停在旧版，操作员同一句指令说了三遍。
+   *.pending.html 是待放行草稿约定（template_distill_spec），不自动发。
+   点名规则保留作并集：回复点了名且 6 小时内改过的照发；seo-agent-output/ 只认点名，
+   那里有 runner 自己落的内部审阅壳。 */
+function clientFilesToPublish(workspace, output, cardHtmlName, reportsBefore, nowMs) {
+  const now = nowMs || Date.now();
+  const before = reportsBefore || {};
+  const reportsDir = path.join(workspace, 'reports');
+  const fresh = [];
+  for (const rdir of [reportsDir, path.join(workspace, 'seo-agent-output')]) {
+    if (!fs.existsSync(rdir)) continue;
+    for (const f of fs.readdirSync(rdir)) {
+      if (!f.endsWith('.html') || fresh.some((x) => x.f === f)) continue;
+      const mtime = fs.statSync(path.join(rdir, f)).mtimeMs;
+      const named = (String(output).indexOf(f) !== -1 || f === cardHtmlName) && now - mtime < 6 * 3600 * 1000;
+      const changed = rdir === reportsDir && before[f] !== mtime && !f.endsWith('.pending.html');
+      if (named || changed) fresh.push({ rdir, f });
+    }
+  }
+  return fresh;
+}
+
 async function runOne(ctx, context, workspace, taskId) {
   const { cfg, api, log, job } = ctx;
   const profile = (context && context.profile) || {};
@@ -2675,6 +2711,7 @@ async function runOne(ctx, context, workspace, taskId) {
   }
   if (capabilities.slugPlatform(platform) === 'shopify') prompt += '\n' + SHOPIFY_READ_DOCTRINE;
 
+  const reportsBefore = htmlMtimes(path.join(workspace, 'reports'));
   const res = await runClaude(cfg, {
     prompt,
     cwd: workspace,
@@ -2863,18 +2900,7 @@ async function runOne(ctx, context, workspace, taskId) {
     try {
       /* 扫描目录补 seo-agent-output/（2026-09-21，ideal #798 实证：agent 把卡写去那里，
          发布段只扫 reports/ 导致客户版链接没生成，人工 republish 又补了裸链接）。 */
-      const scanDirs = [path.join(workspace, 'reports'), path.join(workspace, 'seo-agent-output')];
-      const fresh = [];
-      for (const rdir of scanDirs) {
-        if (!fs.existsSync(rdir)) continue;
-        for (const f of fs.readdirSync(rdir)) {
-          // 产线渲染的确认卡 HTML 是 runner 落的盘，文件名不在模型 output 里，点名放行
-          if (!f.endsWith('.html') || (output.indexOf(f) === -1 && f !== cardHtmlName)) continue;
-          if (Date.now() - fs.statSync(path.join(rdir, f)).mtimeMs >= 6 * 3600 * 1000) continue;
-          if (fresh.some((x) => x.f === f)) continue;
-          fresh.push({ rdir, f });
-        }
-      }
+      const fresh = clientFilesToPublish(workspace, output, cardHtmlName, reportsBefore);
       for (const { rdir, f } of fresh) {
         // 发布前跑一遍完整 Python 交付 lint，结果盖到卡上（2026-09-17 P1 核实：worker 无头
         // claude -p 不加载 /data/aira/.claude 的 PostToolUse lint 钩子，blogcheck.js 又只
@@ -3015,6 +3041,8 @@ async function run(ctx) {
 
 module.exports = {
   run,
+  htmlMtimes,
+  clientFilesToPublish,
   liveVerifyExtraPaths,
   writebackSource,
   revisionCheck,

@@ -77,5 +77,13 @@ t('其他错误不重试',function(){
     eq(job_is_lock_retryable(new RuntimeException('1205 Lock wait timeout exceeded')),false,'非 PDOException');
 });
 
+t('客户版已发布判定：只认行首「客户版: URL」（ticket #60 审阅件通知减法）',function(){
+    eq(note_has_client_version("客户版: https://agencyreport.horntech-dev.com/reports/midea/x.html?t=1989&k=abc\n预览: https://a/b"),true,'首行');
+    eq(note_has_client_version("摘要\n客户版: https://a.example/x.html\n其余"),true,'中间行');
+    eq(note_has_client_version("预览: https://agencyreport.horntech-dev.com/reports/midea/preview/task-1992.html"),false,'只有预览');
+    eq(note_has_client_version("客户版发布失败，卡上会缺客户版: 行"),false,'行内提及不算');
+    eq(note_has_client_version(''),false,'空');
+});
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail?1:0);
