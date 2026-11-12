@@ -520,7 +520,9 @@ function checkDraft(draft, ctx) {
     errors.push('social_message 里必须保留 ' + PREVIEW_TOKEN + ' 占位符，由 runner 替换成真实预览链接');
   }
   const socialLen = social.replace(PREVIEW_TOKEN, '').replace(/\s+/g, '').length;
-  if (socialLen < SOCIAL_MIN || socialLen > SOCIAL_MAX) {
+  /* 上限是写给模型的目标不是毙稿线（2026-11-13 Alvin 批，Power Dekor #2067：整篇新稿因话术 167 字被扔）。
+     话术是人转发前要过目的，长十几个字人能删；只有短到没内容、或长到两倍以上（成了小作文）才拦。 */
+  if (socialLen < SOCIAL_MIN || socialLen > SOCIAL_MAX * 2) {
     errors.push('social_message 去掉占位符和空白后 ' + socialLen + ' 字，应在 ' + SOCIAL_MIN + ' 到 ' + SOCIAL_MAX + ' 字之间');
   }
   if (!/[一-鿿]/.test(social)) errors.push('social_message 必须是中文');

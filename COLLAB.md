@@ -20,6 +20,14 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-13 AIRA 确认卡等客户的改稿单不再排发布 + 话术上限不毙稿（Alvin 批「第一性原理决策后做完」）
+
+- 病：chatw 改稿单 ops 是 blog-draft，result 分派里的发布凭证前置按 ops 含 blog-publish 才拦，拦不到；auto 档直落 apply，被 apply 侧同意闸拦下，白烧 failed job 加熔断通知。#2045、#2072、#2073 两天三撞。
+- 修（seo-api.php，POST /tasks/{id}/result 的 chatw 分支开头）：改看载荷，blog_card_waiting 为真就不排 apply，任务留 review，note 记 [wait-card]，audit seo_task_dispatch_wait_card。publish_consent_resume 同步认 review 且带 [wait-card] 的单，客户点同意即续排。豁免与误杀出口全随 blog_card_waiting（发布权委托、卡满 7 天、人工 decide、代确认）。
+- blogcheck：social_message 上限从毙稿线改成目标，超过 2 倍（300 字）才拦，下限不动。起因 Power Dekor #2067 整篇新稿因话术 167 字被扔。
+- 未验证：客户点同意后的续排只读过代码，没有真单走过；本机无 php，语法靠 deploy 的远端 php -l。
+- 已知缺口（没修）：chat 泳道的卡满 7 天视同同意后由谁排 apply，没查到明确的续接点，等第一张到期的单验证。
+
 ### 2026-11-12 AIRA 博客改稿改成原地改（Alvin 批，第一性原理重做，不再给校验器补例外）
 
 - 起因: agent 工单 7 条执行失败里 5 条是博客小改稿（Louvresky #2006/#2007/#2016/#2017 换图删图，Sammichelle #2042 改三句）。改三句话、删一张图，系统却让模型整篇重新生成，再拿新稿全套契约验，死在字数、配图数、H2 句式、话术长度、原图必须保留这些和任务无关甚至和任务相反的规则上。同病 10-23 已补过两轮分支（ticket #46/#48）。

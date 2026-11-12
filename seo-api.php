@@ -3065,6 +3065,18 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     if(strpos((string)($cr['origin']??''),'chatw:')===0){
         /* 频道消息统一走 hold_notify（按 origin 自查根），这里不再直接插频道行（2026-10-27） */
         $cidW=(int)($cr['client_id']??0);
+        /* 确认卡已出、客户没表态的博客单不排 apply（2026-11-13 Alvin 批，#2045/#2072/#2073 两天三撞）：
+           chatw 改稿单的 ops 是 blog-draft 不带 blog-publish，下面的发布凭证前置按申报词匹配拦不到，
+           auto 档直落 apply，被 apply 侧同意闸拦下，白烧一个 failed job 加一次熔断通知。
+           这里改看载荷：卡在且无表态（blog_card_waiting，与放行官/L0/批量放行四处同一判据）就不起跑，
+           任务留在 review 等客户。豁免面与误杀出口全随 blog_card_waiting：发布权委托客户、卡满 7 天
+           视同同意都不算等客户照常流转；人工 decide 放行与代确认 proxy 照常可用。命中记 audit。 */
+        $fcW=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$fcW->execute([$tid]);$fcRow=$fcW->fetch();
+        if($fcRow&&blog_card_waiting($fcRow)){
+            task_append_note($tid,'[wait-card] 确认卡已出等客户表态，不排 apply；客户在卡上同意即自动续排发布');
+            audit('seo-worker','seo_task_dispatch_wait_card',(string)$tid,[]);
+            res(200,['ok'=>true,'dispatch_grade'=>'wait-card']);
+        }
         $seenW=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload=?");
         $seenW->execute([$cidW,json_encode(['task_ids'=>[$tid]],JSON_UNESCAPED_UNICODE)]);
         $rw=$seenW->fetch();
@@ -6407,7 +6419,7 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
 function publish_consent_resume($tid,$choice,$item){
     if($choice!=='agree'||$item!=='publish_blog')return;
     try{
-        $wq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE client_id=(SELECT client_id FROM seo_tasks WHERE id=?) AND status='blocked' AND result_note LIKE '%[wait-publish-consent]%' AND (id=? OR detail LIKE ? OR result_note LIKE ?) LIMIT 5");
+        $wq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE client_id=(SELECT client_id FROM seo_tasks WHERE id=?) AND ((status='blocked' AND result_note LIKE '%[wait-publish-consent]%') OR (status='review' AND result_note LIKE '%[wait-card]%')) AND (id=? OR detail LIKE ? OR result_note LIKE ?) LIMIT 5"); /* [wait-card]：chatw 改稿单卡在等客户（2026-11-13），同意落库同样续排 */
         $wq->execute([$tid,$tid,'%#'.$tid.'%','%#'.$tid.'%']);
         foreach($wq->fetchAll() as $wt){
             $wtid=(int)$wt['id'];
