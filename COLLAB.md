@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-13 AIRA 改稿可换封面（ticket #61 Summer 提报，Sammichelle #2080 实证，Alvin 批）
+
+- 病：封面是文章字段 meta.ogImage，新稿配图工序一直在写；改稿（原地改）可改字段只有正文、title、excerpt、meta_description，封面够不着。chat worker 对人回「WebForger 没有换封面的操作」，#2080 零改动收口。是我们没开这个动作，不是平台不支持。
+- 修：blogedit.applyEdits 收 cover_image（只收 /assets/ 图片路径，形状校验）；runner 拿平台素材库清单零模型核对存在才放行（首轮与审稿定点修两处），写回时 meta 整块带现值再覆盖动过的键；改稿 prompt 展示当前封面并说明用法；chat prompt 加一条「换封面走 blog-draft 改稿单」；capabilities/webforger.md 登记。测试 4 例在 tests/blogedit.test.js。
+- 顺带发现：#2073 只换了正文图，封面字段没动，但客户话术写了「封面图换成了男士背包原图」，与实际不符。
+- 未验证：没有真单走过换封面这条路；本篇草稿的封面由我手动 PATCH（dead end 擦屁股，只此一篇）。
+
 ### 2026-11-13 AIRA 确认卡等客户的改稿单不再排发布 + 话术上限不毙稿（Alvin 批「第一性原理决策后做完」）
 
 - 病：chatw 改稿单 ops 是 blog-draft，result 分派里的发布凭证前置按 ops 含 blog-publish 才拦，拦不到；auto 档直落 apply，被 apply 侧同意闸拦下，白烧 failed job 加熔断通知。#2045、#2072、#2073 两天三撞。

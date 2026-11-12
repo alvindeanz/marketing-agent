@@ -147,5 +147,34 @@ t('更长 slug 的一部分不算提到', () => {
   assert.deepStrictEqual(E.slugsMentioned('见 best-glass-roof-pergola-nz-vs-louvre-roof-guide', SLUGS), []);
 });
 
+console.log('封面字段（ticket #61，Sammichelle #2080 回放）');
+const COVER_BASE = { title: 't', slug: 's', category: 'c', keyword: 'k', excerpt: 'e', meta_description: 'm',
+  body: 'Intro paragraph.\n\n![a](/assets/x.webp)\n', cover_image: '/assets/1794466385749-slv72w-hero-1-small.jpg' };
+t('只换封面、正文不动：不算 noop，changed 只有 cover_image，正文逐字不变', () => {
+  const r = E.applyEdits(COVER_BASE, { edits: [], cover_image: '/assets/1792541374909-xs9vzc-gemini_generated_image_-4-.webp', social_message: '话术' });
+  assert.ok(r.ok, r.errors.join(' | '));
+  assert.strictEqual(r.noop, false);
+  assert.deepStrictEqual(r.changed, ['cover_image']);
+  assert.strictEqual(r.draft.cover_image, '/assets/1792541374909-xs9vzc-gemini_generated_image_-4-.webp');
+  assert.strictEqual(r.draft.body_markdown, COVER_BASE.body);
+});
+t('没交 cover_image：封面保持原值，不进 changed', () => {
+  const r = E.applyEdits(COVER_BASE, { edits: [{ find: 'Intro paragraph.', replace: 'New intro.' }], social_message: '话术' });
+  assert.ok(r.ok);
+  assert.deepStrictEqual(r.changed, ['body']);
+  assert.strictEqual(r.draft.cover_image, COVER_BASE.cover_image);
+});
+t('交的封面和现值相同：不算改动', () => {
+  const r = E.applyEdits(COVER_BASE, { edits: [], cover_image: COVER_BASE.cover_image, social_message: '话术' });
+  assert.ok(r.ok);
+  assert.strictEqual(r.noop, true);
+});
+t('外链与编造路径被拦', () => {
+  for (const bad of ['https://cdn.example.com/a.jpg', '/products/vanguard/', 'assets/a.jpg', '/assets/a.jpg?x=1"><script>']) {
+    const r = E.applyEdits(COVER_BASE, { edits: [], cover_image: bad, social_message: '话术' });
+    assert.ok(!r.ok && r.errors.some((e) => e.indexOf('cover_image') > -1), bad);
+  }
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

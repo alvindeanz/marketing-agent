@@ -1341,6 +1341,9 @@ function blogEditContract() {
     '- 新增一段文字：find 取插入点前面那一句原文，replace 写「那一句原文 + 新增内容」。',
     '- 只有任务明确要求时，才在 json 里加 "title"、"excerpt"、"meta_description" 这三个字段给新值；',
     '  没要求就不要出现这些字段。slug、分类、关键词不能改。',
+    '- 换文章封面图（顶部 hero，也是分享图）：封面是文章上的独立字段，不在正文里，edits 改不到它。任务要求换封面时，',
+    '  在 json 里加 "cover_image": "/assets/..."，值必须是站内素材库里已有的图片路径（例如产品页图库里的原图，',
+    '  用工具打开页面核实过）。不许外链、不许编造。任务没要求换封面就不要出现这个字段。',
     '- social_message 是我们发给客户的微信消息：中文，口吻是「我们替您运营站点」，照实说这次按意见改了',
     '  哪几处、请他看看是否合适。不吹嘘，不写 SEO 术语，不写 emoji，不写破折号。链接位置写 {PREVIEW_URL}。',
     '',
@@ -1378,6 +1381,8 @@ function buildBlogRevisePrompt(opts) {
       '- 新加的站内链接只准用下面清单里的真实路径，带尾斜杠：',
       (opts.allowedPaths || []).map((p) => '   ' + p).join('\n'),
       '- 不编造数字、价格、承诺；拿不准的事实不写。',
+      '',
+      '当前封面图（文章顶部 hero，独立字段，不在正文里）：' + (opts.currentCover || '（未设置）'),
       '',
       '当前草稿全文（slug ' + slug + '，find 从这里逐字照抄）',
       '=====',
@@ -1917,6 +1922,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     registryText,
     editMode,
     allowedPaths,
+    currentCover: String(((targetPost || {}).meta || {}).ogImage || ''),
   };
 
   const clientRules = clientRulesBlock(cfg, workspace, log);
@@ -1959,6 +1965,20 @@ async function runBlogTask(ctx, context, workspace, task) {
   const editBase = {
     title: strOf(tp.title), slug, category: strOf(tp.category), keyword: strOf(tp.keyword),
     excerpt: strOf(tp.excerpt), meta_description: strOf((tp.meta || {}).description), body: currentBody,
+    cover_image: strOf((tp.meta || {}).ogImage),
+  };
+  /* 新封面必须是站内素材库里真有的图（零模型核对，读平台素材清单）。读不到清单按核不了处理，不放行。 */
+  const coverProblem = async (cand) => {
+    if (!editMode || cand.changed.indexOf('cover_image') === -1) return '';
+    try {
+      const r = await client.req('GET', '/api/content/' + encodeURIComponent(client.siteId) + '/media');
+      const items = Array.isArray(r) ? r : (r && (r.items || r.media || r.files)) || [];
+      const want = cand.draft.cover_image;
+      const hit = items.some((m) => m && (m.url === want || '/' + String(m.key || '') === want));
+      return hit ? '' : 'cover_image 在站内素材库里找不到，只能用素材库已有的图片路径：' + want;
+    } catch (e) {
+      return 'cover_image 核不了（读站内素材库失败：' + e.message + '），这一轮不换封面，去掉 cover_image 字段';
+    }
   };
   const checkable = (d) => {
     const c = Object.assign({}, d);
@@ -2053,6 +2073,12 @@ async function runBlogTask(ctx, context, workspace, task) {
       log('task ' + taskId + '：两次核对都判定无需改动，按「核实后无需改动」交付，线上稿不动');
       break;
     }
+    const coverErr = await coverProblem(cand);
+    if (coverErr) {
+      lastErrors = [coverErr];
+      log('task ' + taskId + '：' + coverErr);
+      continue;
+    }
     let attemptCtx = checkCtx;
     try {
       const extraPaths = await liveVerifyExtraPaths(
@@ -2117,11 +2143,13 @@ async function runBlogTask(ctx, context, workspace, task) {
       if (read.ok && cand2.ok) {
         /* 原地改第二轮的底稿字段沿用第一轮已改的值，话术没重交就沿用第一轮的。 */
         if (editMode) {
-          for (const f of ['title', 'excerpt', 'meta_description']) {
+          for (const f of ['title', 'excerpt', 'meta_description', 'cover_image']) {
             if (cand2.changed.indexOf(f) === -1) cand2.draft[f] = draft[f];
           }
         }
-        const v2 = judge(cand2.draft, checkCtx);
+        const cover2 = await coverProblem(cand2);
+        if (cover2) log('task ' + taskId + '：定点修改的封面没过核对，保留上一版 :: ' + cover2);
+        const v2 = cover2 ? { ok: false, errors: [cover2] } : judge(cand2.draft, checkCtx);
         if (v2.ok) {
           draft = cand2.draft;
           for (const f of cand2.changed) editChanged.add(f);
@@ -2188,7 +2216,12 @@ async function runBlogTask(ctx, context, workspace, task) {
         { body: platformBody },
         editChanged.has('title') ? { title: draft.title } : {},
         editChanged.has('excerpt') ? { excerpt: draft.excerpt } : {},
-        editChanged.has('meta_description') ? { meta: { description: draft.meta_description } } : {}
+        /* meta 整块带上平台现值再覆盖动过的键：不赌平台对嵌套对象是合并还是整块替换。 */
+        editChanged.has('meta_description') || editChanged.has('cover_image')
+          ? { meta: Object.assign({}, tp.meta || {},
+              editChanged.has('meta_description') ? { description: draft.meta_description } : {},
+              editChanged.has('cover_image') ? { ogImage: draft.cover_image } : {}) }
+          : {}
       )
     : {
         title: draft.title,

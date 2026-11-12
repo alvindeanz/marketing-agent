@@ -25,7 +25,7 @@ autonomy 三级的判定标准只有一条：出错以后能不能低成本还�
 | content-edit | agent_prepare | 元素级改文案、图片、按钮，一次最多 50 处 |
 | blog-edit | agent_prepare | PATCH 已有博文字段级修改（title/body/excerpt/category/keyword/meta），平台留 history |
 | collection-item-update | agent_prepare | PUT collection item 单字段增量合并，未提交字段不动 |
-| blog-draft | agent_apply | 建与修订未发布博客草稿，公众看不到，改稿不换预览链接 |
+| blog-draft | agent_apply | 建与修订未发布博客草稿，公众看不到，改稿不换预览链接；改稿可换封面图（文章 meta.ogImage，只收站内素材库已有图片，2026-11-13 ticket #61） |
 | blog-publish | agent_prepare | 发布已审草稿并验证线上，人放行后由 apply 执行 |
 | image-generate | agent_prepare | FLUX 生成配图并入库 |
 | styles-fragment | agent_prepare | 站点级 CSS 与共享页头页脚片段 |

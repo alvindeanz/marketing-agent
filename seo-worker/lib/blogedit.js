@@ -27,7 +27,7 @@ function countOccurrences(hay, needle) {
 /**
  * 把替换清单套到原稿上。
  * base: { title, slug, category, keyword, excerpt, meta_description, body }（平台现状）
- * out:  模型交回的对象 { edits:[{find,replace}], title?, excerpt?, meta_description?, social_message }
+ * out:  模型交回的对象 { edits:[{find,replace}], title?, excerpt?, meta_description?, cover_image?, social_message }
  * 返回 { ok, errors, draft, changed:[字段名], applied:数量, noop:套完一个字没变 }
  */
 function applyEdits(base, out) {
@@ -71,6 +71,19 @@ function applyEdits(base, out) {
     if (typeof o[f] === 'string' && o[f].trim() !== '' && o[f] !== draft[f]) {
       draft[f] = o[f];
       changed.push(f);
+    }
+  }
+  /* 封面是文章上的一个字段（平台 meta.ogImage），不在正文里，替换清单够不着（ticket #61：
+     Sammichelle #2080 要换封面，改稿流程没有这个字段，agent 回「平台没有换封面的操作」原样收口）。
+     只收站内素材路径；存不存在由 runner 拿素材库核，这里只管形状。 */
+  draft.cover_image = String((base && base.cover_image) || '');
+  if (typeof o.cover_image === 'string' && o.cover_image.trim() !== '') {
+    const cv = o.cover_image.trim();
+    if (!/^\/assets\/[^\s"'<>]+\.(jpe?g|png|webp|avif)$/i.test(cv)) {
+      errors.push('cover_image 只能是站内素材路径（/assets/ 开头的图片文件），不收外链和编造的路径：' + cv.slice(0, 120));
+    } else if (cv !== draft.cover_image) {
+      draft.cover_image = cv;
+      changed.push('cover_image');
     }
   }
   if (applied > 0) changed.push('body');
