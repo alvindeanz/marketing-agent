@@ -86,3 +86,19 @@ t('正文其余部分一字不动', () => {
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
+
+/* 2026-11-13 #2067 回放：2 条产品内链 + 顶部底部各一个 /contact/ = 4 次出现、3 个页面，应过；4 个页面仍拦。 */
+(function () {
+  const assert = require('assert');
+  const path = require('path');
+  const bc = require(path.join(__dirname, '..', 'seo-worker', 'lib', 'blogcheck'));
+  const mk = (body) => ({ title: 't', slug: 'a-b', category: 'blog', keyword: 'k', excerpt: 'e', meta_description: 'x'.repeat(60),
+    body_markdown: body, social_message: '中'.repeat(90) + '{PREVIEW_URL}' });
+  const ctx = { roll: null, allowedPaths: ['/contact/', '/premium-laminate-flooring/', '/engineered-hardwood-flooring/', '/about/'], categories: ['blog'], lang: '', keepImages: [], expectImageBriefs: false, lintRules: {} };
+  const three = '[talk to us](/contact/)\n\n## A\n\n[laminate](/premium-laminate-flooring/) and [engineered](/engineered-hardwood-flooring/)\n\n[get a quote](/contact/)';
+  const v1 = bc.checkDraft(mk(three), ctx);
+  assert.ok(!v1.errors.some((e) => e.indexOf('内链指向') > -1), v1.errors.join(' | '));
+  const v2 = bc.checkDraft(mk(three + '\n\n[about](/about/)'), ctx);
+  assert.ok(v2.errors.some((e) => e.indexOf('内链指向 4 个不同页面') > -1), v2.errors.join(' | '));
+  console.log('ok 内链上限按不同页面计（#2067 回放）');
+})();

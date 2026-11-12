@@ -25,6 +25,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 病：chatw 改稿单 ops 是 blog-draft，result 分派里的发布凭证前置按 ops 含 blog-publish 才拦，拦不到；auto 档直落 apply，被 apply 侧同意闸拦下，白烧 failed job 加熔断通知。#2045、#2072、#2073 两天三撞。
 - 修（seo-api.php，POST /tasks/{id}/result 的 chatw 分支开头）：改看载荷，blog_card_waiting 为真就不排 apply，任务留 review，note 记 [wait-card]，audit seo_task_dispatch_wait_card。publish_consent_resume 同步认 review 且带 [wait-card] 的单，客户点同意即续排。豁免与误杀出口全随 blog_card_waiting（发布权委托、卡满 7 天、人工 decide、代确认）。
 - blogcheck：social_message 上限从毙稿线改成目标，超过 2 倍（300 字）才拦，下限不动。起因 Power Dekor #2067 整篇新稿因话术 167 字被扔。
+- blogcheck 内链上限改按不同页面计（同页重复算 1）：#2067 重跑（job 14823）再挂，真因是任务书按本站惯例要 2 条产品内链加顶部底部各一个 /contact/，共 4 次出现，对上「最多 3 条」怎么写都过不了；prompt 同步改口径，回放测试在 tests/blogcheck.test.js。
 - 未验证：客户点同意后的续排只读过代码，没有真单走过；本机无 php，语法靠 deploy 的远端 php -l。
 - 板上处置（Alvin 授权，走 decide/finish 按钮，note 各带依据）：kill #2064（被 #2075 取代，挂着 after:2026-11-13 等待条件，不废会重复新建黑五组）、#2063、#2072（同稿以 #2073 的卡为准）、#2016、#2017、#2042、#1817；finish #2065（硬读账户 10 条挂载全 ENABLED）；#2067 重排 job 14823。#2075 在我放行前已由 Monica 频道放行并落地，回读黑五组 6772680345 仅一个、ENABLED。
 - 已知缺口（没修）：chat 泳道的卡满 7 天视同同意后由谁排 apply，没查到明确的续接点，等第一张到期的单验证。

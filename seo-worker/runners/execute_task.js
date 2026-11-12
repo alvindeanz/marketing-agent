@@ -1231,7 +1231,7 @@ function blogHardRules(opts) {
     ...imageRule,
     '2. **内链只准指向下面这张真实路径清单里的路径**，一条都不许编：',
     allowedPaths.map((p) => '   ' + p).join('\n'),
-    '   全篇内链总数最多 3 条（2 主 1 次）。',
+    '   全篇内链最多指向 3 个不同页面（2 主 1 次）；同一页面重复出现只算 1 个（例如顶部和底部各一个 /contact/ 行动号召）。',
     '3. **分类只准从下面这张现有分类清单里选一个最贴的**，不许发明新分类：',
     '   ' + (categories.length ? categories.join('、') : '（站点还没有分类，category 写 blog）'),
     '4. 正文、标题、meta、excerpt 用' + lang + '；social_message 用中文。',

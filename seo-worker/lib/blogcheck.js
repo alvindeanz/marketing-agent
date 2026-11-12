@@ -448,7 +448,11 @@ function checkDraft(draft, ctx) {
   // Redline 3: internal links exist, and every one of them must be real.
   const links = internalLinks(body);
   if (!links.length) errors.push('正文没有任何内链，SOP 红线第 3 条');
-  if (links.length > 3) errors.push('内链 ' + links.length + ' 条，SOP 要求最多 2 主加 1 次');
+  /* 按链到几个页面算，不按出现次数（2026-11-13，Power Dekor #2067 两连挂）：任务书按本站惯例要
+     顶部底部各一个 /contact/ 行动号召加 2 条产品内链，共 4 次出现，旧算法下任务书和闸互相矛盾，
+     怎么写都过不了。上限防的是把读者往一堆页面导，同一页面出现两次不是这个病。 */
+  const linkTargets = Array.from(new Set(links.map(normPath)));
+  if (linkTargets.length > 3) errors.push('内链指向 ' + linkTargets.length + ' 个不同页面，SOP 要求最多 3 个（2 主加 1 次，同一页面重复出现只算 1 个）');
   const allowed = new Set((Array.isArray(ctx.allowedPaths) ? ctx.allowedPaths : Array.from(ctx.allowedPaths || [])).map(normPath));
   const bad = links.filter((p) => !allowed.has(normPath(p)));
   if (bad.length) {
