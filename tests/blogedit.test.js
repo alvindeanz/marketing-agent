@@ -60,10 +60,15 @@ t('后一条 edit 按前一条套完后的正文匹配', () => {
   assert.ok(r.ok, r.errors.join(' | '));
   assert.ok(r.draft.body_markdown.indexOf('a 55cm bag on the flight') > -1);
 });
-t('一个字没变：不算通过', () => {
+t('一个字没变：如实回 noop，不算错（#2006 重跑回放：改动上一轮已落在线上）', () => {
   const r = E.applyEdits(BASE, { edits: [], social_message: SOC });
-  assert.ok(!r.ok);
-  assert.ok(/一个字没变/.test(r.errors.join('')));
+  assert.ok(r.ok, r.errors.join(' | '));
+  assert.strictEqual(r.noop, true);
+  assert.strictEqual(r.draft.body_markdown, BODY);
+});
+t('有改动时 noop 为 false', () => {
+  const r = E.applyEdits(BASE, { edits: [{ find: 'a 56cm case', replace: 'a 55cm case' }], social_message: SOC });
+  assert.strictEqual(r.noop, false);
 });
 t('交了整篇正文没交 edits：打回', () => {
   const r = E.applyEdits(BASE, { body_markdown: 'whole new body', social_message: SOC });

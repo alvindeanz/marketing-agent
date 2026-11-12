@@ -1996,6 +1996,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     return { ok: true, errors: [], draft: out, changed: [] };
   };
   const editChanged = new Set();
+  let noopNote = '';
   if (editMode) log('task ' + taskId + '：改稿走原地改（只交替换清单，未点名的部分逐字不变）');
 
   let draft = null;
@@ -2038,6 +2039,20 @@ async function runBlogTask(ctx, context, workspace, task) {
       log('task ' + taskId + '：替换清单套不上（' + cand.errors.length + ' 项）：' + cand.errors.join(' | '));
       continue;
     }
+    if (cand.noop) {
+      /* 无需改动是合法结局（改动早已在线上、或核实后原稿就是对的），不是失败。第一次先让它再确认一遍，
+         防的是偷懒交空清单；第二次仍然说不用改，就按「核实后无需改动」如实交付，线上稿不碰。 */
+      if (attempt === 1) {
+        lastErrors = ['替换清单套完之后稿子一个字没变。逐条对照任务再核一遍「当前草稿全文」：有该改的就给出 edits；' +
+          '确实一处都不用改（比如改动已经在稿子里了），就在 json 之前写清楚核实了什么、为什么不用改，edits 仍给空数组。'];
+        log('task ' + taskId + '：第 1 次交回的替换清单没有任何改动，要求再核一遍');
+        continue;
+      }
+      draft = cand.draft;
+      noopNote = summarize(output.replace(/```json[\s\S]*$/, '').trim(), 1200) || '模型两次核对后判定无需改动，未给出说明';
+      log('task ' + taskId + '：两次核对都判定无需改动，按「核实后无需改动」交付，线上稿不动');
+      break;
+    }
     let attemptCtx = checkCtx;
     try {
       const extraPaths = await liveVerifyExtraPaths(
@@ -2073,7 +2088,9 @@ async function runBlogTask(ctx, context, workspace, task) {
 
   // ---- 审稿：一次审，一次定点修，不循环 ----
   let reviewNote = '';
-  const review = await reviewDraft(ctx, { draft, clientRules, task, workspace, taskId });
+  const review = noopNote
+    ? { verdict: 'ok', issues: [], ok: true }
+    : await reviewDraft(ctx, { draft, clientRules, task, workspace, taskId });
   // 选题跑偏不是改稿能救的：写手把任务要的主题换掉了（2026-08-29 #120 要费用指南写成量尺指南），
   // 直接判任务失败让人看，不建草稿不配图，省一轮 FLUX 和一篇孤儿草稿。
   const drift = (review.issues || []).find((x) => /^选题不符|选题与任务[^，。]*不符|范围变更|(自行|擅自)改题/.test(String(x)));
@@ -2188,7 +2205,13 @@ async function runBlogTask(ctx, context, workspace, task) {
   if (mode === 'revise' && slug) {
     const before = await client.getPost(slug);
     const stNow = String(((before && before.post) || {}).status || '').toLowerCase();
-    if (stNow === 'published') {
+    if (noopNote) {
+      const hostN = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      previewUrl = stNow === 'published'
+        ? (hostN ? 'https://' + hostN + '/blog/' + slug + '/' : '')
+        : String((before && before.previewUrl) || outputUrl);
+      finalSlug = slug;
+    } else if (stNow === 'published') {
       // 已发布文章：PATCH 会直接上线（2026-08-27 #88 实测），等于绕过放行。
       // 所以这里不碰平台，把新正文存成交付文件，放行后由 apply 阶段 PATCH 并发布。
       publishedRevise = true;
@@ -2317,7 +2340,8 @@ async function runBlogTask(ctx, context, workspace, task) {
   const summary =
     '写了 ' + (draft.keyword || draft.title) + ' 主题，骨架 ' + roll.skeleton.label +
     '，' + (mode === 'revise' ? (publishedRevise ? '就地扩写已发布文章（新正文在交付文件 revised-body-*.md 里，线上未动，放行 = 替换并发布）' : '按客户反馈改稿') : '新建草稿') +
-    '，分类 ' + draft.category + '。' + imageNote + reviewNote;
+    '，分类 ' + draft.category + '。' + imageNote + reviewNote +
+    (noopNote ? '本轮核实后无需改动，线上稿未动。' : '');
 
   const clientName = (context && context.client && context.client.name) || profile.domain || '';
   // 预览页是可以直接转给客户的成稿页（2026-09-10 Alvin 定）：不带客户铁律回显、
@@ -2341,6 +2365,7 @@ async function runBlogTask(ctx, context, workspace, task) {
     social,
     SOCIAL_CLOSE,
     '要点：' + summarize(summary, 400),
+    noopNote ? '无需改动的核实说明：' + noopNote : '',
     (review.verdict === 'revise' && review.issues.length && !/审稿修改/.test(reviewNote)) ? '审稿意见（未能自动落实）：' + review.issues.join('；') : '',
   ].filter(Boolean).join('\n');
 

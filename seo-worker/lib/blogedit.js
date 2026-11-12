@@ -28,7 +28,7 @@ function countOccurrences(hay, needle) {
  * 把替换清单套到原稿上。
  * base: { title, slug, category, keyword, excerpt, meta_description, body }（平台现状）
  * out:  模型交回的对象 { edits:[{find,replace}], title?, excerpt?, meta_description?, social_message }
- * 返回 { ok, errors, draft, changed:[字段名], applied:数量 }
+ * 返回 { ok, errors, draft, changed:[字段名], applied:数量, noop:套完一个字没变 }
  */
 function applyEdits(base, out) {
   const errors = [];
@@ -75,10 +75,10 @@ function applyEdits(base, out) {
   }
   if (applied > 0) changed.push('body');
   if (!draft.social_message.trim()) errors.push('json 缺 social_message（发给客户的中文微信话术，说明这次改了哪几处）');
-  if (!errors.length && !changed.length) {
-    errors.push('替换清单套完之后稿子一个字没变。任务要求的改动没有落到任何一处，重新对照任务逐条给出 edits');
-  }
-  return { ok: errors.length === 0, errors, draft, changed, applied };
+  /* 一个字没变不是错：任务要的改动可能早就落在线上了（#2006 实证：上一轮已删图，任务没收口）。
+     如实回 noop，由 runner 决定要不要再确认一次；硬判失败等于逼模型为了过校验去乱改。 */
+  const noop = !errors.length && !changed.length;
+  return { ok: errors.length === 0, errors, draft, changed, applied, noop };
 }
 
 /** 报错文本里的数字会随正文长短浮动（「正文 1398 词」对「1401 词」），比对时抹平。 */
