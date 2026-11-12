@@ -18,6 +18,7 @@ const path = require('node:path');
 const { runClaude } = require('../lib/llm');
 const { buildBrief } = require('../lib/brief');
 const { extractTrailingJson } = require('../lib/mdjson');
+const blogedit = require('../lib/blogedit');
 const capabilities = require('../lib/capabilities');
 const preview = require('../lib/preview');
 const { publishFile } = require('../lib/publish');
@@ -1317,8 +1318,75 @@ function buildBlogPrompt(opts) {
   ].join('\n');
 }
 
+/** 改稿（原地改）的产出契约：只交替换清单，不交整篇正文。lib/blogedit.js 负责套用与校验。 */
+function blogEditContract() {
+  return [
+    '产出格式：你的最终回复必须以一个 json 代码块结尾，块之后不许再有任何文字。',
+    '```json',
+    '{',
+    '  "edits": [',
+    '    {"find": "从当前草稿全文里逐字照抄的一段原文", "replace": "换成的新文字，要删除就给空字符串"}',
+    '  ],',
+    '  "social_message": "中文微信话术，结尾带 {PREVIEW_URL} 占位符"',
+    '}',
+    '```',
+    '',
+    '规矩：',
+    '- 这是原地改稿：你只交要改的地方，机器把每条 find 换成 replace 套到原稿上。没出现在 edits 里的文字、',
+    '  图片、链接、结构一个字都不会变，所以不要交整篇正文，也不要改任务没点到的地方。',
+    '- find 必须是「当前草稿全文」里的原文，逐字照抄（标点、空格、换行都算），并且在全文里只出现一次；',
+    '  太短会撞到别处，就多带半句前后文。edits 按顺序套用，后一条的 find 要按前面套完之后的正文来写。',
+    '- 删图就把那一整行图片 markdown 放进 find、replace 给空字符串。换图只能换成你用工具核实过、',
+    '  站点上真实存在的图片地址，不许编造路径；没有合适的图就删，不拿别的图凑数。',
+    '- 新增一段文字：find 取插入点前面那一句原文，replace 写「那一句原文 + 新增内容」。',
+    '- 只有任务明确要求时，才在 json 里加 "title"、"excerpt"、"meta_description" 这三个字段给新值；',
+    '  没要求就不要出现这些字段。slug、分类、关键词不能改。',
+    '- social_message 是我们发给客户的微信消息：中文，口吻是「我们替您运营站点」，照实说这次按意见改了',
+    '  哪几处、请他看看是否合适。不吹嘘，不写 SEO 术语，不写 emoji，不写破折号。链接位置写 {PREVIEW_URL}。',
+    '',
+    '交之前把每条 find 回到原稿里核一遍是不是逐字一致、是不是唯一；字符串里的英文双引号和换行要转义。',
+  ].join('\n');
+}
+
 function buildBlogRevisePrompt(opts) {
   const { task, roll, sop, siteBlock, facts, hardRules, contract, currentBody, feedback, slug, registryText } = opts;
+  if (opts.editMode) {
+    return [
+      '你是这家新西兰数字营销公司的 SEO 内容 agent。站点上有一篇**已经写好的文章或草稿**，',
+      '现在要按下面的任务和意见做定点修改。这是改稿，不是重写。',
+      '',
+      '任务',
+      taskDetail(task),
+      '',
+      '这次的意见（改稿的唯一依据）',
+      '=====',
+      feedback || '（任务备注里没有找到 [反馈] 段落，按任务说明里的要求改）',
+      '=====',
+      '',
+      '站点信息',
+      siteBlock,
+      '',
+      '客户已确认的事实',
+      facts,
+      '',
+      opts.clientRules || '',
+      '',
+      opts.guidance || '',
+      '',
+      '新写进去的文字要守这几条（原稿里已有的内容不用你去纠正，除非任务点名）：',
+      '- 语言与原稿一致，不出现 emoji 和破折号，不写内部备注。',
+      '- 新加的站内链接只准用下面清单里的真实路径，带尾斜杠：',
+      (opts.allowedPaths || []).map((p) => '   ' + p).join('\n'),
+      '- 不编造数字、价格、承诺；拿不准的事实不写。',
+      '',
+      '当前草稿全文（slug ' + slug + '，find 从这里逐字照抄）',
+      '=====',
+      currentBody,
+      '=====',
+      '',
+      blogEditContract(),
+    ].join('\n');
+  }
   return [
     '你是这家新西兰数字营销公司的 SEO 内容 agent。站点上有一篇**已经写好的草稿**，',
     '客户看过预览之后提了意见，现在你要按意见改稿。',
@@ -1651,6 +1719,19 @@ async function runBlogTask(ctx, context, workspace, task) {
       log('task ' + taskId + '：detail/note 里有 ' + rel.length + ' 条站内博客相对路径，不猜目标，照原流程处理');
     }
   }
+  if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
+    /* slug 兜底（2026-11-12 #2006/#2017）：改稿单常只写「#839 那篇草稿（some-long-slug）」，既没有绝对链接
+       也没有 /blog/ 路径，掉进新建分支后被当成新文章整篇重写。任务文本里逐字出现、且正好只对上一篇
+       现有文章的 slug，就是目标；对上多篇不猜。 */
+    const hits = blogedit.slugsMentioned(String(task.title || '') + '\n' + String(task.detail || ''), posts.map((x) => x && x.slug));
+    const hostS = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (hits.length === 1 && hostS) {
+      outputUrl = 'https://' + hostS + '/blog/' + hits[0] + '/';
+      log('task ' + taskId + '：目标草稿按任务文本里的现有 slug 定位 ' + outputUrl);
+    } else if (hits.length > 1) {
+      log('task ' + taskId + '：任务文本里出现 ' + hits.length + ' 个现有文章 slug，不猜目标，照原流程处理');
+    }
+  }
   let targetPost = null;
   if (outputUrl && wf.isBlogUrl(outputUrl, profile.domain)) {
     slug = wf.slugFromBlogUrl(outputUrl);
@@ -1804,7 +1885,11 @@ async function runBlogTask(ctx, context, workspace, task) {
   const reviseReason = String((ctx.job && ctx.job.payload && ctx.job.payload.reason) || '');
   const regenImages = mode === 'revise' && /重新配图|补图|regen[_ ]?images?/i.test(reviseReason);
   if (regenImages) log('task ' + taskId + '：改稿轮要求重新配图，本轮丢弃原图并按新 brief 重出');
-  const keepImages = mode === 'revise' && !regenImages ? currentBody.match(/!\[[^\]]*\]\([^)]+\)/g) || [] : [];
+  /* 原地改（2026-11-12）：改稿轮只交替换清单，机器套到原稿上，见 lib/blogedit.js。
+     补图重出（regenImages）仍是整篇重出，走旧契约并保留 keepImages 为空的既有行为。
+     原地改不需要 keepImages 校验：没点名的图机制上就不会变，点名删的图是任务本意。 */
+  const editMode = mode === 'revise' && !regenImages && !!targetPost;
+  const keepImages = [];
   const shared = {
     task,
     roll,
@@ -1830,6 +1915,8 @@ async function runBlogTask(ctx, context, workspace, task) {
     // stage, and its image rules stay exactly what they were.
     contract: blogOutputContract(roll, { withImageBriefs: mode !== 'revise' || regenImages }),
     registryText,
+    editMode,
+    allowedPaths,
   };
 
   const clientRules = clientRulesBlock(cfg, workspace, log);
@@ -1864,6 +1951,53 @@ async function runBlogTask(ctx, context, workspace, task) {
     expectImageBriefs: mode !== 'revise',
     lintRules,
   };
+  /* ---- 原地改的底稿与判定 ----
+     底稿 = 平台现状。判定只问「改完有没有比改之前多出新毛病」：同一套 blogcheck 分别跑改前改后，
+     只留新增的报错。空字段两边填同一个占位，Style Roll 注释两边同样补上，这些差异自然抵消。 */
+  const tp = targetPost || {};
+  const strOf = (v) => (typeof v === 'string' ? v : '');
+  const editBase = {
+    title: strOf(tp.title), slug, category: strOf(tp.category), keyword: strOf(tp.keyword),
+    excerpt: strOf(tp.excerpt), meta_description: strOf((tp.meta || {}).description), body: currentBody,
+  };
+  const checkable = (d) => {
+    const c = Object.assign({}, d);
+    for (const f of ['title', 'slug', 'category', 'keyword', 'excerpt', 'meta_description', 'social_message']) {
+      if (typeof c[f] !== 'string' || c[f].trim() === '') c[f] = 'placeholder';
+    }
+    const b = String(c.body_markdown || '');
+    c.body_markdown = styleroll.parseRollComment(b).found ? b : styleroll.rollComment(roll) + '\n' + b;
+    return c;
+  };
+  const judge = (cand, ctxUse) => {
+    if (!editMode) return blogcheck.checkDraft(cand, ctxUse);
+    const next = blogcheck.checkDraft(checkable(cand), ctxUse);
+    const base = blogcheck.checkDraft(
+      checkable(Object.assign({}, editBase, { body_markdown: editBase.body, social_message: cand.social_message })), ctxUse);
+    const fresh = blogedit.newErrors(base.errors, next.errors);
+    return { ok: fresh.length === 0, errors: fresh, structure: next.structure };
+  };
+  /** 模型产出 → 候选稿。原地改把替换清单套到 baseBody 上；新稿顺手把站内链接尾斜杠补齐。 */
+  const toCandidate = (out, baseBody) => {
+    if (editMode) {
+      const ap = blogedit.applyEdits(Object.assign({}, editBase, { body: baseBody }), out);
+      if (ap.ok && ap.draft.social_message.indexOf(blogcheck.PREVIEW_TOKEN) === -1) {
+        ap.draft.social_message = ap.draft.social_message.trim() + ' ' + blogcheck.PREVIEW_TOKEN;
+      }
+      return ap;
+    }
+    if (out && typeof out.body_markdown === 'string') {
+      const sl = blogedit.fixTrailingSlashes(out.body_markdown);
+      if (sl.fixed.length) {
+        out.body_markdown = sl.body;
+        log('task ' + taskId + '：站内链接自动补尾斜杠 ' + sl.fixed.length + ' 处：' + Array.from(new Set(sl.fixed)).slice(0, 5).join('、'));
+      }
+    }
+    return { ok: true, errors: [], draft: out, changed: [] };
+  };
+  const editChanged = new Set();
+  if (editMode) log('task ' + taskId + '：改稿走原地改（只交替换清单，未点名的部分逐字不变）');
+
   let draft = null;
   let lastErrors = [];
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -1874,7 +2008,9 @@ async function runBlogTask(ctx, context, workspace, task) {
           '\n\n===== 上一版被机器校验打回 =====\n' +
           '你刚才交的那一版没通过校验，问题如下，逐条改掉再交一次完整的 json：\n' +
           lastErrors.map((e, i) => i + 1 + '. ' + e).join('\n') +
-          '\n不要只改被点名的地方就交，改完通读一遍确认其他规则没被改坏。';
+          (editMode
+            ? '\n上一版没有被采用，原稿没有变。请对照「当前草稿全文」重新给出完整的 edits 清单。'
+            : '\n不要只改被点名的地方就交，改完通读一遍确认其他规则没被改坏。');
     log('task ' + taskId + '：第 ' + attempt + ' 次生成，模型 ' + cfg.claudeModel + '，prompt ' + prompt.length + ' 字符');
 
     const res = await runClaude(cfg, {
@@ -1896,10 +2032,16 @@ async function runBlogTask(ctx, context, workspace, task) {
       log('task ' + taskId + '：' + lastErrors[0]);
       continue;
     }
+    const cand = toCandidate(read.draft, currentBody);
+    if (!cand.ok) {
+      lastErrors = cand.errors;
+      log('task ' + taskId + '：替换清单套不上（' + cand.errors.length + ' 项）：' + cand.errors.join(' | '));
+      continue;
+    }
     let attemptCtx = checkCtx;
     try {
       const extraPaths = await liveVerifyExtraPaths(
-        read.draft && read.draft.body_markdown, allowedPaths, profile.domain, log, taskId
+        cand.draft && cand.draft.body_markdown, allowedPaths, profile.domain, log, taskId
       );
       if (extraPaths.length) {
         attemptCtx = Object.assign({}, checkCtx, { allowedPaths: allowedPaths.concat(extraPaths) });
@@ -1907,12 +2049,14 @@ async function runBlogTask(ctx, context, workspace, task) {
     } catch (e) {
       log('task ' + taskId + '：内链线上兜底核验整体失败，退回纯白名单口径 :: ' + e.message);
     }
-    const verdict = blogcheck.checkDraft(read.draft, attemptCtx);
+    const verdict = judge(cand.draft, attemptCtx);
     if (verdict.ok) {
-      draft = read.draft;
+      draft = cand.draft;
+      for (const f of cand.changed) editChanged.add(f);
+      const stc = verdict.structure || {};
       log(
-        'task ' + taskId + '：机器校验通过，' + verdict.structure.words + ' 词，表格 ' +
-          verdict.structure.tables + '，UL ' + verdict.structure.uls + '，H2 ' + verdict.structure.h2Count
+        'task ' + taskId + '：机器校验通过' + (editMode ? '（原地改 ' + (cand.applied || 0) + ' 处，改动字段 ' + cand.changed.join('、') + '，未新增问题）' : '') +
+          '，' + stc.words + ' 词，表格 ' + stc.tables + '，UL ' + stc.uls + '，H2 ' + stc.h2Count
       );
       break;
     }
@@ -1936,7 +2080,15 @@ async function runBlogTask(ctx, context, workspace, task) {
   if (drift) throw new Error('task ' + taskId + '：审稿判定选题与任务不符，打回人工：' + drift);
   if (review.verdict === 'revise' && review.issues.length) {
     log('task ' + taskId + '：审稿要求修改 ' + review.issues.length + ' 处：' + review.issues.join(' | '));
-    const fixPrompt = basePrompt +
+    /* 原地改的定点修：把已经改过一轮的正文当「当前草稿」，审稿意见当这一轮的意见，再交一份替换清单。 */
+    const fixPrompt = editMode
+      ? buildBlogRevisePrompt(Object.assign({}, shared, {
+          currentBody: draft.body_markdown,
+          slug,
+          feedback: '审稿人看了上一轮改稿，要求再改下面几处。只改这几处，其余不动：\n' +
+            review.issues.map((e, i) => i + 1 + '. ' + e).join('\n'),
+        }))
+      : basePrompt +
       '\n\n===== 审稿意见（定点修改，其余保持原样）=====\n' +
       '下面是你上一版的完整 json，审稿人要求改这几处。只改被点名的地方，改完交一次完整的 json：\n' +
       review.issues.map((e, i) => i + 1 + '. ' + e).join('\n') +
@@ -1944,10 +2096,18 @@ async function runBlogTask(ctx, context, workspace, task) {
     try {
       const res = await runClaude(cfg, { prompt: fixPrompt, cwd: workspace, log, model: cfg.claudeModel, allowedTools: ALLOWED_TOOLS, label: 'blog task ' + taskId + ' fix' });
       const read = readDraftJson(String(res.stdout || '').trim());
-      if (read.ok) {
-        const v2 = blogcheck.checkDraft(read.draft, checkCtx);
+      const cand2 = read.ok ? toCandidate(read.draft, draft.body_markdown) : null;
+      if (read.ok && cand2.ok) {
+        /* 原地改第二轮的底稿字段沿用第一轮已改的值，话术没重交就沿用第一轮的。 */
+        if (editMode) {
+          for (const f of ['title', 'excerpt', 'meta_description']) {
+            if (cand2.changed.indexOf(f) === -1) cand2.draft[f] = draft[f];
+          }
+        }
+        const v2 = judge(cand2.draft, checkCtx);
         if (v2.ok) {
-          draft = read.draft;
+          draft = cand2.draft;
+          for (const f of cand2.changed) editChanged.add(f);
           reviewNote = '审稿修改 ' + review.issues.length + ' 处。';
           log('task ' + taskId + '：定点修改后机器校验通过');
         } else {
@@ -1955,7 +2115,7 @@ async function runBlogTask(ctx, context, workspace, task) {
           log('task ' + taskId + '：定点修改版没过校验（' + v2.errors.join(' | ') + '），沿用修改前版本');
         }
       } else {
-        reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改版解析失败，沿用修改前版本，意见附在备注。';
+        reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改版' + (read.ok ? '替换清单套不上' : '解析失败') + '，沿用修改前版本，意见附在备注。';
       }
     } catch (e) {
       reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改调用失败，沿用修改前版本，意见附在备注。';
@@ -2005,14 +2165,22 @@ async function runBlogTask(ctx, context, workspace, task) {
   const platformBody = styleroll.stripRollComment(draft.body_markdown);
   writeFileRetry(draftFile, platformBody, 'utf8');
 
-  const payload = {
-    title: draft.title,
-    keyword: draft.keyword,
-    category: draft.category,
-    body: platformBody,
-    excerpt: draft.excerpt,
-    meta: { description: draft.meta_description },
-  };
+  /* 原地改只把动过的字段写回平台：没动的标题、分类、关键词、摘要一概不碰。 */
+  const payload = editMode
+    ? Object.assign(
+        { body: platformBody },
+        editChanged.has('title') ? { title: draft.title } : {},
+        editChanged.has('excerpt') ? { excerpt: draft.excerpt } : {},
+        editChanged.has('meta_description') ? { meta: { description: draft.meta_description } } : {}
+      )
+    : {
+        title: draft.title,
+        keyword: draft.keyword,
+        category: draft.category,
+        body: platformBody,
+        excerpt: draft.excerpt,
+        meta: { description: draft.meta_description },
+      };
 
   let previewUrl = '';
   let finalSlug = '';
