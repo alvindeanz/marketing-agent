@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-12 AIRA shopseo 1.16.0：collection products 只读命令（Alvin 批）
+
+- 起因: Midea 黑五 sale 集合成员拿不到，频道 worker 让运营逐页另存网页（171 个存了 5 页，客户改成 410 个后又要存 12 页）。
+- 根因: 不是 API 不支持，是版本。shopseo 钉的 Admin API 2025-07 到 2026-04 都整批隐藏一部分集合（该店 252 对 271，sale 与 blackfridaysale 按 handle 按 ID 都回 null），2026-07 起 GraphQL 才返回。REST 即使指定 2026-10 也照样列不出。
+- 干了什么: shopseo 加 `collection products <handle|id> [--all] [--json]`，走 GraphQL，版本单独用 SHOPSEO_GQL_API_VERSION（默认 2026-10），REST 写路径版本不动。默认只列前台在架（ACTIVE 且已发布）按集合原序，--json 带商品与变体 ID、价格、划线价、库存。shopseo-ro 白名单放行这一条。chat.js 与 execute_task.js 的 Shopify 读站提示词补上这条命令，写明集合成员不许再让人另存网页、collection get 查不到不许断言集合不存在。
+- 验证: midea sale 647 成员 410 在架（与客户报数一致），blackfridaysale、普通集合 dishwasher、不存在的 handle、ro 包装器拒写各测一遍；node tests 49 个全绿；本机无 php，seo-api.php 本次未动。
+- 坑: find_collection（get、set-meta 等写命令共用）仍走 REST，被隐藏的集合照旧写不了，只是报错里加了指路。要写这批集合得整体升 REST 版本，影响全船队写路径，另案评估。
+- 下一步: worker 待部署后生效。
+
 ### 2026-11-11 AIRA Shopify 店面平台级 429：读站纪律订正与适用判据（Alvin 批）
 
 - 起因: Oak #1991 核验内链跑满 55 分钟超时，Midea #1992 按 Retry-After 退避 26 分钟。实测本机出口打任何 Shopify 店（含无关第三方店）的集合页、商品页、products.json 都秒回 429，首页、博客、sitemap 正常，换 UA 无效。查证是 Shopify 2026-07 底起的平台级防爬，不是我们抓太猛。

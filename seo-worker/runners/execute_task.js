@@ -50,6 +50,8 @@ const SHOPIFY_READ_DOCTRINE = [
   '  admin API 的字段值就是事实源：product/collection 的 body_html、title、SEO metafield、status、published_at。',
   '- 核验链接存不存在（稿子里的内链、落地页、集合与商品 URL）同样走 shopseo-ro：按 handle 做',
   '  collection/product/article/page get，查得到且已发布即链接有效；拉商品清单与集合成员也走它，不抓 products.json。',
+  '  集合成员用 collection products <handle|数字ID> [--all] [--json]（默认只列前台在架的，按集合原序，带商品与变体 ID、',
+  '  价格、划线价、库存）；collection get 报查不到的集合（旧版接口会隐藏一部分）先用这条再下结论，不许断言集合不存在。',
   '- Shopify 平台对未签名的自动化请求限流：集合页、商品页、products.json 的 curl 基本必回 429，',
   '  这与你的请求频率无关，等不动。这几类 URL 不要 curl；确需看前台渲染时全程最多试 3 次、每次',
   '  --max-time 30，不许写退避等待循环、不许 sleep 等桶、不许起后台脚本轮询。连续 429 就以',
