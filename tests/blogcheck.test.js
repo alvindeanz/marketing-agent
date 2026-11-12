@@ -84,9 +84,6 @@ t('正文其余部分一字不动', () => {
   assert.strictEqual(SR.stripRollComment('<!-- Style Roll: 骨架=Checklist -->\n' + body), body);
 });
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
-
 /* 2026-11-13 #2067 回放：2 条产品内链 + 顶部底部各一个 /contact/ = 4 次出现、3 个页面，应过；4 个页面仍拦。 */
 (function () {
   const assert = require('assert');
@@ -102,3 +99,6 @@ process.exit(fail ? 1 : 0);
   assert.ok(v2.errors.some((e) => e.indexOf('内链指向 4 个不同页面') > -1), v2.errors.join(' | '));
   console.log('ok 内链上限按不同页面计（#2067 回放）');
 })();
+
+console.log('\n' + pass + ' passed, ' + fail + ' failed');
+process.exit(fail ? 1 : 0);
