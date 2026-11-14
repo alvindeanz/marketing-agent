@@ -20,6 +20,10 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-15 AIRA 半月轮开轮提醒改发私信（Alvin 批）
+- round_remind.sh 不再发 horntech-sem 群，改用 Aira bot token 开 Alvin 的 DM 频道发；DM 发不了才退回原频道并 @ 人，提醒不丢。文案末尾改成「到 MA 线程说一句开跑」（DM 会话不带 MA 项目上下文，开轮动作仍在 MA 线程做）。
+- cron 不动（脚本由 crontab 直接从仓里跑，无需部署）。实测：带测试前缀手动跑一次，私信发送成功。零 LLM 性质不变。
+
 ### 2026-11-13 AIRA 改稿可换封面（ticket #61 Summer 提报，Sammichelle #2080 实证，Alvin 批）
 
 - 病：封面是文章字段 meta.ogImage，新稿配图工序一直在写；改稿（原地改）可改字段只有正文、title、excerpt、meta_description，封面够不着。chat worker 对人回「WebForger 没有换封面的操作」，#2080 零改动收口。是我们没开这个动作，不是平台不支持。
