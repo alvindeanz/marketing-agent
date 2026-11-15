@@ -1133,7 +1133,8 @@ async function report(all, sprint, retried) {
      的那部分在每轮汇总里有名有姓（#1461 判 do 没人推同款病的泳道版预防针）。 */
   try {
     const chatLane = (t) => /^(spawn|chatw|report|ruling|splitw):/.test(String(t.origin || ''));
-    const laneAge = (t) => { const d = Date.parse(String(t.updated_at || t.created_at || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : (Date.now() - d) / 86400000; };
+    /* 按建单时间计龄：updated_at 会被复审与附件回传刷新，SD Aluminium #1576 建单 25 天仍被算成当天（2026-11-15） */
+    const laneAge = (t) => { const d = Date.parse(String(t.created_at || t.updated_at || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : (Date.now() - d) / 86400000; };
     const laneOpen = all.filter((t) => chatLane(t) && !['done'].includes(t.status));
     /* 2026-11-15 改到期清单：带在途载荷或已补 sprint 章的是例外照常流转，只计数；其余超 3 天、
        失败、blocked、停人的进清单。清单不是待拍板项：按口径可直接废（decide 废单，备注「需要再做在频道重新派」）。 */
@@ -1150,12 +1151,12 @@ async function report(all, sprint, retried) {
       console.log('\n## chat 泳道到期清单（' + laneStuck.length + ' 张，最老 ' + oldest + ' 天；chat 单当场处理不进轮，可直接废不用逐张拍板）');
       for (const t of laneStuck) {
         const js = t.job_state || {};
-        const why = js.status === 'failed' ? '执行失败' : (t.status === 'blocked' ? 'blocked' : (Number(t.attention) === 1 ? '停人' : ('超 3 天未收口/' + t.status)));
+        const why = js.status === 'failed' ? '执行失败' : (t.status === 'blocked' ? 'blocked' : (Number(t.attention) === 1 ? '停人' : ('建单超 3 天未收口/' + t.status)));
         console.log('- #' + t.id + ' [' + String(t.origin || '').split(':')[0] + '/' + why + '] ' + String(t.title || '').slice(0, 60));
       }
       console.log('可废 id：' + laneStuck.map((t) => t.id).join(' '));
     } else if (laneOpen.length) {
-      console.log('\n## chat 泳道：' + laneOpen.length + ' 张在途，无到期');
+      console.log('\n## chat 泳道：' + laneOpen.length + ' 张未结，无到期');
     }
     if (laneKeep.length) console.log('chat 泳道例外 ' + laneKeep.length + ' 张（带确认卡、静默期戳或已补 sprint 章，照常流转）：' + laneKeep.map((t) => '#' + t.id).join(' '));
   } catch (e) { console.log('chat 泳道扫帚异常（不挡轮）：' + e.message); }
