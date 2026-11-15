@@ -20,6 +20,17 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-15 AIRA (c) 流程病三修（Alvin 批，rev 1ad0965，api 与 worker 两面已部署，ros 与 mac 同版）
+
+- 干了什么：
+  1. **apply 已落地有偏差终态**（#1484 / #2093 实证）。病根：收口把「写入是否落地」和「方案预期是否达成」混判，任一验证项不过即失败；失败备注进 /tasks/{id}/result 会排闸A重判，判 do 后 L0 再排 apply，站点已是目标状态零写入、同一断言照样不过，空转到停人。修法：worker 侧 `landedWithDeviation`（apply_task.js）只看硬证据认定（changeset 真实清单非空、无方案外文件、声明文件全碰到、steps_done 等于 steps_total、失败的只有 checks 项），带 `landed_deviation` 回写；服务端该分支只置停人标与 hold_notify，不排闸A不排 apply；wait_reason 单列「已落地有偏差」；该 job 不挂红，冷却台账照记。只覆盖通用 apply 路（WF 等），Shopify 与广告泳道的独立收尾未动。能力清单 webforger.md 补两条：平台不自动生成 FAQPage；计数类验证项以改前实测为基线。
+  2. **报告「需观察」单闭环**（#1800 / #1793 实证）。病根比评估时看到的更具体：10-24「出生即有家」只盖在 task_insert，/tasks/bulk 入口漏了，观察单从批量入口落库成无期数单。修法：tasks_bulk_insert 对空 sprint 盖当期章；任务要求改成逐条兑现承诺并把结论写进收口备注；report.js 新增 `priorCommitments`，往期最近两张观察单的原话与收口结论进 pack（放 pack 是因为数字校验只认 pack 里的数字），prompt 要求在漏斗黄色 callout 开头回应。收口的观察单会被归档，取数与查重都改带 include_archived。
+  3. **chat 泳道脱 harness**（Alvin 口径：chat 单当场处理不进轮，积压直接废，例外是经 chat 更新 sprint）。动手前先验了续排链路，结论是不能整体拆：客户点同意后的续排只有带 [wait-card] / [wait-publish-consent] 戳的 chatw 单走服务端 publish_consent_resume，spawn 来源的卡单和所有「卡满 7 天视同同意」都靠 harness 放行窗推。所以改成看载荷收窄（lib/chatlane.js `laneInFlight`：确认卡、静默期放行戳）：无 sprint 的泳道单只有带在途载荷的留在放行窗，其余不进停滞台账不被推；扫帚改「chat 泳道到期清单」并打印可废 id，例外单只计数。fleet_digest 的 [chat] 栏加口径提示。
+- 测试：node tests 全套绿（apply 66 含 6 条回放、sentinel、chatlane 新增 3 条）；250 上 php -l 过，asksapi 47、chatapi 24、inboxapi 21、jobsapi 10 全绿。landed_deviation_latest 与批量盖章两处 PHP 改动没有单测覆盖。
+- 真单验证：chat 泳道在 Sammichelle（23）试跑通过，4 张带卡单归例外、无到期。第 1 条要等下一次真实出现写入成功但验证项不过的 apply；第 2 条要等下一份月报（12 月初）。两条都还没有真单验证。
+- 四问：新增 0 道闸；新增 1 个终态（载荷判定，非申报字符串）；新增 1 个申报-现实契约点（apply 回写的 landed_deviation 标记，由 worker 零模型证据产生，不是模型申报）。
+- 挂起未做：验证项按「对照改前存档没变差即过」改差分（第二刀）；execute 出稿不守客户封面规则（#976 一例，落地闸已拦，再出一例再查）。
+
 ### 2026-11-15 AIRA (b) 15 号轮非 WF 15 家批跑 + 尾巴处置（Alvin 逐项批）
 
 - 批跑：shop3（3、42、6）、resta（11、9、1、34、54、2）、restb（10、51、4、20、5、13）、bnz（45 补跑）。至此 28 家 15 号轮全部跑完，机器侧无流程报错。本条为板上处置与文档改动，未动代码。
