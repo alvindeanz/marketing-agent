@@ -180,6 +180,8 @@ function isPendingCard(t) {
     for (const lane of ['chat', 'sprint']) {
       const rows = issues.filter((x) => x.lane === lane);
       L.push('## [' + lane + '] ' + rows.length + ' 条');
+      /* 2026-11-15 Alvin 定：chat 单当场处理不进轮，积压直接废，这一栏不是待拍板清单 */
+      if (lane === 'chat' && rows.length) L.push('（口径：chat 单当场处理，办不了的直接废并备注「需要再做在频道重新派」，不逐张拍板；带确认卡等客户的除外）');
       for (const k of KINDS) for (const x of rows) if (x.kind === k) L.push('- [' + x.kind + '] ' + x.text);
       if (!rows.length) L.push('- 无');
       L.push('');

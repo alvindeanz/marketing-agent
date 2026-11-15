@@ -5,7 +5,7 @@
    日跑 pull 把 semrush 付费额度烧穿。 */
 const assert = require('assert');
 const sentinel = require('../seo-worker/lib/sentinel');
-const { pickWatchCallout } = require('../seo-worker/runners/report');
+const { pickWatchCallout, priorCommitments, watchPromised, commitmentsBlock } = require('../seo-worker/runners/report');
 const { cacheCheck } = require('../seo-worker/runners/pull_data');
 
 let fail = 0;
@@ -144,6 +144,29 @@ t('报告需观察 callout 挑选：黄取正文，缺了返回 null', () => {
   assert.strictEqual(c.body, '询盘回落');
   assert.strictEqual(pickWatchCallout({ funnel_callouts: [{ tone: 'yellow', body: '  ' }] }), null);
   assert.strictEqual(pickWatchCallout(null), null);
+});
+
+t('上期承诺回访：取往期观察单的原话与收口结论，本期自己的不算（#1800 回放）', () => {
+  const detail = '来源：2026-10 期报告的「需观察」一节（https://x/r.html）。\n\n发起结账 1532 次，我方下月先核对这一事件的统计。\n\n任务要求：核实该观察项下一期是否需要动作。';
+  assert.strictEqual(watchPromised(detail), '发起结账 1532 次，我方下月先核对这一事件的统计。');
+  const tasks = [
+    { id: 1800, title: '[报告需观察] 2026-10 需观察', status: 'done', detail, result_note: '旧行\n[killed] aira：人工不做：已核对，非新西兰发起结账 1274 次，新西兰 258 次。' },
+    { id: 1900, title: '[报告需观察] 2026-11 需观察', status: 'proposed', detail, result_note: '' },
+    { id: 1700, title: '[报告需观察] 2026-09 需观察', status: 'review', detail, result_note: '半截备注' },
+    { id: 1600, title: '[报告需观察] 2026-08 需观察', status: 'done', detail, result_note: '[accepted] ok' },
+    { id: 5, title: '别的任务', status: 'done', detail: '', result_note: '' },
+  ];
+  const pc = priorCommitments(tasks, '2026-11');
+  assert.strictEqual(pc.length, 2, '只取最近两张往期单');
+  assert.strictEqual(pc[0].period, '2026-10');
+  assert.strictEqual(pc[0].status, 'closed');
+  assert.ok(/1274/.test(pc[0].outcome) && !/旧行/.test(pc[0].outcome), '结论取最后一条收口行');
+  assert.ok(/核对这一事件/.test(pc[0].promised));
+  assert.strictEqual(pc[1].status, 'open');
+  assert.strictEqual(pc[1].outcome, '', '没收口的不带结论，防止把半截备注当结论');
+  assert.deepStrictEqual(priorCommitments([], '2026-11'), []);
+  assert.strictEqual(commitmentsBlock({}), '');
+  assert.ok(/硬要求/.test(commitmentsBlock({ prior_commitments: pc })));
 });
 
 t('按源缓存 TTL：30 小时旧快照，gsc 过期要拉，semrush 在 144h 内跳过', () => {

@@ -226,10 +226,24 @@ function packForPrompt(pack) {
   return copy;
 }
 
+/** 上期承诺回访段（2026-11-15）。pack.prior_commitments 为空就整段不出。 */
+function commitmentsBlock(pack) {
+  const list = Array.isArray(pack.prior_commitments) ? pack.prior_commitments : [];
+  if (!list.length) return '';
+  return [
+    '',
+    '上期承诺回访（硬要求）：DATA PACK 的 prior_commitments 是往期报告「需观察」一节里我方对客户写下的话，客户会找下文。',
+    '本期 funnel_callouts 黄色那条的开头必须先用一两句回应：status 为 closed 的按 outcome 说清我方核实了什么、结论是什么；',
+    'status 为 open 的如实说仍在跟进并给出下一步，不许当作没说过，也不许说成已完成。',
+    'outcome 是内部处置备注：只取其中的事实结论和数字，任务编号、文件路径、内部流程用语一律不许出现在报告里。',
+  ].join('\n');
+}
+
 function buildPrompt(pack) {
   return [
     headerBlock(pack),
     instructionsBlock(pack),
+    commitmentsBlock(pack),
     '',
     factsBlock(pack),
     '',
@@ -452,6 +466,22 @@ async function run(ctx) {
   });
   if (pack.gaps && pack.gaps.length) log('数据缺口 ' + pack.gaps.length + ' 条：' + pack.gaps.join('；'));
 
+  /* 上期承诺回访（2026-11-15 Alvin 批，Midea #1800 / Haakaa #1793 教训）：往期「需观察」单的处置结论
+     进 pack，叙事必须回应。收口的观察单会被看板归档，默认 context 读不到，单独带归档再取一次。
+     放进 pack 而不是只写进 prompt：数字校验只认 pack 里出现过的数字，结论里的数字才能被引用。
+     取不到只降级不出这段，不影响报告。 */
+  try {
+    const ymNow = period.rolling ? period.start + '_' + period.end : period.start.slice(0, 7); /* 与下方开观察单的 ym 同一口径 */
+    const allCtx = await api.req('GET', '/context?client_id=' + encodeURIComponent(job.client_id) + '&include_archived=1');
+    const pc = priorCommitments((allCtx && allCtx.tasks) || [], ymNow);
+    if (pc.length) {
+      pack.prior_commitments = pc;
+      log('上期承诺回访 ' + pc.length + ' 条：' + pc.map((c) => c.period + ' ' + c.status).join('、'));
+    }
+  } catch (e) {
+    log('上期承诺回访：降级跳过 :: ' + e.message);
+  }
+
   // ---- 第二层：叙事 ----
   let narrative = null;
   let narrativeStatus = 'fallback';
@@ -653,16 +683,61 @@ function pickWatchCallout(narrative) {
 }
 
 const WATCH_PREFIX = '[报告需观察]';
+const WATCH_ASK =
+  '任务要求：上面这段是报告里写给客户看的原话，其中「我方下月会做什么」的每一句都是对客户的承诺。' +
+  '逐条处理：能做的直接做完并写明结果；判断不该做的带数据说明为什么不做。' +
+  '结论写进本任务的收口备注，下期报告会自动读这条备注回应客户，所以备注要写清核实了什么、结论是什么。';
+
+/** 从观察单 detail 里取回报告原话（「来源」行之后、「任务要求」之前）。纯函数。 */
+function watchPromised(detail) {
+  const d = String(detail || '');
+  const a = d.indexOf('\n\n');
+  const b = d.lastIndexOf('\n\n任务要求');
+  if (a === -1) return d.trim();
+  return d.slice(a + 2, b > a ? b : undefined).trim();
+}
+
+/**
+ * 往期「需观察」单的处置结论，供下期报告回应（2026-11-15）。纯函数，供测试。
+ * 本期自己的单不算；按 id 倒序取最近 2 张（再早的客户已不记得，回应反而突兀）。
+ * 返回 [{ period, promised, status: 'closed'|'open', outcome }]。
+ */
+function priorCommitments(tasks, ym) {
+  const mine = WATCH_PREFIX + ' ' + String(ym || '');
+  const list = (tasks || [])
+    .filter((t) => t && String(t.title || '').startsWith(WATCH_PREFIX) && !(ym && String(t.title).startsWith(mine)))
+    .sort((x, y) => Number(y.id) - Number(x.id))
+    .slice(0, 2);
+  return list.map((t) => {
+    const title = String(t.title).slice(WATCH_PREFIX.length).trim();
+    const note = String(t.result_note || '');
+    const closed = String(t.status) === 'done';
+    let outcome = '';
+    if (closed) {
+      const tags = note.match(/\[(?:applied|accepted|dropped|merged|killed)\][^\n]*/g);
+      outcome = tags && tags.length ? tags[tags.length - 1] : note.split('\n').filter((l) => l.trim()).slice(-1)[0] || '';
+    }
+    return {
+      period: title.split(' ')[0] || title,
+      promised: watchPromised(t.detail).slice(0, 600),
+      status: closed ? 'closed' : 'open',
+      outcome: String(outcome).trim().slice(0, 600),
+    };
+  });
+}
 
 async function watchTask(api, clientId, narrative, ym, reportUrl) {
   const callout = pickWatchCallout(narrative);
   if (!callout) return '无叙事或无需观察项，不开单';
   const title = WATCH_PREFIX + ' ' + ym + ' ' + callout.title;
-  const context = await api.getContext(clientId);
+  /* 查重带归档：本期观察单若已收口归档，重出报告（v2）不该再开一张。 */
+  const context = await api.req('GET', '/context?client_id=' + encodeURIComponent(clientId) + '&include_archived=1');
   const tasks = (context && context.tasks) || [];
   if (tasks.some((t) => String((t && t.title) || '').startsWith(WATCH_PREFIX + ' ' + ym))) {
     return '本期已开过需观察单，跳过';
   }
+  /* sprint 不在这里填：服务端批量入口对空 sprint 盖当期章（2026-11-15 补，此前只有单条入口盖，
+     本单走批量入口成了无期数的调度隐身单，#1800 / #1793 挂 12 天没人判）。 */
   const out = await api.postTasksBulk({
     client_id: clientId,
     tasks: [
@@ -675,7 +750,8 @@ async function watchTask(api, clientId, narrative, ym, reportUrl) {
           reportUrl +
           '）。\n\n' +
           callout.body +
-          '\n\n任务要求：核实该观察项下一期是否需要动作，需要就给出具体清单，不需要就带数据说明收口。',
+          '\n\n' +
+          WATCH_ASK,
         module: 'technical',
         owner_type: 'agent',
         status: 'proposed',
@@ -688,6 +764,9 @@ async function watchTask(api, clientId, narrative, ym, reportUrl) {
 }
 
 module.exports = {
+  priorCommitments,
+  watchPromised,
+  commitmentsBlock,
   run,
   buildPrompt,
   headerBlock,

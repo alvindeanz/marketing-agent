@@ -859,6 +859,9 @@ async function paidDriftCheck() {
   return out;
 }
 
+/* chat 泳道新口径（2026-11-15）：判据在 lib/chatlane.js，看载荷不看出身。 */
+const { laneInFlight } = require('../lib/chatlane');
+
 async function stallLedger(all, curNum) {
   let wsDir = '';
   try {
@@ -878,6 +881,8 @@ async function stallLedger(all, curNum) {
     if (t.card_kind && t.sent_at && !/\[卡反馈折叠/.test(String(t.result_note || ''))) return false;
     /* 未来期是排期不是停滞；blocked 与泳道单例外（它们没有「以后再说」的正当身份） */
     const n = sn(t.sprint);
+    /* 无 sprint 的泳道单不进停滞台账（2026-11-15）：它们走到期清单直接废，不再逐张上报定性 */
+    if (laneT(t) && n === null) return false;
     if (String(t.status) !== 'blocked' && !laneT(t) && n !== null && curNum !== null && n > curNum) return false;
     return true;
   });
@@ -918,7 +923,8 @@ async function report(all, sprint, retried) {
      卡刷新、阻塞回写若只按 sprint 筛就全断（脱轮当天的洞）。泳道单按 origin 入窗，
      等客户/停人/静默期的既有跳过规则原样生效。 */
   const laneT = (t) => /^(spawn|chatw|report|ruling|splitw):/.test(String(t.origin || ''));
-  const scoped = all.filter((t) => (IDS ? IDS.includes(t.id) : (laneT(t) || (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn))));
+  /* 2026-11-15 收窄：泳道单按 origin 入窗只留带在途载荷的（确认卡、静默期戳），见 laneInFlight */
+  const scoped = all.filter((t) => (IDS ? IDS.includes(t.id) : ((laneT(t) && laneInFlight(t)) || (sn(t.sprint) !== null && cn !== null && sn(t.sprint) <= cn))));
   // 方案审批执行闸：未批准方案的任务不进阻塞回写、卡刷新、放行判定与静默期放行，单列计数
   const mine = scoped.filter(planGateOk);
   const heldPlan = scoped.filter((t) => OPEN_ST.includes(t.status) && !planGateOk(t));
@@ -1129,22 +1135,29 @@ async function report(all, sprint, retried) {
     const chatLane = (t) => /^(spawn|chatw|report|ruling|splitw):/.test(String(t.origin || ''));
     const laneAge = (t) => { const d = Date.parse(String(t.updated_at || t.created_at || '').replace(' ', 'T') + 'Z'); return isNaN(d) ? 0 : (Date.now() - d) / 86400000; };
     const laneOpen = all.filter((t) => chatLane(t) && !['done'].includes(t.status));
+    /* 2026-11-15 改到期清单：带在途载荷或已补 sprint 章的是例外照常流转，只计数；其余超 3 天、
+       失败、blocked、停人的进清单。清单不是待拍板项：按口径可直接废（decide 废单，备注「需要再做在频道重新派」）。 */
+    const laneKeep = laneOpen.filter((t) => laneInFlight(t) || /^S\d+$/i.test(String(t.sprint || '')));
+    const keepIds = new Set(laneKeep.map((t) => t.id));
     const laneStuck = laneOpen.filter((t) => {
+      if (keepIds.has(t.id)) return false;
       const js = t.job_state || {};
       if (js.status === 'failed' || t.status === 'blocked' || Number(t.attention) === 1) return true;
       return laneAge(t) > 3;
     });
     if (laneStuck.length) {
       const oldest = Math.max.apply(null, laneStuck.map((t) => Math.round(laneAge(t))));
-      console.log('\n## chat 泳道欠收口（' + laneStuck.length + ' 张，最老 ' + oldest + ' 天）');
+      console.log('\n## chat 泳道到期清单（' + laneStuck.length + ' 张，最老 ' + oldest + ' 天；chat 单当场处理不进轮，可直接废不用逐张拍板）');
       for (const t of laneStuck) {
         const js = t.job_state || {};
         const why = js.status === 'failed' ? '执行失败' : (t.status === 'blocked' ? 'blocked' : (Number(t.attention) === 1 ? '停人' : ('超 3 天未收口/' + t.status)));
         console.log('- #' + t.id + ' [' + String(t.origin || '').split(':')[0] + '/' + why + '] ' + String(t.title || '').slice(0, 60));
       }
+      console.log('可废 id：' + laneStuck.map((t) => t.id).join(' '));
     } else if (laneOpen.length) {
-      console.log('\n## chat 泳道：' + laneOpen.length + ' 张在途，无停滞');
+      console.log('\n## chat 泳道：' + laneOpen.length + ' 张在途，无到期');
     }
+    if (laneKeep.length) console.log('chat 泳道例外 ' + laneKeep.length + ' 张（带确认卡、静默期戳或已补 sprint 章，照常流转）：' + laneKeep.map((t) => '#' + t.id).join(' '));
   } catch (e) { console.log('chat 泳道扫帚异常（不挡轮）：' + e.message); }
   console.log('\n## 方案未批准挡下（held_unapproved_plan=' + heldPlan.length + '）' + (heldPlan.length ? '：' + planHeldSummary(heldPlan) : ''));
   for (const t of heldPlan.slice(0, 25)) console.log('- #' + t.id + ' [方案 ' + planPid(t) + ' ' + planStateOf(t) + '/' + (t.module || '') + '/' + t.status + '] ' + t.title);

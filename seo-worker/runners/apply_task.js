@@ -639,6 +639,30 @@ function readOutcome(output, log) {
   return Object.assign({ status, note: truncate(String(json.note || ''), 500), raw: json }, extra);
 }
 
+/**
+ * 已落地有偏差（2026-11-15 Alvin 批，#1484 / #2093 实证）：写入全部落地，只有方案自带的验证项没过。
+ * 这类失败重跑没有信息增益：站点已是目标状态，下一轮零写入，同一条断言照样不过，失败备注回写
+ * 又会触发闸A重判再排 apply，空转到熔断。所以单独认成一个终态：不记失败、不重判、不重排，
+ * 停人一步收口（人看偏差项：预期写错就直接收口，真缺口另开单）。
+ * 判据全看硬证据，不看模型申报的字符串（关节红线）：
+ *   changeset 真实清单非空（worker 读回，不是模型的 touched_files）、无方案外文件、方案声明的文件全部碰到；
+ *   步骤全部做完（steps_done 等于 steps_total）；失败的只有 checks 里的验证项。
+ * 任一条不满足都回落原来的失败路，宁可按老办法停人也不放过半截写入。
+ * 纯函数，供测试。返回 { ok, failed: [{name, note}] }。
+ */
+function landedWithDeviation(outcome, touchedEntries, cmp) {
+  const no = { ok: false, failed: [] };
+  if (!outcome || outcome.status !== 'failed' || !outcome.raw) return no;
+  const judge = outcome.judge || {};
+  if (judge.mode !== 'checks' || !Array.isArray(judge.failed) || !judge.failed.length) return no;
+  if (!Array.isArray(touchedEntries) || !touchedEntries.length) return no;
+  if (!cmp || (cmp.extra && cmp.extra.length) || (cmp.missing && cmp.missing.length)) return no;
+  const done = Number(outcome.raw.steps_done);
+  const total = Number(outcome.raw.steps_total);
+  if (!(total > 0) || done !== total) return no;
+  return { ok: true, failed: judge.failed.map((c) => ({ name: String(c.name || ''), note: String(c.note || '') })) };
+}
+
 /* =========================================================
    changeset：worker 代开、收尾比对
    ========================================================= */
@@ -2002,6 +2026,35 @@ async function runOne(ctx, context, workspace, taskId) {
     return { taskId, status: 'success', logFile };
   }
 
+  // 已落地有偏差：写入全落地、只有验证项没过。不走失败路（失败备注会触发重判重排空转），
+  // 带 landed_deviation 回写，服务端只停人不排闸A。判据见 landedWithDeviation。
+  const landed = landedWithDeviation(outcome, touchedEntries, cmp);
+  if (landed.ok) {
+    const headerL = buildNoteHeader(Object.assign({
+      affectedUrls: outcome.affectedUrls,
+      archiveUrl,
+      snapshotLabel: outcome.snapshotLabel,
+      judge: outcome.judge,
+    }, csInfo));
+    const items = landed.failed
+      .map((c) => c.name + (c.note ? '（' + truncate(c.note, 160) + '）' : ''))
+      .join('；');
+    const noteL =
+      headerL +
+      '已落地有偏差：' + truncate(String(outcome.note || ''), 300) +
+      ' 改动已按方案全部写入（changeset ' + cs.changesetId + ' 清单与方案声明一致），未达预期的验证项 ' +
+      landed.failed.length + ' 条：' + items +
+      '。不重跑（站点已是目标状态，重跑零写入）。人看偏差项一步收口：预期写错直接收口，真缺口另开单。执行记录 ' +
+      path.basename(logFile);
+    try {
+      await api.postTaskResult(taskId, { output_url: '', note: noteL, attention: true, landed_deviation: true });
+    } catch (e) {
+      log('task ' + taskId + ': could not write the landed-deviation note :: ' + e.message);
+    }
+    log('task ' + taskId + ': landed with deviation, held for one-step close :: ' + truncate(items, 300));
+    return { taskId, status: 'landed', logFile };
+  }
+
   // Not a success. The task stays in review with the reason on it, and nothing
   // is retried. A half applied change needs a human, not another attempt.
   // 判失败且方案里拍过快照的，先当场兜底回滚一次，把结果写进 note 开头，
@@ -2055,8 +2108,9 @@ async function run(ctx) {
       const res = await runOne(ctx, context, workspace, taskId);
       if (res.status === 'carded') {
         /* 落地页确认卡已出或已在等客户表态：不是失败，job 不挂红，冷却台账不记（零写入） */
-      } else if (res.status !== 'success') { problems.push(taskId + ': ' + res.status); allGate = false; }
+      } else if (res.status !== 'success' && res.status !== 'landed') { problems.push(taskId + ': ' + res.status); allGate = false; }
       else {
+        /* landed（已落地有偏差）页面确实被改了，冷却台账与成功同样记；job 不挂红。 */
         /* 冷却台账：成功落地的批次记 URL 集与 op（NFS 共享，双 worker 同源）。
            无变更方案与空 URL 的博客发布不进账（没有触碰既有页面）。 */
         const t0 = findTask(context, taskId) || {};
@@ -2115,6 +2169,7 @@ module.exports = {
   normalizeChecks,
   normalizeUrls,
   judgeChecks,
+  landedWithDeviation,
   checkSummary,
   buildNoteHeader,
   publishBeforeArchive,

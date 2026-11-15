@@ -242,6 +242,8 @@ POST /api/auth/login  {"email":"...","password":"..."}
 - `editability`：`auto` 跟随原页；`preserve` 要求保留 `data-content-id` 结构；`none` 给老页面。
 - 平台会写 `history/` 和 `archive/` 两份备份再替换。校验会硬拒不安全 HTML 和重复的 `data-content-id`，缺 H2、缺 CTA、缺表单只是 warning。
 - 一次改多页也不拍全站快照，安全网是 apply 阶段 worker 代开的 changeset（见风险注记 1）。
+- **平台不会按页内 FAQ 内容自动生成 FAQPage 结构化数据**（2026-11-15 Ben's NZ #2093 实证：正文带 FAQ 小节重写上线后，页面源码里没有 FAQPage）。要 FAQPage 就在方案里另列一步 page-advanced-update 注入 customJsonLd，验证项才能写「FAQPage 存在」；只做 page-rewrite 的方案不许把「FAQPage 自动出现」写成验证项。
+- 验证项里的计数类断言（某词出现 N 次、某类型出现 N 个）必须以改前留档的实测值为基线写，不许凭方案推算（2026-11-15 WebForger #1484：原文 FAQ 已有一处目标词，方案按零起算，写入全对却判不过）。
 
 ## content-edit
 

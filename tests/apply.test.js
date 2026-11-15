@@ -885,6 +885,51 @@ t('发布凭证闸：policy 非 agent 或 retracted 照走卡凭证', () => {
     (e) => { assert.ok(/没有任何发布表态/.test(e.message), e.message); }
   );
 });
+/* ---------- landedWithDeviation（2026-11-15，#1484 / #2093 回放） ---------- */
+section('landedWithDeviation');
+{
+  const mk = (over) => A.readOutcome(reply(Object.assign({
+    status: 'failed', steps_done: 4, steps_total: 4, verification_passed: false,
+    affected_urls: ['https://www.example.co.nz/blinds/'], touched_files: ['pages/blinds.html'],
+    checks: [
+      { name: 'V1 回读一致', passed: true, deferred: false, note: 'ok' },
+      { name: 'V5 FAQPage 自动生成', passed: false, deferred: false, note: '平台未自动生成 FAQPage' },
+    ],
+    note: '三次写入均成功且回读一致，唯 V5 平台未自动生成 FAQPage',
+  }, over || {})), quiet);
+  const touched = [{ path: 'pages/blinds.html' }];
+  const cmpOk = A.compareFiles(['pages/blinds.html'], touched);
+  t('#2093 回放：写入全落地只差验证项，认成已落地有偏差并带出偏差项', () => {
+    const r = A.landedWithDeviation(mk(), touched, cmpOk);
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.failed.length, 1);
+    assert.ok(/V5/.test(r.failed[0].name));
+  });
+  t('声称 success 被 checks 降级成 failed 的，同样认（#1484 形态）', () => {
+    const o = mk({ status: 'success' });
+    assert.strictEqual(o.status, 'failed');
+    assert.strictEqual(A.landedWithDeviation(o, touched, cmpOk).ok, true);
+  });
+  t('步骤没做完不认：半截写入照走失败路', () => {
+    assert.strictEqual(A.landedWithDeviation(mk({ steps_done: 3 }), touched, cmpOk).ok, false);
+  });
+  t('changeset 清单读不回或为空不认（第二轮零写入重跑、#1484 第二次形态）', () => {
+    assert.strictEqual(A.landedWithDeviation(mk(), null, cmpOk).ok, false);
+    assert.strictEqual(A.landedWithDeviation(mk(), [], A.compareFiles(['pages/blinds.html'], [])).ok, false);
+  });
+  t('碰了方案外文件或漏了声明文件不认', () => {
+    const extra = [{ path: 'pages/blinds.html' }, { path: 'pages/other.html' }];
+    assert.strictEqual(A.landedWithDeviation(mk(), extra, A.compareFiles(['pages/blinds.html'], extra)).ok, false);
+    assert.strictEqual(A.landedWithDeviation(mk(), touched, A.compareFiles(['pages/blinds.html', 'pages/b.html'], touched)).ok, false);
+  });
+  t('aborted、success、老格式无 checks、解析失败都不认', () => {
+    assert.strictEqual(A.landedWithDeviation(mk({ status: 'aborted' }), touched, cmpOk).ok, false);
+    const good = mk({ status: 'success', checks: [{ name: 'V1', passed: true, deferred: false, note: '' }] });
+    assert.strictEqual(A.landedWithDeviation(good, touched, cmpOk).ok, false);
+    assert.strictEqual(A.landedWithDeviation(mk({ checks: [] }), touched, cmpOk).ok, false);
+    assert.strictEqual(A.landedWithDeviation(A.readOutcome('没有 json', quiet), touched, cmpOk).ok, false);
+  });
+}
 t('onsiteCardExpired：只认 [到期执行] 标记，满 14 天才到期，旧卡永不到期', () => {
   assert.strictEqual(A.onsiteCardExpired({ result_note: '[落地页确认卡] 结构类调整需客户确认' }), false, '旧卡没有标记不该到期');
   assert.strictEqual(A.onsiteCardExpired({ result_note: '[落地页确认卡] [到期执行 2026-01-01] 新建页' }), true, '老日期该到期');

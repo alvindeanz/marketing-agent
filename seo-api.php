@@ -873,6 +873,10 @@ function tasks_bulk_insert($p,$clean){
     $ins=$p->prepare("INSERT INTO seo_tasks(client_id,plan_id,sprint,module,title,detail,owner_type,priority,attention,ops,status,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,'proposed','seo-worker')");
     foreach($clean as $row){
         $row[2]=sprint_label_norm((int)$row[0],$row[2]); /* 批二 C：非法 sprint 标签入口折算（行形状见 tasks_bulk_clean） */
+        /* 出生即有家补到批量入口（2026-11-15 Alvin 批，Midea #1800 / Haakaa #1793 实证）：10-24 的盖章只做在
+           task_insert，本入口漏了，报告观察单从这里落库成了无期数单，前端算本期、harness 看不见，挂 12 天没人判。
+           本入口只有 sprint 泳道单（plan 落任务、报告观察、哨兵），空 sprint 一律盖当期章；无锚客户盖不出保持空。 */
+        if($row[2]==='')$row[2]=client_current_sprint_label((int)$row[0]);
         $ins->execute($row);
         $ids[]=(int)$p->lastInsertId();
     }
@@ -1378,6 +1382,11 @@ function attach_human_state($tasks,$cid){
                attention=1 的单列「停人」（hold-human/熔断/harness 阻塞都打这个标），和普通待放行分开，
                普通待放行下一轮放行官会推进，停人的不会（2026-10-07 僵尸根因：Louvresky #752 hold 后 9 天没人裁）。 */
             $hs='wait_me';$why=!empty($t['attention'])?'停人：需人裁决（note 有 hold 判语）':'待放行';
+            /* 已落地有偏差单列（2026-11-15）：最近一条落地结论是它才算，之后又有失败或中止的按原口径。 */
+            if(!empty($t['attention'])&&landed_deviation_latest($note)){
+                $why='已落地有偏差：改动已写入，验证项未达预期，一步收口或另开单';
+                $failReason=task_fail_reason($t,0,'apply_task');
+            }
         }elseif(is_split_origin($t['origin']??'')&&(string)($t['owner_type']??'')!=='agent'){
             /* 拆条人工工单（2026-09-21）：母判决已继承，没有排期概念，就是等人上手。
                2026-10-10 补 owner 判断：转回机器位（machine_run/转位）的拆条单不再标
@@ -2610,6 +2619,17 @@ function attach_job_state($tasks,$cid){
     return $tasks;
 }
 
+/* 任务备注里最近一条落地结论是不是「已落地有偏差」（2026-11-15）。纯函数。 */
+function landed_deviation_latest($note){
+    $note=(string)$note;
+    $p=mb_strrpos($note,'已落地有偏差：',0,'UTF-8');
+    if($p===false)return false;
+    foreach(['执行失败：','执行中止：','发布后验证未通过'] as $k){
+        $q=mb_strrpos($note,$k,0,'UTF-8');
+        if($q!==false&&$q>$p)return false;
+    }
+    return true;
+}
 /* 任务最近一次失败的一句话原因。优先结果备注里 runner 写的「执行中止：/执行失败：」那句
    （那是模型自己说的为什么），没有就取 job 日志最后一条 FAILED 行。人看卡就能知道为什么，
    不用去 Jobs 页翻。 */
@@ -2629,7 +2649,7 @@ function task_fail_reason($t,$jobId,$jobType=''){
             return mb_substr(trim($s),0,300,'UTF-8');
         }
     }
-    if(preg_match_all('/(?:执行中止|执行失败|发布后验证未通过|落地失败)[：:]\s*([^\n]+)/u',$note,$mm)&&$mm[1]){
+    if(preg_match_all('/(?:执行中止|执行失败|发布后验证未通过|落地失败|已落地有偏差)[：:]\s*([^\n]+)/u',$note,$mm)&&$mm[1]){
         $s=end($mm[1]);
         $s=preg_replace('/\s*任务保持 review.*$/u','',$s);
         return mb_substr(trim($s),0,300,'UTF-8');
@@ -2980,6 +3000,19 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         db()->prepare("UPDATE seo_tasks SET attention=0 WHERE id=? AND attention=1")->execute([$tid]);
     }
     audit('seo-worker','seo_task_result',(string)$tid,['output_url'=>$i['output_url']??'','attention'=>isset($i['attention'])?($i['attention']?1:0):null]);
+    /* 已落地有偏差（2026-11-15 Alvin 批，WebForger #1484 / Ben's NZ #2093 实证）：apply 把改动全部写进去了
+       （worker 侧凭 changeset 真实清单与步骤计数认定，见 apply_task.js landedWithDeviation），只有方案
+       自带的验证项没过。老路是失败备注进本端点 → 排闸A重判 → 判 do → L0 再排 apply → 站点已是
+       目标状态零写入、同一条断言照样不过，空转到熔断，每次都要人去线上核对再手动收口。
+       这里认成终态：只停人，不排闸A、不排 apply、不进任何 origin 分支。
+       管什么：带 landed_deviation 的 apply 结果。豁免面：无（不带标记的失败照走原链）。
+       误杀出口：人工 decide 放行重跑、finish 收口、另开单都照常。命中台账：audit seo_task_landed_deviation。 */
+    if(!empty($i['landed_deviation'])){
+        db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+        audit('seo-worker','seo_task_landed_deviation',(string)$tid,[]);
+        hold_notify($tid,'改动已全部写入，但有验证项未达预期，不重跑，等人看偏差项后收口');
+        res(200,['ok'=>true,'landed_deviation'=>true]);
+    }
     /* 只读交付默认放行（2026-09-18 Alvin 第一性原理：可逆的直接放行不卡流程，错靠事后抽查+原地还原）。
        分析型任务（只读卡/报告，放行本就不 apply）交付即自动收货，不进「待放行 等我」。止损闩生效时仍留人。 */
     ensure_review_schema(); /* card_kind 列（analysis_task 空 ops 分岔要读） */
