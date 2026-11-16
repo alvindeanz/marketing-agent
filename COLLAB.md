@@ -2005,3 +2005,9 @@ Alvin 提的四项客户栏改造：
 - **备注列加宽**：`ensure_note_capacity` 惰性把 seo_tasks.result_note 从 TEXT 改 MEDIUMTEXT，挂在 task_append_note、PATCH、result 三个入口。线上实测：#479 写入 74687 字节读回完整，已还原。
 - 测试：新增 tests/apply_fail_streak.test.js 6 条（job 11167/10999/10236/10238 真实日志回放加源码同步闸）；node 全套绿；250 上 php -l 过，四套 PHP 测试全绿。
 - 未验证：连败闸没有真单验证（要等下一次真实连败），目前只有回放。
+
+## 2026-11-16 AIRA (c) Dareu（2）切到 WebForger 接入与切换核查
+
+- 接入：shadow bot 凭据落 clients/dareu/notes/webforger_credentials.md（readCredentials 实测可解析，登录 isShadow、shadowOf=dareu）；看板平台档 Shopify 翻 WebForger；facts 2904/1309 改作废，新增 tech.webforger_lane（3859）；客户 CLAUDE.md 执行通道重写。harness 试跑正常，本期无可推单（#972 在 S6）。
+- 切换核查发现两处并当场补救（均可逆）：①GA4 停采：站上只挂空容器 GTM-5JFL7KLJ（我方账号，零标签），WF ga4 字段与 gtm 并存时不渲染。PATCH tracking 改为 gtm 置空、ga4=G-50BZ51W23M，全站直出，GA4 实时恢复。服务账号对该容器只有 read，未动容器也未自提权限。②旧网址 404：跳转表仅 10 条，/en-eu 等语言前缀与 /blogs/news/ 全 404（切换前 30 天自然落地会话 52.6%）。按 90 天 GA4 自然落地页生成并 PATCH 426 条（WF 存档 archive/2026-11-16T23-40-23-766Z-redirects），逐条回测 200。GSC sitemap 已重提。
+- 遗留：约 240 条低流量 404（清单在客户 notes/migration_2026-11/）；GSC 口径补全未做；容器发布权限待 Alvin；seo-worker 里 Dareu 的 Shopify 车道存量任务未逐张过。
