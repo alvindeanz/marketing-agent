@@ -1217,9 +1217,50 @@ function capgap_split_on_accept($tid){
     }
     return $splitTid;
 }
+/* 同因连败闸（2026-11-16，Oak #479 实证：落地因 stores.conf 缺店铺别名零写入中止，中止备注回写
+   排闸A，判 do 后排放行官，放行又排 apply，事件链自转 79 圈、每圈两次 opus，靠一次回写网络错误才
+   断）。第一性：同一版方案、世界没变，重复同一动作不会有不同结果；「没有新信息」不靠关键词锚去猜
+   （Shopify 车道的中止日志一个锚都不中），直接看证据：最近连续几次 apply 都失败且失败签名相同。
+   签名取 runner 收尾行「did not complete :: …」，数字归一；取不到签名的失败（超时清扫等瞬态）
+   断开连击不计数。连击到 APPLY_FAIL_STREAK_MAX 两条放行路都停人，方案重出（$since 刷新）或人工
+   放行后解锁。与 10-20 可逆降软不冲突：降软放的是「夹了判定的重试」，这里拦的是「重试已被证据
+   证明无效」。镜像实现与真实日志回放在 tests/apply_fail_streak.test.js。 */
+const APPLY_FAIL_STREAK_MAX=3;
+function apply_fail_sig($log){
+    if(!preg_match_all('/did not complete :: ([^\n]+)/u',(string)$log,$m)||!$m[1])return '';
+    $sig=trim((string)end($m[1]));
+    $sig=preg_replace('/\d+/','#',$sig);
+    return mb_substr($sig,0,160,'UTF-8');
+}
+function apply_fail_streak($cid,$tid,$since){
+    $like='%"task_ids":['.(int)$tid.']%';
+    $q=db()->prepare("SELECT status,log_text FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status IN('failed','done') AND payload LIKE ?".($since!==''?' AND created_at>?':'')." ORDER BY id DESC LIMIT 6");
+    $q->execute($since!==''?[(int)$cid,$like,$since]:[(int)$cid,$like]);
+    $n=0;$sig0='';
+    foreach($q->fetchAll() as $r){
+        if($r['status']!=='failed')break;
+        $sig=apply_fail_sig($r['log_text']);
+        if($sig==='')break;
+        if($n===0)$sig0=$sig;
+        elseif($sig!==$sig0)break;
+        $n++;
+    }
+    return [$n,$sig0];
+}
+/* 备注列加宽（2026-11-16，同案）：result_note 原为 TEXT（65535 字节），#479 被重放记录写满后
+   CONCAT 追加全部静默截断，停人判语与交办戳都丢。加宽成 MEDIUMTEXT，所有写口（追加、PATCH 整写、
+   harness 回写）一并受益；增殖本身由上面的连败闸管。 */
+function ensure_note_capacity(){
+    static $done=false;
+    if($done)return;
+    $done=true;
+    $col=db()->query("SHOW COLUMNS FROM seo_tasks LIKE 'result_note'")->fetch();
+    if($col&&strtolower((string)$col['Type'])==='text')db()->exec("ALTER TABLE seo_tasks MODIFY result_note MEDIUMTEXT");
+}
 function task_append_note($tid,$note){
     $note=trim((string)$note);
     if($note==='')return;
+    ensure_note_capacity();
     db()->prepare("UPDATE seo_tasks SET result_note=CONCAT_WS('\n',NULLIF(result_note,''),?) WHERE id=?")
         ->execute([mb_substr($note,0,1000,'UTF-8'),(int)$tid]);
 }
@@ -3016,6 +3057,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
     /* 只读交付默认放行（2026-09-18 Alvin 第一性原理：可逆的直接放行不卡流程，错靠事后抽查+原地还原）。
        分析型任务（只读卡/报告，放行本就不 apply）交付即自动收货，不进「待放行 等我」。止损闩生效时仍留人。 */
     ensure_review_schema(); /* card_kind 列（analysis_task 空 ops 分岔要读） */
+    ensure_note_capacity();
     $arow=db()->prepare("SELECT owner_type,ops,client_id,card_kind,output_url,result_note FROM seo_tasks WHERE id=?");
     $arow->execute([$tid]);
     $at=$arow->fetch();
@@ -8328,6 +8370,14 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
                 continue;
             }
         }
+        list($fsN0,$fsSig0)=apply_fail_streak($cid,$tid,$lx0);
+        if($fsN0>=APPLY_FAIL_STREAK_MAX){
+            db()->prepare("UPDATE seo_tasks SET status='blocked',attention=1 WHERE id=?")->execute([$tid]);
+            if(strpos((string)$t['result_note'],'[auto-release 停人] 同因连败')===false)
+                task_append_note($tid,'[auto-release 停人] 同因连败 '.$fsN0.' 次（'.mb_substr($fsSig0,0,120,'UTF-8').'），重试已被证明无效，停自动放行转人工：先排除失败原因，方案重出或人工放行后解锁。');
+            hold_notify($tid,'同一版方案连续 '.$fsN0.' 次因同一原因落地失败，需先排除原因');
+            continue;
+        }
         if($an0>=2){
             db()->prepare("UPDATE seo_tasks SET status='blocked',attention=1 WHERE id=?")->execute([$tid]);
             if(strpos((string)$t['result_note'],'[auto-release 熔断] 本版方案')===false)
@@ -8521,6 +8571,15 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
            spend/irreversible 保留原封顶（每版方案首落 + 判后重试一次，第三次停人）；可逆类不设
            硬顶，第三次起照放但强制 [fuse-note] 台账留痕。防环性质不变：每次重放中间必须夹一次
            放行官判定（同版方案无判定不会再排 apply），且 harness 由人触发，无 cron 自转。 */
+        list($fsN,$fsSig)=apply_fail_streak($cid,$tid,$lastExec);
+        if($fsN>=APPLY_FAIL_STREAK_MAX){
+            if(strpos($note,'同因连败')===false)
+                task_append_note($tid,'[hold-human opus '.$stamp.'] 同因连败 '.$fsN.' 次（'.mb_substr($fsSig,0,120,'UTF-8').'），重试已被证明无效，停自动放行转人工：先排除失败原因，方案重出或人工放行后解锁。');
+            db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
+            audit('opus-release','seo_release_hold',(string)$tid,['reason'=>'apply fail streak','streak'=>$fsN,'sig'=>$fsSig]);
+            hold_notify($tid,'同一版方案连续 '.$fsN.' 次因同一原因落地失败，需先排除原因');
+            $act['held'][]=$tid;continue;
+        }
         if($applyN>=2&&$money){
             task_append_note($tid,'[hold-human opus '.$stamp.'] 熔断：本版方案已自动落地 '.$applyN.' 次（含判后重试），spend/不可逆类第三次归人。判词：'.$reason);
             db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([$tid]);
@@ -9314,6 +9373,7 @@ if($m==='PATCH'&&preg_match('#^/tasks/(\d+)$#',$ROUTE,$mm)){
     $u=auth_admin();
     ensure_task_module();
     ensure_review_schema(); /* card_kind 随 ops 重算要列在（2026-09-21） */
+    ensure_note_capacity();
     $tid=(int)$mm[1];
     $i=input();
     $chk=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
