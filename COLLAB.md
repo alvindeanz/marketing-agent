@@ -1997,3 +1997,11 @@ Alvin 提的四项客户栏改造：
 - #479 备注列（TEXT 65535 字节）被 79 轮重放写满，其后追加全部静默丢失（含 11-15 判语，首次盖戳也没写进去）。已折叠重放段重写备注。
 - 摸底结论（待 Alvin 批再修）：10-28 的 79 轮是事件链自转，不靠 harness：apply 中止备注进 /tasks/{id}/result 排闸A，判 do 后自动排放行官，放行官放行又排 apply，约 25 秒一圈，每圈两次 opus。确定性拒绝闸只做在 L0 路（seo-api.php 8308 段），放行官路（8500 段）可逆类 10-20 降软后无顶也无此闸，注释里「每次重放夹一次判定且 harness 人触发无 cron 自转」的防环前提不成立。循环停下是意外：第 79 次回写备注 socket hang up，链断了。全船队扫 result_note 只此一例。口子仍开：任何走放行官路的可逆单遇确定性中止都会复现。
 - 建议修法三处：放行官路补同一道确定性拒绝闸；result 入口对同版方案连续同因中止不再排闸A；task_append_note 接近列上限时拒写并停人。
+
+## 2026-11-16 AIRA (b) 同因连败闸 + 备注列加宽（rev 2ced4aa，Alvin 批「没有阻塞就直接修复完毕」）
+
+- 审阅后方案从三处收成两处。原拟的「放行官路补关键词闸」不够：回放发现 #479 的 Shopify 车道中止日志（shop alias missing）连 L0 路现有的锚都一个不中，补锚是追着话术跑。原拟的「result 入口不再排闸A」撤掉：中止后经判定自愈的链（无方案续排 execute 等）靠这个入口，拦了会误伤。
+- **同因连败闸**（seo-api.php `apply_fail_sig` / `apply_fail_streak`，`APPLY_FAIL_STREAK_MAX=3`）：同一版方案（最近一次 execute done 之后）最近连续 3 次 apply 失败且收尾行「did not complete :: …」签名相同（数字归一）即停人，L0 路与放行官路共用。无签名的失败（超时清扫等瞬态）断开连击；中间成功过清零；方案重出或人工放行后解锁。与 10-20 可逆降软不冲突：前两次重试照放。最坏代价从无上限降到 3 次落地加其间的判定。
+- **备注列加宽**：`ensure_note_capacity` 惰性把 seo_tasks.result_note 从 TEXT 改 MEDIUMTEXT，挂在 task_append_note、PATCH、result 三个入口。线上实测：#479 写入 74687 字节读回完整，已还原。
+- 测试：新增 tests/apply_fail_streak.test.js 6 条（job 11167/10999/10236/10238 真实日志回放加源码同步闸）；node 全套绿；250 上 php -l 过，四套 PHP 测试全绿。
+- 未验证：连败闸没有真单验证（要等下一次真实连败），目前只有回放。
