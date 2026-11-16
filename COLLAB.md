@@ -1990,3 +1990,10 @@ Alvin 提的四项客户栏改造：
 - 起因：SD Aluminium（9，WP 端）试跑，#1576（spawn 来源博客单，10-21 建）显示「在途无到期」。原因是 laneAge 用 updated_at，复审与附件回传会刷新它，单子永远不满 3 天。
 - 改动：`seo-worker/tools/harness.js` laneAge 改 created_at 优先；文案「在途」改「未结」。只动汇总打印，不影响放行窗。
 - 处置：#1576 稿件已交付且文章已上线（实测 200），走 /finish 收口。SD Aluminium S6 五张全 done，板上无未结单。
+
+## 2026-11-16 AIRA Custom 档试跑（Citymed 13、Oak 1）+ #479 重放循环摸底（未动代码）
+
+- 处置：Citymed #1832（chat 单，月报已改上线）finish。Oak #479 博客成稿补交办 Summer（11-04 首批漏件，Alvin 批「发吧」；/ops_notify 发信 resend 01a1e1e8），转人工位盖 [交办 2026-11-16 → summer] 戳。
+- #479 备注列（TEXT 65535 字节）被 79 轮重放写满，其后追加全部静默丢失（含 11-15 判语，首次盖戳也没写进去）。已折叠重放段重写备注。
+- 摸底结论（待 Alvin 批再修）：10-28 的 79 轮是事件链自转，不靠 harness：apply 中止备注进 /tasks/{id}/result 排闸A，判 do 后自动排放行官，放行官放行又排 apply，约 25 秒一圈，每圈两次 opus。确定性拒绝闸只做在 L0 路（seo-api.php 8308 段），放行官路（8500 段）可逆类 10-20 降软后无顶也无此闸，注释里「每次重放夹一次判定且 harness 人触发无 cron 自转」的防环前提不成立。循环停下是意外：第 79 次回写备注 socket hang up，链断了。全船队扫 result_note 只此一例。口子仍开：任何走放行官路的可逆单遇确定性中止都会复现。
+- 建议修法三处：放行官路补同一道确定性拒绝闸；result 入口对同版方案连续同因中止不再排闸A；task_append_note 接近列上限时拒写并停人。
