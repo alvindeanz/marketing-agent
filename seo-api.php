@@ -987,6 +987,28 @@ function blog_card_waiting($t){
    口径与 apply 侧 requireBlogPublishConsent 一致，两处要一起改：
    ①委托客户（policy.blog_publish_executor=agent）视同有凭证；
    ②候选顺序 本任务 → detail/note 里引用的任务号，取到 publish_blog 行即停（agree 过，其余不过）。 */
+/* 同篇文章的确认卡（2026-11-17 ticket #63，Sammichelle #2100 对 #2045）：发布单常是另开的一张，
+   正文不写卡单号，只写文章网址；客户在卡上点了同意，凭证判定和续排按「#单号」都接不上。
+   口径：任务正文里恰好一个 /blog/<slug>（多个不猜），同客户带确认卡且提到同一 slug 的任务里
+   取单号最大的一张，即这篇文章最新的卡。只认最新一张：旧卡的同意不能替新一版改稿放行。
+   apply 侧经 GET /card_feedback?task_id=&linked=1 取同一结果，三处（派单、续排、执行）一个口径。 */
+function blog_slug_of($text){
+    if(!preg_match_all('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#',(string)$text,$m))return '';
+    $u=array_values(array_unique($m[1]));
+    return count($u)===1?$u[0]:'';
+}
+function blog_consent_card_by_slug($cid,$tid,$t){
+    $slug=blog_slug_of((string)($t['detail']??'')."\n".(string)($t['result_note']??''));
+    if($slug==='')return 0;
+    try{
+        $q=db()->prepare("SELECT id,result_note FROM seo_tasks WHERE client_id=? AND id!=? AND result_note LIKE '%blog_confirmation_task-%' AND result_note LIKE ? ORDER BY id DESC LIMIT 10");
+        $q->execute([(int)$cid,(int)$tid,'%/blog/'.$slug.'%']);
+        foreach($q->fetchAll() as $r){
+            if(preg_match('#/blog/'.preg_quote($slug,'#').'(?![A-Za-z0-9_-])#',(string)$r['result_note']))return (int)$r['id'];
+        }
+    }catch(Exception $e){/* 查不到按无关联处理 */}
+    return 0;
+}
 function blog_publish_consent_ok($cid,$tid,$t){
     try{
         $pq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
@@ -999,6 +1021,9 @@ function blog_publish_consent_ok($cid,$tid,$t){
         foreach($mm[1] as $x){$x=(int)$x;if($x&&!in_array($x,$cands,true))$cands[]=$x;}
     }
     $cands=array_slice($cands,0,8);
+    /* 同篇文章的卡（2026-11-17 ticket #63）：发布单与卡单只靠文章网址关联时也认，排在显式引用之后 */
+    $lk=blog_consent_card_by_slug($cid,$tid,$t);
+    if($lk&&!in_array($lk,$cands,true))$cands[]=$lk;
     try{
         $fq=db()->prepare("SELECT choice FROM seo_card_feedback WHERE task_id=? AND item='publish_blog' ORDER BY id DESC LIMIT 1");
         foreach($cands as $cd){
@@ -6441,6 +6466,9 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
     $i=input();
     $tid=(int)($i['task_id']??0);
     $tok=(string)($i['token']??'');
+    /* 链接尾巴带标点照认（2026-11-17 ticket #62）：卡链接被连着右括号一起复制，令牌多一位就整卡红字。
+       令牌是 32 位十六进制，只取这一段比对，后面跟什么都不算数。 */
+    if(preg_match('/^[0-9a-f]{32}/',$tok,$tkm))$tok=$tkm[0];
     if(!$tid||!hash_equals(md5('cardfb'.$tid.$WORKER_TKN),$tok))res(403,['error'=>'bad token']);
     $g=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE id=?");
     $g->execute([$tid]);
@@ -6494,9 +6522,18 @@ if($m==='POST'&&$ROUTE==='/card_feedback'){
 function publish_consent_resume($tid,$choice,$item){
     if($choice!=='agree'||$item!=='publish_blog')return;
     try{
-        $wq=db()->prepare("SELECT id,client_id FROM seo_tasks WHERE client_id=(SELECT client_id FROM seo_tasks WHERE id=?) AND ((status='blocked' AND result_note LIKE '%[wait-publish-consent]%') OR (status='review' AND result_note LIKE '%[wait-card]%')) AND (id=? OR detail LIKE ? OR result_note LIKE ?) LIMIT 5"); /* [wait-card]：chatw 改稿单卡在等客户（2026-11-13），同意落库同样续排 */
-        $wq->execute([$tid,$tid,'%#'.$tid.'%','%#'.$tid.'%']);
+        /* 候选先全取再在 PHP 里筛（2026-11-17 ticket #63）：原先只认正文里写了「#卡单号」的等待单，
+           发布单只写文章网址的接不上。现在三种都认：卡单自己、正文引用卡单号、同篇文章且本卡是最新一张。 */
+        $wq=db()->prepare("SELECT id,client_id,detail,result_note FROM seo_tasks WHERE client_id=(SELECT client_id FROM seo_tasks WHERE id=?) AND ((status='blocked' AND result_note LIKE '%[wait-publish-consent]%') OR (status='review' AND result_note LIKE '%[wait-card]%')) ORDER BY id DESC LIMIT 40"); /* [wait-card]：chatw 改稿单卡在等客户（2026-11-13），同意落库同样续排 */
+        $wq->execute([$tid]);
+        $nR=0;
         foreach($wq->fetchAll() as $wt){
+            $wtxt=(string)$wt['detail']."\n".(string)$wt['result_note'];
+            $hit=((int)$wt['id']===(int)$tid)||preg_match('/#'.(int)$tid.'(?!\d)/',$wtxt)
+                ||(strpos((string)$wt['result_note'],'[wait-publish-consent]')!==false /* 网址关联只叫醒发布单；同篇的旧改稿单不跟着重跑，免得旧稿盖新稿 */
+                    &&blog_consent_card_by_slug((int)$wt['client_id'],(int)$wt['id'],$wt)===(int)$tid);
+            if(!$hit)continue;
+            if(++$nR>5)break;
             $wtid=(int)$wt['id'];
             db()->prepare("UPDATE seo_tasks SET status='review' WHERE id=?")->execute([$wtid]);
             list($ajP,)=queue_task_jobs((int)$wt['client_id'],'apply_task',[$wtid],'publish-consent','seo_tasks_release');
@@ -6550,6 +6587,13 @@ if($m==='GET'&&$ROUTE==='/card_feedback'){
             $q=db()->prepare("SELECT id,item,choice,fb,created_at,actor FROM seo_card_feedback WHERE task_id=? ORDER BY id");
             $q->execute([$tid]);
             $rows=$q->fetchAll();
+            /* linked=1（2026-11-17 ticket #63）：顺带回这张任务按文章网址关联到的最新确认卡单号，apply 凭证闸用 */
+            if(!empty($_GET['linked'])){
+                $lt=db()->prepare("SELECT id,client_id,detail,result_note FROM seo_tasks WHERE id=?");
+                $lt->execute([$tid]);
+                $ltr=$lt->fetch();
+                res(200,['rows'=>$rows,'linked_card_task'=>$ltr?blog_consent_card_by_slug((int)$ltr['client_id'],$tid,$ltr):0]);
+            }
         }else{
             $limF=min(max((int)($_GET['limit']??60),1),200);
             $q=db()->prepare("SELECT f.id,f.task_id,f.item,f.choice,f.fb,f.created_at,f.actor,t.title AS task_title

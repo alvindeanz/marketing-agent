@@ -932,9 +932,15 @@ async function requireBlogPublishConsent(api, task, record) {
     } catch (e) { record('policy facts 读取失败（' + e.message + '），按未委托处理，照走卡凭证'); }
   }
   const refIds = consentRefIds(task);
+  /* 同篇文章的卡（2026-11-17 ticket #63）：发布单另开、正文只写文章网址不写卡单号时，由服务端按
+     文章网址找这篇最新的确认卡（blog_consent_card_by_slug，派单与续排同一口径），排在显式引用之后。
+     本任务的反馈行与关联卡号同一次调用取回，不多打一次接口。 */
+  const own = await api.cardFeedback(taskId, true).catch(() => ({ rows: [] }));
+  const lk = Number((own || {}).linked_card_task || 0);
+  if (lk && lk !== taskId && refIds.indexOf(lk) === -1) refIds.push(lk);
   let pub = [];
   for (const cand of [taskId].concat(refIds)) {
-    const fbres = await api.cardFeedback(cand).catch(() => ({ rows: [] }));
+    const fbres = cand === taskId ? (own || { rows: [] }) : await api.cardFeedback(cand).catch(() => ({ rows: [] }));
     const rows = (fbres.rows || []).filter((r) => String(r.item) === 'publish_blog');
     if (rows.length) { pub = rows; record('发布凭证取自任务 #' + cand + ' 的确认卡'); break; }
   }

@@ -573,6 +573,16 @@ t('发布凭证闸：本任务无行时回退引用任务，取到 agree 放行�
   });
 });
 
+t('发布凭证闸：正文没写卡单号时按服务端回的同篇文章卡取凭证（ticket #63）', () => {
+  const calls = [];
+  const apiLk = { cardFeedback: async (id, linked) => { calls.push([id, !!linked]); if (id === 2100) return { rows: [], linked_card_task: 2045 }; return id === 2045 ? { rows: [{ item: 'publish_blog', choice: 'agree' }] } : { rows: [] }; } };
+  const rec = [];
+  return A.requireBlogPublishConsent(apiLk, { id: 2100, detail: '把站内草稿 /blog/summer-holiday-packing-list-nz-bach-week/ 原样发布', result_note: '' }, (l) => rec.push(l)).then(() => {
+    assert.deepStrictEqual(calls, [[2100, true], [2045, false]], '本任务带 linked 查一次，再查关联卡');
+    assert.ok(rec.some((l) => l.indexOf('#2045') >= 0), '来源没记进步骤');
+  });
+});
+
 t('发布凭证闸：最后一次表态非 agree 必须拦（以最后表态为准）', () => {
   const apiHold = { cardFeedback: async () => ({ rows: [{ item: 'publish_blog', choice: 'agree' }, { item: 'publish_blog', choice: 'hold' }] }) };
   return A.requireBlogPublishConsent(apiHold, { id: 2, detail: '', result_note: '' }, () => {}).then(

@@ -104,8 +104,8 @@ class Api {
 
   /** GET /card_feedback?task_id= -> { rows } 该卡的全部反馈，id 升序即时间序。
       博客发布前查客户是否已在确认卡上点同意（publish_blog=agree）。 */
-  async cardFeedback(taskId) {
-    return this.req('GET', '/card_feedback?task_id=' + encodeURIComponent(taskId));
+  async cardFeedback(taskId, linked) {
+    return this.req('GET', '/card_feedback?task_id=' + encodeURIComponent(taskId) + (linked ? '&linked=1' : ''));
   }
 
   /** GET /card_feedback?client_id=&limit= -> { rows } 该客户全部卡的近期反馈（含 task_id
