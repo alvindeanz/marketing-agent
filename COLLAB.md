@@ -2017,3 +2017,9 @@ Alvin 提的四项客户栏改造：
 - 容器 GTM-5JFL7KLJ（我方账号，dareu-webforger）发布 v2：GA4 目的地 G-50BZ51W23M 加 10 个电商事件标签与 7 个 dataLayer 变量，照 sanmichellebags 容器的 GA4 部分；未含 Ads 标签。WF 追踪 00:10 UTC 切回 gtm、ga4 清空。切换后 5 分钟 GA4 实时连续有数，page_view、view_item、select_item、view_item_list 均到。
 - 坑：GA4 数据流关联容器后工作区自动生成 dest_ga 标签，再手建同 ID 的 googtag 会编译失败且无原因说明，删手建的即可。服务账号对该容器的发布权限是 Alvin 当场开的。
 - 未验证：add_to_cart、begin_checkout、purchase 三个事件要等真实加购与下单出现才能确认。
+
+## 2026-11-17 (b) AIRA 迁站后跟进定为三次读数（Alvin 定）
+
+- Alvin 否了迁移检查工具加哨兵的方案，定为切换后一周、一个月、三个月各读一轮 GSC 与 GA4，不建工具。
+- Dareu 建单 #2143（S6，technical，P1，agent）：迁站后第一次复查，读 GSC 前后窗口与旧网址曝光转移、GA4 渠道与电商事件、WF 跳转候选只列不写。一个月与三个月两次并入 11 月月报与季度复盘，不另开单。
+- 无代码改动。
