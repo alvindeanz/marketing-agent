@@ -628,6 +628,77 @@ function assemble(context, limits, log) {
  * a distilled artifact and squeezing the tables to make room for it would trade
  * good information for good information.
  */
+/* 上一季任务结局（续季方案的硬输入，2026-11-17）。
+   病根：任务做完即归档，/context 默认不带归档单，续季时账本节近乎空白，模型会把方案当
+   首份来写，重排已落地的活、重走已经证明走不通的路。这里吃带归档的全量任务（调用方用
+   getContext(cid,{includeArchived:true}) 取回挂在 context.prior_tasks），零模型压成一节：
+   按档统计、计划内已落地、丢弃与砍掉（带理由）、计划外的改站动作。
+   被打回或被取代方案留下的收尸单是过渡产物，不进。首份方案（没有已结束的计划内任务）返回空串。 */
+const PRIOR_MAX_BYTES = 7 * 1024;
+function priorClosedKind(t) {
+  const note = String(t.result_note || '');
+  if (String(t.review_verdict || '') === 'drop') return 'dropped';
+  const tags = note.match(/\[(killed|dropped|merged)\]/g);
+  if (tags && tags.length) return tags[tags.length - 1].slice(1, -1);
+  return 'landed';
+}
+function priorReason(t) {
+  if (String(t.review_verdict || '') === 'drop' && t.review_reason) return String(t.review_reason);
+  const note = String(t.result_note || '');
+  const all = [...note.matchAll(/\[(killed|dropped|merged)\]([\s\S]{0,400})/g)];
+  if (!all.length) return '';
+  const seg = all[all.length - 1][2].split(/\n(?=\[)/)[0];
+  return seg.replace(/^[：:\s]+/, '').replace(/^[\w.:-]{1,80}：\s*/, '').replace(/\s*\n+\s*/g, ' ').trim();
+}
+function priorOutcomesSection(priorTasks) {
+  const list = (Array.isArray(priorTasks) ? priorTasks : []).filter((t) => String(t.status) === 'done');
+  const transitional = (t) => /方案 #\d+ 被(打回|#\d+ 取代)|被 #\d+ 取代/.test(String(t.result_note || ''));
+  const isPlan = (t) => t.plan_id != null || String(t.origin || '') === 'sprint';
+  const isBlog = (t) => /blog-draft/.test(String(t.ops || ''));
+  const day = (t) => String(t.updated_at || '').slice(0, 10);
+  const sp = (t) => String(t.sprint || '').toUpperCase() || '-';
+  const planned = list.filter((t) => isPlan(t) && !transitional(t));
+  if (!planned.length) return '';
+  const byNew = (a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+  const landed = planned.filter((t) => priorClosedKind(t) === 'landed');
+  const closed = planned.filter((t) => priorClosedKind(t) !== 'landed');
+  const stat = {};
+  for (const t of planned) {
+    const k = sp(t);
+    if (!stat[k]) stat[k] = { landed: 0, closed: 0 };
+    stat[k][priorClosedKind(t) === 'landed' ? 'landed' : 'closed'] += 1;
+  }
+  const statLine = Object.keys(stat).sort().map((k) => k + ' 落地 ' + stat[k].landed + ' / 丢弃砍并 ' + stat[k].closed).join('；');
+  const landedBlog = landed.filter(isBlog).length;
+  const landedRows = landed.filter((t) => !isBlog(t)).sort(byNew).slice(0, 60)
+    .map((t) => '- #' + t.id + ' [' + sp(t) + '][' + (t.module || '?') + '] ' + truncate(String(t.title || ''), 60) + ' | ' + day(t));
+  const closedRows = closed.sort(byNew).slice(0, 40)
+    .map((t) => '- #' + t.id + ' [' + sp(t) + '][' + (t.module || '?') + '][' + priorClosedKind(t) + '] ' + truncate(String(t.title || ''), 60) +
+      ' :: ' + (truncate(priorReason(t), 120) || '未写理由'));
+  const offPlan = list
+    .filter((t) => !isPlan(t) && !transitional(t) && priorClosedKind(t) === 'landed' && String(t.ops || '').trim() &&
+      !/report|analysis-readonly|deliverable|blog-draft/.test(String(t.ops)))
+    .sort(byNew).slice(0, 25)
+    .map((t) => '- #' + t.id + ' [' + (t.module || '?') + '][' + truncate(String(t.ops), 40) + '] ' + truncate(String(t.title || ''), 60) + ' | ' + day(t));
+  let text = [
+    'PRIOR QUARTER OUTCOMES（上一季任务结局，含已归档；续季方案的硬输入）',
+    '按档统计（计划内）：' + statLine,
+    '',
+    '计划内已落地（' + (landed.length - landedBlog) + ' 条，另有配额博客 ' + landedBlog + ' 篇已出稿，选题见内容登记）：',
+    landedRows.join('\n') || '（无）',
+    '',
+    '计划内丢弃、砍掉、并掉（' + closed.length + ' 条，带理由；这些路上一季没走通）：',
+    closedRows.join('\n') || '（无）',
+    '',
+    '计划外已落地的改站动作（来自频道与派生单，最近 ' + offPlan.length + ' 条；别对刚动过的页再排同样的活）：',
+    offPlan.join('\n') || '（无）',
+  ].join('\n');
+  if (Buffer.byteLength(text, 'utf8') > PRIOR_MAX_BYTES) {
+    text = Buffer.from(text, 'utf8').subarray(0, PRIOR_MAX_BYTES - 60).toString('utf8').replace(/\uFFFD+$/, '') + '\n[上一季结局过长已截断]';
+  }
+  return text;
+}
+
 function buildPlanningBriefing(context, opts = {}) {
   const maxBytes = opts.maxBytes || MAX_BYTES;
   const log = opts.log;
@@ -647,8 +718,13 @@ function buildPlanningBriefing(context, opts = {}) {
   const meta = dossierMeta(context);
   const dossier = dossierSection(context);
   text = text + '\n\n' + dossier;
+  /* 上一季结局同 dossier 一样挂在预算之外：它决定续季不重排、不重蹈，不能被数据节挤掉。 */
+  const prior = priorOutcomesSection(context && context.prior_tasks);
+  if (prior) text = text + '\n\n' + prior;
 
   return {
+    renewal: !!prior,
+    priorBytes: Buffer.byteLength(prior, 'utf8'),
     text,
     bytes: Buffer.byteLength(text, 'utf8'),
     dataBytes,
@@ -660,6 +736,7 @@ function buildPlanningBriefing(context, opts = {}) {
 
 module.exports = {
   buildPlanningBriefing,
+  priorOutcomesSection,
   lastRejectedFromTasks,
   capabilitiesSection,
   contentRegistrySection,

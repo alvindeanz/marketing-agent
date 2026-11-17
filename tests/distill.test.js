@@ -71,5 +71,50 @@ t('ledger row keeps the URL lines and drops the actor prefix', () => {
   assert.ok(!row.includes('wfu_c6cb3371'), 'actor prefix stripped');
 });
 
+console.log('priorOutcomesSection（续季：上一季结局，2026-11-17）');
+const PRIOR = [
+  { id: 1, status: 'done', plan_id: 3, sprint: 'S1', module: 'onpage', title: '首页 title 改写', ops: 'page-meta-update', updated_at: '2026-09-10 01:00:00' },
+  { id: 2, status: 'done', plan_id: 3, sprint: 'S6', module: 'onpage', title: '产品页加厚', review_verdict: 'drop', review_reason: '商品描述正文属 human_only', updated_at: '2026-11-15 01:00:00' },
+  { id: 3, status: 'done', plan_id: 3, sprint: 'S2', module: 'content', title: 'S2 配额博客', ops: 'blog-draft', updated_at: '2026-10-01 01:00:00' },
+  { id: 4, status: 'done', origin: 'chatw:9', module: 'onpage', title: '新建配送页', ops: 'page-create', updated_at: '2026-11-06 01:00:00' },
+  { id: 5, status: 'done', origin: 'report:9', module: 'onpage', title: '月报改稿', ops: 'report-html-update', updated_at: '2026-11-06 01:00:00' },
+  { id: 6, status: 'done', plan_id: 2, sprint: 'S1', title: '被打回方案的收尸单', result_note: '[killed] aira：方案 #2 被打回：方向不对' },
+  { id: 7, status: 'approved', plan_id: 3, sprint: 'S6', title: '没做完的不进结局' },
+  { id: 8, status: 'done', plan_id: 3, sprint: 'S4', module: 'technical', title: '人工叫停的活', result_note: '检查: ok\n[killed] aira：客户不同意改导航' },
+];
+t('首份方案（没有已结束的计划内任务）返回空串，简报不标续季', () => {
+  assert.strictEqual(D.priorOutcomesSection([]), '');
+  assert.strictEqual(D.priorOutcomesSection([PRIOR[3], PRIOR[6]]), '');
+  const out = D.buildPlanningBriefing(baseCtx([]), {});
+  assert.strictEqual(out.renewal, false);
+  assert.ok(!out.text.includes('PRIOR QUARTER OUTCOMES'));
+});
+t('已落地、丢弃带理由、计划外改站动作各归各节，过渡单与报告改稿不进', () => {
+  const s = D.priorOutcomesSection(PRIOR);
+  assert.ok(s.includes('#1 [S1][onpage] 首页 title 改写 | 2026-09-10'));
+  assert.ok(s.includes('#2 [S6][onpage][dropped] 产品页加厚 :: 商品描述正文属 human_only'));
+  assert.ok(s.includes('#8 [S4][technical][killed] 人工叫停的活 :: 客户不同意改导航'));
+  assert.ok(s.includes('另有配额博客 1 篇'));
+  assert.ok(s.includes('#4 [onpage][page-create] 新建配送页'));
+  assert.ok(!s.includes('月报改稿'));
+  assert.ok(!s.includes('收尸单'));
+  assert.ok(!s.includes('没做完的不进结局'));
+  assert.ok(s.includes('S6 落地 0 / 丢弃砍并 1'));
+});
+t('prior_tasks 挂上后简报带上一季结局并标续季', () => {
+  const ctx = baseCtx([]);
+  ctx.prior_tasks = PRIOR;
+  const out = D.buildPlanningBriefing(ctx, {});
+  assert.strictEqual(out.renewal, true);
+  assert.ok(out.priorBytes > 0);
+  assert.ok(out.text.includes('PRIOR QUARTER OUTCOMES'));
+});
+t('超长截断到预算内', () => {
+  const many = [];
+  for (let i = 0; i < 400; i++) many.push({ id: 1000 + i, status: 'done', plan_id: 3, sprint: 'S1', module: 'onpage', title: '很长的任务标题'.repeat(8), updated_at: '2026-09-10' });
+  const s = D.priorOutcomesSection(many);
+  assert.ok(Buffer.byteLength(s, 'utf8') <= 7 * 1024);
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -9238,10 +9238,13 @@ if($m==='GET'&&$ROUTE==='/board'){
         $pr=$pq->fetch();
         $pq->closeCursor();
         $anchor=($pr&&$pr['created_at'])?sprint_anchor_norm($pr['created_at']):null;
-        $cur=null;
+        $cur=null;$overdue=0;
         if($anchor){
             $n=semimonth_index($today->format('Y-m-d'))-semimonth_index($anchor)+1;
             $cur=max(1,min($n,6));
+            /* 方案超期档数（2026-11-17）：期指针封顶 6 是为了不让 S7+ 任务隐身，副作用是方案过了
+               第六档在板上仍显示 S6，看不出该续季。单出一个数，汇总与看板据此提示「待续季」。 */
+            $overdue=max(0,$n-6);
         }
         $tq=db()->prepare("SELECT * FROM seo_tasks WHERE client_id=? AND archived=0 ORDER BY FIELD(status,'proposed','approved','in_progress','review','blocked','done'),FIELD(priority,'P0','P1','P2','P3'),id");
         $tq->execute([$cid]);
@@ -9296,7 +9299,7 @@ if($m==='GET'&&$ROUTE==='/board'){
         $fj->execute([$cid]);
         $out[]=[
             'client_id'=>$cid,'name'=>$c['name'],'domain'=>$c['domain'],'platform'=>$c['platform'],
-            'plan_id'=>$pr?(int)$pr['id']:null,'sprint_anchor'=>$anchor,'sprint_mode'=>'semimonth','current_sprint'=>$cur,
+            'plan_id'=>$pr?(int)$pr['id']:null,'sprint_anchor'=>$anchor,'sprint_mode'=>'semimonth','current_sprint'=>$cur,'sprint_overdue'=>$overdue,
             'counts'=>['tasks'=>count($tasks),'wait_me'=>$nWaitMe,'running'=>$nRunning,'manual_pending'=>$nManual,'failed_jobs_7d'=>(int)$fj->fetch()['n'],'hidden_closed'=>$hiddenClosed],
             'pending_plans'=>array_values($pendingPlans),
             'tasks'=>$tasks,

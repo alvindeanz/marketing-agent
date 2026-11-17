@@ -283,8 +283,11 @@ class Api {
   }
 
   /** GET /context?client_id= -> { profile, active_plan, tasks, latest_snapshots } */
-  async getContext(clientId) {
-    return this.req('GET', '/context?client_id=' + encodeURIComponent(clientId));
+  async getContext(clientId, opts) {
+    /* includeArchived：连已归档任务一起给。续季出方案要翻上一季的结局（做完即归档，
+       默认口径里看不到，2026-11-17 续季摸底实证），其余调用方保持默认。 */
+    const arch = opts && opts.includeArchived ? '&include_archived=1' : '';
+    return this.req('GET', '/context?client_id=' + encodeURIComponent(clientId) + arch);
   }
 
   /**

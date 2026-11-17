@@ -18,16 +18,20 @@ def snapshot(out, cids):
     data = {}
     names = {}
     cal = {}
+    over = {}
     for c in (req('/board').get('clients') or []):
         cal[c.get('client_id')] = c.get('current_sprint')
+        over[c.get('client_id')] = c.get('sprint_overdue') or 0
     for c in (req('/clients').get('clients') or []):
         names[c.get('client_id')] = c.get('name')
     for cid in cids:
-        ts = req('/tasks?client_id=%d' % cid)['tasks']
-        data[str(cid)] = {'name': names.get(cid, str(cid)), 'cal_sprint': cal.get(cid), 'tasks': [
+        # 带归档单：任务收口即归档，默认列表里看不到，before/after 对账会把本轮收口全数漏掉
+        # （2026-11 全部 9 份汇总都报「收口 0」的病根）。
+        ts = req('/tasks?client_id=%d&include_archived=1' % cid)['tasks']
+        data[str(cid)] = {'name': names.get(cid, str(cid)), 'cal_sprint': cal.get(cid), 'sprint_overdue': over.get(cid, 0), 'tasks': [
             {k: t.get(k) for k in ('id', 'title', 'status', 'sprint', 'ops', 'owner_type',
                                    'human_state', 'wait_reason', 'closed_kind', 'sent_at',
-                                   'card_feedback_at', 'result_note', 'review_verdict')}
+                                   'card_feedback_at', 'result_note', 'review_verdict', 'archived')}
             for t in ts]}
     json.dump(data, open(out, 'w'), ensure_ascii=False)
     print('快照 %d 家 -> %s' % (len(cids), out))
@@ -77,6 +81,7 @@ def digest(before_f, after_f, prev_f=None):
     lines = ['# 每周批跑收尾 ' + stamp, '']
     tot_done = 0
     smooth, stuck_clients = [], []
+    overdue_all = []
     stuck_all = {}
     for cid, a in A.items():
         b = B.get(cid, {'tasks': []})
@@ -84,17 +89,23 @@ def digest(before_f, after_f, prev_f=None):
         done_new = [t for t in a['tasks'] if t.get('status') == 'done'
                     and bst.get(t['id'], {}).get('status') != 'done']
         cal = a.get('cal_sprint')
-        task_cur = cur_sprint(a['tasks'])
+        # 归档单只用于收口对账；当期与卡壳口径仍只看板面活账（与改前一致）
+        live = [t for t in a['tasks'] if not t.get('archived')]
+        task_cur = cur_sprint(live)
         # 当期口径与 harness 同源（日历）；任务只推进到日历之后 = 等日历翻页，不算卡壳
         cur = cal if isinstance(cal, int) and cal else task_cur
         ahead = (task_cur or 0) > (cur or 0)
-        cur_open = [t for t in a['tasks'] if cur and str(t.get('sprint')) == 'S%d' % cur
+        cur_open = [t for t in live if cur and str(t.get('sprint')) == 'S%d' % cur
                     and t.get('status') != 'done']
         stuck = [(t, classify(t)) for t in cur_open]
         stuck = [(t, c) for t, c in stuck if c]
         tot_done += len(done_new)
-        head = '## %s（日历本期 %s%s）：收口 %d，卡壳 %d' % (
+        od = a.get('sprint_overdue') or 0
+        if od:
+            overdue_all.append('%s（超 %d 档）' % (a['name'], od))
+        head = '## %s（日历本期 %s%s%s）：收口 %d，卡壳 %d' % (
             a['name'], ('S%d' % cur) if cur else '全清',
+            ('，方案已超期 %d 档待续季' % od) if od else '',
             ('，本期活已干完等日历进 S%d' % task_cur) if (ahead and not cur_open) else '',
             len(done_new), len(stuck))
         lines.append(head)
@@ -114,6 +125,8 @@ def digest(before_f, after_f, prev_f=None):
     lines.insert(2, '**总结：顺利跑完 %d 家（%s），卡壳 %d 家，本轮共收口任务 %d 条。**' % (
         len(smooth), '、'.join(smooth) or '无', len(stuck_clients), tot_done))
     lines.insert(3, '')
+    if overdue_all:
+        lines.insert(3, '**方案已超期待续季 %d 家：%s。**' % (len(overdue_all), '、'.join(overdue_all)))
     # 放行官观察期三个数（2026-09-27 方案 B）：本轮新增的 opus 放行 / 静默期 / 停人。
     # 按 note 标记 diff 计数（before 没有 after 有才算本轮），推翻数看 audit 归人工复盘。
     rel = {'auto': 0, 'pend': 0, 'hold': 0}

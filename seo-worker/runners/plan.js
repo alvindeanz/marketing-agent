@@ -31,7 +31,10 @@ const OWNER_TYPES = ['agency', 'client', 'agent'];
 const SPRINTS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 const DEFAULT_PRIORITY = 'P2';
-const MAX_TASKS = 12;
+/* 2026-11-17 由 12 提到 20：12 条里 6 条是合同博客，剩 6 条摊到六档，后三档必然只剩一两条
+   （首季实证：全队计划内任务按档 225/169/110/94/48/29）。配平规则见 buildPrompt。 */
+const MAX_TASKS = 20;
+const BALANCE_MIN_LATE = 2; // S3 到 S6 每档至少几条非博客任务
 const AUTHORED_BY = 'seo-worker';
 
 /* 客户背景一律来自 profile 与 facts 简报，不在这里写死。
@@ -148,7 +151,7 @@ function validateTasks(rawTasks, log, capability) {
  * Client facing deliverables are a different matter and are written in the
  * site's language by the execute stage.
  */
-function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota) {
+function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota, renewal) {
   const hasDossier = !!(dossier && dossier.present);
   const ops = (capability && capability.operations) || [];
   const applyOps = ops.filter((o) => o.autonomy === 'agent_apply').map((o) => o.name);
@@ -190,6 +193,18 @@ function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota
           '按现有表现数据能支撑的范围规划，把缺失的摸底写进数据缺口段。',
         ].join('\n'),
     '',
+    renewal
+      ? [
+          '这是续季方案，不是首份方案',
+          '这个客户已经做完一个季度。简报末尾的 PRIOR QUARTER OUTCOMES 是上一季每条任务的结局，是硬输入：',
+          '- 已落地的活不许重排。要在同一页或同一词上继续做，detail 必须写明这次和上次的差别，以及表现数据里的依据。',
+          '- 丢弃、砍掉的方向不许原样再排。确实还值得做的，detail 写明当时的阻断理由现在哪里变了；说不出变化就不要排。',
+          '- 因为缺执行能力被丢弃、而收益仍然成立的活，写成 agency 任务，detail 点名要人做的具体动作，不要再派给 agent 空转。',
+          '- 「数据解读」一节先交代上一季：哪些动作在表现数据里见效了、哪些没有、哪些还看不出来，数字引简报。',
+          '- 「做」清单每条开头标明：延续、加码、或新开。上一季见效的优先加码，没见效的讲清为什么还做或为什么停。',
+          '',
+        ].join('\n')
+      : '',
     extraInstructions ? '客户负责人的额外要求\n' + extraInstructions + '\n' : '',
     '输出契约：五个部分，顺序照抄，前后不要有别的东西。',
     '标题是机器解析和人工 grep 的锚点，必须一字不差地复制。',
@@ -270,6 +285,16 @@ function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota
     '其余任务字段规则：',
     '- detail 写一到三句，让人不用回来问你就能开工。S1 的任务要点名具体页面、关键词或文件。',
     '- 每条任务都要能追溯到"做"清单里的某一条。',
+    '',
+    '关于排期配平（2026-11-17 定，硬约束）：',
+    '- 六档都要有实活。S3 到 S6 每档至少 ' + BALANCE_MIN_LATE + ' 条非博客任务，S1 与 S2 合计不超过非博客任务总数的一半。',
+    '- 上一版方案的通病是把活全堆在前两档，后两个月每档只剩一篇博客。持续性的工作（按表现数据分批的',
+    '  title 与 meta 迭代、内容刷新、内链、承接页补建）按批次摊到各档，每批点名范围或写明取数口径',
+    '  （例如：取本档开始时近 28 天曝光前 N 而点击率低于同位次均值的页）。',
+    '- 后段任务可以依赖前段落地后的数据，detail 写清依赖哪条任务、看哪个指标即可，不要因为现在定不死范围就不排。',
+    '- agency 任务全季不超过 3 条，每条 detail 写明要人做的具体动作。机器做不了、也说不清谁来做的事不要进任务块，',
+    '  写进正文的「不做」清单并说明原因。',
+    '- 输出前自检一遍每档的非博客任务数，不达标就调整排期，不要靠拆碎任务凑数。',
     blogQuota
       ? '- 博客节奏（合同，硬约束）：S1 到 S6 每个 sprint 至少 ' + blogQuota + ' 条写新博文的任务（ops 含 blog-draft），' +
         '选题取自锁定词表。缺了的 sprint 落库时会被自动补一条选题待定的占位任务，所以请自己排好选题。'
@@ -286,6 +311,22 @@ function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota
   ]
     .filter((s) => s !== '')
     .join('\n');
+}
+
+/* 排期配平零模型自检（软提示，只进日志不拦落库：方案是贵重产物，配平不达标交给方案层过闸和人看）。 */
+function balanceReport(tasks) {
+  const nonBlog = (tasks || []).filter((t) => !/blog-draft/.test(String(t.ops || '')));
+  const by = {};
+  for (const t of nonBlog) by[t.sprint] = (by[t.sprint] || 0) + 1;
+  const warns = [];
+  for (const sp of ['S3', 'S4', 'S5', 'S6']) {
+    if ((by[sp] || 0) < BALANCE_MIN_LATE) warns.push(sp + ' 非博客任务 ' + (by[sp] || 0) + ' 条，少于 ' + BALANCE_MIN_LATE);
+  }
+  const front = (by.S1 || 0) + (by.S2 || 0);
+  if (nonBlog.length && front * 2 > nonBlog.length) warns.push('S1 与 S2 合计 ' + front + ' 条，超过非博客任务 ' + nonBlog.length + ' 条的一半');
+  const agency = (tasks || []).filter((t) => t.owner_type === 'agency').length;
+  if (agency > 3) warns.push('agency 任务 ' + agency + ' 条，超过 3 条');
+  return warns;
 }
 
 /**
@@ -339,6 +380,7 @@ async function persist(ctx, text, dossier, capability, blogQuota) {
 
   const { tasks, dropped, overflow } = validateTasks(parsed.tasks, log, capability);
   if (overflow) log('model proposed more than ' + MAX_TASKS + ' tasks, kept the first ' + MAX_TASKS);
+  for (const w of balanceReport(tasks)) log('排期配平未达标：' + w);
   if (!tasks.length) {
     log(
       'every proposed task failed validation, ' +
@@ -442,7 +484,9 @@ async function run(ctx) {
   if (!profile) throw new Error('context returned no profile for client_id ' + job.client_id);
 
   await hydrateDossier(ctx, context);
+  await hydratePriorTasks(api, context, job.client_id, log);
   const briefing = buildPlanningBriefing(context, { log });
+  if (briefing.renewal) log('续季方案：上一季结局 ' + briefing.priorBytes + ' 字节已进简报');
   log(
     'briefing distilled: ' +
       briefing.bytes +
@@ -514,7 +558,7 @@ async function run(ctx) {
 
   const blogQuota = blogcadence.quotaOf(context);
   if (blogQuota) log('博客节奏：每个 sprint ' + blogQuota + ' 篇（fact ' + blogcadence.FACT_KEY + '）');
-  const prompt = buildPrompt(briefing.text, payload.instructions, dossier, capability, blogQuota);
+  const prompt = buildPrompt(briefing.text, payload.instructions, dossier, capability, blogQuota, briefing.renewal);
   log('step 3 of 4: planning pass, model ' + cfg.planModel + ', prompt ' + prompt.length + ' chars');
 
   let result = { planId: null, taskIds: [] };
@@ -544,8 +588,22 @@ async function run(ctx) {
   return { tokenUsage: 0 };
 }
 
+/* 续季输入：带归档的全量任务挂到 context.prior_tasks，distill 压成「上一季结局」一节。
+   取不到不炸方案（降级成不带上一季结局，日志留痕），方案本身才是贵重产物。 */
+async function hydratePriorTasks(api, context, clientId, log) {
+  try {
+    const full = await api.getContext(clientId, { includeArchived: true });
+    context.prior_tasks = Array.isArray(full && full.tasks) ? full.tasks : [];
+  } catch (e) {
+    context.prior_tasks = [];
+    if (log) log('WARNING 取带归档任务失败，本次方案不带上一季结局：' + e.message);
+  }
+}
+
 module.exports = {
   run,
+  hydratePriorTasks,
+  balanceReport,
   planPostBody,
   buildPrompt,
   extractJsonBlock,

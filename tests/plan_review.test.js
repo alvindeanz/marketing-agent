@@ -161,6 +161,37 @@ t('plan.planPostBody：payload.service 透传，缺省不带（服务端落 seo�
   assert.ok(!('service' in P.planPostBody({ client_id: 55 }, 'b')), '无 payload 不带');
 });
 
+console.log('续季与排期配平（2026-11-17）');
+t('plan prompt：配平规则常驻，续季块只在续季时出现，任务上限 20', () => {
+  const P = require(path.join(W, 'runners', 'plan'));
+  assert.strictEqual(P.MAX_TASKS, 20);
+  const first = P.buildPrompt('BRIEF', '', null, cap, 1, false);
+  assert.ok(first.includes('关于排期配平'));
+  assert.ok(first.includes('最多 20 条'));
+  assert.ok(!first.includes('这是续季方案'));
+  const renew = P.buildPrompt('BRIEF', '', null, cap, 1, true);
+  assert.ok(renew.includes('这是续季方案'));
+  assert.ok(renew.includes('PRIOR QUARTER OUTCOMES'));
+});
+t('balanceReport：后四档不足、前两档过半、agency 超额各报一条；配平达标不报', () => {
+  const P = require(path.join(W, 'runners', 'plan'));
+  const mk = (sprint, n, extra) => Array.from({ length: n }, () => Object.assign({ sprint, ops: 'page-meta-update', owner_type: 'agent' }, extra || {}));
+  const bad = [].concat(mk('S1', 5), mk('S2', 4), mk('S3', 1), mk('S5', 2), mk('S6', 3, { ops: 'blog-draft' }), mk('S4', 2, { owner_type: 'agency' }), mk('S5', 2, { owner_type: 'agency' }));
+  const w = P.balanceReport(bad).join(' | ');
+  assert.ok(w.includes('S3 非博客任务 1 条'));
+  assert.ok(w.includes('S6 非博客任务 0 条'), '博客不算实活');
+  assert.ok(w.includes('S1 与 S2 合计 9 条'));
+  assert.ok(w.includes('agency 任务 4 条'));
+  const good = [].concat(mk('S1', 3), mk('S2', 3), mk('S3', 2), mk('S4', 2), mk('S5', 2), mk('S6', 2));
+  assert.deepStrictEqual(P.balanceReport(good), []);
+});
+t('review prompt 带配平与续季两条硬规矩', () => {
+  const p = R.buildPrompt({ clientName: 'A', experience: 'E', principles: 'P', clientRules: '', globalRules: '', history: '', briefing: 'B', planBody: 'X', tasks: [], capability: cap });
+  assert.ok(p.includes('排期配平'));
+  assert.ok(p.includes('PRIOR QUARTER OUTCOMES'));
+  assert.ok(p.includes('最多 20 条'));
+});
+
 Promise.all(pending).then(() => {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

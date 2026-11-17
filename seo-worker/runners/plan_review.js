@@ -129,6 +129,10 @@ function buildPrompt(o) {
     '- 不为了显得有改动而改。v1 对的地方 keep，改动必须有理由，理由要能追溯到下面的经验、铁律或简报。',
     '- 一任务一件事：博客一任务一篇；一组页面一个任务；只读审计不立任务。',
     '- S1 只放我方能独立落地、且直接推动本季度第一批转化的事。',
+    '- 排期配平（2026-11-17 定）：S3 到 S6 每档至少 2 条非博客任务，S1 与 S2 合计不超过非博客任务的一半；agency 任务全季不超过 3 条。',
+    '  v1 不达标就由你重排，把持续性工作按批次摊到后几档，每批写明范围或取数口径。不要靠拆碎任务凑数。',
+    '- 简报末尾若有 PRIOR QUARTER OUTCOMES，这就是续季方案：已落地的不重排，丢弃砍掉的方向不原样再排（除非 detail 写明阻断理由哪里变了），',
+    '  v1 违反的由你在 changes 里 drop 或改写。方向确认卡的 goal 写本季相对上一季的变化（延续什么、加码什么、停掉什么）。',
     '- 任务字段沿用 v1 的契约：module ' + planRunner.MODULES.join('/') + '，sprint ' + planRunner.SPRINTS.join('/') +
       '，priority P0 到 P3，owner_type agency/client/agent，ops 只能用能力清单里的名字' + (ops ? '（' + ops + '）' : '（这个客户没有清单，改站任务一律 agency，ops 留空）') + '。最多 ' + planRunner.MAX_TASKS + ' 条。',
     '- 任务 detail 里凡是文案类的，要引用客户铁律里相关的一条（写「铁律：」加原句要点）。',
@@ -266,6 +270,8 @@ async function runWith(ctx, judge) {
   const workspace = ensureClientWorkspace(profile, cfg);
   const platform = profile.platform || profile.cms || '';
   const capability = { platform, operations: platform ? capabilities.operations(platform) : [] };
+  /* 续季：评审与出方案吃同一节「上一季结局」（带归档任务），否则评审看不到上一季做过什么。 */
+  await planRunner.hydratePriorTasks(api, context, job.client_id, log);
   const briefing = buildPlanningBriefing(context, { log });
 
   const judged = await judge({

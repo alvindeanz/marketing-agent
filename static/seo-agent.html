@@ -3918,7 +3918,10 @@ function renderLanes(){
     const openNow=(tasksData||[]).filter(t=>{const n=sprintNum(t);return n!==null&&n<=cur&&t.status!=='done'}).length;
     const overdue=(tasksData||[]).filter(t=>{const n=sprintNum(t);return n!==null&&n<cur&&t.status!=='done'}).length;
     const nextR=sprintRange(cur+1);
-    let head=sprintScope==='all'?'全部排期':('本期 S'+cur+(r?('（'+r.label+'）'):''));
+    /* 方案超期（2026-11-17）：期指针封顶 6，过了第六档仍显示 S6 和它的旧日期，看不出该续季。说破。 */
+    let planOver=0;
+    if(sprintAnchor){const a0=new Date(sprintAnchor+'T00:00:00');if(!isNaN(a0.getTime()))planOver=Math.max(0,smIdx(new Date())-smIdx(a0)+1-6);}
+    let head=sprintScope==='all'?'全部排期':(planOver?('方案已超期 '+planOver+' 档，待续季（板面按 S6 收尾显示）'):('本期 S'+cur+(r?('（'+r.label+'）'):'')));
     if(sprintScope!=='all'&&sprintAnchor){
       if(overdue)head+='，逾期未完成 '+overdue+' 个';
       else if(!openNow&&cur<6)head+='，本期已全部完成，下一期 S'+(cur+1)+(nextR?(' 从 '+nextR.label.split(' 至 ')[0]+' 开始'):'');
