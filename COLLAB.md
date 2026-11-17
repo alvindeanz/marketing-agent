@@ -20,6 +20,17 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-18 AIRA 续季 fable 测试：6 家超期客户草稿出齐（rev 096e898，Alvin 批「先拿超期的 6 家用 fable 做测试」）
+
+- 机制补充（rev 096e898，api 与 worker 两机已部署）：plan job 可带 `payload.model`（白名单 opus/fable/sonnet），worker 经 /tasks/bulk 的 `review_model` 透传到 plan_review job 的 payload，整条方案链用同一个模型，不动全局 config。缺省与脏值回落 config。测试 jobModel 一条；/tasks/bulk 的 PHP 透传没有单测。
+- 测试跑法：`weekly_runs/renewal_test_20261117/driver.js`（逐家 pull_data fresh，plan model=fable，等 plan_review），对照组 `dryrun_plan.js` 用同一套 runner 跑 opus 但截住 postPlan 与 postTasksBulk 不落库。
+- 结果：15、46、45、16、47、8 六家 fable 草稿全部出齐（plan 74、78、76、81、72、82），每份 18 到 20 条，非博客任务每档 2 到 4 条，六档排匀；现役方案未动，没有登记任何客户 Ask。opus 对照（46、47）同样排匀。排期配平自检零告警。
+- 观察：
+  1. 任务层判定（review_plan）在草稿落库后自动跑：每份约 2 条判 drop，后段依赖前段的任务判 later（正常挪期，到档重判）。drop 之后当档不补位，是规划里「候补池」要解决的口子。
+  2. 两个模型都还会在 S6 排只读复盘表，被任务层按「只读审计归 pull_data」判掉。
+- 坑：Mac worker 自 NZ 11-18 09:57 起所有 LLM job 秒挂（exit 1 无 stderr，熔断文件注记多半是登录过期），10:26 连续三挂熔断停领单，与本次改动无关（挂的含 opus 的 chat 与 execute）。期间挂掉 4 条 chat（#15766、#15783、#15801、#15807）与 1 条 execute（#15785）。需要人在 Mac 上重新登录并删 .spawn_fuse。
+- 下一步/认领：等 Alvin 看草稿定三件事（后 17 家用哪个模型、提示词是否再调、这 6 份是否转正）。
+
 ### 2026-11-17 AIRA 续季地基：上一季结局进简报、排期配平、汇总收口计数、方案超期提示（Alvin 批「开始吧」）
 
 - 起因：Summer 反馈 11 月两轮 sprint 很多客户看着没做事。摸底结论：机器没停（11 月 execute 477、apply 163），但计划内的活空了。首季 684 条计划任务按档 225/169/110/94/48/29；11 月新建 392 条任务里计划内只有 18 条；26 份方案里 6 份已超期、17 份 11-30 到期，10-20 之后全队没有新建过方案，没有任何续季触发。
