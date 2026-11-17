@@ -2023,3 +2023,12 @@ Alvin 提的四项客户栏改造：
 - Alvin 否了迁移检查工具加哨兵的方案，定为切换后一周、一个月、三个月各读一轮 GSC 与 GA4，不建工具。
 - Dareu 建单 #2143（S6，technical，P1，agent）：迁站后第一次复查，读 GSC 前后窗口与旧网址曝光转移、GA4 渠道与电商事件、WF 跳转候选只列不写。一个月与三个月两次并入 11 月月报与季度复盘，不另开单。
 - 无代码改动。
+
+## 2026-11-17 (c) AIRA 发布凭证按文章网址关联 + 卡令牌容错（ticket #62 #63，Alvin 批直接修）
+
+- 根因一（#63，Sammichelle #2100 对 #2045）：同意落在改稿单的卡上，发布单是另开的一张，正文只写文章网址不写卡单号；派单凭证判定、同意落库续排、apply 凭证闸三处都只按「#单号」类引用找卡，接不上，发布单永远挂 wait-publish-consent。
+- 根因二（#62，Ben's AU #1588）：卡链接被连着右括号复制，令牌多一位，卡反馈接口拒收，客户两次点同意都红字。无凭证时 WF 博客放行按大纲阶段重排写稿，于是人工放行只会重写再回放行位，11-11 两圈后被循环闸停人。括号在哪一步混进链接未查到。
+- 改动（rev 72d55ce、11186e9）：seo-api.php 新增 blog_slug_of / blog_consent_card_by_slug（正文恰好一个 /blog/slug 才认；同客户带确认卡且提到同一 slug 的任务取单号最大的一张；自带卡的任务不借同篇旧卡）；blog_publish_consent_ok 与 publish_consent_resume 接入（续排的网址关联只叫醒 wait-publish-consent 发布单，不带旧改稿单重跑）；GET /card_feedback?task_id=&linked=1 回 linked_card_task，apply 的 requireBlogPublishConsent 复用同一次调用取关联卡；POST /card_feedback 令牌只取前 32 位十六进制比对。
+- 测试：新增 tests/consent_slug_link.test.js（8 条，含线上正文回放与源码同步闸），tests/apply.test.js 加 1 条；JS 53 个文件与 PHP 全套全绿。
+- 线上验证：带括号令牌过验、改一位照拒；在 #2045 补记代确认后 #2100 经续排自动起 apply job #15743，日志「发布凭证取自任务 #2045 的确认卡」，发布成功线上 200。#1588 代确认（留档引 Summer 工单陈述）后放行直通 apply job #15745，发布成功线上 200。#828、#2045 finish 收口，两票 resolved。
+- 未做：放行路在「卡已出、无表态」时仍会走重写（靠循环闸两圈停人），这次没动。
