@@ -2011,3 +2011,9 @@ Alvin 提的四项客户栏改造：
 - 接入：shadow bot 凭据落 clients/dareu/notes/webforger_credentials.md（readCredentials 实测可解析，登录 isShadow、shadowOf=dareu）；看板平台档 Shopify 翻 WebForger；facts 2904/1309 改作废，新增 tech.webforger_lane（3859）；客户 CLAUDE.md 执行通道重写。harness 试跑正常，本期无可推单（#972 在 S6）。
 - 切换核查发现两处并当场补救（均可逆）：①GA4 停采：站上只挂空容器 GTM-5JFL7KLJ（我方账号，零标签），WF ga4 字段与 gtm 并存时不渲染。PATCH tracking 改为 gtm 置空、ga4=G-50BZ51W23M，全站直出，GA4 实时恢复。服务账号对该容器只有 read，未动容器也未自提权限。②旧网址 404：跳转表仅 10 条，/en-eu 等语言前缀与 /blogs/news/ 全 404（切换前 30 天自然落地会话 52.6%）。按 90 天 GA4 自然落地页生成并 PATCH 426 条（WF 存档 archive/2026-11-16T23-40-23-766Z-redirects），逐条回测 200。GSC sitemap 已重提。
 - 遗留：约 240 条低流量 404（清单在客户 notes/migration_2026-11/）；GSC 口径补全未做；容器发布权限待 Alvin；seo-worker 里 Dareu 的 Shopify 车道存量任务未逐张过。
+
+## 2026-11-17 AIRA Dareu 追踪定型为 GTM（Alvin 定）
+
+- 容器 GTM-5JFL7KLJ（我方账号，dareu-webforger）发布 v2：GA4 目的地 G-50BZ51W23M 加 10 个电商事件标签与 7 个 dataLayer 变量，照 sanmichellebags 容器的 GA4 部分；未含 Ads 标签。WF 追踪 00:10 UTC 切回 gtm、ga4 清空。切换后 5 分钟 GA4 实时连续有数，page_view、view_item、select_item、view_item_list 均到。
+- 坑：GA4 数据流关联容器后工作区自动生成 dest_ga 标签，再手建同 ID 的 googtag 会编译失败且无原因说明，删手建的即可。服务账号对该容器的发布权限是 Alvin 当场开的。
+- 未验证：add_to_cart、begin_checkout、purchase 三个事件要等真实加购与下单出现才能确认。
