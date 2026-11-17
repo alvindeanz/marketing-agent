@@ -19,6 +19,7 @@ function slugOf(text) {
 function cardBySlug(tasks, self) {
   const slug = slugOf((self.detail || '') + '\n' + (self.note || ''));
   if (!slug) return 0;
+  if (/blog_confirmation_task-/.test(self.note || '')) return 0;
   const re = new RegExp('/blog/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9_-])');
   const c = tasks.filter((x) => x.id !== self.id && /blog_confirmation_task-/.test(x.note || '') && re.test(x.note || ''))
     .sort((a, b) => b.id - a.id);
@@ -53,6 +54,11 @@ t('正文里两个不同 slug 不猜', () => {
 t('没有卡的同篇任务不算凭证来源，自己也不算', () => {
   assert.strictEqual(cardBySlug([{ id: 2099, note: '改稿 /blog/summer-holiday-packing-list-nz-bach-week/' }, T2100], T2100), 0);
 });
+t('自己带卡的任务只认自己的卡，不借同篇旧卡（#1588 对 #828）', () => {
+  const a = CARD(828, 'motorised-sheer-curtains-planning-checklist'), b = CARD(1588, 'motorised-sheer-curtains-planning-checklist');
+  assert.strictEqual(cardBySlug([a, b], b), 0);
+  assert.strictEqual(cardBySlug([a, b], a), 0);
+});
 t('令牌尾巴带右括号照认，位数不够或内容不对照拒', () => {
   const k = '17ab72d8e7f6522666ecbea62dca65e7';
   assert.strictEqual(tok(k + ')'), k);
@@ -66,6 +72,7 @@ t('源码同步闸：PHP 与 apply 两侧都接了这条口径', () => {
   assert.ok(php.includes("preg_match_all('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#'"), 'blog_slug_of 正则变了');
   assert.ok(php.includes("result_note LIKE '%blog_confirmation_task-%'"), '卡任务判据变了');
   assert.ok(php.includes('ORDER BY id DESC LIMIT 10'), '最新一张的排序变了');
+  assert.ok(php.includes("if(strpos((string)($t['result_note']??''),'blog_confirmation_task-')!==false)return 0;"), '自带卡不借旧卡的闸没了');
   assert.ok((php.match(/blog_consent_card_by_slug\(/g) || []).length >= 4, '派单、续排、linked 接口三处调用少了');
   assert.ok(php.includes("preg_match('/^[0-9a-f]{32}/',$tok,$tkm)"), '令牌容错没了');
   const js = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task.js'), 'utf8');

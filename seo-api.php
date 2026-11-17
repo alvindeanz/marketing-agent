@@ -1000,6 +1000,8 @@ function blog_slug_of($text){
 function blog_consent_card_by_slug($cid,$tid,$t){
     $slug=blog_slug_of((string)($t['detail']??'')."\n".(string)($t['result_note']??''));
     if($slug==='')return 0;
+    /* 自己带卡的任务只认自己的卡：同篇更早的卡是上一版稿子的，不能替这一版放行（#1588 对 #828） */
+    if(strpos((string)($t['result_note']??''),'blog_confirmation_task-')!==false)return 0;
     try{
         $q=db()->prepare("SELECT id,result_note FROM seo_tasks WHERE client_id=? AND id!=? AND result_note LIKE '%blog_confirmation_task-%' AND result_note LIKE ? ORDER BY id DESC LIMIT 10");
         $q->execute([(int)$cid,(int)$tid,'%/blog/'.$slug.'%']);
