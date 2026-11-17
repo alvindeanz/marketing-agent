@@ -2032,3 +2032,11 @@ Alvin 提的四项客户栏改造：
 - 测试：新增 tests/consent_slug_link.test.js（8 条，含线上正文回放与源码同步闸），tests/apply.test.js 加 1 条；JS 53 个文件与 PHP 全套全绿。
 - 线上验证：带括号令牌过验、改一位照拒；在 #2045 补记代确认后 #2100 经续排自动起 apply job #15743，日志「发布凭证取自任务 #2045 的确认卡」，发布成功线上 200。#1588 代确认（留档引 Summer 工单陈述）后放行直通 apply job #15745，发布成功线上 200。#828、#2045 finish 收口，两票 resolved。
 - 未做：放行路在「卡已出、无表态」时仍会走重写（靠循环闸两圈停人），这次没动。
+
+## 2026-11-17 (d) AIRA sprint 侧挂单清理（Alvin 批；新规矩：人工位先判能否代劳，能做就做，不能做发工单提醒人）
+
+- 收口 5 张：Apollo #1758（三窗自然表单提交 2、3、3，小基数波动）、Sungait #867（PDP 三项落地，mens 内链放弃）、Sunseeker #441（按默认值定为重组现有博客，fact 3867）、Ideal #1075（根因 10-13 已查清，查证部分完成）、LuxeLink #2139（chat 单超时无产出，废）。
+- 交办 Monica 2 张（均已邮件）：Ideal 新单 #2148 与客户商议后换主要转化；Merii #1176 由等客户改为我方人工，在 Google 地图查三家店营业时间（官网与公开搜索都没有，无 Places API）。
+- 转机器位：Citymed #379、#384（写稿交付 HTML 片段），单跑 harness 13，#379 判 do 已起 execute job 15751，#384 判 later。
+- Kia Ora Kids #386 转机器位并写回摸底：迁站后容器 GTM-5ZSVKH3Z 只有 GA4 基础标签，generate_lead、click_to_call 无标签承接，key events 为 0；服务账号对该容器只读，加标签待 Alvin 开发布权限。Direct 380 会话里互动 13，主体是新加坡桌面端零互动流量。
+- 未查：fleet_digest --issues 把 chat 泳道的执行失败 job（Ben's NZ #2140、#2142）归进 sprint 组。
