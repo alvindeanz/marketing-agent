@@ -823,7 +823,7 @@ function queue_release_review_job($cid,$ids,$by,$auditAction){
 /* 方案层过闸（plan_review job，light 道，fable 一次）。plan job 刚落的草稿先过这一道：
    按跨客户经验改成 v2 并出方向确认卡，人确认方向后 v2 的任务才进任务层判定（review_plan）。
    同一 plan 已有 queued/running 的就不重复排。回 job_id。 */
-function queue_plan_review_job($cid,$pid,$ids,$by){
+function queue_plan_review_job($cid,$pid,$ids,$by,$model=''){
     ensure_job_types(); /* type 是 ENUM，先扩列再插，否则 'plan_review' 被截成空串（2026-08-29 job 195） */
     $q=db()->prepare("SELECT id,payload FROM agent_jobs WHERE client_id=? AND type='plan_review' AND status IN('queued','running') ORDER BY id DESC LIMIT 1");
     $q->execute([$cid]);
@@ -834,9 +834,9 @@ function queue_plan_review_job($cid,$pid,$ids,$by){
         if(is_array($p)&&(int)($p['plan_id']??0)===(int)$pid)return (int)$row['id'];
     }
     db()->prepare("INSERT INTO agent_jobs(client_id,type,payload,status,created_by)VALUES(?,'plan_review',?,'queued',?)")
-        ->execute([$cid,json_encode(['plan_id'=>(int)$pid,'task_ids'=>array_values($ids)],JSON_UNESCAPED_UNICODE),$by]);
+        ->execute([$cid,json_encode(array_merge(['plan_id'=>(int)$pid,'task_ids'=>array_values($ids)],$model!==''?['model'=>$model]:[]),JSON_UNESCAPED_UNICODE),$by]);
     $jid=(int)db()->lastInsertId();
-    audit($by,'seo_plan_review_auto',(string)$jid,['client_id'=>$cid,'plan_id'=>$pid,'task_ids'=>$ids]);
+    audit($by,'seo_plan_review_auto',(string)$jid,['client_id'=>$cid,'plan_id'=>$pid,'task_ids'=>$ids,'model'=>$model]);
     fire_wake($jid);
     return $jid;
 }
@@ -4506,7 +4506,11 @@ if($m==='POST'&&$ROUTE==='/tasks/bulk'){
         if($pr&&(string)$pr['authored_by']==='seo-worker')$gate='plan_review';
     }
     if($gate==='plan_review'){
-        $rjid=queue_plan_review_job($cid,$pid,$ids,'seo-worker');
+        /* 方案链单次指定模型（2026-11-17）：plan job 带 payload.model 时 worker 透传 review_model，
+           过闸沿用同一个。只认白名单，其余按 config 走。 */
+        $rm=strtolower(trim((string)($i['review_model']??'')));
+        if(!in_array($rm,['opus','fable','sonnet'],true))$rm='';
+        $rjid=queue_plan_review_job($cid,$pid,$ids,'seo-worker',$rm);
         res(200,['ok'=>true,'ids'=>$ids,'plan_review_job_id'=>$rjid,'gate'=>'plan_review']);
     }
     list($rjid,$rmerged)=queue_review_job($cid,$ids,'seo-worker','seo_tasks_review_auto');

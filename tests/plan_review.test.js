@@ -185,6 +185,14 @@ t('balanceReport：后四档不足、前两档过半、agency 超额各报一条
   const good = [].concat(mk('S1', 3), mk('S2', 3), mk('S3', 2), mk('S4', 2), mk('S5', 2), mk('S6', 2));
   assert.deepStrictEqual(P.balanceReport(good), []);
 });
+t('jobModel：payload.model 只认白名单，缺省与脏值回落 config', () => {
+  const P = require(path.join(W, 'runners', 'plan'));
+  assert.strictEqual(P.jobModel({ model: 'Fable ' }, 'opus'), 'fable');
+  assert.strictEqual(P.jobModel({ model: 'gpt-9' }, 'opus'), 'opus');
+  assert.strictEqual(P.jobModel({}, 'opus'), 'opus');
+  assert.strictEqual(P.jobModel(null, 'opus'), 'opus');
+  assert.strictEqual(P.jobModel({ model: '; rm -rf' }, ''), '');
+});
 t('review prompt 带配平与续季两条硬规矩', () => {
   const p = R.buildPrompt({ clientName: 'A', experience: 'E', principles: 'P', clientRules: '', globalRules: '', history: '', briefing: 'B', planBody: 'X', tasks: [], capability: cap });
   assert.ok(p.includes('排期配平'));

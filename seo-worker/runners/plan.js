@@ -34,6 +34,14 @@ const DEFAULT_PRIORITY = 'P2';
 /* 2026-11-17 由 12 提到 20：12 条里 6 条是合同博客，剩 6 条摊到六档，后三档必然只剩一两条
    （首季实证：全队计划内任务按档 225/169/110/94/48/29）。配平规则见 buildPrompt。 */
 const MAX_TASKS = 20;
+/* 单次指定模型（2026-11-17 续季测试）：人排 plan job 时可带 payload.model，整条方案链（出方案加
+   方案层过闸）用同一个模型，不动全局 config。只认白名单，缺省或脏值回落 config（硬规矩 5 的
+   权威仍是 config，这里是人对单个 job 的显式选择，不是散落硬编码）。 */
+const JOB_MODELS = ['opus', 'fable', 'sonnet'];
+function jobModel(payload, fallback) {
+  const m = String((payload && payload.model) || '').trim().toLowerCase();
+  return JOB_MODELS.includes(m) ? m : fallback;
+}
 const BALANCE_MIN_LATE = 2; // S3 到 S6 每档至少几条非博客任务
 const AUTHORED_BY = 'seo-worker';
 
@@ -406,11 +414,11 @@ async function persist(ctx, text, dossier, capability, blogQuota) {
   }
 
   try {
-    const res = await api.postTasksBulk({
-      client_id: job.client_id,
-      plan_id: planId,
-      tasks,
-    });
+    const bulk = { client_id: job.client_id, plan_id: planId, tasks };
+    /* 指定了模型的方案链，过闸那一步沿用同一个（服务端写进 plan_review job 的 payload.model）。 */
+    const chosen = jobModel(job.payload, '');
+    if (chosen) bulk.review_model = chosen;
+    const res = await api.postTasksBulk(bulk);
     const ids = (res && res.ids) || [];
     log('stored ' + tasks.length + ' proposed task(s), ids ' + (ids.join(', ') || 'none returned'));
     return { planId, taskIds: ids };
@@ -559,7 +567,8 @@ async function run(ctx) {
   const blogQuota = blogcadence.quotaOf(context);
   if (blogQuota) log('博客节奏：每个 sprint ' + blogQuota + ' 篇（fact ' + blogcadence.FACT_KEY + '）');
   const prompt = buildPrompt(briefing.text, payload.instructions, dossier, capability, blogQuota, briefing.renewal);
-  log('step 3 of 4: planning pass, model ' + cfg.planModel + ', prompt ' + prompt.length + ' chars');
+  const model = jobModel(payload, cfg.planModel);
+  log('step 3 of 4: planning pass, model ' + model + (model !== cfg.planModel ? '（payload 指定）' : '') + ', prompt ' + prompt.length + ' chars');
 
   let result = { planId: null, taskIds: [] };
   await generateDraft(ctx, {
@@ -567,7 +576,7 @@ async function run(ctx) {
     prompt,
     filePrefix: 'plan-90d',
     profile,
-    model: cfg.planModel,
+    model,
     allowedTools: 'Read', // planning reads, it does not act
     logFullText: false, // the plan lives in /plans, not in the job log
     postDraft: async ({ text }) => {
@@ -604,6 +613,7 @@ module.exports = {
   run,
   hydratePriorTasks,
   balanceReport,
+  jobModel,
   planPostBody,
   buildPrompt,
   extractJsonBlock,

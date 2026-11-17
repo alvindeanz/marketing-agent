@@ -232,8 +232,9 @@ function renderCard(card, o) {
 async function judgeWithModel(ctx, opts) {
   const { cfg, log } = ctx;
   const prompt = buildPrompt(opts);
-  log('方案层过闸 prompt ' + prompt.length + ' 字符，模型 ' + cfg.planReviewModel);
-  const res = await runClaude(cfg, { prompt, cwd: opts.workspace, log, model: cfg.planReviewModel, allowedTools: ALLOWED_TOOLS, label: opts.label });
+  const model = planRunner.jobModel(ctx.job && ctx.job.payload, cfg.planReviewModel);
+  log('方案层过闸 prompt ' + prompt.length + ' 字符，模型 ' + model + (model !== cfg.planReviewModel ? '（payload 指定）' : ''));
+  const res = await runClaude(cfg, { prompt, cwd: opts.workspace, log, model, allowedTools: ALLOWED_TOOLS, label: opts.label });
   let output = String(res.stdout || '').trim();
   if (!output) return { ok: false, error: 'claude 没有任何输出' };
   let parsed = extractTrailingJson(output);
@@ -242,7 +243,7 @@ async function judgeWithModel(ctx, opts) {
     const fixRes = await runClaude(cfg, {
       prompt: '你上一轮的输出如下，结尾的 json 代码块无法解析，解析器报错：' + (parsed.error || 'json 块不是对象') +
         '。常见原因是字符串值里有未转义的英文双引号或换行。重新输出：先原样给出 v2 正文，再给修正后的 json 代码块，块外不要有别的字。\n\n=====\n' + output.slice(-12000),
-      cwd: opts.workspace, log, model: cfg.planReviewModel, allowedTools: ALLOWED_TOOLS, label: opts.label + ' fix',
+      cwd: opts.workspace, log, model, allowedTools: ALLOWED_TOOLS, label: opts.label + ' fix',
     });
     output = String(fixRes.stdout || '').trim();
     parsed = extractTrailingJson(output);
