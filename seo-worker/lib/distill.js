@@ -9,7 +9,16 @@ const { safeJson, truncate } = require('./util');
 const capabilities = require('./capabilities');
 const registry = require('./registry');
 
-const MAX_BYTES = 15 * 1024;
+/* 数据节上限，按真实字节算（2026-11-18 改）。原值 15KB 且用 String.slice 按字符截，中文一个字符三个字节，
+   实际放行到 20 到 25KB，超出的从尾巴砍，而尾巴正是最近 28 天的搜索、流量、排名数据。
+   6 家续季测试里 4 家因此没看到新数据，方案写着「简报里没有落地之后的快照」（Apollo、Kuddles、Ben's NZ、Louvresky）。
+   现在：上限提到与实际放行量相当；新鲜数据排在档案前面且永不截；档案段单独设上限，超了按层级和更新时间让位。 */
+const MAX_BYTES = 28 * 1024;
+/* 档案段（FACTS LEDGER）自己的字节上限。档案只增不减，Apollo 一家 60 条就 19KB。 */
+const FACTS_MAX_BYTES = 12 * 1024;
+/* 出方案与方案评审用的加大档：一个季度只跑一次，值得把数据明细和档案给足。
+   对话与任务层判定每单都跑，用默认档。 */
+const PLAN_BRIEF_OPTS = { maxBytes: 40 * 1024, factsMaxBytes: 16 * 1024 };
 
 // Tried in order until the briefing fits.
 const LIMIT_STEPS = [
@@ -451,14 +460,44 @@ function factLines(list, limit, opts) {
     chosen = never.concat(rest.slice(0, Math.max(0, lim - never.length)))
       .sort((a, b) => order.get(a) - order.get(b));
   }
-  return chosen
-    .map((f) => {
-      const key = keyOf(f) || '(no key)';
-      const value = truncate(String((f && f.value) !== undefined ? f.value : ''), FACT_VALUE_CHARS);
-      const source = f && f.source ? ' [from ' + f.source + ']' : '';
-      return '- ' + key + ': ' + value + source;
-    })
-    .join('\n');
+  const lineOf = (f) => {
+    const key = keyOf(f) || '(no key)';
+    const value = truncate(String((f && f.value) !== undefined ? f.value : ''), FACT_VALUE_CHARS);
+    const source = f && f.source ? ' [from ' + f.source + ']' : '';
+    return '- ' + key + ': ' + value + source;
+  };
+  /* 字节上限（2026-11-18）：条数达标但值很长时照样会把新鲜数据挤出简报。超限时让位顺序：
+     history.* 最先，其次普通条目，再次调用方点名的优先前缀；policy.* 与 biz.* 永不让位（客户铁律和经营口径）。
+     同一层里最久没更新的先让位（updated_at 由 /context 下发，没有这个字段的按原顺序靠后的先让）。 */
+  const maxBytes = (opts && Number(opts.maxBytes)) || 0;
+  let omitted = 0;
+  if (maxBytes > 0) {
+    const tierOf2 = (f) => {
+      const key = keyOf(f);
+      if (/^(policy|biz)\./.test(key)) return 0;
+      if (pri.some((p) => p && key.indexOf(p) === 0)) return 1;
+      if (/^history\./.test(key)) return 3;
+      return 2;
+    };
+    const sizeOf = (f) => Buffer.byteLength(lineOf(f), 'utf8') + 1;
+    let total = chosen.reduce((n, f) => n + sizeOf(f), 0);
+    if (total > maxBytes) {
+      const idx = new Map(chosen.map((f, i) => [f, i]));
+      const ts = (f) => String((f && f.updated_at) || '');
+      const droppable = chosen.filter((f) => tierOf2(f) !== 0).sort((a, b) =>
+        (tierOf2(b) - tierOf2(a)) || (ts(a) < ts(b) ? -1 : ts(a) > ts(b) ? 1 : 0) || (idx.get(b) - idx.get(a)));
+      const gone = new Set();
+      for (const f of droppable) {
+        if (total <= maxBytes) break;
+        gone.add(f); total -= sizeOf(f);
+      }
+      omitted = gone.size;
+      chosen = chosen.filter((f) => !gone.has(f));
+    }
+  }
+  const out = chosen.map(lineOf).join('\n');
+  if (opts && typeof opts.onOmit === 'function' && omitted) opts.onOmit(omitted);
+  return out;
 }
 
 /**
@@ -473,11 +512,17 @@ function factsSection(context, opts) {
     return 'FACTS LEDGER\nnothing on record yet. Anything you need to know about this client is still an open question.';
   }
   const blocks = ['FACTS LEDGER'];
+  let omitted = 0;
+  const capOpts = (share) => (opts && opts.maxBytes
+    ? Object.assign({}, opts, { maxBytes: Math.floor(opts.maxBytes * share), onOmit: (n) => { omitted += n; } })
+    : opts);
+  /* 待确认条目最多占上限的两成，已确认的拿其余 */
+  const pendShare = pending.length ? 0.2 : 0;
   if (confirmed.length) {
     blocks.push(
       'CONFIRMED, a human has verified these. They are settled. Do not ask for them again,' +
         '\ndo not list them as unknowns, and do not create a task to go and find them out.\n' +
-        factLines(confirmed, null, opts)
+        factLines(confirmed, null, capOpts(1 - pendShare))
     );
   } else {
     blocks.push('CONFIRMED\nnone yet');
@@ -486,8 +531,13 @@ function factsSection(context, opts) {
     blocks.push(
       'PENDING, an agent checked these and a human has not confirmed them yet. You may' +
         '\nrely on them, but say "pending confirmation" whenever you do.\n' +
-        factLines(pending, null, opts)
+        factLines(pending, null, capOpts(pendShare))
     );
+  }
+  if (omitted) {
+    blocks.push('[档案另有 ' + omitted + ' 条没有列出：篇幅有限，最久没更新的历史与普通条目先让位，客户铁律与经营口径（policy、biz）全部保留。'
+      + '没列出的不等于没有记录：方案里要用到这里没有的客户事实时，写成「待核对档案」，不要当成未知去立任务问客户。]');
+    if (opts && typeof opts.onFactsOmitted === 'function') opts.onFactsOmitted(omitted);
   }
   return blocks.join('\n\n');
 }
@@ -603,20 +653,31 @@ function dossierSection(context) {
 // assembly
 // ---------------------------------------------------------------------------
 
-function assemble(context, limits, log) {
+/* 拼装顺序（2026-11-18 改）：最近一个窗口的搜索、流量、排名数据紧跟在客户档案头和能力清单后面，
+   排在档案、任务台账、注册表之前。万一还要截尾，被截的是注册表的尾巴，不是新鲜数据。
+   返回 { text, factsOmitted }。 */
+function assemble(context, limits, log, factsMaxBytes) {
   const latest = context && context.latest_snapshots;
+  let factsOmitted = 0;
   const blocks = [
     profileSection(context && context.profile, limits),
     capabilitiesSection(context && context.profile),
-    factsSection(context),
-    ledgerSection(context && context.tasks, limits),
-    feedbackSection(context, log),
-    contentRegistrySection(context, limits),
     gscSection(latest, limits),
     ga4Section(latest, limits),
     semrushSection(latest, limits),
+    factsSection(context, { maxBytes: factsMaxBytes || FACTS_MAX_BYTES, onFactsOmitted: (n) => { factsOmitted = n; } }),
+    ledgerSection(context && context.tasks, limits),
+    feedbackSection(context, log),
+    contentRegistrySection(context, limits),
   ].filter(Boolean);
-  return blocks.join('\n\n');
+  return { text: blocks.join('\n\n'), factsOmitted };
+}
+
+/* 按字节截到上限以内，不切坏多字节字符。 */
+function clipBytes(text, maxBytes) {
+  const buf = Buffer.from(String(text || ''), 'utf8');
+  if (buf.length <= maxBytes) return String(text || '');
+  return buf.subarray(0, maxBytes).toString('utf8').replace(/\uFFFD+$/, '');
 }
 
 /**
@@ -703,15 +764,26 @@ function buildPlanningBriefing(context, opts = {}) {
   const maxBytes = opts.maxBytes || MAX_BYTES;
   const log = opts.log;
   let text = '';
+  const factsMax = Number(opts.factsMaxBytes) || FACTS_MAX_BYTES;
   let step = 0;
+  let factsOmitted = 0;
   for (let i = 0; i < LIMIT_STEPS.length; i += 1) {
     step = i;
-    text = assemble(context, LIMIT_STEPS[i], i === 0 ? log : null);
+    const a = assemble(context, LIMIT_STEPS[i], i === 0 ? log : null, factsMax);
+    text = a.text;
+    factsOmitted = a.factsOmitted;
     if (Buffer.byteLength(text, 'utf8') <= maxBytes) break;
   }
+  let clipped = 0;
   if (Buffer.byteLength(text, 'utf8') > maxBytes) {
-    text =
-      text.slice(0, maxBytes - 80) + '\n\n[briefing truncated to fit the size budget]';
+    const before = Buffer.byteLength(text, 'utf8');
+    text = clipBytes(text, maxBytes - 120) + '\n\n[briefing truncated to fit the size budget：被截的是站内内容注册表的尾部，搜索与流量数据完整]';
+    clipped = before - Buffer.byteLength(text, 'utf8');
+  }
+  /* 截了就出声（2026-11-18）：此前静默截断，四份方案在没有新数据的情况下写完都没人知道。 */
+  if (typeof log === 'function') {
+    if (factsOmitted) log('briefing: 档案段超过 ' + factsMax + ' 字节，' + factsOmitted + ' 条最久没更新的条目没有进简报（policy 与 biz 全保留）');
+    if (clipped) log('briefing: 数据节在最小档仍超 ' + maxBytes + ' 字节，尾部截掉 ' + clipped + ' 字节（注册表尾部，新鲜数据不受影响）');
   }
   const dataBytes = Buffer.byteLength(text, 'utf8');
 
@@ -728,6 +800,8 @@ function buildPlanningBriefing(context, opts = {}) {
     text,
     bytes: Buffer.byteLength(text, 'utf8'),
     dataBytes,
+    factsOmitted,
+    clippedBytes: clipped,
     dossierBytes: Buffer.byteLength(dossier, 'utf8'),
     step,
     dossier: meta,
@@ -735,6 +809,9 @@ function buildPlanningBriefing(context, opts = {}) {
 }
 
 module.exports = {
+  PLAN_BRIEF_OPTS,
+  FACTS_MAX_BYTES,
+  MAX_BYTES,
   buildPlanningBriefing,
   priorOutcomesSection,
   lastRejectedFromTasks,

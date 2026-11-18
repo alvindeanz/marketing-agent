@@ -116,5 +116,78 @@ t('超长截断到预算内', () => {
   assert.ok(Buffer.byteLength(s, 'utf8') <= 7 * 1024);
 });
 
+console.log('简报预算（2026-11-18：档案挤掉新鲜数据，6 家续季测试 4 家没看到近 28 天数据）');
+function bigCtx(nFacts, valueLen) {
+  const facts = [];
+  for (let i = 0; i < nFacts; i++) {
+    facts.push({ fact_key: (i < 3 ? 'policy.rule_' : i < 6 ? 'history.old_' : 'site.fact_') + String(i).padStart(2, '0'),
+      value: '值'.repeat(valueLen), updated_at: '2026-' + String(1 + (i % 9)).padStart(2, '0') + '-01 00:00:00' });
+  }
+  const queries = []; for (let i = 0; i < 30; i++) queries.push({ query: 'kw ' + i, clicks: 30 - i, impressions: 900 - i, position: 5 + i });
+  const pages = []; for (let i = 0; i < 20; i++) pages.push({ page: 'https://x.co.nz/p' + i + '/', clicks: 20 - i, impressions: 700 - i, position: 8 + i });
+  return {
+    client: { id: 1, name: 'X' }, profile: { client_id: 1, platform: '', domain: 'https://x.co.nz/' }, tasks: [],
+    facts: { confirmed: facts, pending: [] },
+    latest_snapshots: { gsc: { source: 'gsc', period_start: '2026-10-18', period_end: '2026-11-14',
+      data: { totals: { clicks: 82, impressions: 20107 }, queries, pages, period_start: '2026-10-18', period_end: '2026-11-14' } } },
+  };
+}
+t('档案再厚，近 28 天搜索数据也在简报里，且排在档案前面', () => {
+  const out = D.buildPlanningBriefing(bigCtx(60, 130), {});
+  const iG = out.text.indexOf('SEARCH CONSOLE 2026-10-18'); const iF = out.text.indexOf('FACTS LEDGER');
+  assert.ok(iG > 0, '搜索数据段不见了');
+  assert.ok(iG < iF, '搜索数据没排在档案前面');
+  assert.ok(out.text.includes('clicks 82, impressions 20107'), '窗口合计没进简报');
+});
+t('档案段有字节上限：超了让位，policy 全保留，history 最先让', () => {
+  const out = D.buildPlanningBriefing(bigCtx(60, 130), {});
+  assert.ok(out.factsOmitted > 0, '档案没被限住');
+  const sec = out.text.slice(out.text.indexOf('FACTS LEDGER'));
+  for (const k of ['policy.rule_00', 'policy.rule_01', 'policy.rule_02']) assert.ok(sec.includes(k), k + ' 被让掉了');
+  assert.ok(!sec.includes('history.old_03'), 'history 应最先让位');
+  assert.ok(/档案另有 \d+ 条没有列出/.test(sec) && sec.includes('待核对档案'), '没有告诉模型有条目没列出');
+  const factsBytes = Buffer.byteLength(sec.split('\n\n[档案另有')[0], 'utf8');
+  assert.ok(factsBytes <= D.FACTS_MAX_BYTES + 400, '档案段超上限 ' + factsBytes);
+});
+t('同一层里最久没更新的先让位', () => {
+  const ctx = bigCtx(60, 130);
+  const out = D.buildPlanningBriefing(ctx, {});
+  const sec = out.text.slice(out.text.indexOf('FACTS LEDGER'));
+  const site = ctx.facts.confirmed.filter((f) => /^site\./.test(f.fact_key));
+  const kept = site.filter((f) => sec.includes(f.fact_key)); const gone = site.filter((f) => !sec.includes(f.fact_key));
+  assert.ok(kept.length && gone.length, '样本没有同时出现保留与让位');
+  const maxGone = gone.map((f) => f.updated_at).sort().pop(); const minKept = kept.map((f) => f.updated_at).sort()[0];
+  assert.ok(maxGone <= minKept, '让位的比保留的还新：' + maxGone + ' 对 ' + minKept);
+});
+t('上限按真实字节算，中文不超；截了要出声', () => {
+  const logs = [];
+  const out = D.buildPlanningBriefing(bigCtx(60, 130), { log: (l) => logs.push(l) });
+  assert.ok(out.dataBytes <= D.MAX_BYTES, '数据节 ' + out.dataBytes + ' 超过上限');
+  assert.ok(logs.some((l) => /档案段超过/.test(l)), '档案让位没有记日志');
+});
+t('出方案用加大档：同一客户让位更少，明细档位不更差', () => {
+  const ctx = bigCtx(60, 130);
+  const d = D.buildPlanningBriefing(ctx, {}); const p = D.buildPlanningBriefing(ctx, Object.assign({}, D.PLAN_BRIEF_OPTS));
+  assert.ok(p.factsOmitted < d.factsOmitted, '加大档没有多留档案');
+  assert.ok(p.step <= d.step);
+  assert.ok(p.dataBytes <= D.PLAN_BRIEF_OPTS.maxBytes);
+});
+t('档案不厚的客户不受影响：零让位零截断', () => {
+  const out = D.buildPlanningBriefing(bigCtx(10, 40), {});
+  assert.strictEqual(out.factsOmitted, 0);
+  assert.strictEqual(out.clippedBytes, 0);
+  assert.ok(!out.text.includes('档案另有'));
+});
+t('源码闸：出方案与评审都用加大档，拼装顺序数据在前', () => {
+  const fs = require('fs'); const path = require('path');
+  for (const f of ['plan.js', 'plan_review.js']) {
+    const js = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'runners', f), 'utf8');
+    assert.ok(js.includes('buildPlanningBriefing(context, Object.assign({ log }, PLAN_BRIEF_OPTS))'), f + ' 没用加大档');
+  }
+  const dj = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'lib', 'distill.js'), 'utf8');
+  assert.ok(dj.indexOf('gscSection(latest, limits),') < dj.indexOf('factsSection(context, { maxBytes'), '拼装顺序被改回去了');
+  assert.ok(!/text\.slice\(0, maxBytes/.test(dj), '按字符截断又回来了');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

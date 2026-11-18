@@ -4731,12 +4731,14 @@ if($m==='GET'&&$ROUTE==='/context'){
     $snaps=[];
     foreach($sn->fetchAll() as $r){$r['data']=jdec($r['data']);$snaps[$r['source']]=$r;}
 
-    $fc=db()->prepare("SELECT fact_key,value,source,status FROM seo_facts WHERE client_id=? ORDER BY fact_key");
+    /* updated_at 随条目下发（2026-11-18）：规划简报的档案段有字节上限，超限时 worker 按「最久没更新的先让位」取舍，
+       没有这个字段只能按 key 字母序砍。字段只增不改，老 worker 不读它。 */
+    $fc=db()->prepare("SELECT fact_key,value,source,status,updated_at FROM seo_facts WHERE client_id=? ORDER BY fact_key");
     $fc->execute([$cid]);
     $confirmed=[];$pending=[];
     foreach($fc->fetchAll() as $f){
-        if($f['status']==='confirmed')$confirmed[]=['fact_key'=>$f['fact_key'],'value'=>$f['value']];
-        else $pending[]=['fact_key'=>$f['fact_key'],'value'=>$f['value'],'source'=>$f['source']];
+        if($f['status']==='confirmed')$confirmed[]=['fact_key'=>$f['fact_key'],'value'=>$f['value'],'updated_at'=>(string)$f['updated_at']];
+        else $pending[]=['fact_key'=>$f['fact_key'],'value'=>$f['value'],'source'=>$f['source'],'updated_at'=>(string)$f['updated_at']];
     }
 
     $cl=db()->prepare("SELECT id,name FROM clients WHERE id=?");

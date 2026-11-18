@@ -168,6 +168,9 @@ t('plan prompt：配平规则常驻，续季块只在续季时出现，任务上
   const first = P.buildPrompt('BRIEF', '', null, cap, 1, false);
   assert.ok(first.includes('关于排期配平'));
   assert.ok(first.includes('不排只读的复盘、盘点、汇总表任务'), '出计划提示词没禁只读复盘表');
+  assert.ok(first.includes('关于考核口径') && first.includes('非品牌点击，目标词位次'), '出计划提示词没写考核口径');
+  assert.ok(first.includes('不排以提升转化率为目标的任务') && first.includes('守门不单独立任务'), '出计划提示词没禁转化率优化任务');
+  assert.ok(first.includes('paid 泳道的方案，照各自口径'), '考核口径没留 paid 例外');
   assert.ok(first.includes('最多 20 条'));
   assert.ok(!first.includes('这是续季方案'));
   const renew = P.buildPrompt('BRIEF', '', null, cap, 1, true);
@@ -198,8 +201,33 @@ t('review prompt 带配平与续季两条硬规矩', () => {
   const p = R.buildPrompt({ clientName: 'A', experience: 'E', principles: 'P', clientRules: '', globalRules: '', history: '', briefing: 'B', planBody: 'X', tasks: [], capability: cap });
   assert.ok(p.includes('排期配平'));
   assert.ok(p.includes('只读的复盘、盘点、汇总表任务一律删掉'), '评审提示词没禁只读复盘表');
+  assert.ok(p.includes('SEO 方案考核看非品牌点击与目标词位次'), '评审提示词没写考核口径');
+  assert.ok(p.includes('转化率优化不归 SEO 方案'), '评审提示词没让它 drop 转化率优化任务');
+  assert.ok(!p.includes('直接推动本季度第一批转化的事'), '首季那条规则还在无条件生效');
+  assert.ok(p.includes('本季度靠什么涨非品牌点击与目标词位次'), '方向确认卡目标栏没改');
   assert.ok(p.includes('PRIOR QUARTER OUTCOMES'));
   assert.ok(p.includes('最多 20 条'));
+});
+
+t('转化类任务自检：表单改版、字段规格、漏斗类命中，询盘入口按钮与 title 批次不命中，paid 不查', () => {
+  const P = require(path.join(W, 'runners', 'plan'));
+  const r = P.conversionTaskReport([
+    { title: '新开：咨询表单字段改版，平台执行我方验收' },
+    { title: '新开：/contact-us/ 表单上方说明文案改写并产出字段规格' },
+    { title: '结账漏斗优化' },
+    { title: '新开：承接页补统一询盘入口' },
+    { title: '延续：页面 title 与 meta 第一批' },
+    { module: 'paid', title: '落地页转化率测试' },
+  ]);
+  assert.strictEqual(r.length, 3, r.join('|'));
+});
+t('源码闸：payload.review_model 可单独指定过闸模型', () => {
+  const js = require('fs').readFileSync(require('path').join(__dirname, '..', 'seo-worker', 'runners', 'plan.js'), 'utf8');
+  assert.ok(js.includes("jobModel({ model: (job.payload || {}).review_model }, '') || jobModel(job.payload, '')"));
+});
+t('经验文件：首季那条限定到首份方案，续季口径在档', () => {
+  const md = require('fs').readFileSync(require('path').join(__dirname, '..', 'seo-worker', 'specs', 'plan_experience.md'), 'utf8');
+  assert.ok(md.includes('**只管首份方案**') && md.includes('续季方案的考核口径是非品牌点击与目标词位次'));
 });
 
 Promise.all(pending).then(() => {

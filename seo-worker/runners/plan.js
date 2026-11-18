@@ -294,6 +294,17 @@ function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota
     '- detail 写一到三句，让人不用回来问你就能开工。S1 的任务要点名具体页面、关键词或文件。',
     '- 每条任务都要能追溯到"做"清单里的某一条。',
     '',
+    '关于考核口径（2026-11-18 Alvin 定，硬约束）：',
+    '- SEO 方案的考核看两样：非品牌点击，目标词位次。方案的主线、每档的做成标准都围绕这两样写。',
+    '- 询盘与转化数据只做两件事。一是排优先级：先做带来询盘的词和页。二是守门：询盘通道是不是活着',
+    '  （表单能否提交入库、追踪断没断）。',
+    '- 不排以提升转化率为目标的任务：表单改版、字段规格、漏斗优化、落地页转化文案、询盘口径对账，都不进任务块。',
+    '  这些归建站、付费线或客户，发现问题写进正文的「不做」清单并注明该转给谁。',
+    '- 守门不单独立任务：关键事件配置、追踪核对并进取数，或写进对应改动任务的验收口径。',
+    '- 样本小的转化读数（一个窗口内个位数到几十次事件）不当定量依据，不据此排活。流量小的站瓶颈是流量，不是漏斗。',
+    '- 首份方案（简报末尾没有 PRIOR QUARTER OUTCOMES）例外一条：询盘追踪链路没验通的，S1 先把它验通，这是地基。',
+    '- 整体例外：客户档案或铁律写明按询盘考核的客户，以及 paid 泳道的方案，照各自口径。',
+    '',
     '关于排期配平（2026-11-17 定，硬约束）：',
     '- 六档都要有实活。S3 到 S6 每档至少 ' + BALANCE_MIN_LATE + ' 条非博客任务，S1 与 S2 合计不超过非博客任务总数的一半。',
     '- 上一版方案的通病是把活全堆在前两档，后两个月每档只剩一篇博客。持续性的工作（按表现数据分批的',
@@ -324,6 +335,14 @@ function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota
 }
 
 /* 排期配平零模型自检（软提示，只进日志不拦落库：方案是贵重产物，配平不达标交给方案层过闸和人看）。 */
+/* 转化类任务零模型自检（2026-11-18，软提示只进日志）：SEO 方案不排以提升转化率为目标的任务。
+   Kuddles 续季测试稿 13 条非博客任务里 4 条是转化类，主线写成「把曝光换成询盘，不追流量」，而全站 30 天只有 587 次浏览。 */
+const CRO_TASK_RE = /表单[^，。]{0,16}(改版|字段|规格)|漏斗|转化率|CRO|询盘口径|结账流程/i;
+function conversionTaskReport(tasks) {
+  return (tasks || []).filter((t) => String(t.module || '') !== 'paid' && CRO_TASK_RE.test(String(t.title || '')))
+    .map((t) => '转化类任务疑似混入 SEO 方案：' + String(t.title || '').slice(0, 60));
+}
+
 function balanceReport(tasks) {
   const nonBlog = (tasks || []).filter((t) => !/blog-draft/.test(String(t.ops || '')));
   const by = {};
@@ -391,6 +410,7 @@ async function persist(ctx, text, dossier, capability, blogQuota) {
   const { tasks, dropped, overflow } = validateTasks(parsed.tasks, log, capability);
   if (overflow) log('model proposed more than ' + MAX_TASKS + ' tasks, kept the first ' + MAX_TASKS);
   for (const w of balanceReport(tasks)) log('排期配平未达标：' + w);
+  for (const w of conversionTaskReport(tasks)) log('考核口径自检：' + w);
   if (!tasks.length) {
     log(
       'every proposed task failed validation, ' +
@@ -417,8 +437,9 @@ async function persist(ctx, text, dossier, capability, blogQuota) {
 
   try {
     const bulk = { client_id: job.client_id, plan_id: planId, tasks };
-    /* 指定了模型的方案链，过闸那一步沿用同一个（服务端写进 plan_review job 的 payload.model）。 */
-    const chosen = jobModel(job.payload, '');
+    /* 指定了模型的方案链，过闸那一步沿用同一个（服务端写进 plan_review job 的 payload.model）。
+       payload.review_model 可单独指定过闸模型（2026-11-18 Alvin 定续季口径：opus 出稿、fable 评审）。 */
+    const chosen = jobModel({ model: (job.payload || {}).review_model }, '') || jobModel(job.payload, '');
     if (chosen) bulk.review_model = chosen;
     const res = await api.postTasksBulk(bulk);
     const ids = (res && res.ids) || [];
@@ -495,7 +516,7 @@ async function run(ctx) {
 
   await hydrateDossier(ctx, context);
   await hydratePriorTasks(api, context, job.client_id, log);
-  const briefing = buildPlanningBriefing(context, { log });
+  const briefing = buildPlanningBriefing(context, Object.assign({ log }, PLAN_BRIEF_OPTS));
   if (briefing.renewal) log('续季方案：上一季结局 ' + briefing.priorBytes + ' 字节已进简报');
   log(
     'briefing distilled: ' +
@@ -612,6 +633,7 @@ async function hydratePriorTasks(api, context, clientId, log) {
 }
 
 module.exports = {
+  conversionTaskReport,
   run,
   hydratePriorTasks,
   balanceReport,

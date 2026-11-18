@@ -17,7 +17,7 @@ const path = require('node:path');
 const blogcadence = require('../lib/blogcadence');
 const { runClaude } = require('../lib/llm');
 const { extractTrailingJson } = require('../lib/mdjson');
-const { buildPlanningBriefing } = require('../lib/distill');
+const { buildPlanningBriefing, PLAN_BRIEF_OPTS } = require('../lib/distill');
 const capabilities = require('../lib/capabilities');
 const { ensureClientWorkspace, truncate, summarize } = require('../lib/util');
 const planRunner = require('./plan');
@@ -128,7 +128,12 @@ function buildPrompt(o) {
     '- 不改事实。CONFIRMED 的事实照用，不派任务核实。',
     '- 不为了显得有改动而改。v1 对的地方 keep，改动必须有理由，理由要能追溯到下面的经验、铁律或简报。',
     '- 一任务一件事：博客一任务一篇；一组页面一个任务；只读审计不立任务。',
-    '- S1 只放我方能独立落地、且直接推动本季度第一批转化的事。',
+    '- S1 只放我方能独立落地的事。首份方案（简报末尾没有 PRIOR QUARTER OUTCOMES）：S1 放直接推动第一批询盘的事，追踪链路没验通先验通。',
+    '  续季方案：S1 放离目标词位次和非品牌点击最近的事（打击距离内的词、高曝光低点击的页）。',
+    '- 考核口径（2026-11-18 Alvin 定）：SEO 方案考核看非品牌点击与目标词位次。询盘与转化数据只用来排优先级（先做带来询盘的词和页）',
+    '  和守门（询盘通道是否活着）。不排以提升转化率为目标的任务：表单改版、字段规格、漏斗优化、落地页转化文案、询盘口径对账，',
+    '  v1 里有就 drop，why 写「转化率优化不归 SEO 方案」，并在 unsure 里点名该转给建站、付费线还是客户。守门不单独立任务，',
+    '  并进取数或对应改动任务的验收口径。样本小的转化读数不当定量依据。例外：档案或铁律写明按询盘考核的客户，以及 paid 泳道。',
     '- 排期配平（2026-11-17 定）：S3 到 S6 每档至少 2 条非博客任务，S1 与 S2 合计不超过非博客任务的一半；agency 任务全季不超过 3 条。',
     '  v1 不达标就由你重排，把持续性工作按批次摊到后几档，每批写明范围或取数口径。不要靠拆碎任务凑数。',
     '  只读的复盘、盘点、汇总表任务一律删掉换成实活（2026-11-18，6 家续季测试两个模型都在 S6 排复盘表，全被任务层判掉）。',
@@ -173,7 +178,7 @@ function buildPrompt(o) {
     '```json',
     '{"tasks":[{"module":"onpage","title":"...","detail":"...","owner_type":"agent","sprint":"S1","priority":"P0","ops":["page-meta-update"],"attention":false,"from":[97]}],',
     ' "changes":[{"type":"split","from":[110],"why":"一任务一篇"}],',
-    ' "card":{"goal":"一句话：本季度靠什么出第一批询盘","s1":["S1 第一件事","第二件","第三件"],"changed":["v1 到 v2 改了什么，每条一句，最多 6 条"],"unsure":["我拿不准的，最多 3 条，没有写空数组"],"ask":"要人做的唯一一个动作，通常是：确认方向，批准 v2"}}',
+    ' "card":{"goal":"一句话：本季度靠什么涨非品牌点击与目标词位次（首份方案写靠什么出第一批询盘）","s1":["S1 第一件事","第二件","第三件"],"changed":["v1 到 v2 改了什么，每条一句，最多 6 条"],"unsure":["我拿不准的，最多 3 条，没有写空数组"],"ask":"要人做的唯一一个动作，通常是：确认方向，批准 v2"}}',
     '```',
     '字段规矩：',
     '- tasks：v2 的完整任务清单（不是增量）。from 写它来自 v1 的哪些任务号，新增写 []。',
@@ -274,7 +279,7 @@ async function runWith(ctx, judge) {
   const capability = { platform, operations: platform ? capabilities.operations(platform) : [] };
   /* 续季：评审与出方案吃同一节「上一季结局」（带归档任务），否则评审看不到上一季做过什么。 */
   await planRunner.hydratePriorTasks(api, context, job.client_id, log);
-  const briefing = buildPlanningBriefing(context, { log });
+  const briefing = buildPlanningBriefing(context, Object.assign({ log }, PLAN_BRIEF_OPTS));
 
   const judged = await judge({
     clientName: profile.name || (context.client && context.client.name) || profile.domain || '',
