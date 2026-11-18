@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-18 AIRA 同意判定第二轮：等客户判断并入、到点续排、续季提示词（rev 252a7d2，Alvin 批「按建议做」）
+
+- 上一条的两个遗留都收了。`blog_card_waiting` 的 publish_blog 分支先问 `blog_publish_consent_verdict`，判定放行就不算等客户；它不再是第三份判断。以后「等不等客户」和「能不能发」是同一个答案。
+- 约定：同意认到哪张任务就记到哪张任务。凭批文、或凭别的卡（任务书显式引用的卡、同篇最新的卡）放行时，verdict 在 materialize 模式下给本任务代记一行 publish_blog 同意（署建单人）。只看本任务那一行的下游（`blog_outline_stage` 发布直通、卡反馈折叠）因此不用改。
+- 派单出口新增一档 `dispatch_grade=consent-met`：chatw 带卡博客单同意已在手（via card 或 backing）直接排 apply，同任务已有 apply 历史的不走。不落零载荷分流（那条路会当交付稿收口不发布）。
+- 新端点 `POST /tasks/consent_sweep`（worker 令牌）：挂 [wait-publish-consent] 或 [wait-card] 的在途单逐张问判定，放行的续排 apply 并记 [consent-met]。worker 侧 `consentSweepTick` 与条件巡检同一拍（12 个 poll 一次，现配置约 60 分钟）。防重：`GET_LOCK('seo_consent_sweep')`；`consent_sweep_due` 保证最后一个等待标记之后只续一次；每拍最多 5 张；止损闩生效不续。
+- 续季提示词：plan 与 plan_review 都加「不排只读的复盘、盘点、汇总表任务」。
+- 测试与回放见 commit message。部署：api 与 worker 两机 rev 252a7d2。
+
 ### 2026-11-18 AIRA 目标文章标记 + 发布同意判定收成一份（rev 9672453，ticket #64 与 Ben's NZ #2151，Alvin 批「一次做完」）
 
 - 根因（两张单同根）：派单时确定的「哪篇文章」没有地方放，写进任务书句子里，执行器和发布闸用正则猜回来。猜错一次补一条正则，补过六轮（ticket #43 #47 #48 #63、#2006/#2017、#2151）。
