@@ -20,6 +20,21 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-18 AIRA 目标文章标记 + 发布同意判定收成一份（rev 9672453，ticket #64 与 Ben's NZ #2151，Alvin 批「一次做完」）
+
+- 根因（两张单同根）：派单时确定的「哪篇文章」没有地方放，写进任务书句子里，执行器和发布闸用正则猜回来。猜错一次补一条正则，补过六轮（ticket #43 #47 #48 #63、#2006/#2017、#2151）。
+- 接口约定一：任务书行标记 `[target] /blog/<slug>/`，独占一行，与 `[backing]` 同一套。chat 委托单 drafts 新增 `target` 字段，生产端（`lib/tasktarget.js` 的 stampTarget）落行；发布单（blog-publish）和博客模式改稿单（blog-draft 加 blog-edit）任务书出现多篇又没写明的拦下并露面。只有 blog-edit 的批量改单不归它管。服务端 `task_target_of` / `task_blog_slug` 同一条正则。
+- 接口约定二：发布同意判定全系统只有 `blog_publish_consent_verdict` 一份。派单闸、续排、执行闸同一个函数；apply 的 `requireBlogPublishConsent` 经 `GET /blog_consent?task_id=` 只问不判（`dry=1` 纯读；只有 worker 令牌来问才记账），问不到按没有同意处理。纯函数块 `CONSENT-PURE-START/END`，测试 `tests/consent_verdict.test.php`。以后动同意口径只改这一处，apply 里不许再长出第二份。
+- 同意来源按序：发布权委托 > 卡上表态（本任务、显式引用的卡、同篇文章最新的卡，取到第一张有表态的为准）> 卡签发满 7 天零表态 > 挂在单上的客户批文。批文要求：`[backing]` 指向已确认 fact，value 写明本篇 slug 且说的是发布；批文早于最新卡签发日不算。凭批文放行时代记一行 publish_blog 同意，署建单人，留档写批文原文。
+- 显式卡引用只认「确认卡#N / 卡 #N / #N 确认卡 / blog_confirmation_task-N」。派单闸原先扫全部 #数字，#2174 写了「同 #1737」就被别篇文章的旧同意放行，已收紧。
+- 执行器：博客模式先读 `[target]`；申报 blog-edit 却定位不到、或写明的目标平台读不到，停下报目标不明，不再默认写新稿（`blogTargetStop`）。旧兜底猜法只留给没有标记的旧单。
+- 看板：发布单（ops 含 blog-publish）卡片上加「代确认发布」按钮，记 item=publish_blog，署名留档必填。
+- 回放（部署前，只读）：446 张博客相关任务新旧判定逐条比对，442 一致，4 条由拦改放且都确有客户同意（#2133/#2174 微信批文，#2151 对 #832、#2255 对 #2105 客户已在卡上点同意），由放改拦 0 条。近一个月博客模式改稿单 5 张，3 张当时掉进新建两次必挂（#1321 #1323 #2151），新规则下会直接停下报目标不明，误停 0 张。
+- 测试：node tests 全套绿（新增 tasktarget 18 条、apply 发布闸 7 条改写、三条卡引用用例搬到服务端测试）；250 上 php -l 过，consent_verdict 14、asksapi 47、chatapi 24、inboxapi 21、jobsapi 10 全绿。
+- 部署与验证：api 与 worker 两机 rev 9672453。#2174 从看板放行，apply job 15948 凭批文过闸、代记同意（agency:summer）、发布成功，正式地址 200 零跳转。#2151 回填 `[target]` 后重跑，execute job 15949 按标记定位、走原地改、核实四项均已满足不动稿、交付。
+- 遗留一（未动，等 Alvin 定）：`blog_card_waiting` 是第三份「等不等客户」的判断，只看本任务自己的卡。#2151 改稿后又出了一张新卡，任务书明写「客户已在 #832 确认卡同意，不用重新确认」，判定函数认，`blog_card_waiting` 不认，任务停在 [wait-card]。要彻底一份就该让它也问 verdict，但它管着放行官、L0、批量放行的防死循环，改动面大，单独评。
+- 遗留二（未动）：chat 泳道的发布单因没同意被挂 [wait-publish-consent] 后，卡满 7 天到期没有东西叫醒它（Kia Ora Kids #2011，11-11 签发，今天到期，判定已是可发，任务仍 blocked）。续排只挂在「同意落库」这一个事件上。
+
 ### 2026-11-18 AIRA 续季 fable 测试：6 家超期客户草稿出齐（rev 096e898，Alvin 批「先拿超期的 6 家用 fable 做测试」）
 
 - 机制补充（rev 096e898，api 与 worker 两机已部署）：plan job 可带 `payload.model`（白名单 opus/fable/sonnet），worker 经 /tasks/bulk 的 `review_model` 透传到 plan_review job 的 payload，整条方案链用同一个模型，不动全局 config。缺省与脏值回落 config。测试 jobModel 一条；/tasks/bulk 的 PHP 透传没有单测。
