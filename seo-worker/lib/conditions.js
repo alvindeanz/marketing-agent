@@ -43,6 +43,21 @@ function checkCondition(cond, customerId, log) {
  * 一轮巡检：拉等条件任务，逐任务核全部条件，全满足的交 condition_met。
  * 任何一个任务出错不拖累其他任务。挂在 listener 的兜底轮询上，约每小时一轮。
  */
+/* 等同意的单到点续排（2026-11-18）：零模型，判定全在服务端，这里只按节拍敲一下并把结果记进日志。
+   和条件巡检同一拍。失败只记一行，下一拍再来。 */
+async function consentSweepTick(api, log) {
+  const say = log || function () {};
+  try {
+    const r = await api.postConsentSweep();
+    const done = (r && r.resumed) || [];
+    for (const x of done) say('同意巡检：任务 #' + x.task_id + ' 发布凭证已满足（' + x.via + '），已续排 apply' + (x.job_id ? ' job #' + x.job_id : ''));
+    return done;
+  } catch (e) {
+    say('同意巡检：本轮失败，下一拍再试 :: ' + String(e.message || '').slice(0, 150));
+    return [];
+  }
+}
+
 async function conditionProbeTick(api, log) {
   const say = log || function () {};
   let list;
@@ -76,4 +91,4 @@ async function conditionProbeTick(api, log) {
   }
 }
 
-module.exports = { conditionProbeTick, checkCondition };
+module.exports = { consentSweepTick, conditionProbeTick, checkCondition };

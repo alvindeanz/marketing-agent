@@ -115,6 +115,13 @@ class Api {
     return this.req('GET', '/blog_consent?task_id=' + encodeURIComponent(taskId) + (dry ? '&dry=1' : ''));
   }
 
+  /** POST /tasks/consent_sweep -> { ok, seen, resumed:[{task_id, via, job_id}] }
+      等同意的单到点续排（确认卡满 7 天视同同意等没有事件的情况）。判定和续排都在服务端，
+      worker 只负责按节拍敲一下（2026-11-18，Kia Ora Kids #2011）。 */
+  async postConsentSweep() {
+    return this.req('POST', '/tasks/consent_sweep', {});
+  }
+
   /** GET /card_feedback?client_id=&limit= -> { rows } 该客户全部卡的近期反馈（含 task_id
       与任务标题，id 升序）。chat 简报回流客户逐字反馈用（2026-10-13 ticket 28）。 */
   async cardFeedbackForClient(clientId, limit) {

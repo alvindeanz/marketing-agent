@@ -89,6 +89,23 @@ t('旧批文不替新一版放行：批文早于最新卡的签发日不算',fun
     $in['card_issued']='2026-11-10';
     eq(blog_consent_decide($in)['ok'],true);
 });
+t('到点续排只碰一次：续过之后 apply 失败不再重排，重新挂起后可以再续',function(){
+    eq(consent_sweep_due('x [wait-publish-consent] 发布凭证未到'),true);
+    eq(consent_sweep_due('x [wait-card] 确认卡已出'),true);
+    eq(consent_sweep_due('x [wait-card] 等 | [consent-met] 已续排 | 落地失败'),false);
+    eq(consent_sweep_due('[wait-card] | [consent-met] | 改稿后 [wait-card] 又出卡'),true);
+    eq(consent_sweep_due('没有等待标记'),false);
+    eq(consent_sweep_due(''),false);
+});
+t('源码闸：等客户判断、到点巡检、派单出口都问同一个判定',function()use($src){
+    $a=strpos($src,'function blog_card_waiting(');$b=strpos($src,'function blog_slug_of(');
+    $body=substr($src,$a,$b-$a);
+    if(strpos($body,'blog_publish_consent_verdict(')===false)throw new Exception('blog_card_waiting 没问 verdict，第三份判断又回来了');
+    if(strpos($src,"\$ROUTE==='/tasks/consent_sweep'")===false)throw new Exception('到点续排端点没了');
+    if(strpos($src,"GET_LOCK('seo_consent_sweep',0)")===false)throw new Exception('巡检没有库级锁，两台 worker 会同时扫');
+    if(strpos($src,'if(!consent_sweep_due($wt[\'result_note\']))continue;')===false)throw new Exception('巡检没过只碰一次的闸');
+    if(strpos($src,"'chat-dispatch-consent'")===false)throw new Exception('派单出口的同意已在手直排没了');
+});
 t('源码闸：判定只此一份，派单闸与读接口都调 verdict',function()use($src){
     eq(substr_count($src,'function blog_publish_consent_verdict('),1);
     if(strpos($src,"blog_publish_consent_verdict((int)\$bt['client_id']")===false)throw new Exception('GET /blog_consent 没调 verdict');

@@ -976,6 +976,16 @@ function blog_card_waiting($t){
         $now=new DateTime('now',new DateTimeZone('Pacific/Auckland'));
         if(($now->getTimestamp()-$anchor->getTimestamp())/86400>=14)return false;
     }
+    /* 「等不等客户」也问同一个同意判定（2026-11-18 第二轮，Ben's NZ #2151）：这里原先只看本任务自己的卡，
+       是第三份判断。改稿单重出了一张卡，任务书明写客户已在原卡 #832 同意、不用重新确认，判定认、这里不认，
+       任务白等。判定已放行就不算等客户；放行依据不在本任务头上的，判定会顺手代记到本任务（见 verdict）。
+       没放行的照旧往下走：本任务有任何表态走各自路由，零表态才算等。 */
+    if($item==='publish_blog'&&!empty($t['id'])&&function_exists('blog_publish_consent_verdict')){
+        try{
+            $cv=blog_publish_consent_verdict((int)($t['client_id']??0),(int)$t['id'],$t,true);
+            if($cv['ok'])return false;
+        }catch(Exception $e){/* 判定出错按原口径往下走 */}
+    }
     try{
         $fb=db()->prepare("SELECT id FROM seo_card_feedback WHERE task_id=? AND item=? ORDER BY id DESC LIMIT 1");
         $fb->execute([(int)$t['id'],$item]);
@@ -1050,6 +1060,16 @@ function blog_consent_decide($in){
     }
     return ['ok'=>false,'via'=>'none','last'=>'','card'=>0];
 }
+/* 到点续排巡检该不该碰这张单：只在最后一个等待标记之后还没续过时碰一次。
+   note 只增不改，apply 失败后等待标记还在，没有这道闸巡检会每一拍重排一次。 */
+function consent_sweep_due($note){
+    $note=(string)$note;
+    $w1=strrpos($note,'[wait-publish-consent]');$w2=strrpos($note,'[wait-card]');
+    if($w1===false&&$w2===false)return false;
+    $lastWait=max($w1===false?-1:$w1,$w2===false?-1:$w2);
+    $met=strrpos($note,'[consent-met]');
+    return $met===false||$met<$lastWait;
+}
 /* CONSENT-PURE-END */
 /* 同篇文章的确认卡（2026-11-17 ticket #63，Sammichelle #2100 对 #2045）：发布单常是另开的一张，
    正文不写卡单号，只写文章网址；客户在卡上点了同意，凭证判定和续排按「#单号」都接不上。
@@ -1120,15 +1140,21 @@ function blog_publish_consent_verdict($cid,$tid,$t,$materialize=false){
         }catch(Exception $e){/* 批文读不到按没有处理 */}
     }
     $v=blog_consent_decide($in);
-    if($v['ok']&&$v['via']==='backing'&&$materialize){
+    /* 同意认到哪张任务头上就记到哪张任务头上（2026-11-18 第二轮）：凭批文、或凭别的卡（任务书显式引用的卡、
+       同篇文章最新的卡）放行时，给本任务代记一行 publish_blog 同意。下游还有几处只看本任务自己那一行
+       （blog_outline_stage 的发布直通、卡反馈折叠），账本归一之后它们不用各自再学一遍引用规则。 */
+    $viaOther=$v['ok']&&$v['via']==='card'&&(int)$v['card']!==(int)$tid;
+    if($v['ok']&&($v['via']==='backing'||$viaOther)&&$materialize){
         try{
             $by=mb_substr(trim((string)($t['created_by']??'')),0,60,'UTF-8');
             if($by==='')$by='agent';
-            $txt=mb_substr('依据批文 '.$v['key'].'：'.$bkVal,0,2000,'UTF-8');
+            $txt=$viaOther
+                ?('依据任务 #'.(int)$v['card'].' 确认卡上客户的同意（同一篇文章，本任务不另等一次表态）')
+                :mb_substr('依据批文 '.$v['key'].'：'.$bkVal,0,2000,'UTF-8');
             db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip,actor)VALUES(?,?,?,?,?,?)")
                 ->execute([(int)$tid,'publish_blog','agree',$txt,'','agency:'.$by]);
             task_append_note((int)$tid,'[代确认 '.$by.'] publish_blog：同意按建议：'.mb_substr($txt,0,300,'UTF-8'));
-            audit($by,'seo_card_feedback_proxy',(string)$tid,['choice'=>'agree','item'=>'publish_blog','via'=>'backing','key'=>$v['key']]);
+            audit($by,'seo_card_feedback_proxy',(string)$tid,['choice'=>'agree','item'=>'publish_blog','via'=>$v['via'],'key'=>(string)($v['key']??''),'card'=>(int)$v['card']]);
         }catch(Exception $e){/* 记账失败不改判定，下次过闸再补 */}
     }
     return $v;
@@ -3278,6 +3304,24 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
             task_append_note($tid,'[wait-card] 确认卡已出等客户表态，不排 apply；客户在卡上同意即自动续排发布');
             audit('seo-worker','seo_task_dispatch_wait_card',(string)$tid,[]);
             res(200,['ok'=>true,'dispatch_grade'=>'wait-card']);
+        }
+        /* 带卡的博客单、同意已经在手（2026-11-18 第二轮，Ben's NZ #2151）：任务书引用的原卡客户已同意，
+           或单上挂着写明本篇发布的批文。和「客户在卡上点了同意」是同一个状态，走同一条出口：直接排 apply 发布
+           （publish_consent_resume 同款）。不往下走零载荷分流，那条路会把它当成交付稿收口而不发布。
+           委托客户与到期视同同意不在这里改道，照旧往下走原流程。 */
+        if($fcRow&&strpos(strtolower((string)($fcRow['ops']??'')),'blog-draft')!==false
+            &&strpos((string)($fcRow['output_url']??'').' '.(string)($fcRow['result_note']??''),'blog_confirmation')!==false){
+            $cvW=blog_publish_consent_verdict($cidW,$tid,$fcRow,true);
+            if($cvW['ok']&&in_array($cvW['via'],['card','backing'],true)){
+                $seenC=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload=?");
+                $seenC->execute([$cidW,json_encode(['task_ids'=>[$tid]])]);
+                if((int)$seenC->fetch()['c']===0){
+                    list($ajK,)=queue_task_jobs($cidW,'apply_task',[$tid],'chat-dispatch-consent','seo_tasks_release');
+                    task_append_note($tid,'[consent-met] 发布凭证已在手（'.($cvW['via']==='backing'?'单上批文':'任务 #'.(int)$cvW['card'].' 卡上客户已同意').'），不另等一次表态，apply job #'.($ajK?$ajK[0]:'在飞跳过'));
+                    audit('seo-worker','seo_task_publish_consent_met',(string)$tid,['via'=>$cvW['via'],'job_ids'=>$ajK,'dispatch'=>1]);
+                    res(200,['ok'=>true,'dispatch_grade'=>'consent-met','job_ids'=>$ajK]);
+                }
+            }
         }
         $seenW=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='apply_task' AND payload=?");
         $seenW->execute([$cidW,json_encode(['task_ids'=>[$tid]],JSON_UNESCAPED_UNICODE)]);
@@ -6683,6 +6727,41 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/card_feedback_proxy$#',$ROUTE,$mm)){
    GET /card_feedback?client_id=&limit= -> 该客户全部卡的近期反馈行（带 task_id 与任务标题，
    id 升序）。chat 简报用（2026-10-13 ticket 28：客户在卡上的逐字反馈存了库却没有任何
    通道回流给 agent，agent 只能答「拿不到原话」）。 */
+/* 等同意的单到点续排（2026-11-18 第二轮，Kia Ora Kids #2011）：续排原先只挂在「同意落库」这一个事件上，
+   确认卡满 7 天视同同意是时间到了、没有事件，chat 泳道的单没有 harness 轮，就永远挂着。
+   worker 的零模型巡检节拍（与条件巡检同一拍）来调：挂着 [wait-publish-consent] 或 [wait-card] 的在途单
+   逐张问同一个判定，已放行的续排 apply。防重两道：库级咨询锁保证两台 worker 不同时扫；
+   每张单只在最后一个等待标记之后还没有 [consent-met] 时续一次，apply 失败不会被这里反复重排。 */
+if($m==='POST'&&$ROUTE==='/tasks/consent_sweep'){
+    auth_worker();
+    ensure_task_origin();
+    $lk=db()->query("SELECT GET_LOCK('seo_consent_sweep',0) g")->fetch();
+    if(!$lk||(int)$lk['g']!==1)res(200,['ok'=>true,'busy'=>true,'resumed'=>[]]);
+    $resumed=[];$seen=0;
+    try{
+        $wq=db()->query("SELECT * FROM seo_tasks WHERE archived=0 AND ((status='blocked' AND result_note LIKE '%[wait-publish-consent]%') OR (status='review' AND result_note LIKE '%[wait-card]%')) ORDER BY id DESC LIMIT 40");
+        foreach($wq->fetchAll() as $wt){
+            $seen++;
+            if(!consent_sweep_due($wt['result_note']))continue;
+            $wtid=(int)$wt['id'];$wcid=(int)$wt['client_id'];
+            if(ops_halted($wcid))continue;
+            $v=blog_publish_consent_verdict($wcid,$wtid,$wt,true);
+            if(!$v['ok'])continue;
+            if(count($resumed)>=5)break;
+            db()->prepare("UPDATE seo_tasks SET status='review' WHERE id=?")->execute([$wtid]);
+            list($aj,)=queue_task_jobs($wcid,'apply_task',[$wtid],'consent-sweep','seo_tasks_release');
+            $why=['delegated'=>'发布权已委托','card'=>'卡上已有同意'.((int)$v['card']&&(int)$v['card']!==$wtid?('（任务 #'.(int)$v['card'].'）'):''),'expiry'=>'确认卡签发满 7 天客户无表态，到期视同同意','backing'=>'单上挂有写明本篇发布的客户批文'][$v['via']]??$v['via'];
+            task_append_note($wtid,'[consent-met] 发布凭证已满足：'.$why.'。凭证即放行，apply job #'.($aj?$aj[0]:'在飞跳过'));
+            audit('seo-worker','seo_task_publish_consent_met',(string)$wtid,['via'=>$v['via'],'job_ids'=>$aj,'sweep'=>1]);
+            $resumed[]=['task_id'=>$wtid,'via'=>$v['via'],'job_id'=>$aj?$aj[0]:0];
+        }
+    }catch(Exception $e){
+        db()->query("SELECT RELEASE_LOCK('seo_consent_sweep')");
+        res(500,['error'=>'consent sweep failed: '.mb_substr($e->getMessage(),0,200,'UTF-8')]);
+    }
+    db()->query("SELECT RELEASE_LOCK('seo_consent_sweep')");
+    res(200,['ok'=>true,'seen'=>$seen,'resumed'=>$resumed]);
+}
 /* GET /blog_consent?task_id= -> 这张任务现在能不能发布（2026-11-18 ticket #64）。
    apply 的发布闸不再自己判，来问这里；派单闸、续排调的是同一个 blog_publish_consent_verdict。
    返回 {ok, via(delegated|card|expiry|backing|none), last, card, slug}。凭批文放行时顺手记代确认。 */

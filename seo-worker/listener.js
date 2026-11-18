@@ -31,7 +31,7 @@ function fuseActive() {
 const { load } = require('./lib/config');
 const { Api } = require('./lib/api');
 const blogreview = require('./lib/blogreview');
-const { conditionProbeTick } = require('./lib/conditions');
+const { conditionProbeTick, consentSweepTick } = require('./lib/conditions');
 const { LANE_NAMES, laneOf } = require('./lib/lanes');
 const { fuseVerdict } = require('./lib/fuse_policy');
 const { ts, makeStdoutLogger, summarize } = require('./lib/util');
@@ -590,6 +590,7 @@ const pollTimer = setInterval(() => {
   probeTickCount += 1;
   if (probeTickCount % 12 === 0) {
     conditionProbeTick(api, log).catch((e) => log('条件巡检本轮异常 :: ' + e.message));
+    consentSweepTick(api, log).catch((e) => log('同意巡检本轮异常 :: ' + e.message));
   }
 }, cfg.pollIntervalSec * 1000);
 

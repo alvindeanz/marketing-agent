@@ -167,6 +167,7 @@ t('plan prompt：配平规则常驻，续季块只在续季时出现，任务上
   assert.strictEqual(P.MAX_TASKS, 20);
   const first = P.buildPrompt('BRIEF', '', null, cap, 1, false);
   assert.ok(first.includes('关于排期配平'));
+  assert.ok(first.includes('不排只读的复盘、盘点、汇总表任务'), '出计划提示词没禁只读复盘表');
   assert.ok(first.includes('最多 20 条'));
   assert.ok(!first.includes('这是续季方案'));
   const renew = P.buildPrompt('BRIEF', '', null, cap, 1, true);
@@ -196,6 +197,7 @@ t('jobModel：payload.model 只认白名单，缺省与脏值回落 config', () 
 t('review prompt 带配平与续季两条硬规矩', () => {
   const p = R.buildPrompt({ clientName: 'A', experience: 'E', principles: 'P', clientRules: '', globalRules: '', history: '', briefing: 'B', planBody: 'X', tasks: [], capability: cap });
   assert.ok(p.includes('排期配平'));
+  assert.ok(p.includes('只读的复盘、盘点、汇总表任务一律删掉'), '评审提示词没禁只读复盘表');
   assert.ok(p.includes('PRIOR QUARTER OUTCOMES'));
   assert.ok(p.includes('最多 20 条'));
 });
