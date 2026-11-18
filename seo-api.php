@@ -983,22 +983,80 @@ function blog_card_waiting($t){
     }catch(Exception $e){/* 表未建 = 无表态，按等客户处理 */}
     return true;
 }
-/* 发布凭证核验（2026-10-28，#1737 教训）：blog-publish 任务在排 apply 前先问凭证。
-   口径与 apply 侧 requireBlogPublishConsent 一致，两处要一起改：
-   ①委托客户（policy.blog_publish_executor=agent）视同有凭证；
-   ②候选顺序 本任务 → detail/note 里引用的任务号，取到 publish_blog 行即停（agree 过，其余不过）。 */
-/* 同篇文章的确认卡（2026-11-17 ticket #63，Sammichelle #2100 对 #2045）：发布单常是另开的一张，
-   正文不写卡单号，只写文章网址；客户在卡上点了同意，凭证判定和续排按「#单号」都接不上。
-   口径：任务正文里恰好一个 /blog/<slug>（多个不猜），同客户带确认卡且提到同一 slug 的任务里
-   取单号最大的一张，即这篇文章最新的卡。只认最新一张：旧卡的同意不能替新一版改稿放行。
-   apply 侧经 GET /card_feedback?task_id=&linked=1 取同一结果，三处（派单、续排、执行）一个口径。 */
+/* CONSENT-PURE-START 发布同意判定的纯函数块（2026-11-18 ticket #64）。零数据库零 HTTP，
+   tests/consent_verdict.test.php 按这对标记抠出来 eval，改标记文字要同步改测试。 */
 function blog_slug_of($text){
     if(!preg_match_all('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#',(string)$text,$m))return '';
     $u=array_values(array_unique($m[1]));
     return count($u)===1?$u[0]:'';
 }
+/* 任务的目标文章（2026-11-18 ticket #64 与 #2151 同根）：派单时就确定的事实不该压成自然语言再让下游猜。
+   chat 派博客单时在 detail 末尾落一行 [target] /blog/<slug>/（与 [backing] 同一套行标记约定），
+   服务端与执行器都先读这一行；没有这一行的旧单才退回扫正文（恰好一个 slug，多个不猜）。 */
+function task_target_of($detail){
+    if(preg_match('/^\[target\][ \t]*(\S+)[ \t]*$/mu',(string)$detail,$m))return $m[1];
+    return '';
+}
+function task_blog_slug($t){
+    $tg=task_target_of((string)($t['detail']??''));
+    if($tg!==''&&preg_match('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#',$tg,$m))return $m[1];
+    return blog_slug_of((string)($t['detail']??'')."\n".(string)($t['result_note']??''));
+}
+/* 显式引用的确认卡单号：只认「确认卡#N / 确认页 #N / 卡 #N / #N 确认卡 / blog_confirmation_task-N」这几种写法。
+   正文里随手写的「同 #1737」不是凭证引用（#2174 实证：别篇文章的旧同意把派单闸打开了）。 */
+function consent_ref_ids($t){
+    $tid=(int)($t['id']??0);
+    $src=(string)($t['detail']??'')."\n".(string)($t['result_note']??'');
+    $out=[];
+    if(preg_match_all('/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)|(?:^|[\s（(、：:])卡\s*#(\d+)|#(\d+)\s*确认[页卡]/mu',$src,$mm,PREG_SET_ORDER)){
+        foreach($mm as $m){
+            $rid=0;
+            for($gi=1;$gi<=4;$gi++)if(($m[$gi]??'')!==''){$rid=(int)$m[$gi];break;}
+            if($rid&&$rid!==$tid&&!in_array($rid,$out,true))$out[]=$rid;
+        }
+    }
+    return array_slice($out,0,8);
+}
+/* 批文 fact 能不能当这篇文章的发布同意：写明了这篇文章的 slug，且说的是发布这件事。
+   范围类批文（「这篇只讲帘子」）也会带 slug，不能当发布同意。 */
+function backing_publish_fact_ok($value,$slug){
+    $value=(string)$value;$slug=(string)$slug;
+    if($slug===''||$value==='')return false;
+    if(!preg_match('#(?<![A-Za-z0-9_-])'.preg_quote($slug,'#').'(?![A-Za-z0-9_-])#',$value))return false;
+    return (bool)preg_match('/发布|上线|先发|可以发|发这篇|publish|go live/iu',$value);
+}
+/* 判定本体。入参全是取好的数据：
+   delegated   发布权已委托（policy.blog_publish_executor=agent）
+   cands       候选同意来源，按序 [[任务号, 该任务最后一次 publish_blog 表态或 null], ...]，本任务排第一
+   issued      本任务确认卡签发日 Y-m-d（没有戳为空），now 为当前时间戳
+   backing     ['key'=>批文 key,'ok'=>已确认且写明本篇发布,'date'=>批文日期 Y-m-d]，没有为 null
+   card_issued 这篇文章最新一张卡的签发日（本任务或关联卡），用来挡「旧批文替新一版放行」
+   顺序即优先级：委托 > 卡上表态（客户亲点或代确认，取到第一张有表态的卡为准）> 满 7 天视同同意 > 批文。 */
+function blog_consent_decide($in){
+    if(!empty($in['delegated']))return ['ok'=>true,'via'=>'delegated','last'=>'','card'=>0];
+    foreach(($in['cands']??[]) as $c){
+        if($c[1]===null)continue;
+        return ['ok'=>(string)$c[1]==='agree','via'=>'card','last'=>(string)$c[1],'card'=>(int)$c[0]];
+    }
+    $issued=(string)($in['issued']??'');
+    if($issued!==''){
+        $anchor=new DateTime($issued.' 00:00:00',new DateTimeZone('Pacific/Auckland'));
+        if(((int)($in['now']??time())-$anchor->getTimestamp())/86400>=7)return ['ok'=>true,'via'=>'expiry','last'=>'','card'=>0,'issued'=>$issued];
+    }
+    $bk=$in['backing']??null;
+    if($bk&&!empty($bk['ok'])){
+        $ci=(string)($in['card_issued']??'');
+        if($ci===''||(string)($bk['date']??'')>=$ci)return ['ok'=>true,'via'=>'backing','last'=>'','card'=>0,'key'=>(string)$bk['key']];
+    }
+    return ['ok'=>false,'via'=>'none','last'=>'','card'=>0];
+}
+/* CONSENT-PURE-END */
+/* 同篇文章的确认卡（2026-11-17 ticket #63，Sammichelle #2100 对 #2045）：发布单常是另开的一张，
+   正文不写卡单号，只写文章网址；客户在卡上点了同意，凭证判定和续排按「#单号」都接不上。
+   口径：这张任务的目标文章（task_blog_slug：先读 [target] 行，旧单才扫正文），同客户带确认卡且提到
+   同一 slug 的任务里取单号最大的一张，即这篇文章最新的卡。只认最新一张：旧卡的同意不能替新一版改稿放行。 */
 function blog_consent_card_by_slug($cid,$tid,$t){
-    $slug=blog_slug_of((string)($t['detail']??'')."\n".(string)($t['result_note']??''));
+    $slug=task_blog_slug($t);
     if($slug==='')return 0;
     /* 自己带卡的任务只认自己的卡：同篇更早的卡是上一版稿子的，不能替这一版放行（#1588 对 #828） */
     if(strpos((string)($t['result_note']??''),'blog_confirmation_task-')!==false)return 0;
@@ -1011,31 +1069,73 @@ function blog_consent_card_by_slug($cid,$tid,$t){
     }catch(Exception $e){/* 查不到按无关联处理 */}
     return 0;
 }
-function blog_publish_consent_ok($cid,$tid,$t){
+/* 发布同意判定，全系统只此一份（2026-11-18 ticket #64）。派单闸、续排、执行闸（apply 经
+   GET /blog_consent 来问）都调这里；此前 apply 侧自己另判一份，两份漂移过（#2174：派单放行、执行拦下）。
+   $materialize：凭批文放行时顺手记一行代确认（署建单人的名，留档写批文原文），同意账本保持单一来源。 */
+function blog_publish_consent_verdict($cid,$tid,$t,$materialize=false){
+    $in=['delegated'=>false,'cands'=>[],'issued'=>'','now'=>time(),'backing'=>null,'card_issued'=>''];
     try{
         $pq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
         $pq->execute([(int)$cid]);
-        $pv=$pq->fetch();
-        if($pv&&preg_match('/^\s*agent\b/i',(string)$pv['value']))return true;
+        $pv=$pq->fetch();$pq->closeCursor();
+        if($pv&&preg_match('/^\s*agent\b/i',(string)$pv['value']))$in['delegated']=true;
     }catch(Exception $e){/* facts 读不到按未委托处理 */}
-    $cands=[(int)$tid];
-    if(preg_match_all('/#(\d{1,7})\b/u',(string)($t['detail']??'').' '.(string)($t['result_note']??''),$mm)){
-        foreach($mm[1] as $x){$x=(int)$x;if($x&&!in_array($x,$cands,true))$cands[]=$x;}
-    }
-    $cands=array_slice($cands,0,8);
-    /* 同篇文章的卡（2026-11-17 ticket #63）：发布单与卡单只靠文章网址关联时也认，排在显式引用之后 */
+    $ids=[(int)$tid];
+    foreach(consent_ref_ids(['id'=>$tid]+$t) as $x)if(!in_array($x,$ids,true))$ids[]=$x;
     $lk=blog_consent_card_by_slug($cid,$tid,$t);
-    if($lk&&!in_array($lk,$cands,true))$cands[]=$lk;
+    if($lk&&!in_array($lk,$ids,true))$ids[]=$lk;
     try{
+        ensure_card_feedback_schema();
         $fq=db()->prepare("SELECT choice FROM seo_card_feedback WHERE task_id=? AND item='publish_blog' ORDER BY id DESC LIMIT 1");
-        foreach($cands as $cd){
+        foreach($ids as $cd){
             $fq->execute([$cd]);
-            $r=$fq->fetch();
-            $fq->closeCursor();
-            if($r)return (string)$r['choice']==='agree';
+            $r=$fq->fetch();$fq->closeCursor();
+            $in['cands'][]=[$cd,$r?(string)$r['choice']:null];
         }
-    }catch(Exception $e){/* 表未建 = 无凭证 */}
-    return false;
+    }catch(Exception $e){/* 表未建 = 无表态 */}
+    $stampOf=function($note){
+        return preg_match_all('/\[卡签发 (\d{4}-\d{2}-\d{2})\]/u',(string)$note,$sm)?end($sm[1]):'';
+    };
+    $in['issued']=$stampOf($t['result_note']??'');
+    $in['card_issued']=$in['issued'];
+    if($lk){
+        try{
+            $lq=db()->prepare("SELECT result_note FROM seo_tasks WHERE id=?");$lq->execute([$lk]);
+            $lr=$lq->fetch();$lq->closeCursor();
+            $ls=$lr?$stampOf($lr['result_note']):'';
+            if($ls>$in['card_issued'])$in['card_issued']=$ls;
+        }catch(Exception $e){}
+    }
+    $bkVal='';
+    if(preg_match('/\[backing\]\s*(\S+)/u',(string)($t['detail']??''),$bm)){
+        try{
+            $bq=db()->prepare("SELECT value,status,updated_at,created_at FROM seo_facts WHERE client_id=? AND fact_key=? ORDER BY id DESC LIMIT 1");
+            $bq->execute([(int)$cid,$bm[1]]);
+            $br=$bq->fetch();$bq->closeCursor();
+            if($br&&(string)$br['status']==='confirmed'){
+                $bkVal=(string)$br['value'];
+                $in['backing']=['key'=>$bm[1],'ok'=>backing_publish_fact_ok($bkVal,task_blog_slug($t)),
+                    'date'=>substr((string)($br['updated_at']?:$br['created_at']),0,10)];
+            }
+        }catch(Exception $e){/* 批文读不到按没有处理 */}
+    }
+    $v=blog_consent_decide($in);
+    if($v['ok']&&$v['via']==='backing'&&$materialize){
+        try{
+            $by=mb_substr(trim((string)($t['created_by']??'')),0,60,'UTF-8');
+            if($by==='')$by='agent';
+            $txt=mb_substr('依据批文 '.$v['key'].'：'.$bkVal,0,2000,'UTF-8');
+            db()->prepare("INSERT INTO seo_card_feedback(task_id,item,choice,fb,ip,actor)VALUES(?,?,?,?,?,?)")
+                ->execute([(int)$tid,'publish_blog','agree',$txt,'','agency:'.$by]);
+            task_append_note((int)$tid,'[代确认 '.$by.'] publish_blog：同意按建议：'.mb_substr($txt,0,300,'UTF-8'));
+            audit($by,'seo_card_feedback_proxy',(string)$tid,['choice'=>'agree','item'=>'publish_blog','via'=>'backing','key'=>$v['key']]);
+        }catch(Exception $e){/* 记账失败不改判定，下次过闸再补 */}
+    }
+    return $v;
+}
+function blog_publish_consent_ok($cid,$tid,$t){
+    $v=blog_publish_consent_verdict($cid,$tid,$t,true);
+    return $v['ok'];
 }
 function blog_outline_stage($t){
     $ops=strtolower((string)($t['ops']??''));
@@ -3238,7 +3338,9 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
            凭证即放行（规矩2）反过来也成立：没凭证不起跑。管 chatw 派单的 blog-publish；
            豁免=委托客户与已有 agree（blog_publish_consent_ok）；误杀出口=人工 PATCH 状态或代确认 proxy；
            命中记 audit。客户点 agree 落库即由卡反馈端点自动续排 apply（配对改动在那边）。 */
-        if(in_array('blog-publish',$opsW,true)&&!blog_publish_consent_ok($cidW,$tid,$cr)){
+        /* 判定取整行任务（批文、[target]、建单人都要用），$cr 是窄查询。2026-11-18 ticket #64 */
+        $pcW=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$pcW->execute([$tid]);$pcRow=$pcW->fetch();$pcW->closeCursor();
+        if(in_array('blog-publish',$opsW,true)&&!blog_publish_consent_ok($cidW,$tid,$pcRow?:$cr)){
             db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
             task_append_note($tid,'[wait-publish-consent] 发布凭证未到：客户尚未在确认卡点「同意，安排发布」。同意落库即自动续排 apply');
             hold_notify($tid,'发布等客户：确认卡上还没有发布表态，客户点同意后自动发布');
@@ -6581,6 +6683,20 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/card_feedback_proxy$#',$ROUTE,$mm)){
    GET /card_feedback?client_id=&limit= -> 该客户全部卡的近期反馈行（带 task_id 与任务标题，
    id 升序）。chat 简报用（2026-10-13 ticket 28：客户在卡上的逐字反馈存了库却没有任何
    通道回流给 agent，agent 只能答「拿不到原话」）。 */
+/* GET /blog_consent?task_id= -> 这张任务现在能不能发布（2026-11-18 ticket #64）。
+   apply 的发布闸不再自己判，来问这里；派单闸、续排调的是同一个 blog_publish_consent_verdict。
+   返回 {ok, via(delegated|card|expiry|backing|none), last, card, slug}。凭批文放行时顺手记代确认。 */
+if($m==='GET'&&$ROUTE==='/blog_consent'){
+    $auB=auth_any();
+    $tid=(int)($_GET['task_id']??0);
+    if(!$tid)res(400,['error'=>'task_id required']);
+    $bq=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$bq->execute([$tid]);$bt=$bq->fetch();$bq->closeCursor();
+    if(!$bt)res(404,['error'=>'task not found']);
+    /* 记账只在执行器来问时发生；人和只读令牌来查是纯读 */
+    $v=blog_publish_consent_verdict((int)$bt['client_id'],$tid,$bt,empty($_GET['dry'])&&(string)($auB['role']??'')==='seo_worker');
+    $v['slug']=task_blog_slug($bt);
+    res(200,$v);
+}
 if($m==='GET'&&$ROUTE==='/card_feedback'){
     auth_any();
     $tid=(int)($_GET['task_id']??0);

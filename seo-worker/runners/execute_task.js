@@ -26,6 +26,7 @@ const styleroll = require('../lib/styleroll');
 const blogcheck = require('../lib/blogcheck');
 const blogimages = require('../lib/blogimages');
 const wf = require('../lib/webforger');
+const tasktarget = require('../lib/tasktarget');
 const contentRegistry = require('../lib/registry');
 const { request: httpRequest } = require('../lib/http');
 const deliverables = require('../lib/deliverables');
@@ -1452,6 +1453,23 @@ function readDraftJson(output) {
   return { ok: true, draft: parsed.json };
 }
 
+/* 博客任务定位不到目标文章时该不该停（纯函数，tests/blog.test.js 覆盖）。返回给人看的一句话，空串 = 继续。
+   mode 是全部定位办法跑完之后的结论（revise = 已定位到现有文章）。
+   两种情况停：任务书写了 [target] 但平台上读不到这篇；申报了 blog-edit（改已有文章）却没定位到任何文章。
+   只有 blog-draft 的新写单不受影响，照旧新建。 */
+function blogTargetStop({ ops, mode, markedTarget }) {
+  if (mode === 'revise') return '';
+  if (markedTarget) {
+    return '任务书写明的目标文章 ' + markedTarget + ' 在平台上读不到（可能已改网址或被删），不新建不重写，任务保持原状。'
+      + '核对网址后在频道重新派单。';
+  }
+  if (tasktarget.declaresEdit(ops)) {
+    return '目标不明：这张单申报了改已有文章（blog-edit），但任务书里定位不到唯一的一篇，不退回写新稿，任务保持原状。'
+      + '在频道重新派单并写明目标文章的站内路径（/blog/<slug>/）。';
+  }
+  return '';
+}
+
 /**
  * One blog task: roll the style, write or revise, check it mechanically, then
  * put the draft on the platform. The draft is never published here, and the
@@ -1699,6 +1717,16 @@ async function runBlogTask(ctx, context, workspace, task) {
   let slug = '';
   let currentBody = '';
   let outputUrl = String(task.output_url || '');
+  /* 目标文章先读任务书上的 [target] 行（2026-11-18 ticket #64 与 #2151）：派单时写明的目标压过一切猜法。
+     下面那串兜底（note 链接、detail 链接、相对路径、slug）只留给没有这一行的旧单。 */
+  const markedTarget = tasktarget.normalizeBlogTarget(tasktarget.targetOf(task.detail));
+  if (markedTarget) {
+    const hostT = String(profile.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (hostT) {
+      outputUrl = 'https://' + hostT + markedTarget;
+      log('task ' + taskId + '：目标文章按任务书 [target] 行定位 ' + outputUrl);
+    }
+  }
   /* 2026-09-16：确认卡机制后 output_url 常是卡链接，不再指向草稿。修订轮识别草稿
      加 note 兜底：output_url 不是博客地址时，从 result_note 里找平台预览/正文链接。
      note 没有再读 detail（2026-10-20 ticket #43：频道开的改稿单链接只写在任务描述里，
@@ -1841,6 +1869,11 @@ async function runBlogTask(ctx, context, workspace, task) {
       log('task ' + taskId + '：读要扩写的文章 ' + expandSlug + ' 失败，按新建处理 :: ' + e.message);
     }
   }
+  /* 定位不到目标就停，不退回写新稿（2026-11-18 Ben's NZ #2151）：改三处小问题的改稿单因为任务书里
+     提到第二篇文章被「不猜目标」，随后默认走了新建，拿新稿骨架去校验旧文章两次必挂；
+     10 月 #1597/#1608 同一个默认动作真的另起了重复稿。猜不出时选破坏性最大的解释是错的。 */
+  const stopWhy = blogTargetStop({ ops: task.ops, mode, markedTarget });
+  if (stopWhy) throw new Error('task ' + taskId + '：' + stopWhy);
   const guidance = [
     adjustText ? '===== 判定前提修正（硬约束，优先级高于任务说明）=====\n' + adjustText + '\n===== 前提修正结束 =====' : '',
     outlineText ? '===== 已批大纲（正文必须照它写，H2 顺序、每节要点、内链与表格位置都按它来）=====\n' + truncate(outlineText, 12000) + '\n===== 大纲结束 =====' : '',
@@ -3282,6 +3315,7 @@ async function run(ctx) {
 }
 
 module.exports = {
+  blogTargetStop,
   run,
   htmlMtimes,
   clientFilesToPublish,

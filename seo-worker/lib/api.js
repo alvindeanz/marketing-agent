@@ -108,6 +108,13 @@ class Api {
     return this.req('GET', '/card_feedback?task_id=' + encodeURIComponent(taskId) + (linked ? '&linked=1' : ''));
   }
 
+  /** GET /blog_consent?task_id= -> { ok, via, last, card, slug, key?, issued? }
+      这张任务现在能不能发布。判定只在服务端一份，apply 的发布闸只问不判（2026-11-18 ticket #64）。
+      dry=true 时纯读不记账（回放用）。 */
+  async blogConsent(taskId, dry) {
+    return this.req('GET', '/blog_consent?task_id=' + encodeURIComponent(taskId) + (dry ? '&dry=1' : ''));
+  }
+
   /** GET /card_feedback?client_id=&limit= -> { rows } 该客户全部卡的近期反馈（含 task_id
       与任务标题，id 升序）。chat 简报回流客户逐字反馈用（2026-10-13 ticket 28）。 */
   async cardFeedbackForClient(clientId, limit) {

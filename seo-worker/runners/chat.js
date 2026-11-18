@@ -26,6 +26,7 @@ const { runClaude } = require('../lib/llm');
 const { extractLastFence } = require('../lib/mdjson');
 const { buildPlanningBriefing } = require('../lib/distill');
 const { ensureClientWorkspace, truncate, summarize } = require('../lib/util');
+const tasktarget = require('../lib/tasktarget');
 
 // 任务线程模式：根挂了一个任务时，会话就是这个任务的线程。模型多拿到任务全文、
 // 判决和（等放行时的）方案正文，回复末尾可以附「动作提议」，人点执行才落账。
@@ -587,7 +588,7 @@ function buildPrompt(opts) {
     '',
     '```json',
     '{"drafts":[{"title":"任务标题","detail":"要做什么，做到什么程度算完","module":"content",' +
-      '"owner_type":"agency","priority":"P2","sprint":"W35","ops":"","kind":"","backing_fact":""}],' +
+      '"owner_type":"agency","priority":"P2","sprint":"W35","ops":"","kind":"","backing_fact":"","target":""}],' +
       '"facts":[{"key":"content.delivery_time","value":"交期 6 周，2026-09 客户微信确认"}]' +
       (task ? '' : ',"actions":[{"type":"commission_start","proposal_msg_id":123,"proposal_idx":0,"title_check":"任务标题前十几个字","mandate":"人确认的那句原话"},' +
         '{"type":"kill","task_id":470,"title_check":"第一批五个品类页","reason":"客户暂停这条线"}]') +
@@ -658,6 +659,16 @@ function buildPrompt(opts) {
     task ? '' : '  **任务状态同理有时效**：以简报「EXISTING TASK LEDGER」为准，历史消息里某任务还开着不算数。',
     task ? '' : '  账上标 killed/dropped/merged/done 的任务是死的，不许对它发 machine_run 或 release；',
     task ? '' : '  killed 行冒号后面就是砍单原因和重启指引，要重做这件事就照指引出**新的委托单**，别拉死人还魂。',
+    task ? '' : '  **目标文章必填（2026-11-18 起）**：发布某一篇博客（ops 含 blog-publish），或改某一篇已有博客的正文',
+    task ? '' : '  （ops 同时含 blog-draft 和 blog-edit）时，"target" 填这张单要动的那一篇的站内路径',
+    task ? '' : '  （如 /blog/how-to-choose-sheer-curtains-nz/），一张单只动一篇，要发两篇就出两张单。',
+    task ? '' : '  一张单批量改多篇（只有 blog-edit，如补内链、改 title）不填 target，逐篇写在任务书里。',
+    task ? '' : '  执行器和发布闸只认这个字段，不从任务书的句子里猜；任务书里提到别的文章（对比、内链、区分角度）不影响。',
+    task ? '' : '  不填会被生产端拦下。新写一篇还没有网址的不填。',
+    task ? '' : '  **客户在微信或群里同意发布**：没有确认卡可点时，把客户原话记成批文 fact，value 里必须写明这篇文章的',
+    task ? '' : '  slug 和「发布」二字（如「客户 X 11-17 微信回复先发这篇吧，批准 /blog/<slug>/ 按当前预览发布」），',
+    task ? '' : '  发布单 backing_fact 填这个 key。发布闸认这条批文并自动代记同意留档；不要再说「处理方式同某某旧单」，',
+    task ? '' : '  别的单的同意不能替这一篇放行。批文没写 slug 或没写发布的不算数。',
     task ? '' : '  客户已批准的改动把批文 fact key 填进 "backing_fact"（如',
     task ? '' : '  paid.change_list_approved），没有批文不填。启动后服务端按风险定档：全部可回滚或有背书的出方案后',
     task ? '' : '  自动落地（失败一次熔断转人工）。**意图携带（2026-09-14 起）**：委托确认本身就是放行凭证，花钱/',
@@ -937,9 +948,19 @@ function cleanDrafts(json, log, dropped) {
       drop('对话：丢弃 change 委托单「' + truncate(title, 40) + '」，没有 ops');
       continue;
     }
+    /* 目标文章落成任务书上的一行 [target]（2026-11-18 ticket #64 与 #2151）：改稿或发布已有文章的单
+       必须写明动哪一篇，执行器和发布闸只读这一行，不再从正文猜。缺了就拦，拦了要露面。 */
+    const tg = tasktarget.stampTarget({
+      title, ops, target: d.target,
+      detail: truncate(opsN.detailPrefix + String(d.detail == null ? '' : d.detail), 3880),
+    });
+    if (tg.error) {
+      drop('对话：丢弃委托单「' + truncate(title, 40) + '」，' + tg.error);
+      continue;
+    }
     out.push({
       title,
-      detail: truncate(opsN.detailPrefix + String(d.detail == null ? '' : d.detail), 4000),
+      detail: truncate(tg.detail, 4000),
       module: mod,
       owner_type: OWNERS.includes(own) ? own : 'agency',
       priority: PRIORITIES.includes(pri) ? pri : 'P2',

@@ -899,70 +899,34 @@ function planPublishIntent(ops, planText) {
   return false;
 }
 
-/* 凭证卡的跨单引用提取。原正则只认「确认卡#N / 确认页 #N / blog_confirmation_task-N」，
-   频道单写「卡 #837」接不上（2026-10-23 ticket #47 第二个洞）：客户当天已在 #837 点了
-   同意，闸只查本任务照拦。放宽收「卡 #N」形态；多收的号只是多查一次 cardFeedback，
-   行过滤只认 publish_blog，误伤面为零。 */
-function consentRefIds(task) {
-  const refIds = [];
-  const taskId = task.id;
-  const refSrc = String(task.detail || '') + '\n' + String(task.result_note || '');
-  for (const m of refSrc.matchAll(/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)|(?:^|[\s（(、：:])卡\s*#(\d+)/gm)) {
-    const rid = Number(m[1] || m[2] || m[3]);
-    if (rid && rid !== taskId && refIds.indexOf(rid) === -1) refIds.push(rid);
-  }
-  return refIds;
-}
-
+/* 发布同意闸（2026-11-18 ticket #64 起只问不判）：判定全系统只有服务端一份
+   （seo-api.php blog_publish_consent_verdict，派单闸与续排同一个函数），这里经
+   GET /blog_consent 来问。此前本文件自己另判一份，和服务端漂移过：#2174 派单闸放行、
+   这里拦下，白烧一个 failed job；更早的 #47、#63 也是两边口径接不上。
+   服务端认的同意来源按序：发布权委托 > 卡上表态（客户亲点或代确认，本任务、显式引用的卡、
+   同篇文章最新的卡，取到第一张有表态的为准）> 确认卡满 7 天零表态视同同意 > 挂在单上的批文
+   （[backing] 指向已确认 fact，且写明本篇文章的发布；放行时服务端代记一行同意留档）。
+   问不到（接口失败）按没有同意处理，不发布。 */
 async function requireBlogPublishConsent(api, task, record) {
   const taskId = task.id;
-  /* 发布权委托（2026-10-15 Alvin 定，降人工介入一级）：客户 facts 里
-     policy.blog_publish_executor=agent 即发布权已托管（全托管客户，Playmate 模式），
-     凭证闸按委托放行，确认卡降级为选题知会（卡照出、反馈照折叠，不再挡发布）。
-     policy 缺位或值非 agent 照旧走卡凭证。 */
-  if (task.client_id) {
-    try {
-      const fr = await api.listFacts(task.client_id);
-      const pol = (fr.facts || []).find((f) => String(f.fact_key) === 'policy.blog_publish_executor'
-        && String(f.status || '') !== 'retracted');
-      if (pol && /^\s*agent\b/i.test(String(pol.value || ''))) {
-        record('发布权已委托（policy.blog_publish_executor=agent），发布凭证闸按委托放行');
-        return;
-      }
-    } catch (e) { record('policy facts 读取失败（' + e.message + '），按未委托处理，照走卡凭证'); }
+  let v;
+  try { v = await api.blogConsent(taskId); } catch (e) {
+    throw new Error('task ' + taskId + '：发布同意查询失败（' + e.message + '），按没有同意处理，不发布。接口恢复后重跑。');
   }
-  const refIds = consentRefIds(task);
-  /* 同篇文章的卡（2026-11-17 ticket #63）：发布单另开、正文只写文章网址不写卡单号时，由服务端按
-     文章网址找这篇最新的确认卡（blog_consent_card_by_slug，派单与续排同一口径），排在显式引用之后。
-     本任务的反馈行与关联卡号同一次调用取回，不多打一次接口。 */
-  const own = await api.cardFeedback(taskId, true).catch(() => ({ rows: [] }));
-  const lk = Number((own || {}).linked_card_task || 0);
-  if (lk && lk !== taskId && refIds.indexOf(lk) === -1) refIds.push(lk);
-  let pub = [];
-  for (const cand of [taskId].concat(refIds)) {
-    const fbres = cand === taskId ? (own || { rows: [] }) : await api.cardFeedback(cand).catch(() => ({ rows: [] }));
-    const rows = (fbres.rows || []).filter((r) => String(r.item) === 'publish_blog');
-    if (rows.length) { pub = rows; record('发布凭证取自任务 #' + cand + ' 的确认卡'); break; }
-  }
-  const lastPub = pub.length ? pub[pub.length - 1] : null;
-  if (!lastPub || String(lastPub.choice) !== 'agree') {
-    /* 到期视同同意（2026-11-04 Alvin 批博客闸门松绑）：确认卡带 [卡签发 YYYY-MM-DD] 戳，
-       满 7 天客户零表态即视同同意（统一到期视同同意口径，落地页卡 14 天先例）。
-       有任何表态（modify 等）不走到期，照旧等表态路由。无戳的旧卡照旧硬等 agree。
-       服务端 blog_card_waiting 同口径，两处一起改。 */
-    if (!lastPub) {
-      const stamps = [...String(task.result_note || '').matchAll(/\[卡签发 (\d{4}-\d{2}-\d{2})\]/g)];
-      const issued = stamps.length ? stamps[stamps.length - 1][1] : '';
-      if (issued && (Date.now() - Date.parse(issued + 'T00:00:00+13:00')) / 86400000 >= 7) {
-        record('确认卡签发于 ' + issued + '，满 7 天客户无表态，按到期视同同意放行（2026-11-04 政）');
-        return;
-      }
+  v = v || {};
+  if (v.ok === true) {
+    if (v.via === 'delegated') record('发布权已委托（policy.blog_publish_executor=agent），发布凭证闸按委托放行');
+    else if (v.via === 'expiry') record('确认卡签发于 ' + (v.issued || '?') + '，满 7 天客户无表态，按到期视同同意放行（2026-11-04 政）');
+    else if (v.via === 'backing') record('发布凭证取自挂在单上的客户批文 ' + (v.key || '') + '（写明本篇发布），已代记同意留档，继续');
+    else {
+      record('发布凭证取自任务 #' + (v.card || taskId) + ' 的确认卡');
+      record('客户确认卡已同意发布（publish_blog=agree），继续');
     }
-    throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
-      + (lastPub ? '，当前最后表态是 ' + lastPub.choice : '，卡上没有任何发布表态') + '）。'
-      + '不发布。等客户在确认卡上点「同意，安排发布」或到期视同同意后再放行。');
+    return;
   }
-  record('客户确认卡已同意发布（publish_blog=agree），继续');
+  throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
+    + (v.last ? '，当前最后表态是 ' + v.last : '，卡上没有任何发布表态，单上也没有写明本篇发布的客户批文') + '）。'
+    + '不发布。等客户在确认卡上点「同意，安排发布」、到期视同同意，或由同事在看板代确认后再放行。');
 }
 
 /* 已发布文章改稿的回读比对：PATCH 之后平台读回的正文必须和交付文件逐字节一致，
@@ -2162,7 +2126,6 @@ module.exports = {
   runBlogPublish,
   requireBlogPublishConsent,
   planPublishIntent,
-  consentRefIds,
   resolveBlogUrl,
   onsiteCardExpired,
   revisedReadbackMismatch,

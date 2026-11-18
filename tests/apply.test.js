@@ -563,31 +563,48 @@ t('revisedReadbackMismatch：一致为 null，不一致给人话（写入没落�
   assert.ok(A.revisedReadbackMismatch(null, { body: 'x' }), '平台读不回也算不一致');
 });
 
-t('发布凭证闸：本任务无行时回退引用任务，取到 agree 放行并记来源', () => {
+/* 2026-11-18 ticket #64：判定收到服务端一份（tests/consent_verdict.test.php 测判定本体），
+   这里只测闸「只问不判」：问到 ok 才过，来源记进步骤，问不到按没有同意处理。 */
+t('发布凭证闸：只问服务端，卡上同意放行并记来源卡号', () => {
   const calls = [];
-  const apiOk = { cardFeedback: async (id) => { calls.push(id); return id === 75 ? { rows: [{ item: 'publish_blog', choice: 'agree' }] } : { rows: [] }; } };
+  const api = { blogConsent: async (id) => { calls.push(id); return { ok: true, via: 'card', card: 2045, last: 'agree' }; },
+    cardFeedback: async () => { throw new Error('闸不该再自己查卡'); }, listFacts: async () => { throw new Error('闸不该再自己查委托'); } };
   const rec = [];
-  return A.requireBlogPublishConsent(apiOk, { id: 1, detail: '凭证见 blog_confirmation_task-75 的卡', result_note: '' }, (l) => rec.push(l)).then(() => {
-    assert.deepStrictEqual(calls, [1, 75], '候选顺序该是本任务再引用任务');
-    assert.ok(rec.some((l) => l.indexOf('#75') >= 0), '来源没记进步骤');
-  });
-});
-
-t('发布凭证闸：正文没写卡单号时按服务端回的同篇文章卡取凭证（ticket #63）', () => {
-  const calls = [];
-  const apiLk = { cardFeedback: async (id, linked) => { calls.push([id, !!linked]); if (id === 2100) return { rows: [], linked_card_task: 2045 }; return id === 2045 ? { rows: [{ item: 'publish_blog', choice: 'agree' }] } : { rows: [] }; } };
-  const rec = [];
-  return A.requireBlogPublishConsent(apiLk, { id: 2100, detail: '把站内草稿 /blog/summer-holiday-packing-list-nz-bach-week/ 原样发布', result_note: '' }, (l) => rec.push(l)).then(() => {
-    assert.deepStrictEqual(calls, [[2100, true], [2045, false]], '本任务带 linked 查一次，再查关联卡');
+  return A.requireBlogPublishConsent(api, { id: 2100, client_id: 23, detail: '', result_note: '' }, (l) => rec.push(l)).then(() => {
+    assert.deepStrictEqual(calls, [2100]);
     assert.ok(rec.some((l) => l.indexOf('#2045') >= 0), '来源没记进步骤');
   });
 });
 
+t('发布凭证闸：批文放行记批文 key（#2174：客户微信批、单上无卡）', () => {
+  const api = { blogConsent: async () => ({ ok: true, via: 'backing', key: 'content.rangi_vs_tepo_blog_pub' }) };
+  const rec = [];
+  return A.requireBlogPublishConsent(api, { id: 2174 }, (l) => rec.push(l)).then(() => {
+    assert.ok(rec.some((l) => l.indexOf('content.rangi_vs_tepo_blog_pub') >= 0 && l.indexOf('批文') >= 0), rec.join('|'));
+  });
+});
+
 t('发布凭证闸：最后一次表态非 agree 必须拦（以最后表态为准）', () => {
-  const apiHold = { cardFeedback: async () => ({ rows: [{ item: 'publish_blog', choice: 'agree' }, { item: 'publish_blog', choice: 'hold' }] }) };
-  return A.requireBlogPublishConsent(apiHold, { id: 2, detail: '', result_note: '' }, () => {}).then(
+  const api = { blogConsent: async () => ({ ok: false, via: 'card', last: 'hold', card: 2 }) };
+  return A.requireBlogPublishConsent(api, { id: 2, detail: '', result_note: '' }, () => {}).then(
     () => { throw new Error('hold 没有拦住'); },
     (e) => { assert.ok(/hold/.test(e.message), e.message); }
+  );
+});
+
+t('发布凭证闸：接口问不到按没有同意处理，不发布', () => {
+  const api = { blogConsent: async () => { throw new Error('HTTP 502'); } };
+  return A.requireBlogPublishConsent(api, { id: 5 }, () => {}).then(
+    () => { throw new Error('问不到却放行了'); },
+    (e) => { assert.ok(/查询失败/.test(e.message) && /不发布/.test(e.message), e.message); }
+  );
+});
+
+t('发布凭证闸：服务端回的不是明确 ok:true 一律拦', () => {
+  const api = { blogConsent: async () => ({}) };
+  return A.requireBlogPublishConsent(api, { id: 6 }, () => {}).then(
+    () => { throw new Error('空回包却放行了'); },
+    (e) => { assert.ok(/没有任何发布表态/.test(e.message), e.message); }
   );
 });
 
@@ -873,27 +890,19 @@ t('冷却闸人工豁免：policy.cooldown_waiver 点名任务号放行，其余
 });
 
 console.log('闸改版 2026-10-15（redirect 出客户闸、page-create 软闸、发布权委托）');
-t('发布凭证闸：policy.blog_publish_executor=agent 即委托放行，不再查卡', () => {
-  let cardCalled = false;
-  const api = {
-    listFacts: async () => ({ facts: [{ fact_key: 'policy.blog_publish_executor', value: 'agent', status: 'confirmed' }] }),
-    cardFeedback: async () => { cardCalled = true; return { rows: [] }; },
-  };
+t('发布凭证闸：服务端判委托即放行并记委托来源', () => {
+  const api = { blogConsent: async () => ({ ok: true, via: 'delegated' }) };
   const rec = [];
   return A.requireBlogPublishConsent(api, { id: 3, client_id: 99, detail: '', result_note: '' }, (l) => rec.push(l)).then(() => {
     assert.ok(rec.some((l) => l.indexOf('委托') >= 0), '没记委托来源');
-    assert.strictEqual(cardCalled, false, '委托放行不该再查卡');
   });
 });
-t('发布凭证闸：policy 非 agent 或 retracted 照走卡凭证', () => {
-  const api = {
-    listFacts: async () => ({ facts: [{ fact_key: 'policy.blog_publish_executor', value: 'agent', status: 'retracted' }] }),
-    cardFeedback: async () => ({ rows: [] }),
-  };
-  return A.requireBlogPublishConsent(api, { id: 4, client_id: 99, detail: '', result_note: '' }, () => {}).then(
-    () => { throw new Error('retracted 委托不该放行'); },
-    (e) => { assert.ok(/没有任何发布表态/.test(e.message), e.message); }
-  );
+t('发布凭证闸：到期视同同意记签发日', () => {
+  const api = { blogConsent: async () => ({ ok: true, via: 'expiry', issued: '2026-11-10' }) };
+  const rec = [];
+  return A.requireBlogPublishConsent(api, { id: 4 }, (l) => rec.push(l)).then(() => {
+    assert.ok(rec.some((l) => l.indexOf('2026-11-10') >= 0 && l.indexOf('视同同意') >= 0), rec.join('|'));
+  });
 });
 /* ---------- landedWithDeviation（2026-11-15，#1484 / #2093 回放） ---------- */
 section('landedWithDeviation');

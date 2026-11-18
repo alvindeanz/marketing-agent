@@ -70,13 +70,16 @@ t('令牌尾巴带右括号照认，位数不够或内容不对照拒', () => {
 t('源码同步闸：PHP 与 apply 两侧都接了这条口径', () => {
   const php = fs.readFileSync(path.join(__dirname, '..', 'seo-api.php'), 'utf8');
   assert.ok(php.includes("preg_match_all('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#'"), 'blog_slug_of 正则变了');
+  assert.ok(php.includes('$slug=task_blog_slug($t);'), '关联卡没先读 [target] 行');
   assert.ok(php.includes("result_note LIKE '%blog_confirmation_task-%'"), '卡任务判据变了');
   assert.ok(php.includes('ORDER BY id DESC LIMIT 10'), '最新一张的排序变了');
   assert.ok(php.includes("if(strpos((string)($t['result_note']??''),'blog_confirmation_task-')!==false)return 0;"), '自带卡不借旧卡的闸没了');
   assert.ok((php.match(/blog_consent_card_by_slug\(/g) || []).length >= 4, '派单、续排、linked 接口三处调用少了');
   assert.ok(php.includes("preg_match('/^[0-9a-f]{32}/',$tok,$tkm)"), '令牌容错没了');
   const js = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task.js'), 'utf8');
-  assert.ok(js.includes('api.cardFeedback(taskId, true)') && js.includes('linked_card_task'), 'apply 凭证闸没接 linked');
+  /* 2026-11-18 ticket #64：apply 不再自己判，只问服务端同一个函数 */
+  assert.ok(js.includes('api.blogConsent(taskId)') && !js.includes('api.cardFeedback(taskId, true)'), 'apply 凭证闸没改成只问服务端');
+  assert.ok(php.includes('$lk=blog_consent_card_by_slug($cid,$tid,$t);'), '判定里按文章关联卡没了');
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

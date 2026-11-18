@@ -2701,6 +2701,16 @@ function cardRow(t){
 }
 /* 代确认（2026-09-21 Alvin 定）：与卡页同一条反馈管道，actor 记登录用户。
    必填留档一句：客户通过什么渠道同意的。整卡同意口径（item 空 = _card）。 */
+async function proxyPublishConsent(tid){
+  var why=prompt('代客户确认「同意发布」这一篇。\n必填留档：客户在哪个渠道、哪天、怎么说的？（如：客户微信 11/17 回复「先发这篇吧」）');
+  if(why===null)return;
+  why=String(why).trim();
+  if(!why){alert('留档不能为空，代确认必须写清客户同意的渠道和原话');return}
+  var d=await api('/tasks/'+tid+'/card_feedback_proxy','POST',{item:'publish_blog',choice:'agree',text:why});
+  if(fail(d,'代确认失败'))return;
+  toast('已代确认发布并署名留档。等同意的单会自动续排；已失败过的点「放行」重跑');
+  loadTasks();
+}
 async function proxyCardFb(tid){
   var why=prompt('代客户确认整卡「同意按建议」。\n必填留档：客户通过什么渠道同意的？（如：客户微信 9/21 口头同意）');
   if(why===null)return;
@@ -4055,6 +4065,10 @@ function taskCard(t,col){
   if(hs==='wait_ext')acts+='<button class="btn tiny green" onclick="decideTask('+t.id+',true)">现在做</button>';
   /* 机器判失败但人看过站点认为成了，或者人手工做完了：置完成，理由必填 */
   if(hs==='wait_me'||hs==='wait_ext')acts+='<button class="btn tiny ghost" onclick="finishTask('+t.id+')">置完成</button>';
+  /* 无卡发布单的代确认（2026-11-18 ticket #64）：客户在微信或群里同意发布、这张单又没出过确认卡时，
+     卡片列表里没有它，「代确认」无处可点。发布单自己带一个，记的是 publish_blog 这一项，署名留档。 */
+  if(/(^|,)\s*blog-publish\s*(,|$)/.test(String(t.ops||''))&&['approved','blocked','review'].indexOf(t.status)>=0)
+    acts+='<button class="btn tiny ghost" onclick="proxyPublishConsent('+t.id+')" title="客户已在微信或群里同意发布这一篇，替客户记一条同意，署你的名留档">代确认发布</button>';
   /* W16（2026-09-11 Alvin 定）：任务不再有线程，沟通统一走客户频道；执行状态看条目账本。 */
   acts+='<button class="btn tiny ghost" onclick="toggleItems('+t.id+')">'+(itOpen[t.id]?'收起条目':'条目')+'</button>';
   acts+=dlAddBtn(t,'lane');

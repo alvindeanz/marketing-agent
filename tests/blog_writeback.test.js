@@ -65,19 +65,7 @@ t('「不改发布状态」不触发', () => {
   assert.strictEqual(ap.planPublishIntent(['blog-edit'], '本单不改发布状态，正文替换完成即收口'), false);
 });
 
-console.log('凭证卡跨单引用（ticket #47 第二个洞）');
-t('#1599 式「（卡 #837，预览 ...）」能接上', () => {
-  const ids = ap.consentRefIds({ id: 1599, detail: '对象：草稿 /blog/patio-cover-nz-checklist-before-quote/（卡 #837，预览 ?preview=42cb）。', result_note: '' });
-  assert.deepStrictEqual(ids, [837]);
-});
-t('旧形态照旧：确认卡#N 与 blog_confirmation_task-N', () => {
-  const ids = ap.consentRefIds({ id: 9, detail: '见确认卡 #123', result_note: '卡页 blog_confirmation_task-55.html' });
-  assert.deepStrictEqual(ids.sort(), [123, 55].sort());
-});
-t('本任务自己的号不进引用表', () => {
-  const ids = ap.consentRefIds({ id: 837, detail: '出卡 #837 后等客户', result_note: '' });
-  assert.deepStrictEqual(ids, []);
-});
+/* 凭证卡跨单引用（ticket #47 第二个洞）的三条用例随判定搬到服务端，见 tests/consent_verdict.test.php（2026-11-18 ticket #64）。 */
 
 console.log('原样写回来源判定（载荷路由，硬规矩 9）');
 function makeWs(layout) {
