@@ -183,6 +183,8 @@ t('源码闸：出方案与评审都用加大档，拼装顺序数据在前', ()
   for (const f of ['plan.js', 'plan_review.js']) {
     const js = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'runners', f), 'utf8');
     assert.ok(js.includes('buildPlanningBriefing(context, Object.assign({ log }, PLAN_BRIEF_OPTS))'), f + ' 没用加大档');
+    /* 2026-11-18 学费：plan.js 用了常量却没引入，6 家重跑前 4 个 job 在出简报那步 ReferenceError 秒挂。只查字符串在不在拦不住这种错。 */
+    assert.ok(/\{[^}]*\bPLAN_BRIEF_OPTS\b[^}]*\}\s*=\s*require\('\.\.\/lib\/distill'\)/.test(js), f + ' 用了 PLAN_BRIEF_OPTS 却没从 distill 引入');
   }
   const dj = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'lib', 'distill.js'), 'utf8');
   assert.ok(dj.indexOf('gscSection(latest, limits),') < dj.indexOf('factsSection(context, { maxBytes'), '拼装顺序被改回去了');

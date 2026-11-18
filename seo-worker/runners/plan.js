@@ -19,6 +19,7 @@ const {
   LIMIT_STEPS,
   MAX_BYTES,
   DOSSIER_STALE_DAYS,
+  PLAN_BRIEF_OPTS,
 } = require('../lib/distill');
 const { extractTrailingJson } = require('../lib/mdjson');
 const capabilities = require('../lib/capabilities');
@@ -528,7 +529,7 @@ async function run(ctx) {
       ' of ' +
       (LIMIT_STEPS.length - 1) +
       ' against a ' +
-      MAX_BYTES +
+      PLAN_BRIEF_OPTS.maxBytes +
       ' byte budget, ' +
       briefing.dossierBytes +
       ' dossier)'
