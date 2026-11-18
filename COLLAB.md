@@ -20,6 +20,18 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-18 AIRA 规划简报修复 + SEO 方案考核口径 + 6 家续季稿重出（rev 6951883，Alvin 批「按新规划做」）
+
+- 起因：抽查 6 家续季测试稿。网址与数字没有编造，但 4 份稿写着「简报里没有落地之后的快照」，Kuddles 稿 13 条非博客任务里 4 条是转化类。
+- 简报（`lib/distill.js`）：数据节原上限 15KB 且按字符截，尾巴是搜索、流量、排名数据；档案段无上限（Apollo 60 条 19KB）。现在新鲜数据排在档案前且不截；上限按真实字节（默认 28KB）；档案段单独上限（默认 12KB，history 先让、同层最久没更新的先让、policy 与 biz 不让）；截断与让位都记日志，返回值带 `factsOmitted`、`clippedBytes`。出方案与评审用 `PLAN_BRIEF_OPTS`（40KB，档案 16KB）。`/context` 的档案条目新增 `updated_at`。chat 与 review_plan 共用同一份简报，同样受益。
+- 考核口径（Alvin 定）：SEO 方案看非品牌点击与目标词位次；询盘只做排优先级与守门；不排转化率优化任务；守门不单独立任务。例外：按询盘考核的客户与 paid 泳道。`plan_experience.md` 的「先出第一单」限定到首份方案，plan 与 plan_review 提示词、方向确认卡目标栏同步。`conversionTaskReport` 零模型自检只进日志。
+- `payload.review_model` 可单独指定过闸模型。续季口径：plan opus，plan_review fable。
+- 我的失误：9a181d2 里 plan.js 用了 `PLAN_BRIEF_OPTS` 却没引入（sed 只改到单行写法的 plan_review.js），重跑头 4 个 plan job 在出简报那步 ReferenceError 秒挂，未调模型。6951883 修复，测试加了引入断言。教训：改 runner 后跑一次到调模型前一步的冒烟（`claudeBin=/bin/false`），只查源码字符串拦不住运行期错误。
+- 重出结果：旧稿 72/74/76/78/81/82 从看板打回，新草稿 Kuddles 85、Power Dekor 89、Ben's NZ 93、Ben's AU 86、Louvresky 91、Apollo 94，全部停在草稿。每份 18 到 20 条，非博客任务每档至少 2 条，转化类任务 0 条，六份都引用了 10-18 至 11-14 窗口数据。
+- 重出稿抽查：点名网址 118 个，非 200 的都是稿内写明要处理的坏链、跳转或未发布草稿；数据解读段数字逐个对照快照，没直接匹配的是千分位写法、周合计（已重算一致）和标注出处的旧基线。
+- 驱动脚本与日志：`weekly_runs/renewal_rerun_20261118/`。
+- 另记：本轮在 bot 侧跑满 3600 秒硬超时被掐（等最后一家评审时），当时代码已部署、驱动是脱离会话的后台进程，没有半截状态；被掐掉的只有最后两家的抽查和本条登记，已补。长跑等待以后拆成「启动后先回话，跑完再汇报」，不在一轮里干等。
+
 ### 2026-11-18 AIRA 同意判定第二轮：等客户判断并入、到点续排、续季提示词（rev 252a7d2，Alvin 批「按建议做」）
 
 - 上一条的两个遗留都收了。`blog_card_waiting` 的 publish_blog 分支先问 `blog_publish_consent_verdict`，判定放行就不算等客户；它不再是第三份判断。以后「等不等客户」和「能不能发」是同一个答案。
