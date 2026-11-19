@@ -53,6 +53,21 @@ manifest_local(){ # 本地白名单文件 md5 清单（BSD md5 -r 输出转 GNU 
       md5 -r "$f" 2>/dev/null || md5sum "$f"; done ) | awk '{print $1"  "$2}'
 }
 
+# 残留熔断检查：worker 连续起跑即挂会写 .spawn_fuse.<id> 并停止领单，修好后必须人工删。
+# 2026-11-18 修完导致熔断的 bug 后忘了清，ros 停领单 23 小时。有残留就报失败并打印原因。
+fuse_check() {
+  local bad=0 out
+  local cmd='for f in DIR/.spawn_fuse*; do [ -e "$f" ] && { echo "$f"; cat "$f"; }; done; true'
+  out=$(ros_sh "${cmd/DIR/$ROS_DIR}" 2>/dev/null || true)
+  if [ -n "$out" ]; then bad=1; echo "    ros 有残留熔断文件（不领单中）："; echo "$out" | sed 's/^/      /'; fi
+  if mac_ssh "true" 2>/dev/null; then
+    out=$(mac_ssh "${cmd/DIR/$MAC_LIVE}" 2>/dev/null || true)
+    if [ -n "$out" ]; then bad=1; echo "    mac 有残留熔断文件（不领单中）："; echo "$out" | sed 's/^/      /'; fi
+  fi
+  if [ "$bad" = 1 ]; then echo "    确认根因已修后删除上述文件，worker 下一拍恢复领单。"; return 1; fi
+  echo "    无残留熔断文件"; return 0
+}
+
 case "${1:-}" in
 check)
   echo "== 本地版本: $(rev) =="; warn_dirty
@@ -68,7 +83,7 @@ check)
     manifest_local | LC_ALL=C sort -k2 > /tmp/seo-worker.local.md5
     mac_ssh "cd $MAC_LIVE && find ${WHITELIST[*]} -type f 2>/dev/null | LC_ALL=C sort | while read f; do md5 -r \"\$f\"; done" \
       | awk '{print $1"  "$2}' | LC_ALL=C sort -k2 > /tmp/seo-worker.mac.md5
-    diff /tmp/seo-worker.local.md5 /tmp/seo-worker.mac.md5 >/dev/null 2>&1 && echo "    mac 与本地白名单逐文件一致" || { echo "    mac 漂移文件："; diff /tmp/seo-worker.local.md5 /tmp/seo-worker.mac.md5 | grep '^[<>]' | sed 's/^/    /' | head -20; }
+    diff /tmp/seo-worker.local.md5 /tmp/seo-worker.mac.md5 >/dev/null 2>&1 && echo "    mac 与本地白名单逐文件一致" || { echo "    mac 漂移文件："; diff /tmp/seo-worker.local.md5 /tmp/seo-worker.mac.md5 | grep '^[<>]' | sed 's/^/    /' | head -20 || true; }
   else
     echo "    mac 不在线或 ssh 不通"
   fi
@@ -80,6 +95,8 @@ check)
     R=$("${SSH_BT[@]}" "md5sum $BT_DIR/$(basename "$f") 2>/dev/null | cut -d' ' -f1")
     [ "$L" = "$R" ] && echo "    $(basename "$f") 一致" || echo "    $(basename "$f") 不一致 local=$L remote=$R"
   done
+  echo "== worker 熔断文件 =="
+  fuse_check || exit 1
   ;;
 
 worker)
@@ -145,6 +162,8 @@ worker)
       echo "mac rsync 失败，staging 未成型不触发促升，mac 保持旧版。"; exit 1
     fi
   fi
+  echo "== 部署收尾：worker 熔断文件 =="
+  fuse_check || { echo "部署已完成，但有 worker 仍在熔断，见上。"; exit 1; }
   ;;
 
 api)
