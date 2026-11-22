@@ -15,9 +15,21 @@
 
 const fs = require('fs');
 const path = require('path');
-const { foldCardFeedback, summariseFold, cardClockAnchor, specFactsFromFold } = require('../lib/cardfold');
+const { foldCardFeedback, summariseFold, cardClockAnchor, specFactsFromFold, cardRevisePlan } = require('../lib/cardfold');
 /* 卡类注册表（批⑤二件）：fold_facts 直落映射的唯一来源。读不到不挡折叠，只是退回无直落行为。 */
 const CARD_KINDS = (() => { try { return require('../specs/card_kinds.json').kinds || {}; } catch (e) { return {}; } })();
+/* 走通用确认卡产线的卡类（kind=confirmation 且 ops 非空：词卡、mapping 卡、SEM 入场卡）。
+   博客卡、落地页卡 ops 为空，各有自己的改稿产线，不在此列。 */
+function confirmationCardKindOf(card) {
+  const ck = String(card.card_kind || '');
+  const ok = (e) => e && e.kind === 'confirmation' && Array.isArray(e.ops) && e.ops.length;
+  if (ck) return ok(CARD_KINDS[ck]) ? ck : '';
+  const ops = String(card.ops || '');
+  for (const k of Object.keys(CARD_KINDS)) {
+    if (ok(CARD_KINDS[k]) && CARD_KINDS[k].ops.some((o) => o && ops.indexOf(o) !== -1)) return k;
+  }
+  return '';
+}
 function foldFactMap(card) {
   const ck = String(card.card_kind || '');
   if (ck && CARD_KINDS[ck] && CARD_KINDS[ck].fold_facts) return CARD_KINDS[ck].fold_facts;
@@ -173,6 +185,19 @@ async function foldCards(sprint) {
         await call('POST', '/facts', { client_id: cid, fact_key: sf.fact_key, value: sf.value, source: 'client', status: 'confirmed' });
       }
       if (specFacts.length) log('#' + card.id + ' 规格 fact 直落 ' + specFacts.length + ' 键：' + specFacts.map((x) => x.fact_key).join('、'));
+    }
+    /* 确认卡改版（2026-11-23 Alvin 定，ticket #66）：确认类卡上有新的文字意见 = 改卡指令。
+       原任务重排 execute 整卡重出（文件名随 issued 不变，原地址与反馈链接不变），卡继续等确认，
+       不收口、不另开跟进单。同轮的 agree 项：fold_facts 卡上面已直落；其余留在账本里，卡最终同意时一并折叠。
+       水位在 note 的 card-revise 状态块头（已处理意见条数），旧意见不会反复触发。零 LLM 判定。 */
+    const rv = confirmationCardKindOf(card) ? cardRevisePlan(card.result_note, f, stamp().slice(0, 10)) : null;
+    if (rv) {
+      const jr = await call('POST', '/jobs', { client_id: cid, type: 'execute_task', payload: { task_ids: [card.id] } });
+      const jid = jr && (jr.job_id || jr.id || (jr.ids && jr.ids[0]) || (jr.job && jr.job.id));
+      await call('PATCH', '/tasks/' + card.id, { note_block: { key: 'card-revise', content: rv.content } });
+      await call('PATCH', '/tasks/' + card.id, { card_feedback_done: 1 }); // 状态不在这里动：与卡时效刷新同款，execute 派发时自己回 review
+      log('#' + card.id + ' 确认卡改版：' + rv.fresh + ' 条新文字意见（累计 ' + rv.total + '），原任务重出 job #' + (jid || '?') + '，卡继续等确认');
+      continue;
     }
     // 博客确认卡（publish_blog）不走泛方向卡折叠：agree 的凭证要留在 seo_card_feedback 表里，
     // 供博客任务 apply 时查（runBlogPublish 硬闸）。agree = 发布凭证 = 放行凭证（2026-09-17

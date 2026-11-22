@@ -191,5 +191,46 @@ t('直落：没有映射表或空折叠回空数组', () => {
   assert.deepStrictEqual(specFactsFromFold(foldCardFeedback([]), FM, CTX), []);
 });
 
+/* 确认卡改版（ticket #66，PF Moving #2675：卡出成 17 词，合同 20，Summer 要在卡上直接写意见） */
+const { cardRevisePlan, cardReviseLines } = require('../seo-worker/lib/cardfold');
+const blk = (c) => '前文\n\n[[块:card-revise]]\n' + c + '\n[[/块:card-revise]]\n后文';
+
+t('改版：首条文字意见触发，块里带全量意见', () => {
+  const f = foldCardFeedback([r('_card', 'other', '首批主攻词按合同 20 个')]);
+  const p = cardRevisePlan('', f, '2026-11-23');
+  assert.strictEqual(p.fresh, 1);
+  assert.ok(/^\[card-revise 2026-11-23 texts:1\]/.test(p.content));
+  assert.deepStrictEqual(cardReviseLines(blk(p.content)), ['[_card] 首批主攻词按合同 20 个']);
+});
+
+t('改版：已处理的意见不重复触发（后来只点了同意，卡走正常收口）', () => {
+  const rows = [r('_card', 'other', '首批主攻词按合同 20 个')];
+  const p = cardRevisePlan('', foldCardFeedback(rows), '2026-11-23');
+  rows.push(r('_card', 'agree'));
+  assert.strictEqual(cardRevisePlan(blk(p.content), foldCardFeedback(rows), '2026-11-24'), null);
+});
+
+t('改版：第二轮新意见触发，块里保留第一轮（整卡重出不能丢前几轮）', () => {
+  const rows = [r('_card', 'other', '首批主攻词按合同 20 个')];
+  const p1 = cardRevisePlan('', foldCardFeedback(rows), '2026-11-23');
+  rows.push(r('kw_piano', 'other', '钢琴搬家\n也要放进首批'));
+  const p2 = cardRevisePlan(blk(p1.content), foldCardFeedback(rows), '2026-11-24');
+  assert.strictEqual(p2.fresh, 1);
+  assert.strictEqual(p2.total, 2);
+  assert.deepStrictEqual(cardReviseLines(blk(p2.content)), ['[_card] 首批主攻词按合同 20 个', '[kw_piano] 钢琴搬家 也要放进首批']);
+});
+
+t('改版：账本换来源后行数变少也不漏新意见（按内容判新，不按条数）', () => {
+  const p1 = cardRevisePlan('', foldCardFeedback([r('a', 'other', '一'), r('a', 'other', '二')]), '2026-11-23');
+  const p2 = cardRevisePlan(blk(p1.content), foldCardFeedback([r('a', 'other', '三')]), '2026-11-24');
+  assert.strictEqual(p2.fresh, 1);
+  assert.strictEqual(p2.total, 3);
+});
+
+t('改版：只有表态没有文字不触发；没有块时意见行为空', () => {
+  assert.strictEqual(cardRevisePlan('', foldCardFeedback([r('x', 'agree'), r('y', 'hold')]), '2026-11-23'), null);
+  assert.deepStrictEqual(cardReviseLines('随便什么 note'), []);
+});
+
 console.log(pass + ' pass, ' + fail + ' fail');
 process.exit(fail ? 1 : 0);

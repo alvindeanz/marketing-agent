@@ -136,4 +136,40 @@ function cardClockAnchor(task) {
   return times[0];
 }
 
-module.exports = { foldCardFeedback, summariseFold, cardClockAnchor, decodeFlag, specFactsFromFold };
+/* 确认卡改版（2026-11-23 Alvin 定，ticket #66）：确认类卡上的文字意见 = 改卡指令。
+   原任务重出、原地址更新、卡继续等确认；只有同意才收口。不分意见是谁写的。
+   已处理的意见记在任务 note 的 card-revise 状态块里，一行一条：
+     [card-revise 2026-11-23 texts:2] ...
+     - [item] 意见原文
+   判新按内容比对（块里没有的行就是新意见），不靠条数或时间戳：账本有两个来源（Ask 与旧
+   card_feedback），行数和时间格式都可能不一致，内容比对对两边都成立。同一句话隔天重发视为已处理。
+   块内永远是全量意见（重出是整卡重出，只给最新一条会把前几轮的改动丢掉）。 */
+function reviseLine(x) {
+  return '[' + x.item + '] ' + String(x.text).replace(/\s*\n\s*/g, ' ').trim().slice(0, 500);
+}
+/** 出卡程序与判新共用：从任务 note 取状态块里的意见行（去掉行首「- 」）。没有块返回空数组。 */
+function cardReviseLines(note) {
+  const m = /\[\[块:card-revise\]\]\n([\s\S]*?)\n\[\[\/块:card-revise\]\]/.exec(String(note || ''));
+  if (!m) return [];
+  return m[1].split('\n').filter((l) => /^- /.test(l)).map((l) => l.slice(2).trim()).filter(Boolean);
+}
+/** 有没有新的文字意见要触发改版。返回 null（没有）或 { fresh, total, content }（content 写进状态块）。 */
+function cardRevisePlan(note, fold, dateStr) {
+  const done = cardReviseLines(note);
+  const all = done.slice();
+  let fresh = 0;
+  for (const x of (fold && fold.texts) || []) {
+    const line = reviseLine(x);
+    if (all.indexOf(line) !== -1) continue;
+    all.push(line);
+    fresh++;
+  }
+  if (!fresh) return null;
+  return {
+    fresh,
+    total: all.length,
+    content: '[card-revise ' + dateStr + ' texts:' + all.length + '] 卡上文字意见，原任务重出，原地址更新，卡继续等确认\n' + all.map((l) => '- ' + l).join('\n'),
+  };
+}
+
+module.exports = { foldCardFeedback, summariseFold, cardClockAnchor, decodeFlag, specFactsFromFold, cardRevisePlan, cardReviseLines };

@@ -2039,6 +2039,16 @@ Alvin 提的四项客户栏改造：
 - 坑：ops-tracker 里的同名文件已删除并留指路，以后 SEO 系统改动只认本仓，别改错地方。
 - 下一步/认领：见上方登记。Aira 首个建议入场点：benscurtains 等非 WebForger 客户跑通后，把踩到的平台适配缺口按认领写回来。
 
+## 2026-11-23 Aira：确认卡上的文字意见即改卡指令，原任务重出原地址更新（ticket #66，Alvin 批）
+
+- 起因：PF Moving 词卡 #2675 出成首批 17 词，合同是 20。Summer 在频道派了两张改版单：#2718 交了空页却被判交付完成，#2720 的方案自编了两个不存在的运行时凭据变量去查旧卡反馈，落地两次中止后熔断。
+- 第一性结论（Alvin 定）：确认卡只有两种回应，同意或要改。要改就直接在卡上写，不分是客户还是我方同事写的，不设内部审稿态。此前词卡收到文字意见会被直接收口、另开「卡反馈落地」单、闸仍关、再由死锁检测补建一张新链接的出卡单，三道弯。
+- 改动：lib/cardfold.js 加 cardRevisePlan 与 cardReviseLines（按内容判新，全量意见进 note 的 card-revise 状态块）；tools/harness.js foldCards 对通用确认卡产线的卡（词卡、mapping 卡、SEM 入场卡）加分岔，有新文字意见就重排原任务 execute，不收口不建跟进单；runners/execute_task.js 确认卡产线注入 CARD REVISION 块（意见全量加上一版 card_data 底稿，issued 沿用所以文件名与链接不变）。博客卡与落地页卡各有改稿产线，未动。
+- 测试：tests/cardfold.test.js 加 5 例，node tests 全套 55 个文件零失败；本次无 php 改动。
+- 坑：改版要等下一轮 harness 才触发（fold_sweep 是 cron，不得触发模型，只会点名）。卡上写完意见要有人起一轮该客户的 harness。
+- 遗留：#2718 空页被自动判交付完成，与 11-22 四张博客单零产出却停在待放行同类，验收缺「交付物有内容」检查，另案评估。
+- 下一步：Summer 在 PF Moving 词卡上写意见后，单跑 harness 57 做真单验证，走通后关 ticket #66、废 #2720。
+
 ## 2026-11-19 Aira：deploy.sh 加残留熔断检查
 - 干了什么：check 末尾与 worker 部署收尾都查 ros 与 mac 的 .spawn_fuse*，有残留就打印内容并 exit 1。顺手修 check 在 mac 有漂移时被 pipefail 提前掐断、走不到 250 段的老毛病。只动 deploy.sh，node tests 全绿。
 - 坑：11-18 我修完 plan.js 漏引入后没清 ros 的熔断文件，ros 停领单约 23 小时，mac 单机顶了 94 个 job。

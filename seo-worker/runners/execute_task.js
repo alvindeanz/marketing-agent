@@ -295,6 +295,39 @@ function cardDataContract(cardKind) {
   ].join('\n');
 }
 
+/** 确认卡改版块（2026-11-23 Alvin 定，ticket #66）：卡上有文字意见时 harness 把全量意见写进任务 note 的
+    card-revise 状态块并重排本任务。这里把意见和上一版 card_data 底稿注进 prompt：整卡重出，
+    issued 沿用上一版（文件名与客户手里的链接因此不变），只按意见改，其余保持。没有意见块返回空串。 */
+function cardReviseBlock(task, workspace) {
+  const lines = require('../lib/cardfold').cardReviseLines(task && task.result_note);
+  if (!lines.length) return '';
+  let prev = '';
+  let issued = '';
+  const m = /\/([A-Za-z0-9_.-]+)\.html(?:[?#]|$)/.exec(String((task && task.output_url) || ''));
+  if (m) {
+    try {
+      prev = fs.readFileSync(path.join(workspace, 'reports', m[1] + '.data.json'), 'utf8');
+      issued = String(JSON.parse(prev).issued || '');
+    } catch (e) { prev = ''; issued = ''; }
+  }
+  return [
+    '',
+    '',
+    'CARD REVISION（本轮是改版，不是首次出卡）',
+    '这张确认卡已经发出，卡上收到了下面的文字意见。意见可能来自客户，也可能来自我方同事，一律照办。',
+    '本轮使命：以上一版 card_data 为底稿整卡重出，逐条落实全部意见，其余内容、结构、item id 与选项码保持不变。',
+    '裁定必须走确认卡路径并输出 card_data 块，不得改走静默补 fact。' + (issued ? 'issued 必须仍写 "' + issued + '"，这样文件名和客户手里的链接不变。' : ''),
+    '意见与客户铁律或事实冲突、照办会出错时：其余照改，冲突的那条在报告正文里写明没照办的原因，不要悄悄忽略。',
+    '报告正文开头用一小段逐条说明每条意见是怎么落实的。',
+    '',
+    '卡上文字意见（按时间序，全量）：',
+  ].concat(lines.map((l) => '- ' + l)).concat(prev ? [
+    '',
+    '===== 上一版 card_data（底稿）=====',
+    prev.slice(0, 60000),
+  ] : ['', '（上一版 card_data 底稿未找到，按任务书与当前数据重出，并在报告正文里说明。）']).join('\n');
+}
+
 const CARD_DATA_RE = /```card_data\s*\n([\s\S]*?)\n```/;
 
 /** 回复里的 card_data 块。没有块返回 null（静默路径合法形态）；块坏 JSON 抛错（喂回自修）。 */
@@ -2983,6 +3016,7 @@ async function runOne(ctx, context, workspace, taskId) {
     /* 确认卡产线任务（analysis 模式，两闸 op 不在能力清单所以永远落这支）：
        把 card_data 契约、规格全文、schema 注进 prompt，模型只产数据不写 HTML。 */
     if (confKind) prompt += '\n' + cardDataContract(confKind);
+    if (confKind) prompt += cardReviseBlock(task, workspace);
   }
   if (isShopifySite(platform, profile, undefined, path.basename(workspace))) prompt += '\n' + SHOPIFY_READ_DOCTRINE;
 
@@ -3351,6 +3385,7 @@ module.exports = {
   recordFacts,
   // 确认卡产线（批三接线）
   confirmationCardKind,
+  cardReviseBlock,
   cardDataContract,
   extractCardData,
   materialiseConfirmationCard,
