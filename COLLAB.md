@@ -2132,3 +2132,4 @@ Alvin 提的四项客户栏改造：
 - 未查：fleet_digest --issues 把 chat 泳道的执行失败 job（Ben's NZ #2140、#2142）归进 sprint 组。
 
 - 2026-11-24 Aira：ticket #70（Summer，Sungait #2791）收编。shopseo 1.17.0 加 file find / upload / delete（店铺文件库传图，只收公网 https 图址，同名拒写，删除要对上 gid；10 家店令牌本来就带 write_files）。MA 登记 op media-upload（reversible，release_policy v27，shopify.md 两处）。注意 Shopify 入库会重新封装图片，CDN 字节与 sha 和源不等，方案只断言 200、宽高、文件名。演示店 horntechdemo 令牌无文件权限，写路径是在 Sungait 上用定稿图实测的。
+- 2026-11-24 Aira：发布同意引用规则补洞（aa1e988，api 已部署）。consent_ref_ids 现在认确认页链接的 ?t= 任务号（排在文件名任务号之前）和「#N 客户确认页」写法。起因 Sungait #2791：改稿重出的卡沿用 blog_confirmation_task-2712.html，客户在 t=2783 上点同意，发布单只查 2712 查不到。php 单测加了两例，本机无 php 未跑，逻辑用等价正则核对过。#2791 已全链走通发布。
