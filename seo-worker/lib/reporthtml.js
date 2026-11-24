@@ -130,6 +130,42 @@ function renderNodes(nodes, stack) {
   return out;
 }
 
+function templateNames(nodes, out) {
+  for (const n of nodes) {
+    if (n.type === 'text') continue;
+    out.add(n.name);
+    if (n.children) templateNames(n.children, out);
+  }
+  return out;
+}
+
+function dataKeys(v, out, depth) {
+  if (!v || typeof v !== 'object' || depth > 6) return out;
+  if (Array.isArray(v)) {
+    for (const item of v) dataKeys(item, out, depth + 1);
+    return out;
+  }
+  for (const k of Object.keys(v)) {
+    out.add(k);
+    dataKeys(v[k], out, depth + 1);
+  }
+  return out;
+}
+
+/** 客户模板里既不在通用骨架词表、也不在本次渲染数据任何一层出现过的占位符名（去重，按出现顺序）。 */
+function unknownTemplateNames(tpl, data, baseTpl) {
+  const known = templateNames(parseTemplate(baseTpl).children, new Set());
+  dataKeys(data, known, 0);
+  known.add('.');
+  /* 渲染器固定会产、但通用骨架没用到的行内字段：某期该数组为空时数据里找不到键，不能因此误判。 */
+  for (const k of ['purchases', 'revenue', 'total_purchases', 'total_revenue']) known.add(k);
+  const out = [];
+  for (const name of templateNames(parseTemplate(tpl).children, new Set())) {
+    if (!known.has(name)) out.push(name);
+  }
+  return out;
+}
+
 function renderTemplate(tpl, data) {
   return renderNodes(parseTemplate(tpl).children, [data]);
 }
@@ -1228,6 +1264,14 @@ function renderReport(pack, narrative, opts = {}) {
   };
 
   const tpl = opts.template || loadTemplate(meta.biz_type);
+  /* 客户模板里渲染器不认识的占位符必须报错（2026-11-24 ticket #68 摸底：Midea 待转正模板有 78 个
+     数据层不产的字段，渲染却「成功」，缺的板块整块悄悄消失）。认识 = 通用骨架用过，或本次数据里有这个键。 */
+  if (opts.template) {
+    const unknown = unknownTemplateNames(tpl, data, loadTemplate(meta.biz_type));
+    if (unknown.length) {
+      throw new Error('客户模板有 ' + unknown.length + ' 个占位符数据层不产，拒绝出报：' + unknown.slice(0, 12).join('、') + (unknown.length > 12 ? ' 等' : ''));
+    }
+  }
   let html = renderTemplate(tpl, data);
   html = stripGuidanceComments(html);
   html = collapseLoneGrids(html);
@@ -1248,6 +1292,7 @@ function nextMonthShort(startYmd) {
 
 module.exports = {
   renderReport,
+  unknownTemplateNames,
   renderTemplate,
   parseTemplate,
   collapseLoneGrids,

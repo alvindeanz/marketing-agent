@@ -877,7 +877,13 @@ t('未闭合的块直接抛错', () => {
   assert.throws(() => R.renderTemplate('{{#a}}x', {}), /未闭合/);
 });
 t('渲染后仍有占位符会抛错', () => {
-  assert.throws(() => R.renderReport(fakePack(), null, { template: '<p>{{never_defined_marker}}</p>{{' }), /未替换的占位符/);
+  assert.throws(() => R.renderReport(fakePack(), null, { template: '<p>{{client_name}}</p>{{' }), /未替换的占位符/);
+});
+t('客户模板有数据层不产的占位符：拒绝出报并点名（ticket #68，Midea 模板缺 78 个字段却渲染成功）', () => {
+  assert.throws(() => R.renderReport(fakePack(), null, { template: '<p>{{client_name}}</p>{{#nz_market}}<b>{{kw_ext}}</b>{{/nz_market}}' }), /2 个占位符数据层不产.*nz_market、kw_ext/);
+  const skeleton = require('fs').readFileSync(path.join(__dirname, '..', 'seo-worker', 'specs', 'report', 'template_leadgen.html'), 'utf8');
+  assert.ok(R.renderReport(fakePack(), null, { template: skeleton }).length > 1000, '通用骨架当客户模板用必须照常出');
+  assert.deepStrictEqual(R.unknownTemplateNames('{{#channel_rows}}{{purchases}}{{revenue}}{{/channel_rows}}{{total_revenue}}', {}, skeleton), [], '订单列是渲染器固定产的，渠道行为空也不算未知');
 });
 t('pack 缺 meta 直接抛错', () => {
   assert.throws(() => R.renderReport({}, null, {}), /没有 meta/);
