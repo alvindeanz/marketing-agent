@@ -91,6 +91,7 @@ risk_class 是放行分级的输入（见 ../release_policy.md）：reversible �
 - campaign-pause [risk_class: spend]：暂停整个 enabled campaign。
 - bidding-strategy-change [risk_class: spend]：改出价策略。
 - campaign-create / asset-create [risk_class: spend]：新建 campaign 或 asset。
+  - 标准购物系列按商品细分时（2026-11-24 Merii #2759/#2780 实证）：方案必须给每个纳入的商品节点写出价（cpc_bid_micros），Google 写入前校验要求 UNIT 节点带出价，缺了整批不过；商品组的细分节点（SUBDIVISION，含根节点）读回状态恒为 PAUSED，这是接口读法不是故障，全 MCC 在投购物系列同样如此，方案不要对细分节点断言 ENABLED，只核 UNIT 节点的状态、出价与数量。
 - adgroup-create [risk_class: structural]：既有 campaign 内新建 ad group（含词、否词、RSA 打包）。
   预算中性：不动 campaign 预算与出价策略，总花费上限不变，风险实质是流量再分配而非新增支出
   （2026-09-08 Alvin 批，从 spend 降档）。执行器铁律：同名组拒建；PAUSED 装配，逐项回读核数

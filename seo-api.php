@@ -1400,6 +1400,65 @@ function apply_fail_streak($cid,$tid,$since){
     }
     return [$n,$sig0];
 }
+/* 败方案不重放（2026-11-24 Alvin 批，Apollo #2618 / Kuddles #2438 / PF Moving #2720 / Play Mate #2731 /
+   SD Aluminium #2765 / Merii #2759 一周六张同形状）。第一性：世界没变、方案没变，重跑不会有新结果；
+   落地 agent 自己给出「失败」或「中止」结论的，这一版方案已经死了，死因多半就是方案自己的写法或断言
+   （文件名写错、预期次数写错、参数写法平台不收）。旧链条是失败备注回写后闸A 判 do，L0 把同一版原样
+   再排一次：全史 37 次这样的重放成 6 次，Apollo 那次还把改前留档覆盖了。
+   判据只看 runner 契约里的硬结构，不看话术关键词（关节红线）：本版方案最近一次 apply 是 failed，且收尾行
+   是「did not complete :: <任务号>: failed|aborted」，即 runOne 正常返回了 agent 的结论。抛错收尾的失败
+   （超时、进程起不来、闸拦截、缺店铺别名）收尾行带的是错误原文，不命中，照走原来的重试额度与连败闸。
+   管什么动作：L0 与放行官两条自动放行路对「同版方案再排 apply」这一下。
+   豁免面：没有 agent 结论的失败不管；人工 decide 放行不管（人看过了）。
+   误杀出口：看板人工放行原样重跑、finish 收口、频道重派都照常。
+   命中台账：audit seo_plan_dead_replan / seo_plan_dead_hold。
+   出路二选一：全部 op 可逆且不是新建博客稿的，带着失败原因打回重出方案（与放行官 redo 共用同一个
+   [redo opus 标记与同一份一次额度，重出轮的 prompt 本来就读这一行）；花钱、不可逆、对外、结构类，
+   或打回额度已用过的，停人。纯函数两件：apply_agent_verdict / dead_plan_replan_ok，镜像测试
+   tests/apply_dead_plan.test.js。 */
+function apply_agent_verdict($log,$tid){
+    if(!preg_match_all('/did not complete :: ([^\n]+)/u',(string)$log,$m)||!$m[1])return '';
+    foreach(explode(' | ',trim((string)end($m[1]))) as $part){
+        if(preg_match('/^'.(int)$tid.': (failed|aborted)$/',trim($part),$mm))return $mm[1];
+    }
+    return '';
+}
+function dead_plan_replan_ok($ops,$rc,$note){
+    if(strpos((string)$note,'[redo opus')!==false)return false;
+    if(!is_array($ops)||!$ops||!is_array($rc))return false;
+    foreach($ops as $op){
+        if($op==='blog-draft')return false;
+        if((string)($rc[$op]??'')!=='reversible')return false;
+    }
+    return true;
+}
+/* 返回 '' 不归我管（照走原链）| 'replan' 已打回重出 | 'hold' 已停人。$since 是本版方案的界（最近一次 execute done）。 */
+function dead_plan_route($cid,$tid,$t,$since,$rc,$actor){
+    $like='%"task_ids":['.(int)$tid.']%';
+    $q=db()->prepare("SELECT id,status,log_text FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status IN('failed','done') AND payload LIKE ?".($since!==''?' AND created_at>?':'')." ORDER BY id DESC LIMIT 1");
+    $q->execute($since!==''?[(int)$cid,$like,$since]:[(int)$cid,$like]);
+    $r=$q->fetch();
+    $q->closeCursor();
+    if(!$r||$r['status']!=='failed')return '';
+    $v=apply_agent_verdict($r['log_text'],$tid);
+    if($v==='')return '';
+    $why=task_fail_reason($t,(int)$r['id'],'apply_task');
+    $why=$why!==''?mb_substr($why,0,260,'UTF-8'):('落地 agent 判'.($v==='aborted'?'中止':'失败'));
+    $ops=array_values(array_filter(array_map('trim',explode(',',(string)($t['ops']??'')))));
+    $stamp=gmdate('Y-m-d H:i');
+    if(!ops_halted((int)$cid)&&dead_plan_replan_ok($ops,$rc,(string)($t['result_note']??''))){
+        task_append_note($tid,'[redo opus '.$stamp.'] 方案打回重出：上一版方案落地'.($v==='aborted'?'中止':'失败').'（apply job #'.(int)$r['id'].'），同一版不再重跑。原因：'.$why.'。重出要求：先实读现场，上一轮可能已经部分或全部写入，已到位的不再写（全部到位就出无变更方案）；失败出在方案写法、参数或验证断言上的，改方案去对齐现实，不要改现实去凑断言。');
+        list($jr,)=queue_task_jobs((int)$cid,'execute_task',[(int)$tid],$actor,'seo_release_redo');
+        audit($actor,'seo_plan_dead_replan',(string)$tid,['apply_job'=>(int)$r['id'],'verdict'=>$v,'job'=>$jr?$jr[0]:0]);
+        return 'replan';
+    }
+    db()->prepare("UPDATE seo_tasks SET attention=1 WHERE id=?")->execute([(int)$tid]);
+    if(strpos((string)($t['result_note']??''),'败方案不重放')===false)
+        task_append_note($tid,'[hold-human '.$actor.' '.$stamp.'] 败方案不重放：上一版方案落地'.($v==='aborted'?'中止':'失败').'（apply job #'.(int)$r['id'].'），同一版不再自动重跑，也不自动重出（含花钱、不可逆、对外或结构类操作，或打回重出额度已用过）。原因：'.$why.'。人看过后三选一：人工放行原样重跑、认定完成收口、废单重派。');
+    audit($actor,'seo_plan_dead_hold',(string)$tid,['apply_job'=>(int)$r['id'],'verdict'=>$v]);
+    hold_notify($tid,'上一版方案落地'.($v==='aborted'?'中止':'失败').'，同一版不再自动重跑：'.mb_substr($why,0,140,'UTF-8'));
+    return 'hold';
+}
 /* 备注列加宽（2026-11-16，同案）：result_note 原为 TEXT（65535 字节），#479 被重放记录写满后
    CONCAT 追加全部静默截断，停人判语与交办戳都丢。加宽成 MEDIUMTEXT，所有写口（追加、PATCH 整写、
    harness 回写）一并受益；增殖本身由上面的连败闸管。 */
@@ -8581,6 +8640,8 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $seen0->execute($lx0!==''?[$cid,$like0,$lx0]:[$cid,$like0]);
         $r0=$seen0->fetch();
         $anAll=(int)(($r0['c'])??0);
+        /* 败方案不重放：本版方案被落地 agent 判过失败或中止的，不再原样排 apply（见 dead_plan_route）。 */
+        if($anAll>=1&&dead_plan_route($cid,$tid,$t,$lx0,$rc,'seo-worker')!=='')continue;
         /* 零写入弹回不烧熔断额度（2026-10-28 ticket #40：Badger #1428 被旧同页冷却闸两次零写入
            弹回计成「落地 2 次」停人八天；sdalu #1685 的零写入中止同病）。熔断管的是同一版方案
            重复写外部世界，没写过的尝试不占额度。识别锚只收两类已用真实 job 日志回放验证的机器
@@ -8818,6 +8879,12 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
            spend/irreversible 保留原封顶（每版方案首落 + 判后重试一次，第三次停人）；可逆类不设
            硬顶，第三次起照放但强制 [fuse-note] 台账留痕。防环性质不变：每次重放中间必须夹一次
            放行官判定（同版方案无判定不会再排 apply），且 harness 由人触发，无 cron 自转。 */
+        /* 败方案不重放：放行官判 release 也不能把被落地 agent 判败的同一版方案原样再排（见 dead_plan_route）。 */
+        if($applyN>=1){
+            $dpr=dead_plan_route($cid,$tid,$t,$lastExec,$rc,'opus-release');
+            if($dpr==='replan'){$act['redo'][]=$tid;continue;}
+            if($dpr==='hold'){$act['held'][]=$tid;continue;}
+        }
         list($fsN,$fsSig)=apply_fail_streak($cid,$tid,$lastExec);
         if($fsN>=APPLY_FAIL_STREAK_MAX){
             if(strpos($note,'同因连败')===false)

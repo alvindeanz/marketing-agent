@@ -20,6 +20,20 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-24 AIRA 败方案不重放 + 清单三处订正 + digest 归档口径 + 输入框（ticket #69 #67，Alvin 批「按照你的推荐去做」）
+
+- 起因：工单巡检一周六张失败单同一个形状（Apollo #2618、Kuddles #2438、PF Moving #2720、Play Mate #2731、SD Aluminium #2765、Merii #2759）。apply 失败后闸A 在 30 秒内判 do，L0 把同一版方案原样再排一次，撞同一堵墙。9 月至今这类重放 37 次成 6 次；Apollo 的重放把改前留档覆盖了。
+- 为什么旧闸没拦住：确定性拒绝靠关键词认日志，WF 车道收尾行是「aborted, left in review ::」不中「apply aborted ::」；同因连败要 3 次，两次熔断先到；放行官的 redo 路被 L0 直落绕过。
+- 修法（`seo-api.php` 的 `dead_plan_route`，L0 与放行官两条路都接）：本版方案最近一次 apply 是 failed 且收尾行为「did not complete :: <任务号>: failed|aborted」（runOne 正常返回了 agent 结论）的，同版不再排 apply。全部 op 可逆且不是 blog-draft 的，写一行 `[redo opus …]` 带失败原因续排 execute 重出，与放行官 redo 共用标记和一次额度；其余（花钱、不可逆、对外、结构类、额度已用、止损闩生效）停人。抛错收尾的失败（超时、登录失败、闸拦截、缺别名）不命中，照走原重试额度与连败闸。
+- 闸四件套写在函数头注释。命中台账：audit `seo_plan_dead_replan` / `seo_plan_dead_hold`。新增申报与现实的契约点 0 个（判据是 runner 既有收尾行）。观察一个月后评估「确定性拒绝」关键词锚退役。
+- 没做的一项：原计划同时放宽「已落地有偏差」的声明文件条件。写 #2618 回放时发现实际改动的 `.json` 对方案声明的 `.md` 来说是方案外文件，放宽「漏声明」救不了它，已撤回不改。#2618 这类现在走打回重出，重出轮实读现场出无变更方案收口。
+- 能力清单订正：`webforger.md` 博文文件示例由 `posts/slug.md` 改 `.json`（历史 changeset 159 例全是 `.json`，方案是照旧示例抄错的）；写接口 `page` 一律带 `.html`（历史成功方案全是这个写法，Kuddles 写 `index` 得 404）。`googleads.md` 加标准购物系列两条：纳入的商品节点必须带出价；细分节点读回恒为 PAUSED 不要断言 ENABLED（全 MCC 在投购物系列实读同样如此）。
+- 平台侧待 Aiden 知悉（不阻塞）：`GET /elements?page=index` 收，`PATCH /edit` 的 `page: "index"` 对 Kuddles 返回 PAGE_NOT_EDITABLE，读写两个接口对 page 的接受面不一致。
+- `tools/fleet_digest.js --issues`：失败 job 对应的任务已归档收口的不再报（Play Mate #2729 已废单重派仍被报成 sprint 执行失败）。
+- 看板：频道输入框随内容自动长高、去掉手动拉伸手柄，附件缩略图移到输入框上方（ticket #67）。
+- shopseo 1.16.1（/data/aira 仓）：`product set-tags` 回读按集合比，不按字符串比（Shopify 按字母序存 tag，新 tag 不在末尾时写成功也被判失败并回滚，Play Mate #2731）。
+- 测试：新增 `tests/apply_dead_plan.test.js` 9 条（本周 8 个真实失败 job 收尾行回放、5 个抛错类反例、出路分档、源码同步闸）；node tests 全套 57 个文件全绿。php -l 走 deploy 远端校验。
+
 ### 2026-11-18 AIRA 规划简报修复 + SEO 方案考核口径 + 6 家续季稿重出（rev 6951883，Alvin 批「按新规划做」）
 
 - 起因：抽查 6 家续季测试稿。网址与数字没有编造，但 4 份稿写着「简报里没有落地之后的快照」，Kuddles 稿 13 条非博客任务里 4 条是转化类。

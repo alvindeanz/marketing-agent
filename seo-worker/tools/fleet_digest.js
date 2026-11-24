@@ -109,6 +109,7 @@ function isPendingCard(t) {
       }
     }
     let jobs = [];
+    let archivedTs = null;
     try { jobs = (await call('/jobs?client_id=' + c.client_id)).jobs || []; } catch (e) { /* 端点缺容忍 */ }
     for (const j of jobs) {
       if (j.status !== 'failed' || daysAgo(j.created_at) > DAYS) continue;
@@ -124,8 +125,19 @@ function isPendingCard(t) {
         const key = c.client_id + ':' + (tid || 'job' + j.id);
         const dup = broken.find((b) => b.key === key);
         if (dup) { if (String(dup.id).startsWith('job') && j.id > parseInt(String(dup.id).slice(4), 10)) { dup.id = 'job ' + j.id; } continue; }
+        let tRef = tid && ts.find((x) => Number(x.id) === Number(tid));
+        /* 任务不在活账里 = 已归档（做完、废单、被重做单接替都会归档）。失败 job 的任务已收口，这次失败
+           没有人要接手，不报；泳道也查不到会被默认标成 sprint（2026-11-24 Play Mate #2729 实证：
+           Summer 已废单并重派，digest 仍按 sprint 执行失败报）。归档账按客户懒取一次，端点缺则照旧报。 */
+        if (tid && !tRef) {
+          if (archivedTs === null) {
+            try { archivedTs = (await call('/tasks?include_archived=1&client_id=' + c.client_id)).tasks || []; } catch (e) { archivedTs = []; }
+          }
+          const aRef = archivedTs.find((x) => Number(x.id) === Number(tid));
+          if (aRef && aRef.status === 'done') continue;
+          tRef = aRef || tRef;
+        }
         broken.push({ c: c.name, id: 'job ' + j.id, key, what: j.type + ' 失败' + (tid ? '（任务 #' + tid + '）' : '') });
-        const tRef = tid && ts.find((x) => Number(x.id) === Number(tid));
         addIssue(j.type === 'chat' || (tRef && laneOf(tRef) === 'chat') ? 'chat' : 'sprint', '执行失败',
           c.name + ' job ' + j.id + ' ' + j.type + ' 失败' + (tid ? '（任务 #' + tid + '）' : ''), key, tRef || null);
       }

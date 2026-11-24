@@ -292,6 +292,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ch-draft .da{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .ch-form{margin-top:11px;border-top:1px solid #2d3748;padding-top:11px}
 .ch-form textarea{width:100%;min-height:64px}
+/* 输入框随内容自动长高、不给手动拉伸手柄，附件缩略图放在输入框上方（ticket #67：手柄往下拉会盖住缩略图） */
+.ch-form #chText{resize:none;max-height:40vh;overflow-y:auto}
+.ch-form .fb-thumbs{margin-top:0;margin-bottom:8px}
 .ch-wait{font-size:12px;color:#fbbf24}
 .ch-empty{font-size:12.5px;color:#3d4f63;font-style:italic;padding:14px 0;display:block}
 /* Chat 频道化（2026-09-07）：Discord 式打字指示、频道流高度、历史会话折叠区 */
@@ -3155,10 +3158,10 @@ function renderChatMain(){
     '<div id="chStatus"></div>'+
     '<div class="ch-form hidden" id="chArch"><span class="plan-meta">这个会话已经归档，不再接新消息。要接着聊回频道说。</span></div>'+
     '<div class="ch-form" id="chForm">'+
-      '<div class="fld"><textarea id="chText" onpaste="onFbPaste('+key+',event)" onkeydown="chKey(event)" '+
+      '<div class="fb-thumbs" id="fb_imgs_'+key+'"></div>'+
+      '<div class="fld"><textarea id="chText" onpaste="onFbPaste('+key+',event)" onkeydown="chKey(event)" oninput="chGrow(this)" '+
         'ondragover="event.preventDefault()" ondrop="chDrop('+key+',event)" '+
         'placeholder="发消息。Enter 发送，Shift+Enter 换行，截图粘贴，文件拖进来（5MB 内）。/reset 翻篇。"></textarea></div>'+
-      '<div class="fb-thumbs" id="fb_imgs_'+key+'"></div>'+
       '<input type="file" class="hidden" id="fb_file_'+key+'" accept="'+CH_ACCEPT+'" multiple onchange="onFbPick('+key+',this)">'+
       '<div class="fb-row"><button class="btn tiny" id="chSend" onclick="sendChat()">发送</button>'+
       '<button class="btn tiny ghost" onclick="pickFbFiles('+key+')">加截图</button>'+
@@ -3166,6 +3169,9 @@ function renderChatMain(){
     '</div>';
   renderFbStrip(key);
 }
+
+/* 输入框随内容长高（ticket #67）：先归零再按内容高度撑开，上限由 CSS max-height 管；清空后回到最小高度。 */
+function chGrow(el){if(!el)return;el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px';}
 
 /* ===== Chat 泳道面板（2026-10-24 脱轮）=====
    聊天派生单（origin spawn:/chatw:/report:/ruling:）不入 sprint，这里是它们唯一的家：
@@ -3304,7 +3310,7 @@ async function sendChat(){
     if(chatRootId!==chanRootId){toast('翻篇只对频道有效，历史会话用「归档会话」',true);return}
     const d0=await api('/inbox/channel/reset','POST',chModule?{client_id:curId,module:chModule}:{client_id:curId});
     if(fail(d0,'翻篇失败'))return;
-    if(el)el.value='';
+    if(el){el.value='';chGrow(el)}
     chanRootId=d0.root_id;chanRoots[curId+':'+chModule]=d0.root_id;chatRootId=0;chatLimit=50;
     toast('已翻篇，旧频道进历史');
     openChat(d0.root_id);
@@ -3314,7 +3320,7 @@ async function sendChat(){
   if(text==='/stop'){
     const dS=await api('/inbox/'+chatRootId+'/chat','POST',{text:'/stop'});
     if(!dS||fail(dS,'/stop 失败'))return;
-    if(el)el.value='';
+    if(el){el.value='';chGrow(el)}
     toast('已止损：排队已撤、在跑已请求中断、自动链暂停。恢复发 /resume');
     await loadChatThread(false);
     return;
@@ -3322,7 +3328,7 @@ async function sendChat(){
   if(text==='/resume'){
     const dR=await api('/inbox/'+chatRootId+'/chat','POST',{text:'/resume'});
     if(!dR||fail(dR,'/resume 失败'))return;
-    if(el)el.value='';
+    if(el){el.value='';chGrow(el)}
     toast('止损闩已解除，自动链恢复');
     await loadChatThread(false);
     return;
@@ -3344,7 +3350,7 @@ async function sendChat(){
   if(!d){renderChatStatus();return}
   if(d._status===409){toast('还在等上一条回复（job #'+(d.job_id||'?')+'）',true);renderChatStatus();return}
   if(fail(d,'发送失败')){renderChatStatus();return}
-  if(el)el.value='';
+  if(el){el.value='';chGrow(el)}
   fbImgs[key]=[];renderFbStrip(key);
   await loadChatThread(false);
 }
