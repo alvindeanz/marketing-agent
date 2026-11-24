@@ -393,6 +393,137 @@ async function nextVersionHint(api, clientId, periodType, periodStart, log) {
 }
 
 // ---------------------------------------------------------------------------
+// agent 模式：简报加周期 -> agent 取数成稿 -> 校验 -> 发布落库
+// ---------------------------------------------------------------------------
+
+const AGENT_BRIEF_NAME = 'report_agent_brief_seo.md';
+const AGENT_TOOLS = 'Read,Write,Edit,Glob,Grep,WebFetch,Bash';
+const AGENT_ABORT = 'REPORT_ABORT:';
+const DELIVERABLE_LINT_PY = '/data/aira/scripts/deliverable_lint.py';
+
+/** agent 模式的 prompt。纯函数，供测试。 */
+function agentReportPrompt(o) {
+  const p = o.period;
+  return [
+    '你是 HornTech 的 SEO 分析师，现在要为客户出一份 SEO 报告草稿。报告由我方同事审过后才发客户。',
+    '',
+    '## 本期',
+    '- 报告周期：' + p.start + ' 至 ' + p.end + '（' + p.label + '）',
+    '- 对比周期：' + p.compare.start + ' 至 ' + p.compare.end + '（' + p.compare.label + '），与本期等长，由系统算好，不要自行更换',
+    p.rolling ? '- 本期是滚动窗口，不做同比' : '- 本期是完整自然月',
+    o.instructions ? '- 出报人本期的补充要求（优先于简报里的默认做法）：' + o.instructions : '- 出报人本期没有补充要求',
+    '',
+    '## 客户月报简报（版式、板块、口径都以它为准）',
+    o.brief.trim(),
+    '',
+    '## 硬规矩',
+    '1. 只读。不改客户网站、店铺、GA4、GSC、广告账户里的任何东西，不建任务，不发消息。',
+    '2. 报告里每一个数字都必须是你这一轮针对上面两个周期实际取到的。往期报告和往期数据文件只用来看版式和取数方法，不许沿用里面的数字。',
+    '3. 取不到的数据不编：该板块写明「本期未统计」和原因。简报点名为必备的板块取不到，就整份不出，见第 6 条。',
+    '4. 成品是一个自包含的 HTML 文件，写到这个绝对路径（只写这一个成品，中间数据文件放 ' + o.dataDir + '/）：',
+    '   ' + o.outPath,
+    '5. 写完后运行 python3 ' + DELIVERABLE_LINT_PY + ' ' + o.outPath + ' ，有 FAIL 就改到没有为止（stale_data 这类 WARN 如实处理）。',
+    '6. 出不了报告时不要写成品文件，最后回复以 ' + AGENT_ABORT + ' 开头，一句话说明卡在哪。',
+    '7. 成功时最后回复两段：第一段三句以内说本期最要紧的变化；第二段以「数据缺口：」开头逐条列出没取到或口径回退的地方，没有就写「数据缺口：无」。',
+  ].join('\n');
+}
+
+/** 成品校验。返回问题清单，空数组为通过。纯函数，供测试。 */
+function agentReportProblems(html, period) {
+  const problems = [];
+  const h = String(html || '');
+  if (h.length < 8000) problems.push('成品只有 ' + h.length + ' 字符，不像一份完整报告');
+  if (!/<html[\s>]/i.test(h) || !/<\/html>/i.test(h)) problems.push('不是完整的 HTML 文档');
+  if (/\{\{[^}]{0,40}/.test(h)) problems.push('有未替换的模板占位符');
+  /* 周期写错是 agent 线最贵的错（沿用往期稿子改数字时最容易漏）：起止日期的「月-日」必须都在正文里出现。 */
+  const md = (ymd) => [ymd.slice(5), String(Number(ymd.slice(5, 7))) + '月' + String(Number(ymd.slice(8, 10))) + '日', ymd.slice(5).replace('-', '/'), String(Number(ymd.slice(5, 7))) + '/' + String(Number(ymd.slice(8, 10)))];
+  for (const [name, ymd] of [['起始日', period.start], ['结束日', period.end]]) {
+    if (!md(ymd).some((x) => h.indexOf(x) !== -1)) problems.push('正文里找不到本期' + name + ' ' + ymd);
+  }
+  return problems;
+}
+
+function lintLines(filePath) {
+  try {
+    if (!fs.existsSync(DELIVERABLE_LINT_PY)) return [];
+    let out = '';
+    try {
+      out = require('node:child_process').execFileSync('python3', [DELIVERABLE_LINT_PY, filePath], { timeout: 90000, encoding: 'utf8' });
+    } catch (e) {
+      out = String((e.stdout || '') + (e.stderr || ''));
+    }
+    return out.split('\n').filter((l) => /^FAIL\s/.test(l)).map((l) => l.trim());
+  } catch (_) {
+    return [];
+  }
+}
+
+async function runAgentReport(ctx, o) {
+  const { job, cfg, api, log } = ctx;
+  const { workspace, slug, period, versionHint } = o;
+  const ym = period.rolling ? period.start + '_' + period.end : period.start.slice(0, 7);
+  const outDir = path.join(workspace, OUTPUT_DIRNAME);
+  mkdirRetry(outDir, { recursive: true });
+  const dataDir = path.join(outDir, 'report-' + ym + '-v' + versionHint + '-data');
+  mkdirRetry(dataDir, { recursive: true });
+  let localHtml = path.join(outDir, 'report-' + ym + '-v' + versionHint + '.html');
+  if (fs.existsSync(localHtml)) fs.unlinkSync(localHtml); /* 同名残稿不能冒充本轮成品 */
+
+  const prompt = agentReportPrompt({ period, brief: o.brief, instructions: o.instructions, outPath: localHtml, dataDir });
+  const model = cfg.reportAgentModel || cfg.claudeModel || cfg.reportModel;
+  log('agent 模式：读到 reports/' + AGENT_BRIEF_NAME + '（' + o.brief.length + ' 字符），prompt ' + prompt.length + ' 字符，模型 ' + model);
+  const res = await runClaude(cfg, {
+    prompt,
+    cwd: workspace,
+    log,
+    model,
+    allowedTools: AGENT_TOOLS,
+    label: 'report agent ' + period.start,
+    timeoutMs: Math.max(10, (Number(cfg.reportTimeoutMin) || 45) - 5) * 60 * 1000,
+  });
+  const output = String(res.stdout || '').trim();
+  if (output.indexOf(AGENT_ABORT) !== -1) {
+    throw new Error('agent 判定本期出不了报告：' + truncate(output.slice(output.indexOf(AGENT_ABORT) + AGENT_ABORT.length).trim(), 300));
+  }
+  if (!fs.existsSync(localHtml)) throw new Error('agent 跑完但没有写出成品文件 ' + path.basename(localHtml) + '：' + truncate(output, 200));
+  let html = fs.readFileSync(localHtml, 'utf8');
+  const problems = agentReportProblems(html, period);
+  if (problems.length) throw new Error('agent 成品校验未过，不发布：' + problems.join('；'));
+  if (!/<meta[^>]+name=["']robots["']/i.test(html)) {
+    html = html.replace(/<head([^>]*)>/i, '<head$1>\n<meta name="robots" content="noindex, nofollow">');
+    writeFileRetry(localHtml, html, 'utf8');
+  }
+  const fails = lintLines(localHtml);
+  if (fails.length) log('交付 lint 仍有 ' + fails.length + ' 条 FAIL，写进版本备注由出报人处理：' + fails.slice(0, 3).join('；'));
+
+  const filename = 'seo_report_' + ym + '_v' + versionHint + '.html';
+  const published = await publishReport(cfg, slug, filename, localHtml, log);
+
+  const gap = /数据缺口：[\s\S]*$/.exec(output);
+  const noteParts = ['按客户月报简报由 agent 成稿'];
+  if (gap && !/^数据缺口：\s*无\s*$/.test(gap[0].trim())) noteParts.push(gap[0].replace(/\s+/g, ' ').trim());
+  if (fails.length) noteParts.push('交付 lint 未过 ' + fails.length + ' 条：' + fails.slice(0, 2).join('；'));
+  const saved = await api.postReport({
+    client_id: job.client_id,
+    period_type: period.type,
+    period_start: period.start,
+    period_end: period.end,
+    url: published.url,
+    html_path: published.remotePath,
+    facts_pack: { meta: { mode: 'agent', brief: AGENT_BRIEF_NAME, period: { start: period.start, end: period.end, label: period.label, compare: period.compare }, data_dir: path.relative(workspace, dataDir) } },
+    narrative_status: 'ok',
+    note: truncate(noteParts.join(' / '), 900),
+  });
+  const finalVersion = Number(saved && saved.version) || versionHint;
+  if (finalVersion !== versionHint) {
+    const renamed = path.join(outDir, 'report-' + ym + '-v' + finalVersion + '.html');
+    try { fs.renameSync(localHtml, renamed); localHtml = renamed; } catch (e) { log('本地副本改名失败，不影响交付：' + e.message); }
+  }
+  log('报告 v' + finalVersion + '（agent 模式）完成，链接 ' + ((saved && saved.url) || published.url));
+  return { tokenUsage: 0 };
+}
+
+// ---------------------------------------------------------------------------
 // runner
 // ---------------------------------------------------------------------------
 
@@ -438,6 +569,15 @@ async function run(ctx) {
 
   const versionHint = await nextVersionHint(api, job.client_id, period.type, period.start, log);
   log('版本号先按 v' + versionHint + ' 起名，最终以服务端返回的为准');
+
+  /* agent 模式（2026-11-24 ticket #68，Alvin 批）：客户 reports/ 下有 report_agent_brief_seo.md 就不走
+     「数据包加模板」三层，改由 agent 按简报取数成稿。给月报内容超出数据层的客户用（CtoMi 的新西兰市场、
+     关键词扩展、变化原因等，模板蒸馏出来有几十个字段数据层不产，永远转不了正）。入口、版本、发布、
+     落库与三层线完全相同，报告 tab 不用知道走的是哪条。 */
+  const briefPath = path.join(workspace, 'reports', AGENT_BRIEF_NAME);
+  if (fs.existsSync(briefPath)) {
+    return runAgentReport(ctx, { workspace, slug, period, versionHint, brief: fs.readFileSync(briefPath, 'utf8'), instructions: String(payload.instructions || '') });
+  }
 
   // ---- 第一层：数据 ----
   /* 品牌板块定义与市场量台账（客户点名的分析资产）：和模板同住客户 reports/ 目录，
@@ -764,6 +904,9 @@ async function watchTask(api, clientId, narrative, ym, reportUrl) {
 }
 
 module.exports = {
+  agentReportPrompt,
+  agentReportProblems,
+  AGENT_BRIEF_NAME,
   priorCommitments,
   watchPromised,
   commitmentsBlock,

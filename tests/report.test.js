@@ -885,6 +885,17 @@ t('客户模板有数据层不产的占位符：拒绝出报并点名（ticket #
   assert.ok(R.renderReport(fakePack(), null, { template: skeleton }).length > 1000, '通用骨架当客户模板用必须照常出');
   assert.deepStrictEqual(R.unknownTemplateNames('{{#channel_rows}}{{purchases}}{{revenue}}{{/channel_rows}}{{total_revenue}}', {}, skeleton), [], '订单列是渲染器固定产的，渠道行为空也不算未知');
 });
+t('agent 模式：prompt 带本期与对比周期、成品路径和中止口令；成品校验拦残稿与周期写错（ticket #68）', () => {
+  const RR = require('../seo-worker/runners/report.js');
+  const period = { start: '2026-10-22', end: '2026-11-21', label: '2026年10月22日 至 11月21日（31 天）', rolling: true, compare: { start: '2026-09-21', end: '2026-10-21', label: '上一周期' } };
+  const p = RR.agentReportPrompt({ period, brief: '必备板块：新西兰市场', instructions: '询盘按后台实收 12', outPath: '/w/seo-agent-output/report-x-v2.html', dataDir: '/w/seo-agent-output/report-x-v2-data' });
+  for (const must of ['2026-10-22 至 2026-11-21', '2026-09-21 至 2026-10-21', '必备板块：新西兰市场', '询盘按后台实收 12', '/w/seo-agent-output/report-x-v2.html', 'REPORT_ABORT:', '只读']) assert.ok(p.indexOf(must) !== -1, 'prompt 缺：' + must);
+  const good = '<html><head></head><body>' + '报告周期 10月22日 至 11月21日。'.repeat(600) + '</body></html>';
+  assert.deepStrictEqual(RR.agentReportProblems(good, period), []);
+  assert.ok(RR.agentReportProblems(good, { start: '2026-12-01', end: '2026-12-31' }).length === 2, '周期对不上要拦');
+  assert.ok(RR.agentReportProblems('<html>{{x}}</html>', period).some((x) => /占位符/.test(x)));
+  assert.strictEqual(RR.AGENT_BRIEF_NAME, 'report_agent_brief_seo.md');
+});
 t('pack 缺 meta 直接抛错', () => {
   assert.throws(() => R.renderReport({}, null, {}), /没有 meta/);
 });
