@@ -28,7 +28,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 闸四件套写在函数头注释。命中台账：audit `seo_plan_dead_replan` / `seo_plan_dead_hold`。新增申报与现实的契约点 0 个（判据是 runner 既有收尾行）。观察一个月后评估「确定性拒绝」关键词锚退役。
 - 没做的一项：原计划同时放宽「已落地有偏差」的声明文件条件。写 #2618 回放时发现实际改动的 `.json` 对方案声明的 `.md` 来说是方案外文件，放宽「漏声明」救不了它，已撤回不改。#2618 这类现在走打回重出，重出轮实读现场出无变更方案收口。
 - 能力清单订正：`webforger.md` 博文文件示例由 `posts/slug.md` 改 `.json`（历史 changeset 159 例全是 `.json`，方案是照旧示例抄错的）；写接口 `page` 一律带 `.html`（历史成功方案全是这个写法，Kuddles 写 `index` 得 404）。`googleads.md` 加标准购物系列两条：纳入的商品节点必须带出价；细分节点读回恒为 PAUSED 不要断言 ENABLED（全 MCC 在投购物系列实读同样如此）。
-- 平台侧待 Aiden 知悉（不阻塞）：`GET /elements?page=index` 收，`PATCH /edit` 的 `page: "index"` 对 Kuddles 返回 PAGE_NOT_EDITABLE，读写两个接口对 page 的接受面不一致。
+- 平台侧待 Aiden 知悉（不阻塞）：`GET /elements?page=index` 收，`PATCH /edit` 的 `page: "index"` 对 Kuddles 返回 PAGE_NOT_EDITABLE，读写两个接口对 page 的接受面不一致。 **Aiden 同日已接（平台仓 617b3fa4）**：确认写接口目前必须带 `.html`，不带会 404 且不写入；平台接口文档与协作账本已订正（线上给 agent 读的那份要到下次 api 发布才更新），代码修复排在黑五后，12-03 起随下一次 api 发布做。MA 清单「写接口一律带 `.html`」在平台修好后仍然成立，不用回改。
 - `tools/fleet_digest.js --issues`：失败 job 对应的任务已归档收口的不再报（Play Mate #2729 已废单重派仍被报成 sprint 执行失败）。
 - 看板：频道输入框随内容自动长高、去掉手动拉伸手柄，附件缩略图移到输入框上方（ticket #67）。
 - shopseo 1.16.1（/data/aira 仓）：`product set-tags` 回读按集合比，不按字符串比（Shopify 按字母序存 tag，新 tag 不在末尾时写成功也被判失败并回滚，Play Mate #2731）。
