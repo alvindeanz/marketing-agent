@@ -33,6 +33,15 @@
 
 ## 硬验收（全过才许交，任何一条不过就停在 review 说明原因）
 
+- **先判这份月报归哪条线（2026-11-24 ticket #68）**：旧报告里有数据层不产的板块（分国家市场、关键词扩展、
+  逐条变化原因、外链明细等，判据是模板里需要通用骨架没有的占位符），就不要蒸馏模板。改为在客户
+  `reports/` 下写 `report_agent_brief_seo.pending.md`（版式定稿指向哪份样张、必备板块、口径、文字规矩，
+  范本见 clients/ctomi/reports/report_agent_brief_seo.md），放行后改正式名，报告 tab 即走 agent 模式。
+  12 家客户的 `.pending.html` 曾挂三周无人放行，其中 4 家就是这种永远转不了正的模板。
+- 蒸馏模板的，必须拿该客户 `seo-agent-output/` 下最近一份真实 `report-*.pack.json` 实渲
+  （`renderReport(pack, null, { template })`）：渲染器现在遇到不认识的占位符会抛错点名，抛错就是不合格。
+  实渲样张发预览（`reports/<slug>/template_sample_seo.html`），链接写进 result_note，放行的人看样张点头。
+
 - 用本仓测试渲染冒烟：`node tests/brandsections.test.js` 全绿，且拿产物模板渲一份
   假 pack 验证零 `{{` 残留（渲染器断言会兜底，但要在交付前自己跑出来，不是等产线炸）。
 - `python3 /data/aira/scripts/deliverable_lint.py` 对渲染样张全过。

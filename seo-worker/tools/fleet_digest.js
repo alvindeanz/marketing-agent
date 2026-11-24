@@ -186,6 +186,22 @@ function isPendingCard(t) {
       }
     }
   }
+  /* 月报模板待转正无主（2026-11-24 ticket #68）：蒸馏产物按约定落 *.pending.*，放行前不生效，
+     但没有任何东西提醒人去放行，12 家挂了三周。挂超 7 天就报成机器债。目录即 NFS 上的客户工作区。 */
+  try {
+    const fsx = require('node:fs');
+    const pathx = require('node:path');
+    const root = process.env.SEO_CLIENTS_ROOT || '/data/aira/clients';
+    for (const dir of fsx.existsSync(root) ? fsx.readdirSync(root) : []) {
+      for (const f of ['report_template_seo.pending.html', 'report_agent_brief_seo.pending.md']) {
+        const fp = pathx.join(root, dir, 'reports', f);
+        if (!fsx.existsSync(fp)) continue;
+        if (f.endsWith('.html') && fsx.existsSync(pathx.join(root, dir, 'reports', 'report_agent_brief_seo.md'))) continue; /* 已走 agent 模式，pending 模板只是它的拼装素材 */
+        const d = Math.floor((Date.now() - fsx.statSync(fp).mtimeMs) / 86400000);
+        if (d >= 7) addIssue('sprint', '机器债', dir + ' 月报' + (f.endsWith('.md') ? '简报' : '模板') + '待转正挂 ' + d + ' 天没人放行，报告 tab 仍走通用模板（看样张后改正式名，或改走 agent 模式）', 'tpl:' + dir + ':' + f, null);
+      }
+    }
+  } catch (_) { /* 读不到客户目录就不报这一类 */ }
   if (ISSUES) {
     const KINDS = ['机器债', '执行失败', '停人待裁决', '停滞超龄'];
     const L = ['# agent 工单 ' + new Date().toISOString().slice(0, 10) + '（job 近 ' + DAYS + ' 天，停滞阈 ' + STALL_DAYS + ' 天）', ''];
