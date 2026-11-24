@@ -46,6 +46,9 @@ t('ticket #47 三条旧用例照过：括号里的卡号、确认卡#N、自己�
     $ids=consent_ref_ids(['id'=>9,'detail'=>'见确认卡 #123','result_note'=>'卡页 blog_confirmation_task-55.html']);sort($ids);
     eq($ids,[55,123]);
     eq(consent_ref_ids(['id'=>837,'detail'=>'出卡 #837 后等客户','result_note'=>'']),[]);
+    /* 2026-11-24 ticket #70 / Sungait #2791：改稿重出的卡沿用原文件名，表态记在链接 ?t= 那张任务上 */
+    eq(consent_ref_ids(['id'=>2791,'detail'=>'按 #2783 客户确认页定稿（https://x/reports/sungait/blog_confirmation_task-2712.html?t=2783&k=53bb）在 Shopify blog news 建文章并发布','result_note'=>'']),[2783,2712]);
+    eq(consent_ref_ids(['id'=>2783,'detail'=>'','result_note'=>'客户版: https://x/blog_confirmation_task-2712.html?t=2783&k=5']),[2712]);
 });
 t('批文写明本篇发布才算数；范围类批文和别篇批文不算',function()use($F3860){
     eq(backing_publish_fact_ok($F3860,'retractable-awning-vs-retractable-louvre-roof'),true);

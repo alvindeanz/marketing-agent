@@ -1018,11 +1018,19 @@ function consent_ref_ids($t){
     $tid=(int)($t['id']??0);
     $src=(string)($t['detail']??'')."\n".(string)($t['result_note']??'');
     $out=[];
-    if(preg_match_all('/blog_confirmation_task-(\d+)|确认[页卡][^#\n]{0,8}#(\d+)|(?:^|[\s（(、：:])卡\s*#(\d+)|#(\d+)\s*确认[页卡]/mu',$src,$mm,PREG_SET_ORDER)){
+    /* 确认页链接里的 ?t=N 才是这张卡挂在哪张任务头上（改稿重出的卡沿用原文件名，客户的表态记在 t 那张上）。
+       2026-11-24 ticket #70 / Sungait #2791：任务书贴了 blog_confirmation_task-2712.html?t=2783，客户在 #2783 上点了同意，
+       只认文件名里的 2712 就查不到。「#N 客户确认页」这种写法同批收进来。 */
+    if(preg_match_all('/blog_confirmation_task-(\d+)(?:\.html\?t=(\d+))?|确认[页卡][^#\n]{0,8}#(\d+)|(?:^|[\s（(、：:])卡\s*#(\d+)|#(\d+)\s*(?:客户)?确认[页卡]/mu',$src,$mm,PREG_SET_ORDER)){
         foreach($mm as $m){
-            $rid=0;
-            for($gi=1;$gi<=4;$gi++)if(($m[$gi]??'')!==''){$rid=(int)$m[$gi];break;}
-            if($rid&&$rid!==$tid&&!in_array($rid,$out,true))$out[]=$rid;
+            $rids=[];
+            if(($m[1]??'')!==''){
+                if(($m[2]??'')!=='')$rids[]=(int)$m[2];
+                $rids[]=(int)$m[1];
+            }else{
+                for($gi=3;$gi<=5;$gi++)if(($m[$gi]??'')!==''){$rids[]=(int)$m[$gi];break;}
+            }
+            foreach($rids as $rid)if($rid&&$rid!==$tid&&!in_array($rid,$out,true))$out[]=$rid;
         }
     }
     return array_slice($out,0,8);
