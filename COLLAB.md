@@ -2130,3 +2130,5 @@ Alvin 提的四项客户栏改造：
 - 转机器位：Citymed #379、#384（写稿交付 HTML 片段），单跑 harness 13，#379 判 do 已起 execute job 15751，#384 判 later。
 - Kia Ora Kids #386 转机器位并写回摸底：迁站后容器 GTM-5ZSVKH3Z 只有 GA4 基础标签，generate_lead、click_to_call 无标签承接，key events 为 0；服务账号对该容器只读，加标签待 Alvin 开发布权限。Direct 380 会话里互动 13，主体是新加坡桌面端零互动流量。
 - 未查：fleet_digest --issues 把 chat 泳道的执行失败 job（Ben's NZ #2140、#2142）归进 sprint 组。
+
+- 2026-11-24 Aira：ticket #70（Summer，Sungait #2791）收编。shopseo 1.17.0 加 file find / upload / delete（店铺文件库传图，只收公网 https 图址，同名拒写，删除要对上 gid；10 家店令牌本来就带 write_files）。MA 登记 op media-upload（reversible，release_policy v27，shopify.md 两处）。注意 Shopify 入库会重新封装图片，CDN 字节与 sha 和源不等，方案只断言 200、宽高、文件名。演示店 horntechdemo 令牌无文件权限，写路径是在 Sungait 上用定稿图实测的。
