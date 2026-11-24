@@ -32,6 +32,7 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - `tools/fleet_digest.js --issues`：失败 job 对应的任务已归档收口的不再报（Play Mate #2729 已废单重派仍被报成 sprint 执行失败）。
 - 看板：频道输入框随内容自动长高、去掉手动拉伸手柄，附件缩略图移到输入框上方（ticket #67）。
 - shopseo 1.16.1（/data/aira 仓）：`product set-tags` 回读按集合比，不按字符串比（Shopify 按字母序存 tag，新 tag 不在末尾时写成功也被判失败并回滚，Play Mate #2731）。
+- 首杀与当场补洞（Kuddles #2438，同日）：把 #2438 置回 review 重排闸A 实测。闸A 判 do，L0 命中新路，写打回行并排 execute #17162；但同一轮「放行官串行续排」照旧又排了放行官 #17163（L0 没直落的 do 单都会续排），它回来判 redo 会撞「额度已用」把正在重出的单停人。补两处：L0 处置过的任务记 `$deadIds`，续排放行官时跳过；`/tasks/release_review_result` 与 `dead_plan_route` 对「该任务有 execute 在队列或在跑」的一律跳过不落判语（audit `seo_release_replan_inflight_skip`）。补丁赶在 #17163 回写前上线，回写结果 skipped，任务没被误停。放行官那次独立判的也是 redo，理由同一条（page 参数写错），旁证这条路该走重出。教训：改放行路要把「同一轮后面还会排什么」一起看，纯函数测试和 php -l 都照不到这种二次派发。
 - 测试：新增 `tests/apply_dead_plan.test.js` 9 条（本周 8 个真实失败 job 收尾行回放、5 个抛错类反例、出路分档、源码同步闸）；node tests 全套 57 个文件全绿。php -l 走 deploy 远端校验。
 
 ### 2026-11-18 AIRA 规划简报修复 + SEO 方案考核口径 + 6 家续季稿重出（rev 6951883，Alvin 批「按新规划做」）

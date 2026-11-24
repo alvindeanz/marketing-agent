@@ -103,6 +103,12 @@ t('源码同步闸：seo-api.php 与镜像一致，且两条放行路都接了',
   assert.ok(src.includes("dead_plan_route($cid,$tid,$t,$lastExec,$rc,'opus-release')"), '放行官路没接');
   assert.ok(src.indexOf("dead_plan_route($cid,$tid,$t,$lx0,$rc,'seo-worker')") < src.indexOf('if($an0>=2){'), 'L0 路要在熔断计数之前');
   assert.ok(src.indexOf("dead_plan_route($cid,$tid,$t,$lastExec,$rc,'opus-release')") < src.indexOf('if($applyN>=2&&$money){'), '放行官路要在熔断分流之前');
+  /* 首杀当场抓到的二次派发（Kuddles #2438）：L0 打回后同一轮不许再续排放行官；放行官回来时方案正在重出的整行跳过 */
+  assert.ok(src.includes("!==''){$deadIds[$tid]=true;continue;}"), 'L0 打回后没登记 deadIds');
+  assert.ok(src.includes("isset($autoIds[$tid])||isset($deadIds[$tid])"), '放行官续排没跳过已处置的任务');
+  assert.ok(src.includes("if((int)($fr['c']??0)>0)return 'replan';"), 'dead_plan_route 缺重出在途的幂等保护');
+  assert.ok(src.includes("'seo_release_replan_inflight_skip'"), '放行官回写缺重出在途跳过');
+  assert.ok(src.indexOf("'seo_release_replan_inflight_skip'") < src.indexOf("if($verdict==='hold_human'){"), '在途跳过要在三种判决分流之前');
   /* 重出轮的 prompt 靠这一行把失败原因带进去，标记改了两边一起改 */
   const ex = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'runners', 'execute_task.js'), 'utf8');
   assert.ok(ex.includes('noteStr.match(/\\[redo opus [^\\n]*/g)'), 'execute 读打回行的正则变了');

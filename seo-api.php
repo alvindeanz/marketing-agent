@@ -1435,6 +1435,13 @@ function dead_plan_replan_ok($ops,$rc,$note){
 /* 返回 '' 不归我管（照走原链）| 'replan' 已打回重出 | 'hold' 已停人。$since 是本版方案的界（最近一次 execute done）。 */
 function dead_plan_route($cid,$tid,$t,$since,$rc,$actor){
     $like='%"task_ids":['.(int)$tid.']%';
+    /* 重出已在路上（本函数刚排的，或放行官 redo 排的）：同一张单不再判第二次。L0 打回后同一轮续排的
+       放行官回来时会再问到这里，不拦就会因「额度已用」把正在重出的单误停人（2026-11-24 Kuddles #2438 首杀当场抓到）。 */
+    $fq=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='execute_task' AND status IN('queued','running') AND payload LIKE ?");
+    $fq->execute([(int)$cid,$like]);
+    $fr=$fq->fetch();
+    $fq->closeCursor();
+    if((int)($fr['c']??0)>0)return 'replan';
     $q=db()->prepare("SELECT id,status,log_text FROM agent_jobs WHERE client_id=? AND type='apply_task' AND status IN('failed','done') AND payload LIKE ?".($since!==''?' AND created_at>?':'')." ORDER BY id DESC LIMIT 1");
     $q->execute($since!==''?[(int)$cid,$like,$since]:[(int)$cid,$like]);
     $r=$q->fetch();
@@ -8570,6 +8577,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
        待放行任务复审判 do，且全部 ops 的 risk_class 均为 reversible、非博客非分析，自动排 apply。
        政策文件缺失或 op 不在表里一律按 L2 处理（默认从严）。2026-08-31 Alvin 拍板。 */
     $auto=[];
+    $deadIds=[]; /* 败方案不重放已处置（打回重出或停人）的任务，下面不再续排放行官 */
     $pol=@json_decode(@file_get_contents(__DIR__.'/release_policy.json'),true);
     $rc=is_array($pol)&&isset($pol['risk_class_by_op'])?$pol['risk_class_by_op']:null;
     $l0on=$rc&&!empty($pol['l0_rules']['auto_release'])&&!ops_halted($cid);
@@ -8641,7 +8649,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         $r0=$seen0->fetch();
         $anAll=(int)(($r0['c'])??0);
         /* 败方案不重放：本版方案被落地 agent 判过失败或中止的，不再原样排 apply（见 dead_plan_route）。 */
-        if($anAll>=1&&dead_plan_route($cid,$tid,$t,$lx0,$rc,'seo-worker')!=='')continue;
+        if($anAll>=1&&dead_plan_route($cid,$tid,$t,$lx0,$rc,'seo-worker')!==''){$deadIds[$tid]=true;continue;}
         /* 零写入弹回不烧熔断额度（2026-10-28 ticket #40：Badger #1428 被旧同页冷却闸两次零写入
            弹回计成「落地 2 次」停人八天；sdalu #1685 的零写入中止同病）。熔断管的是同一版方案
            重复写外部世界，没写过的尝试不占额度。识别锚只收两类已用真实 job 日志回放验证的机器
@@ -8729,7 +8737,7 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
         foreach($rows as $v){
             if(!is_array($v)||(string)($v['verdict']??'')!=='do')continue;
             $tid=(int)($v['task_id']??0);
-            if(!$tid||isset($autoIds[$tid]))continue;
+            if(!$tid||isset($autoIds[$tid])||isset($deadIds[$tid]))continue;
             $sq=db()->prepare("SELECT id,status,ops,output_url,result_note FROM seo_tasks WHERE id=? AND client_id=?");
             $sq->execute([$tid,$cid]);
             $t0=$sq->fetch();
@@ -8774,6 +8782,15 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
         if(!$tid||!in_array($verdict,['release','hold_human','redo'],true)){if($tid)$act['skipped'][]=$tid;continue;}
         $q=db()->prepare("SELECT * FROM seo_tasks WHERE id=?");$q->execute([$tid]);$t=$q->fetch();
         if(!$t||(int)$t['client_id']!==$cid||$t['status']!=='review'){$act['skipped'][]=$tid;continue;}
+        /* 方案正在重出的整行跳过（2026-11-24）：放行官判的是旧版方案，重出轮已在队列里，判语对着的东西
+           马上就不存在了。不拦的话 redo 会撞「额度已用」停人，hold 会给正在自愈的单贴停人标。 */
+        $fqR=db()->prepare("SELECT COUNT(*) c FROM agent_jobs WHERE client_id=? AND type='execute_task' AND status IN('queued','running') AND payload LIKE ?");
+        $fqR->execute([$cid,'%"task_ids":['.$tid.']%']);
+        $frR=$fqR->fetch();$fqR->closeCursor();
+        if((int)($frR['c']??0)>0){
+            audit('opus-release','seo_release_replan_inflight_skip',(string)$tid,['verdict'=>$verdict]);
+            $act['skipped'][]=$tid;continue;
+        }
         /* 等客户表态的卡任务整行跳过：release 会被 blog_outline_stage 误路由成重写（死循环），
            hold/redo 也是对着「等客户」状态空判。谁召唤的都一样跳（见 blog_card_waiting 注释）。 */
         if(blog_card_waiting($t)){
