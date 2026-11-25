@@ -106,4 +106,56 @@ function injectCardToken(localPath, taskId, serviceToken) {
   } catch (e) { return ''; }
 }
 
-module.exports = { publishReport, publishFile, assertSafeName, injectCardToken };
+/**
+ * 这页是不是反馈卡（2026-11-25 Alvin 定「报告在原链接上更新」）。卡页带反馈 widget，
+ * 必须有 ?t=&k= 令牌才能提交；报告、月报这类成品页没有 widget，令牌尾巴只会让同一个
+ * 页面每改一轮就多出一个「看着像新链接」的链接。判据：页面里有反馈通路 card_feedback。
+ */
+function isCardPage(localPath) {
+  try {
+    return require('node:fs').readFileSync(localPath, 'utf8').indexOf('card_feedback') !== -1;
+  } catch (e) { return false; }
+}
+
+/**
+ * 非卡页去掉自动补参脚本：agent 在上一版文件上原地改稿时，旧任务的补参脚本会跟着留在
+ * 页面里，裸链接一打开又被 replace 成带尾巴的。幂等；读写失败不炸调用方。返回是否改了文件。
+ */
+function stripCardToken(localPath) {
+  try {
+    const fs = require('node:fs');
+    const html = fs.readFileSync(localPath, 'utf8');
+    if (html.indexOf('data-card-autotoken') === -1) return false;
+    writeFileRetry(localPath, html.replace(/\n?<script data-card-autotoken>[\s\S]*?<\/script>/g, ''), 'utf8');
+    return true;
+  } catch (e) { return false; }
+}
+
+/**
+ * 草稿地址跳到定稿（同日同令）：X.html 发布后，把线上的 X.draft.html 换成一页跳转，
+ * 手里留着草稿旧链接的人打开看到的是定稿，不再是过期数字。只换线上那份，本地草稿原样留底。
+ * 本地没有对应草稿就什么都不做，返回 null。
+ */
+async function publishDraftRedirect(cfg, slug, finalName, localDir, log) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  if (/\.draft\.html$/i.test(finalName) || !/\.html$/i.test(finalName)) return null;
+  const draftName = finalName.replace(/\.html$/i, '.draft.html');
+  if (!fs.existsSync(path.join(localDir, draftName))) return null;
+  const target = assertSafeName(finalName, '文件名');
+  const stub = '<!doctype html>\n<html lang="zh"><head><meta charset="utf-8">\n'
+    + '<meta name="robots" content="noindex,nofollow">\n'
+    + '<meta http-equiv="refresh" content="0;url=' + target + '">\n'
+    + '<title>已更新</title></head><body>\n'
+    + '<p>这份草稿已有定稿，<a href="' + target + '">点这里打开最新版</a>。</p>\n'
+    + '<script>location.replace("' + target + '");</script>\n</body></html>\n';
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'draft-redirect-')), draftName);
+  fs.writeFileSync(tmp, stub, 'utf8');
+  try {
+    return await publishFile(cfg, slug, '', draftName, tmp, log);
+  } finally {
+    try { fs.rmSync(path.dirname(tmp), { recursive: true, force: true }); } catch (e) { /* 临时目录清不掉不碍事 */ }
+  }
+}
+
+module.exports = { publishReport, publishFile, assertSafeName, injectCardToken, isCardPage, stripCardToken, publishDraftRedirect };

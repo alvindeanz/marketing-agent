@@ -3219,9 +3219,21 @@ async function runOne(ctx, context, workspace, taskId) {
         const lintRes = runDeliverableLint(path.join(rdir, f), log);
         if (lintRes) lintLines += lintRes + '\n';
         /* 令牌注入（2026-09-21 取消预览模式）：裸链接自动补参，卡打开即可提交 */
-        const fbTok = require('../lib/publish').injectCardToken(path.join(rdir, f), taskId, ctx.cfg.serviceToken);
+        /* 只有卡页带令牌（2026-11-25 Alvin 定「报告在原链接上更新」）：报告、月报这类没有
+           反馈 widget 的成品页一律给裸链接，同一份文件改多少轮都是同一个链接；旧补参脚本
+           顺手剥掉。草稿（X.draft.html）有了定稿（X.html）之后，线上草稿地址换成跳转。 */
+        const pub = require('../lib/publish');
+        const isCard = f === cardHtmlName || pub.isCardPage(path.join(rdir, f));
+        const fbTok = isCard ? pub.injectCardToken(path.join(rdir, f), taskId, ctx.cfg.serviceToken) : '';
+        if (!isCard) pub.stripCardToken(path.join(rdir, f));
         const res = await publishFile(ctx.cfg, path.basename(workspace), '', f, path.join(rdir, f), log);
         if (res && res.url) {
+          if (!isCard) {
+            try {
+              const rd = await pub.publishDraftRedirect(ctx.cfg, path.basename(workspace), f, rdir, log);
+              if (rd) log('task ' + taskId + '：草稿地址已跳到定稿 ' + rd.url);
+            } catch (e) { log('task ' + taskId + '：草稿跳转页发布失败（定稿不受影响）:: ' + e.message); }
+          }
           clientLinks += '客户版: ' + res.url + (fbTok ? '?t=' + taskId + '&k=' + fbTok : '') + '\n';
           /* Ask 登记只收裸链接：?k= 参数就是明文卡 token，进 payload 会被 422 拒（令牌
              已注入 HTML，裸链接打开即可提交）。 */
