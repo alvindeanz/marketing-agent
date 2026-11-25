@@ -55,6 +55,19 @@ function declaresEdit(ops) {
   return opsList(ops).indexOf('blog-edit') !== -1;
 }
 
+/** 计划内写新稿的单（方案生成、只申报 blog-draft、没有 [target] 行）。
+    这类单的任务书常点到别的已有文章（「和某篇区分开」「链向某篇」），那是参照不是目标：
+    执行器不许拿任务书正文去猜目标文章，否则新稿被当成那篇的改稿，零产出还出一张错卡
+    （2026-11-22 续季 S1：Kuddles #2440、Power Dekor #2517、Ben's NZ #2597、Ben's AU #2460）。
+    本单自己上一轮留下的草稿链接（output_url、结果备注）不在此列，重跑照旧认。
+    计划里要动已有文章的单，申报 blog-edit 或写 [target] 行。 */
+function plannedNewPost(task) {
+  if (!task || !task.plan_id || Number(task.plan_id) <= 0) return false;
+  const l = opsList(task.ops);
+  if (l.indexOf('blog-draft') === -1 || l.indexOf('blog-edit') !== -1) return false;
+  return !normalizeBlogTarget(targetOf(task.detail));
+}
+
 /**
  * 派单时给任务书落 [target] 行。返回 { detail, target, error }。
  *   给了 target 且是博客文章 → 落行；
@@ -82,4 +95,4 @@ function stampTarget(draft) {
   return { detail: detail.replace(/\s+$/, '') + '\n[target] ' + target, target, error: '' };
 }
 
-module.exports = { targetOf, normalizeBlogTarget, blogSlugsIn, needsBlogTarget, declaresEdit, stampTarget, TARGET_LINE_RE };
+module.exports = { targetOf, normalizeBlogTarget, blogSlugsIn, needsBlogTarget, declaresEdit, plannedNewPost, stampTarget, TARGET_LINE_RE };

@@ -1771,7 +1771,11 @@ async function runBlogTask(ctx, context, workspace, task) {
     const alt = noteUrls.find((u) => wf.isBlogUrl(u, profile.domain));
     if (alt) { outputUrl = alt; }
   }
-  if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
+  /* 计划内写新稿的单不拿任务书正文猜目标（2026-11-25，续季 S1 四张新博客被劫成改稿）：
+     任务书里点到的已有文章是参照。下面三个读 detail 的兜底对它一律不生效，只认本单自己留下的链接。 */
+  const noDetailGuess = tasktarget.plannedNewPost(task);
+  if (noDetailGuess) log('task ' + taskId + '：计划内新稿，任务书里提到的已有文章只当参照，不作改稿目标');
+  if (!noDetailGuess && !(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
     const detailUrls = String(task.detail || '').match(/https?:\/\/[^\s)\]，。]+/g) || [];
     const alt = detailUrls.find((u) => wf.isBlogUrl(u, profile.domain));
     if (alt) { outputUrl = alt; }
@@ -1779,7 +1783,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
     /* 相对路径兜底（2026-10-23 ticket #48）：频道单常只写 /blog/<slug>/，没有绝对链接，
        改稿单因此掉进新建分支按新稿模板重写（#1597/#1608 死因）。多条相对路径不敢猜。 */
-    const rel = wf.relBlogUrls(String(task.result_note || '') + '\n' + String(task.detail || ''), profile.domain);
+    const rel = wf.relBlogUrls(String(task.result_note || '') + (noDetailGuess ? '' : '\n' + String(task.detail || '')), profile.domain);
     if (rel.length === 1) {
       outputUrl = rel[0];
       log('task ' + taskId + '：目标草稿按站内相对路径升格定位 ' + outputUrl);
@@ -1787,7 +1791,7 @@ async function runBlogTask(ctx, context, workspace, task) {
       log('task ' + taskId + '：detail/note 里有 ' + rel.length + ' 条站内博客相对路径，不猜目标，照原流程处理');
     }
   }
-  if (!(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
+  if (!noDetailGuess && !(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {
     /* slug 兜底（2026-11-12 #2006/#2017）：改稿单常只写「#839 那篇草稿（some-long-slug）」，既没有绝对链接
        也没有 /blog/ 路径，掉进新建分支后被当成新文章整篇重写。任务文本里逐字出现、且正好只对上一篇
        现有文章的 slug，就是目标；对上多篇不猜。 */

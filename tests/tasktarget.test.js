@@ -127,6 +127,24 @@ t('执行器先读 [target] 再走兜底，停下判断在写稿之前', () => {
   assert.ok(iMark > 0 && iGuess > iMark, '[target] 没排在兜底猜法之前');
   assert.ok(iStop > iGuess && iGuide > iStop, '停下判断没排在全部定位办法之后、写稿之前');
 });
+t('计划内新稿：任务书里点到的已有文章不作改稿目标（续季 S1 四张回放）', () => {
+  const kuddles = { plan_id: 85, ops: 'blog-draft,blog-publish', detail: '不与已发布的 kindergarten-vs-daycare-nz 撞题，定稿前比对线上站点地图' };
+  const pd = { plan_id: 89, ops: 'blog-draft,blog-publish', detail: '与 /blog/timber-flooring-auckland-homes-what-to-check/ 分开写' };
+  assert.strictEqual(T.plannedNewPost(kuddles), true);
+  assert.strictEqual(T.plannedNewPost(pd), true);
+  assert.strictEqual(T.plannedNewPost({ plan_id: 85, ops: 'blog-draft,blog-edit', detail: '刷新 /blog/a-b-c/' }), false, '申报改旧文的不算新稿');
+  assert.strictEqual(T.plannedNewPost({ plan_id: 85, ops: 'blog-draft', detail: '改这篇\n[target] /blog/a-b-c/' }), false, '写了 [target] 的不算新稿');
+  assert.strictEqual(T.plannedNewPost({ plan_id: null, ops: 'blog-draft', detail: '只改 #839 那篇草稿（some-long-slug）' }), false, '频道与派生单照旧走兜底');
+  assert.strictEqual(T.plannedNewPost({ plan_id: 85, ops: 'meta-update', detail: '' }), false);
+  const js = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'runners', 'execute_task.js'), 'utf8');
+  const iFlag = js.indexOf('const noDetailGuess = tasktarget.plannedNewPost(task);');
+  assert.ok(iFlag > 0, '执行器没接 plannedNewPost');
+  assert.ok(js.indexOf('if (!noDetailGuess && !(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {\n    const detailUrls') > iFlag, 'detail 链接兜底没挂闸');
+  assert.ok(js.indexOf('if (!noDetailGuess && !(outputUrl && wf.isBlogUrl(outputUrl, profile.domain))) {\n    /* slug 兜底') > iFlag, 'slug 兜底没挂闸');
+  assert.ok(js.includes("(noDetailGuess ? '' : '\\n' + String(task.detail || ''))"), '相对路径兜底仍在读任务书');
+  const plan = fs.readFileSync(path.join(__dirname, '..', 'seo-worker', 'runners', 'plan.js'), 'utf8');
+  assert.ok(/博客任务分清新写和改旧文/.test(plan) && /\[target\] \/blog\//.test(plan), '出计划提示词没教改旧文写 [target]');
+});
 t('服务端与本库同一条标记正则，提示词教了 target 和批文写法', () => {
   const php = fs.readFileSync(path.join(__dirname, '..', 'seo-api.php'), 'utf8');
   assert.ok(php.includes("preg_match('/^\\[target\\][ \\t]*(\\S+)[ \\t]*$/mu'"), '服务端 task_target_of 正则变了');

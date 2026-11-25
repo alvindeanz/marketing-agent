@@ -321,6 +321,9 @@ function buildPrompt(briefing, extraInstructions, dossier, capability, blogQuota
       ? '- 博客节奏（合同，硬约束）：S1 到 S6 每个 sprint 至少 ' + blogQuota + ' 条写新博文的任务（ops 含 blog-draft），' +
         '选题取自锁定词表。缺了的 sprint 落库时会被自动补一条选题待定的占位任务，所以请自己排好选题。'
       : '',
+    '- 博客任务分清新写和改旧文：写新博文只申报 blog-draft，detail 里提到别的已有文章只当参照（区分角度、内链去向）。',
+    '  整篇改写或刷新某一篇已有博文的任务，ops 同时申报 blog-draft 与 blog-edit，并在 detail 末尾独占一行写',
+    '  [target] /blog/<那篇的 slug>/。不写这一行，执行时会被当成新写一篇。',
     '',
     '事实台账，这条是硬规则',
     'CONFIRMED 的事实是已经关闭的问题。不许写进数据缺口，不许派任务去核实，不许再问客户，',
