@@ -462,6 +462,10 @@ t('lintPlan：选择题打回，但「需要人定：无」是 prompt 要求的�
   assert.ok(E.lintPlan(base + '- 需要人定：追加的三条暂停广告是否一并对齐').some((x) => x.indexOf('选择题') > -1));
   assert.deepStrictEqual(E.lintPlan(base + '- 需要人定：无。'), []);
   assert.deepStrictEqual(E.lintPlan(base + '需要人定：暂无'), []);
+  /* 2026-11-25 Ben's NZ #2786/#2787 真实产出回放：粗体标题后空格接「无」、自修说明里带引号引用 */
+  assert.deepStrictEqual(E.lintPlan(base + '**需要人定** 无'), [], '#2786 排版');
+  assert.deepStrictEqual(E.lintPlan(base + '- 原因已消除：本方案放行卡写的是「需要人定：无」，符合同一行的豁免格式。'), [], '#2787 排版');
+  assert.ok(E.lintPlan(base + '**需要人定** 无法判断要不要停').some((x) => x.indexOf('选择题') !== -1), '无法 不蹭豁免');
   assert.deepStrictEqual(E.lintPlan(base + '- 需要人定：等客户：确认促销词是否保留'), []);
   assert.deepStrictEqual(E.lintPlan(base + '- 需要人定：无。两处拦截按既定口径只登记，48 小时后回客户。'), [], '无 后带补充说明不算选择题(job561)');
   assert.ok(E.lintPlan(base + '- 需要人定：无法确定预算归属，请人工判断').some((x) => x.indexOf('选择题') > -1), '无法开头不吃豁免');

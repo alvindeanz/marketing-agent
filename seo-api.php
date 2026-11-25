@@ -3227,6 +3227,40 @@ if($m==='PATCH'&&preg_match('#^/jobs/(\d+)$#',$ROUTE,$mm)){
         error_log('seo-api PATCH /jobs/'.$jid.' lock conflict, retry once: '.$e->getMessage());
         $out=$apply();
     }
+    /* 失败要带原因回频道（2026-11-25 频道 PJ 化，Ben's NZ #2786/#2787 实证）：频道派出去的单
+       出方案阶段失败时，以前频道里一个字都没有，运营只能追问「为什么不落地」，bot 又读不到
+       job 日志只能答「没记录原因」。这里在 execute_task 首次翻成 failed 的那一刻，把日志里的
+       失败原因摘一句回出生频道。apply 失败已有自己的通知（熔断、中止），不在这里重复发。
+       通知失败不影响 job 落账。 */
+    if($st==='failed'&&!empty($out['status_changed'])){
+        try{
+            $jq=db()->prepare("SELECT type,payload FROM agent_jobs WHERE id=?");
+            $jq->execute([$jid]);
+            $jr=$jq->fetch();
+            $jq->closeCursor();
+            if($jr&&(string)$jr['type']==='execute_task'){
+                $pl=json_decode((string)$jr['payload'],true);
+                $tidsF=is_array($pl['task_ids']??null)?$pl['task_ids']:[];
+                foreach(array_slice($tidsF,0,5) as $tidF){
+                    $tidF=(int)$tidF;
+                    $tq=db()->prepare("SELECT id,title,origin,status FROM seo_tasks WHERE id=?");
+                    $tq->execute([$tidF]);
+                    $tr=$tq->fetch();
+                    $tq->closeCursor();
+                    if(!$tr||(string)$tr['status']==='done')continue;
+                    $rootF=chat_root_inbox((string)$tr['origin']);
+                    if(!$rootF)continue;
+                    $why='';
+                    if(preg_match('/task '.$tidF.': (.+)/u',$logAppend,$wm))$why=$wm[1];
+                    elseif(preg_match('/FAILED: (?:Error: )*(.+)/u',$logAppend,$wm))$why=$wm[1];
+                    $why=trim(preg_replace('/\s+at .*$/us','',$why));
+                    $why=mb_substr($why,0,160,'UTF-8');
+                    chat_msg_insert($rootF,'chat_agent','#'.$tidF.'「'.mb_substr((string)$tr['title'],0,30,'UTF-8').'」没做成，账户和站点没有改动。原因：'.($why!==''?$why:'日志里没有摘到原因，job #'.$jid).'。要重做在这里说一声。','seo-worker',['tasks'=>[$tidF],'jobs'=>[$jid]]);
+                    audit('seo-worker','seo_job_fail_notify',(string)$tidF,['job_id'=>$jid]);
+                }
+            }
+        }catch(Throwable $e){error_log('seo-api job fail notify: '.$e->getMessage());}
+    }
     res(200,array_merge(['ok'=>true],$out));
 }
 
@@ -4781,7 +4815,21 @@ if($m==='GET'&&$ROUTE==='/task_state'){
     $j->execute([(int)$t['client_id']]);
     $jobs=[];
     foreach($j->fetchAll() as $r){
-        if(preg_match('/\b'.$tid.'\b/',(string)$r['payload'])){unset($r['payload']);$jobs[]=$r;if(count($jobs)>=5)break;}
+        if(preg_match('/\b'.$tid.'\b/',(string)$r['payload'])){
+            unset($r['payload']);
+            /* 失败 job 带一句原因（2026-11-25）：频道 bot 被问「为什么失败」时要能照实答，不再说「没记录原因」。 */
+            if((string)$r['status']==='failed'){
+                $lq=db()->prepare("SELECT RIGHT(log_text,6000) AS tail FROM agent_jobs WHERE id=?");
+                $lq->execute([(int)$r['id']]);
+                $lt=(string)($lq->fetch()['tail']??'');
+                $lq->closeCursor();
+                $whyJ='';
+                if(preg_match_all('/(?:FAILED: |aborted :: )(.+)/u',$lt,$wmJ))$whyJ=(string)end($wmJ[1]);
+                $whyJ=trim(preg_replace('/^(?:Error: )+/u','',$whyJ));
+                if($whyJ!=='')$r['fail_reason']=mb_substr($whyJ,0,400,'UTF-8');
+            }
+            $jobs[]=$r;if(count($jobs)>=5)break;
+        }
     }
     res(200,['task'=>$t,'jobs'=>$jobs]);
 }

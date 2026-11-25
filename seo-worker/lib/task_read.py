@@ -45,6 +45,12 @@ def main():
         print('关联 job（新在前）:')
         for j in jobs:
             print('  #%s %s %s（%s）' % (j.get('id'), j.get('type'), j.get('status'), j.get('created_at')))
+            # 失败的 job 带一句原因（2026-11-25：Ben's NZ #2786 失败后 bot 只能答「没记录原因」，
+            # 原因其实在 job 日志尾部，服务端 /task_state 现在随 job 行带出）。
+            if j.get('status') == 'failed':
+                why = str(j.get('fail_reason') or '')
+                if why:
+                    print('     失败原因: ' + why)
     tail = (t.get('result_note_tail') or '').strip()
     if tail:
         print('结果备注（末 1500 字）:')
