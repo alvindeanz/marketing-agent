@@ -2088,6 +2088,16 @@ function chat_root_or_die($id,$needOpen){
    全部 reply_to 指根，会话就是一层，没有回复的回复。
    status 一律 resolved：会话是否待办看根行，子行的 status 没有意义，
    写成 open 会让收件箱的待办计数虚高。 */
+/* 频道后台记录（2026-11-25 Alvin 定「频道只说三种话：答案、做完了、要你定」）：已开工、
+   已执行指令、拆条、档案回执、自动续跑这类过程行不再占频道正文。行照写（模型下一轮
+   还要读到任务号，审计也要），refs.quiet=true，前端折叠成一行「后台记录 N 条」。
+   失败、未执行、停人这类要人知道的行不走这里，照旧走 chat_msg_insert。
+   回滚：把这个函数体改成直接调 chat_msg_insert 不加 quiet 即可。 */
+function chat_bg_insert($root,$body,$by,$refs=null){
+    $r=is_array($refs)?$refs:[];
+    $r['quiet']=true;
+    return chat_msg_insert($root,'chat_agent',$body,$by,$r);
+}
 function chat_msg_insert($root,$kind,$body,$by,$refs=null){
     db()->prepare("INSERT INTO seo_inbox(client_id,kind,body,refs,reply_to,status,created_by)VALUES(?,?,?,?,?,'resolved',?)")
         ->execute([
@@ -2121,8 +2131,7 @@ function hold_notify($tid,$why,$by='seo-worker'){
     $pvH=preg_match('/预览: (https?:\/\/\S+)/u',(string)$t['result_note'],$pmH)?$pmH[1]:'';
     chat_msg_insert($root,'chat_agent','任务 #'.(int)$tid.'「'.mb_substr((string)$t['title'],0,40,'UTF-8').'」停下等人：'
         .mb_substr(trim((string)$why),0,200,'UTF-8')
-        .'。细节在任务卡，放行类的可在看板点放行或回「放行 #'.(int)$tid.' 标题片段」。'
-        .($pvH!==''?' 网页版：'.$pvH:''),$by);
+        .'。细节在任务卡，放行类的可在看板点放行或回「放行 #'.(int)$tid.' 标题片段」。',$by);
 }
 /* 交付通知（2026-10-30 Alvin 定「停人时刻问人不等钟」）：频道出身任务的交付物就绪时回出生
    频道请人过目，表态即凭证（回「通过」推进后续单，回改动意见走反馈落地）。与 hold_notify
@@ -2192,6 +2201,8 @@ function inbox_refs_norm($v){
        白名单重建把 channel:true 冲掉，频道根隐身，下次开频道新建空根顶掉 133 条历史）。
        module 同理（2026-10-27 频道分线）：被冲掉 = 分线频道查询失配 + worker 读不到线别。 */
     if(!empty($v['channel']))$out['channel']=true;
+    /* 后台记录标记（2026-11-25 频道 PJ 化）：过程性系统行照写照留，前端默认折叠。 */
+    if(!empty($v['quiet']))$out['quiet']=true;
     if(!empty($v['module'])&&in_array($v['module'],['seo','paid'],true))$out['module']=$v['module'];
     if($v&&array_keys($v)===range(0,count($v)-1))$v=['tasks'=>$v];
     foreach(['tasks','jobs'] as $k){
@@ -2495,7 +2506,21 @@ function commission_start_exec($root,$a,$asker,$sameTurnDrafts=null,$curMsgId=0)
         $hasBack=$backKey!==''&&dispatch_backing_ok($cid,$backKey);
         $gradeC=dispatch_grade($opsArr,release_policy_load(),$hasBack);
         if(strpos($gradeC,'invalid')===0)return ['ok'=>false,'what'=>$gradeC.'。执行器未覆盖的操作启动不了机器位，该项留人工或等执行器排期'];
-        if($fastPath&&$gradeC!=='auto')return ['ok'=>false,'what'=>'快路只放直落档（全 reversible，或 structural/external 有已确认批文）。本单含需人确认项，委托单卡已留在本轮回复上，回一句确认即启动'];
+        /* 快路放宽（2026-11-25 Alvin 定，频道 PJ 化）：运营在最新一条消息里亲口下的明确指令就是
+           放行，花钱档（预算、启停系列、出价策略、新建）与无批文的 external/structural 也同轮启动，
+           不再隔一轮要「开工」。引语逐字命中最新人类消息这道验证不变。仍走两阶段的只剩：
+           不可逆档（转化目标、GA4 配置）与 l0 排除表里的 op。 */
+        if($fastPath&&$gradeC!=='auto'){
+            $polF=release_policy_load();
+            $rcF=is_array($polF['risk_class_by_op']??null)?$polF['risk_class_by_op']:[];
+            $exF=is_array($polF['l0_rules']['l0_exclude_ops']['ops']??null)?$polF['l0_rules']['l0_exclude_ops']['ops']:[];
+            foreach($opsArr as $opF){
+                if(($rcF[$opF]??'')==='irreversible'||in_array($opF,$exF,true)){
+                    return ['ok'=>false,'what'=>'本单含不可逆或观察期操作（'.$opF.'），不走同轮启动。委托单卡已留在本轮回复上，回一句确认即启动'];
+                }
+            }
+            $gradeC='auto-mandate';
+        }
         if(!$hasBack)$backKey='';
     }
     list($t,$err)=task_fields_clean($draft,['status_force'=>'approved']);
@@ -2518,7 +2543,7 @@ function commission_start_exec($root,$a,$asker,$sameTurnDrafts=null,$curMsgId=0)
         $jid=$jl?$jl[0]:0;
     }
     $tail=$kind==='change'
-        ?('改动类，风险档 '.($gradeC==='auto'?'可回滚'.($backKey!==''?'/有批文背书':'').'：方案出来直接落地，失败即熔断转人工':'需确认：方案出来后回「放行 #'.$tid.' 标题片段」或在看板点放行'))
+        ?('改动类，风险档 '.($gradeC==='auto-mandate'?'运营指令即放行：方案出来直接落地，失败即熔断转人工':($gradeC==='auto'?'可回滚'.($backKey!==''?'/有批文背书':'').'：方案出来直接落地，失败即熔断转人工':'需确认：方案出来后回「放行 #'.$tid.' 标题片段」或在看板点放行')))
         :($kind==='report'?'报告草稿，出稿后人工验收再对客':($t['owner_type']==='client'?'客户侧任务，挂看板等客户动作':'执行任务'));
     return ['ok'=>true,'what'=>'已启动委托单 #'.$tid.'「'.$t['title'].'」（'.$tail.($jid?('，job #'.$jid):'').'）','task_id'=>$tid,'job_ids'=>$jid?[$jid]:[]];
 }
@@ -3772,7 +3797,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
                人工部分回频道当场推进，不再生「人工落地」子单，母单是唯一载体直到交付。 */
             task_append_note($tid,'[split-guard] chat 单实时交付不拆单（2026-10-28 规矩），'.count($blocked).' 处白名单外条目留在本单，人工部分频道直落');
             $rootB=chat_root_inbox($task['origin']);
-            if($rootB)chat_msg_insert($rootB,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$task['title'],0,50,'UTF-8').'」方案拆条：'.(count($clean)-count($blocked)).' 处机器落地，'.count($blocked).' 处白名单外留在本单（chat 单不拆单），人工部分直接在这里处理，进展看任务卡条目账本。','seo-worker');
+            if($rootB)chat_bg_insert($rootB,'任务 #'.$tid.'「'.mb_substr((string)$task['title'],0,50,'UTF-8').'」方案拆条：'.(count($clean)-count($blocked)).' 处机器落地，'.count($blocked).' 处白名单外留在本单（chat 单不拆单），人工部分直接在这里处理，进展看任务卡条目账本。','seo-worker');
         }elseif($blocked&&(string)$task['owner_type']==='agent'&&(string)$task['status']!=='done'){
             $sq=db()->prepare("SELECT id FROM seo_tasks WHERE origin IN(?,?) LIMIT 1");
             $sq->execute(['split:'.$tid,'splitw:'.$tid]);
@@ -3808,7 +3833,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/items$#',$ROUTE,$mm)){
                         $rq=db()->prepare("SELECT id,client_id FROM seo_inbox WHERE id=?");
                         $rq->execute([(int)$om[2]]);
                         $rootN=$rq->fetch();
-                        if($rootN)chat_msg_insert($rootN,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$task['title'],0,50,'UTF-8').'」方案已拆条：'.(count($clean)-count($blocked)).' 处机器落地，'.count($blocked).' 处白名单外已生成人工工单 #'.$splitTid.'，执行状态看任务卡条目账本。','seo-worker');
+                        if($rootN)chat_bg_insert($rootN,'任务 #'.$tid.'「'.mb_substr((string)$task['title'],0,50,'UTF-8').'」方案已拆条：'.(count($clean)-count($blocked)).' 处机器落地，'.count($blocked).' 处白名单外已生成人工工单 #'.$splitTid.'，执行状态看任务卡条目账本。','seo-worker');
                     }
                 }
             }else{$splitTid=(int)$sr['id'];}
@@ -3984,7 +4009,7 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/condition_met$#',$ROUTE,$mm)){
     $gC=dispatch_grade($opsC2,release_policy_load(),$backC2);
     if($gC==='auto'){
         list($ajC2,)=queue_task_jobs($cidC,'apply_task',[$tid],'condition-probe','seo_tasks_release');
-        if($rootC)chat_msg_insert($rootC,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」前置条件已满足'.($why!==''?('（'.$why.'）'):'').'，按原授权自动续跑落地（apply job #'.($ajC2?$ajC2[0]:0).'），落完回报。','seo-worker');
+        if($rootC)chat_bg_insert($rootC,'任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」前置条件已满足'.($why!==''?('（'.$why.'）'):'').'，按原授权自动续跑落地（apply job #'.($ajC2?$ajC2[0]:0).'），落完回报。','seo-worker');
         res(200,['ok'=>true,'did'=>'apply','job_id'=>$ajC2?$ajC2[0]:0]);
     }
     if($rootC)chat_msg_insert($rootC,'chat_agent','任务 #'.$tid.'「'.mb_substr((string)$t['title'],0,50,'UTF-8').'」前置条件已满足'.($why!==''?('（'.$why.'）'):'').'，含需人确认项：回「放行 #'.$tid.' 加标题片段」或在看板点放行。','seo-worker');
@@ -5978,7 +6003,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
             $linesF=array_map(function($w){
                 return $w['key'].($w['old']===null?'：新增「':'：由「'.mb_substr($w['old'],0,60,'UTF-8').'」改为「').mb_substr($w['new'],0,120,'UTF-8').'」';
             },$factWrites);
-            chat_msg_insert($root,'chat_agent',"已更新档案（记在 ".$authorF." 名下，版本账可回滚）：\n".implode("\n",$linesF),$authorF);
+            chat_bg_insert($root,"已更新档案（记在 ".$authorF." 名下，版本账可回滚）：\n".implode("\n",$linesF),$authorF);
         }
     }
     /* 任务线程的自动执行：白名单里的看板层动作在回复落库的同一刻执行，系统行记账，
@@ -6025,7 +6050,7 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                    本轮 drafts 与消息号传进去给快路（proposal_msg_id=0）用。 */
                 $rC=commission_start_exec($root,$a,$askerA,$drafts,$msgId);
                 if($rC['ok']){
-                    chat_msg_insert($root,'chat_agent','已执行频道指令：'.$rC['what'].'（确认人 '.$askerA.'），进展会回频道。','seo-worker',['tasks'=>[(int)($rC['task_id']??0)]]);
+                    chat_bg_insert($root,'已执行频道指令：'.$rC['what'].'（确认人 '.$askerA.'），进展会回频道。','seo-worker',['tasks'=>[(int)($rC['task_id']??0)]]);
                     $executed[]=['idx'=>$idx,'type'=>'commission_start','ok'=>true,'task_id'=>(int)($rC['task_id']??0)];
                 }else{$failLine($rC['what']);}
                 continue;
@@ -6063,13 +6088,13 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 $sunk=($t2['status']==='review'||trim((string)$t2['result_note'])!=='')?'（该任务已有产出，砍掉即弃）':'';
                 $err=task_close($tidA,'killed','频道指令不做：'.$a['reason'].'（发起 '.$askerA.'）',$askerA);
                 if($err){$failLine($err);continue;}
-                chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」归档不做'.$sunk.'。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
+                chat_bg_insert($root,'已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」归档不做'.$sunk.'。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
                 $executed[]=['idx'=>$idx,'type'=>'kill','ok'=>true,'task_id'=>$tidA];
             }elseif($a['type']==='machine_run'){
                 /* 频道版转机器执行位：双锚已过，逻辑与线程版同一个函数，不复制第二份。 */
                 $rM=thread_action_exec($root,$t2,$a,$askerA);
                 if($rM['ok']){
-                    chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」'.$rM['what'].'（发起 '.$askerA.'）。','seo-worker');
+                    chat_bg_insert($root,'已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」'.$rM['what'].'（发起 '.$askerA.'）。','seo-worker');
                     $executed[]=['idx'=>$idx,'type'=>'machine_run','ok'=>true,'task_id'=>$tidA];
                 }else{$failLine($rM['what']);}
             }elseif($a['type']==='release'){
@@ -6081,13 +6106,13 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                     if(trim((string)$t2['output_url'])===''&&strpos((string)$t2['result_note'],'预览: ')===false){$failLine('任务 #'.$tidA.' 是分析任务但没有产出链接，无法验收');continue;}
                     $err=task_close($tidA,'accepted','分析报告已验收（频道放行，发起 '.$askerA.'）',$askerA);
                     if($err){$failLine($err);continue;}
-                    chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」分析报告验收完结（发起 '.$askerA.'）。','seo-worker');
+                    chat_bg_insert($root,'已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」分析报告验收完结（发起 '.$askerA.'）。','seo-worker');
                     $executed[]=['idx'=>$idx,'type'=>'release','ok'=>true,'task_id'=>$tidA];
                     continue;
                 }
                 if(blog_outline_stage($t2)){
                     list($ajB,)=blog_release_as_write($cidA,$t2,$askerA);
-                    chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」大纲放行，已排写稿（job #'.($ajB?$ajB[0]:0).'，发起 '.$askerA.'）。','seo-worker');
+                    chat_bg_insert($root,'已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」大纲放行，已排写稿（job #'.($ajB?$ajB[0]:0).'，发起 '.$askerA.'）。','seo-worker');
                     $executed[]=['idx'=>$idx,'type'=>'release','ok'=>true,'task_id'=>$tidA];
                     continue;
                 }
@@ -6096,12 +6121,12 @@ if($m==='POST'&&preg_match('#^/inbox/(\d+)/chat_reply$#',$ROUTE,$mm)){
                 list($ajC,$skC)=queue_task_jobs($cidA,'apply_task',[$tidA],$askerA,'seo_tasks_release');
                 if(!$ajC){$failLine('任务 #'.$tidA.' 已有落地 job 在飞（job #'.($skC?$skC[0]['job_id']:0).'），不重复排');continue;}
                 task_append_note($tidA,'[release] 频道放行（发起 '.$askerA.'）'.($a['reason']!==''?('：'.$a['reason']):''));
-                chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」放行落地（apply job #'.$ajC[0].'，发起 '.$askerA.'），落完回报。','seo-worker');
+                chat_bg_insert($root,'已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」放行落地（apply job #'.$ajC[0].'，发起 '.$askerA.'），落完回报。','seo-worker');
                 $executed[]=['idx'=>$idx,'type'=>'release','ok'=>true,'task_id'=>$tidA];
             }else{
                 db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tidA]);
                 task_append_note($tidA,'[later] 频道指令延后：'.$a['reason']);
-                chat_msg_insert($root,'chat_agent','已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」延后挂起。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
+                chat_bg_insert($root,'已执行频道指令：#'.$tidA.'「'.mb_substr((string)$t2['title'],0,60,'UTF-8').'」延后挂起。理由：'.mb_substr($a['reason'],0,200,'UTF-8'),'seo-worker');
                 $executed[]=['idx'=>$idx,'type'=>'later','ok'=>true,'task_id'=>$tidA];
             }
         }

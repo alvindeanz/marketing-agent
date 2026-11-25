@@ -3102,7 +3102,21 @@ function renderChatStream(){
   const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
   const older=Math.max(0,chatMsgs.length-chatLimit);
   const shown=older?chatMsgs.slice(older):chatMsgs;
+  /* 后台记录折叠（2026-11-25 频道 PJ 化）：refs.quiet 的过程行（已执行指令、拆条、档案回执）
+     连续的并成一行「后台记录 N 条」，点开才看全文，频道正文只留答案、结果、要人定的事。 */
+  const bgRuns={};let bgHead=null;
+  shown.forEach(m=>{
+    if(m.kind==='chat_agent'&&m.refs&&m.refs.quiet){if(bgHead===null){bgHead=m.id;bgRuns[bgHead]=[]}bgRuns[bgHead].push(m)}
+    else bgHead=null;
+  });
+  const bgSkip={};Object.keys(bgRuns).forEach(k=>bgRuns[k].slice(1).forEach(x=>{bgSkip[x.id]=1}));
   box.innerHTML=(older?'<div style="text-align:center;margin-bottom:8px"><button class="btn tiny ghost" onclick="chatLimit+=200;renderChatStream()">加载更早（还有 '+older+' 条）</button></div>':'')+shown.map(m=>{
+    if(bgSkip[m.id])return '';
+    if(bgRuns[m.id]){
+      const run=bgRuns[m.id];
+      return '<details class="ch-bg" style="margin:2px 0 8px;font-size:12px;color:#8a8f98"><summary style="cursor:pointer;list-style:none">· 后台记录 '+run.length+' 条 · '+esc(String(run[run.length-1].created_at||'').slice(5,16))+'</summary>'+
+        run.map(x=>'<div style="margin:4px 0 0 10px;white-space:pre-wrap">'+esc(String(x.created_at||'').slice(11,16))+' '+chLinkify(x.body||'')+'</div>').join('')+'</details>';
+    }
     const isMe=m.kind==='chat_user';
     const isSys=m.kind==='chat_agent'&&m.created_by!=='seo-worker';
     const cls=isMe?'me':(isSys?'sys':'bot');

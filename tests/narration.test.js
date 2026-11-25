@@ -35,7 +35,7 @@ t('prompt 含纯叙述铁律、三要素、唯一的嘴与 SKIP 出口，带任�
   });
   assert.ok(p.includes('纯叙述'));
   assert.ok(p.includes('没有任何执行权'));
-  assert.ok(p.includes('账户或站点动没动'));
+  assert.ok(p.includes('一到两句话')); /* 2026-11-25：三要素改一到两句结果，没改动的声明不再说 */
   assert.ok(p.includes('SKIP'));
   assert.ok(p.includes('#1375'));
   assert.ok(p.includes('capability-gap[cli]'));
