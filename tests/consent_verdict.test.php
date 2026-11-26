@@ -138,5 +138,33 @@ t('源码闸：大纲段不再按 output_url 的形状反推',function()use($src
     if(strpos($src,"strpos(\$u,'/blog/')===false")!==false)throw new Exception('按网址形状猜大纲的旧判据还在');
     eq(substr_count($src,'function blog_stage_is_outline('),1);
 });
+/* 发布闸两个不自动发的开关（2026-11-26，HornTech NZ #3088 与 Kuddles 人工审批口径） */
+t('[hold-publish] 只认独占一行，句子里提到不算',function(){
+    eq(task_publish_hold("改稿。\n[hold-publish] 先迁到中文栏目再发\n[target] /blog/a/"),true);
+    eq(task_publish_hold("  [hold-publish]"),true);
+    eq(task_publish_hold('说明里提到 [hold-publish] 这种写法'),false);
+    eq(task_publish_hold('修订完成前不发布'),false);
+});
+t('暂缓标记压过一切凭证：委托、卡上同意、到期都不放行（#3088 回放）',function()use($base,$NOW){
+    eq(blog_consent_decide(['hold'=>true,'delegated'=>true]+$base)['via'],'hold');
+    eq(blog_consent_decide(['hold'=>true,'cands'=>[[9,'agree']]]+$base)['ok'],false);
+    eq(blog_consent_decide(['hold'=>true,'issued'=>'2026-11-01']+$base)['ok'],false);
+});
+t('人工审批口径的客户：到期不算同意，卡上点了同意照常放行（Kuddles）',function()use($base){
+    $v=blog_consent_decide(['human'=>true,'issued'=>'2026-11-01']+$base);
+    eq($v['ok'],false);eq($v['via'],'none');
+    eq(blog_consent_decide(['human'=>true,'issued'=>'2026-11-01','cands'=>[[9,'agree']]]+$base)['ok'],true);
+    eq(blog_consent_decide(['issued'=>'2026-11-01']+$base)['via'],'expiry');
+});
+t('客户发布口径只认开头那个词：agent、human，其余按默认',function(){
+    eq(blog_publish_policy('agent（2026-10-15 Alvin 定，降人工介入）'),'agent');
+    eq(blog_publish_policy('human（2026-11-26 Alvin 定：须人工审批，发布权不委托 agent）'),'human');
+    eq(blog_publish_policy('2026-10-15 Alvin 定：发布权托管 agent'),'');
+    eq(blog_publish_policy(''),'');
+});
+t('源码闸：发布口径 fact 全库只读一处，等客户判定与同意判定同源',function()use($src){
+    eq(substr_count($src,"fact_key='policy.blog_publish_executor'"),1);
+    if(strpos($src,"\$pol=blog_publish_policy_of((int)(\$t['client_id']??0));")===false)throw new Exception('blog_card_waiting 没走统一口径');
+});
 echo "\n$pass passed, $fail failed\n";
 exit($fail?1:0);

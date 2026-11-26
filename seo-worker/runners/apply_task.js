@@ -924,6 +924,10 @@ async function requireBlogPublishConsent(api, task, record) {
     }
     return;
   }
+  if (v.via === 'hold') {
+    throw new Error('task ' + taskId + '：任务书带 [hold-publish] 暂缓标记，这一篇还有没满足的发布前置条件，任何凭证都不自动发布。'
+      + '前置条件处理完后由人摘掉任务书里的 [hold-publish] 那一行再放行。');
+  }
   throw new Error('task ' + taskId + '：客户还没在确认卡上同意发布（publish_blog=agree'
     + (v.last ? '，当前最后表态是 ' + v.last : '，卡上没有任何发布表态，单上也没有写明本篇发布的客户批文') + '）。'
     + '不发布。等客户在确认卡上点「同意，安排发布」、到期视同同意，或由同事在看板代确认后再放行。');

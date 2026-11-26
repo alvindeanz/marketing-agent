@@ -20,6 +20,16 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-26 AIRA 任务接口并发 500 + 发布闸两个不自动发开关（rev 见下，Alvin 批「开工吧」）
+- **GET /tasks 并发即 500**（rev 649d2a3，api 已部署）：`archive_closed_tasks` 挂在读接口上，每次读发两条条件 UPDATE，两个读请求同时到就互锁，未捕获异常回 internal_error。实测修前同客户 4 并发 14/24 失败、不同客户 14/24、看板加任务 6/12；改成先无锁查单号、没有就零写入、有才按主键升序更新、失败只记日志之后，同脚本全部 0。10-24 记的「并发双轮瞬断」是同一个病。复测脚本在 Aira 会话 scratchpad（race.js、race2.js），就是 Promise.all 打几个 /tasks。
+- **发布同意判定加两个开关**，都在 `blog_consent_decide` 一处：
+  - 任务级：任务书独占一行 `[hold-publish] 原因`，返回 via=hold，委托、卡上同意、到期、批文都不放行，人摘掉那一行才发。起因 HornTech NZ #3088：任务书写「迁好栏目之前不发布」，委托客户过了发布门照样自动发，发早了一小时后下架。机器不读自然语言，只认标记。
+  - 客户级：`policy.blog_publish_executor` 的值以 human 开头，7 天到期不算同意，必须有人在卡上点或挂批文。首家 Kuddles（Alvin 2026-11-26 定须人工审批，fact #2365 已改）。agent 开头是委托，其余含空是默认。
+- 这条 fact 现在全库只读一处（`blog_publish_policy_of`），`blog_card_waiting` 改走它，与同意判定同源。注意：值必须以 agent 或 human 开头才生效，Kuddles 旧值「2026-10-15 Alvin 定：发布权托管 agent」一直没被认成委托。
+- worker：apply 遇 via=hold 给专门的报错话术；出计划提示词加一条，发布有前置条件的单写 `[hold-publish]`。
+- 测试：consent_verdict.test.php 再加 5 例（26 例全过），php 全套与 js 全套通过。
+- 回滚：git revert 对应提交后 `./deploy.sh api` 与 `./deploy.sh worker`。
+
 ### 2026-11-26 AIRA 博客大纲段判定改正证据（Alvin 批「第一性原理修复」）
 - 起因：Apex #667、#668 成稿带确认卡、卡满 7 天视同同意，放行时仍被 `blog_outline_stage` 当大纲重排写稿，放行官转两圈停人，11-15 挂到 11-25。旧判据是反推（output_url 不含 /blog/ 即大纲），成稿每多一种状态补一条例外（卡上同意、发布权委托），11-04 加到期规则时漏补。
 - 改法：`seo-api.php` 新增纯函数 `blog_stage_is_outline(ops, output_url, note)`，只认正证据：最近一次交付是大纲（备注有「大纲已出」且其后没有确认卡、成稿块、平台预览链接）。`blog_outline_stage` 只剩平台分流加这一判。两条例外查询删掉。成稿该不该发布仍只归 `blog_publish_consent_verdict`。

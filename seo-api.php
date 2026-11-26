@@ -953,16 +953,14 @@ function blog_card_waiting($t){
        博客确认卡是选题知会不是发布闸，不算等客户，L0/放行照常流转。
        apply 侧 requireBlogPublishConsent 同口径，两处要一起改。 */
     if($item==='publish_blog'){
-        try{
-            $pq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
-            $pq->execute([(int)($t['client_id']??0)]);
-            $pv=$pq->fetch();
-            if($pv&&preg_match('/^\s*agent\b/i',(string)$pv['value']))return false;
-        }catch(Exception $e){/* facts 读不到按未委托处理 */}
-        /* 到期视同同意（2026-11-04 Alvin 批博客闸门松绑）：确认卡带 [卡签发 YYYY-MM-DD] 戳
-           （execute 出卡时盖，重出卡刷新），满 7 天即不再算等客户，放行官与 L0 照常流转，
-           apply 侧 requireBlogPublishConsent 同口径到期放行，两处一起改。无戳旧卡照旧硬等。 */
-        if(preg_match_all('/\[卡签发 (\d{4}-\d{2}-\d{2})\]/u',$sig,$sm)){
+        /* 发布权委托（2026-10-15 Alvin 定）：委托客户的博客确认卡是选题知会不是发布闸，不算等客户。
+           人工审批口径的客户（human，2026-11-26）到期不算同意，没人表态就一直是等客户。
+           任务带 [hold-publish] 的不在这里管：它等的是前置条件不是客户，照常进放行位由人看。 */
+        $pol=blog_publish_policy_of((int)($t['client_id']??0));
+        if($pol==='agent')return false;
+        /* 到期视同同意（2026-11-04 Alvin 批博客闸门松绑）：确认卡带 [卡签发 YYYY-MM-DD] 戳，满 7 天即不再算等客户。
+           无戳旧卡照旧硬等。判据与 blog_consent_decide 的到期分支同口径。 */
+        if($pol!=='human'&&preg_match_all('/\[卡签发 (\d{4}-\d{2}-\d{2})\]/u',$sig,$sm)){
             $issued=end($sm[1]);
             $anchor=new DateTime($issued.' 00:00:00',new DateTimeZone('Pacific/Auckland'));
             $now=new DateTime('now',new DateTimeZone('Pacific/Auckland'));
@@ -1043,21 +1041,35 @@ function backing_publish_fact_ok($value,$slug){
     if(!preg_match('#(?<![A-Za-z0-9_-])'.preg_quote($slug,'#').'(?![A-Za-z0-9_-])#',$value))return false;
     return (bool)preg_match('/发布|上线|先发|可以发|发这篇|publish|go live/iu',$value);
 }
+/* 任务级发布暂缓标记（2026-11-26，HornTech NZ #3088：任务书写了「迁好栏目之前不发布」，发布权委托的客户
+   过了发布门照样自动发）。机器不读任务书的自然语言猜能不能发，只认独占一行的 [hold-publish]，后面可跟原因。 */
+function task_publish_hold($detail){
+    return (bool)preg_match('/^[ \t]*\[hold-publish\][^\n]*$/mu',(string)$detail);
+}
+/* 客户级发布口径：agent = 发布权委托；human = 必须人工点同意，到期不算；其余（含空）= 默认，卡加 7 天到期。
+   只认值开头的那个词，后面随便写说明。 */
+function blog_publish_policy($value){
+    if(preg_match('/^\s*(agent|human)\b/i',(string)$value,$m))return strtolower($m[1]);
+    return '';
+}
 /* 判定本体。入参全是取好的数据：
    delegated   发布权已委托（policy.blog_publish_executor=agent）
    cands       候选同意来源，按序 [[任务号, 该任务最后一次 publish_blog 表态或 null], ...]，本任务排第一
    issued      本任务确认卡签发日 Y-m-d（没有戳为空），now 为当前时间戳
    backing     ['key'=>批文 key,'ok'=>已确认且写明本篇发布,'date'=>批文日期 Y-m-d]，没有为 null
    card_issued 这篇文章最新一张卡的签发日（本任务或关联卡），用来挡「旧批文替新一版放行」
-   顺序即优先级：委托 > 卡上表态（客户亲点或代确认，取到第一张有表态的卡为准）> 满 7 天视同同意 > 批文。 */
+   hold        任务书带独占一行的 [hold-publish] 暂缓标记：这一篇有没满足的发布前置条件，什么凭证都不自动发，人摘掉才放行
+   human       客户级口径为人工审批（policy.blog_publish_executor=human）：必须有人在卡上点同意或挂批文，到期不算同意
+   顺序即优先级：暂缓 > 委托 > 卡上表态（客户亲点或代确认，取到第一张有表态的卡为准）> 满 7 天视同同意 > 批文。 */
 function blog_consent_decide($in){
+    if(!empty($in['hold']))return ['ok'=>false,'via'=>'hold','last'=>'','card'=>0];
     if(!empty($in['delegated']))return ['ok'=>true,'via'=>'delegated','last'=>'','card'=>0];
     foreach(($in['cands']??[]) as $c){
         if($c[1]===null)continue;
         return ['ok'=>(string)$c[1]==='agree','via'=>'card','last'=>(string)$c[1],'card'=>(int)$c[0]];
     }
     $issued=(string)($in['issued']??'');
-    if($issued!==''){
+    if($issued!==''&&empty($in['human'])){
         $anchor=new DateTime($issued.' 00:00:00',new DateTimeZone('Pacific/Auckland'));
         if(((int)($in['now']??time())-$anchor->getTimestamp())/86400>=7)return ['ok'=>true,'via'=>'expiry','last'=>'','card'=>0,'issued'=>$issued];
     }
@@ -1119,14 +1131,20 @@ function blog_consent_card_by_slug($cid,$tid,$t){
 /* 发布同意判定，全系统只此一份（2026-11-18 ticket #64）。派单闸、续排、执行闸（apply 经
    GET /blog_consent 来问）都调这里；此前 apply 侧自己另判一份，两份漂移过（#2174：派单放行、执行拦下）。
    $materialize：凭批文放行时顺手记一行代确认（署建单人的名，留档写批文原文），同意账本保持单一来源。 */
-function blog_publish_consent_verdict($cid,$tid,$t,$materialize=false){
-    $in=['delegated'=>false,'cands'=>[],'issued'=>'','now'=>time(),'backing'=>null,'card_issued'=>''];
+/* 客户的发布口径，读不到按默认处理。全库只此一处读这条 fact。 */
+function blog_publish_policy_of($cid){
     try{
         $pq=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
         $pq->execute([(int)$cid]);
         $pv=$pq->fetch();$pq->closeCursor();
-        if($pv&&preg_match('/^\s*agent\b/i',(string)$pv['value']))$in['delegated']=true;
-    }catch(Exception $e){/* facts 读不到按未委托处理 */}
+        return $pv?blog_publish_policy($pv['value']):'';
+    }catch(Exception $e){return '';}
+}
+function blog_publish_consent_verdict($cid,$tid,$t,$materialize=false){
+    $in=['delegated'=>false,'human'=>false,'hold'=>task_publish_hold($t['detail']??''),'cands'=>[],'issued'=>'','now'=>time(),'backing'=>null,'card_issued'=>''];
+    $pol=blog_publish_policy_of($cid);
+    if($pol==='agent')$in['delegated']=true;
+    if($pol==='human')$in['human']=true;
     $ids=[(int)$tid];
     foreach(consent_ref_ids(['id'=>$tid]+$t) as $x)if(!in_array($x,$ids,true))$ids[]=$x;
     $lk=blog_consent_card_by_slug($cid,$tid,$t);
