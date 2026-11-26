@@ -1992,16 +1992,27 @@ function reclaim_capability_gap_tasks(){
    口径同 /clients 徽章的 cardish）、attention=1（停人标没人收口，归档等于藏尸）。 */
 function archive_closed_tasks($cid=null){
     ensure_task_archived();
-    $sql="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND ".CHAT_ORIGIN_SQL;
-    if($cid!==null){db()->prepare($sql." AND client_id=?")->execute([(int)$cid]);}
-    else db()->exec($sql);
     /* 2026-10-30 Alvin 定：做完直接收口，卡不扣板。此前「发了卡未收反馈的 done 单留板上」
        让交付完的任务在板上烂着，人工不知道怎么办客户也不知道怎么办；卡的死活归卡系统
        （每周卡汇总 + harness 折叠走 include_archived=1 全量，归档不影响后续折叠与到期钟），
        抽查反查走 spotcheck。attention=1 的 done 单仍留板（那是点名要人看的，有明确下一步）。 */
-    $sql2="UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND attention=0";
-    if($cid!==null){db()->prepare($sql2." AND client_id=?")->execute([(int)$cid]);}
-    else db()->exec($sql2);
+    /* 并发安全（2026-11-26，GET /tasks 并发即 500 的根因候选）：本函数挂在读接口上，原先每次读都发两条
+       条件 UPDATE，两个读请求同时到就在同一批行上互锁，未捕获异常变 500。现改成先无锁查出该归档的
+       单号，没有就零写入；有才按主键升序更新。归档是维护动作，失败只记日志，绝不拖垮读请求，
+       下一次读会再扫到。 */
+    try{
+        $where="archived=0 AND status='done' AND (attention=0 OR ".CHAT_ORIGIN_SQL.")";
+        if($cid!==null){
+            $q=db()->prepare("SELECT id FROM seo_tasks WHERE $where AND client_id=? ORDER BY id LIMIT 500");
+            $q->execute([(int)$cid]);
+        }else $q=db()->query("SELECT id FROM seo_tasks WHERE $where ORDER BY id LIMIT 500");
+        $ids=array_map('intval',array_column($q->fetchAll(),'id'));
+        $q->closeCursor();
+        if(!$ids)return;
+        db()->exec("UPDATE seo_tasks SET archived=1 WHERE archived=0 AND status='done' AND id IN (".implode(',',$ids).") ORDER BY id");
+    }catch(Throwable $e){
+        error_log('seo-api archive_closed_tasks skipped: '.$e->getMessage());
+    }
 }
 
 /* sprint 标签白名单（2026-10-09 批二 C，Oak #626 实证：W37 这类非法标签解析不进任何轮次
