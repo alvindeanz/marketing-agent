@@ -114,5 +114,29 @@ t('源码闸：判定只此一份，派单闸与读接口都调 verdict',functio
     if(strpos($src,"blog_publish_consent_verdict((int)\$bt['client_id']")===false)throw new Exception('GET /blog_consent 没调 verdict');
     if(preg_match('/#\(\\\\d\{1,7\}\)\\\\b/',$src))throw new Exception('宽松的 #数字 候选扫描还在');
 });
+/* 大纲段判定（2026-11-26，Apex #667/#668：到期视同同意的成稿被当大纲重排写稿，转两圈停人十天） */
+$OUTLINE="预览: https://x/preview/task-9.html\n大纲已出（交付文件 outline-task-9.md），等客户回批。\n回批通过后，在线程里说「大纲已批，写正文」，会带着这句重跑出正文。";
+$CARD="[[块:blog_card]]\n博客确认卡（发给客户，客户点同意才发布；[卡签发 2026-11-15] 满 7 天无表态视同同意自动发布）: https://r/reports/a/blog_confirmation_task-667.html?t=667&k=x\n平台预览链接：https://a.co.nz/blog/b/?preview=1\n[[/块:blog_card]]";
+t('大纲段只认正证据：刚出大纲、output_url 为空才算',function()use($OUTLINE){
+    eq(blog_stage_is_outline('blog-draft,image-generate','',$OUTLINE),true);
+});
+t('成稿带确认卡不是大纲段，不管卡上有没有表态、到没到期（#667 回放）',function()use($CARD){
+    $u='https://r/reports/a/blog_confirmation_task-667.html?t=667&k=x';
+    eq(blog_stage_is_outline('blog-draft,image-generate,blog-publish',$u,$CARD."\n[auto-release L2-opus 2026-11-14 22:14] 可发"),false);
+    eq(blog_stage_is_outline('blog-draft','',$CARD),false);
+});
+t('先出大纲后出成稿：以最近一次交付为准',function()use($OUTLINE,$CARD){
+    eq(blog_stage_is_outline('blog-draft','',$OUTLINE."\n".$CARD),false);
+    eq(blog_stage_is_outline('blog-draft','',$CARD."\n".$OUTLINE),true);
+});
+t('没出过大纲的单不是大纲段：空产出、本地稿、非博客单都不许被当大纲重写',function(){
+    eq(blog_stage_is_outline('blog-draft','',''),false);
+    eq(blog_stage_is_outline('blog-draft','https://r/reports/a/preview/task-5.html','HTML 稿 lint 通过，预览已发'),false);
+    eq(blog_stage_is_outline('content-edit','','大纲已出'),false);
+});
+t('源码闸：大纲段不再按 output_url 的形状反推',function()use($src){
+    if(strpos($src,"strpos(\$u,'/blog/')===false")!==false)throw new Exception('按网址形状猜大纲的旧判据还在');
+    eq(substr_count($src,'function blog_stage_is_outline('),1);
+});
 echo "\n$pass passed, $fail failed\n";
 exit($fail?1:0);

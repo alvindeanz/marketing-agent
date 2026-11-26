@@ -1078,6 +1078,25 @@ function consent_sweep_due($note){
     $met=strrpos($note,'[consent-met]');
     return $met===false||$met<$lastWait;
 }
+/* 这张博客任务现在是不是「大纲已出、等回批」（2026-11-26 重写，Apex #667/#668 学费）。
+   旧判据是反推：output_url 不含 /blog/ 就当大纲。卡机制上线后成稿的 output_url 是卡链接，同样不含
+   /blog/，于是每多一种成稿状态就要补一条例外（卡上同意、发布权委托），到期视同同意那条漏补，
+   成稿被当大纲重排写稿，放行官转两圈停人。
+   现判据是正证据：只有执行器最近一次交付的确实是大纲才算。大纲交付时 output_url 留空，备注写
+   「大纲已出」；成稿交付会写卡链接与平台预览链接。所以：最近一枚「大纲已出」之后没有任何成稿痕迹
+   才是大纲段。成稿该不该发布不归这里管，归 blog_publish_consent_verdict 一处判。 */
+function blog_stage_is_outline($ops,$outputUrl,$note){
+    if(strpos(strtolower((string)$ops),'blog-draft')===false)return false;
+    $note=(string)$note;
+    if(strpos((string)$outputUrl,'blog_confirmation')!==false)return false;
+    $o=strrpos($note,'大纲已出');
+    if($o===false)return false;
+    foreach(['blog_confirmation','[[块:blog_card]]','平台预览链接'] as $mk){
+        $p=strrpos($note,$mk);
+        if($p!==false&&$p>$o)return false;
+    }
+    return true;
+}
 /* CONSENT-PURE-END */
 /* 同篇文章的确认卡（2026-11-17 ticket #63，Sammichelle #2100 对 #2045）：发布单常是另开的一张，
    正文不写卡单号，只写文章网址；客户在卡上点了同意，凭证判定和续排按「#单号」都接不上。
@@ -1172,37 +1191,17 @@ function blog_publish_consent_ok($cid,$tid,$t){
     return $v['ok'];
 }
 function blog_outline_stage($t){
-    $ops=strtolower((string)($t['ops']??''));
-    if(strpos($ops,'blog-draft')===false)return false;
     /* 大纲→写稿两段式是 WebForger 博客产线的专属轨道（write_draft 会重排 execute）。
-       其他平台（Shopify 等，2026-09-10 上线）的 blog-draft 是 prepare 成稿 + apply 建 DRAFT，
-       放行必须直通 apply，误入本分支会无限重写（task619 job653 教训）。按平台分流。 */
+       其他平台（Shopify 等）的 blog-draft 是 prepare 成稿 + apply 建 DRAFT，放行必须直通 apply，
+       误入本分支会无限重写（task619 job653 教训）。按平台分流。 */
+    if(strpos(strtolower((string)($t['ops']??'')),'blog-draft')===false)return false;
     $pq=db()->prepare("SELECT platform FROM seo_profiles WHERE client_id=?");
     $pq->execute([(int)($t['client_id']??0)]);
     $pr=$pq->fetch();
     $pq->closeCursor();
     $slug=strtolower(preg_replace('/[^a-z0-9_-]/i','',(string)($pr['platform']??'')));
     if($slug!=='webforger')return false;
-    /* 发布凭证优先于 URL 形状（2026-09-16，#103 误路由教训）：确认卡机制上线后
-       output_url 是卡链接不含 /blog/，按 URL 判会把「客户已同意发布」误路由成重写草稿。
-       凭证（publish_blog=agree）是真信号：有它就直通 apply 发布，判据读事实源不猜形状。 */
-    try{
-        $fb=db()->prepare("SELECT choice FROM seo_card_feedback WHERE task_id=? AND item='publish_blog' ORDER BY id DESC LIMIT 1");
-        $fb->execute([(int)$t['id']]);
-        $lastPub=$fb->fetch();
-        if($lastPub&&(string)$lastPub['choice']==='agree')return false;
-    }catch(Exception $e){/* 表未建 = 无凭证，走原判据 */}
-    /* 发布权委托客户（policy.blog_publish_executor=agent，2026-10-15）同为真信号：委托即无需
-       等卡上 agree，放行直通 apply 发布。没有这条，委托客户的成稿按 URL 形状（卡链接不含
-       /blog/）误判成大纲，release 把成稿重写一遍再出新卡（2026-10-15 #826/#984 实烧两例）。 */
-    try{
-        $pq2=db()->prepare("SELECT value FROM seo_facts WHERE client_id=? AND fact_key='policy.blog_publish_executor' AND (status IS NULL OR status!='retracted') ORDER BY id DESC LIMIT 1");
-        $pq2->execute([(int)($t['client_id']??0)]);
-        $pv2=$pq2->fetch();
-        if($pv2&&preg_match('/^\s*agent\b/i',(string)$pv2['value']))return false;
-    }catch(Exception $e){/* facts 读不到按未委托处理 */}
-    $u=(string)($t['output_url']??'');
-    return ($u===''||strpos($u,'/blog/')===false);
+    return blog_stage_is_outline($t['ops']??'',$t['output_url']??'',$t['result_note']??'');
 }
 function blog_release_as_write($cid,$t,$by){
     $tid=(int)$t['id'];

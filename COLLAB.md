@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-26 AIRA 博客大纲段判定改正证据（Alvin 批「第一性原理修复」）
+- 起因：Apex #667、#668 成稿带确认卡、卡满 7 天视同同意，放行时仍被 `blog_outline_stage` 当大纲重排写稿，放行官转两圈停人，11-15 挂到 11-25。旧判据是反推（output_url 不含 /blog/ 即大纲），成稿每多一种状态补一条例外（卡上同意、发布权委托），11-04 加到期规则时漏补。
+- 改法：`seo-api.php` 新增纯函数 `blog_stage_is_outline(ops, output_url, note)`，只认正证据：最近一次交付是大纲（备注有「大纲已出」且其后没有确认卡、成稿块、平台预览链接）。`blog_outline_stage` 只剩平台分流加这一判。两条例外查询删掉。成稿该不该发布仍只归 `blog_publish_consent_verdict`。
+- 回放：线上 25 张待放行的 WebForger 博客单，旧判据（不计例外）全判大纲，新判据全判成稿，逐张核过确实都是带卡成稿，没有一张真大纲。
+- 测试：`tests/consent_verdict.test.php` 加 5 例（含 #667 回放与源码闸），docker php:8.2-cli 跑全套 php 单测与 php -l 通过；js 单测全绿。
+- 回滚：git revert 本提交后 `./deploy.sh api`。
+
 ### 2026-11-24 AIRA 败方案不重放 + 清单三处订正 + digest 归档口径 + 输入框（ticket #69 #67，Alvin 批「按照你的推荐去做」）
 
 - 起因：工单巡检一周六张失败单同一个形状（Apollo #2618、Kuddles #2438、PF Moving #2720、Play Mate #2731、SD Aluminium #2765、Merii #2759）。apply 失败后闸A 在 30 秒内判 do，L0 把同一版方案原样再排一次，撞同一堵墙。9 月至今这类重放 37 次成 6 次；Apollo 的重放把改前留档覆盖了。
