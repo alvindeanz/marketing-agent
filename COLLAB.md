@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-27 AIRA 未申报操作的行为闸改成比风险档（SD Aluminium #2807 第三道卡点，Alvin 批「做吧」）
+- **病**：apply 的行为闸（WordPress 与 Shopify 两张形状表）按名字比，方案里出现任务 ops 没申报的写操作就零写入中止。#2807 申报了 blog-publish，发布同意也到了，方案里一步建稿（wp-draft-create，reversible 档）没申报被拦；同款方案 #2808 把接口地址写成 `$BASE/content` 闸没认出来照发。能查到的 WordPress 命中共 4 次（#394 #1097 #1098 刷 sitemap，#2807 建稿），无一立功。
+- **改法**（`splitByRiskTier`，apply_task.js）：未申报且政策表里是 reversible 档的操作，任务申报过至少一个写操作就放行，job 日志记一行 `[行为闸放行]` 供抽查。照拦的：非 reversible 档没申报（发布、结构、花钱、不可逆）、政策表不认识的操作、零写申报（空或只读 op）的单出现写入。原先三条按名字写的近邻豁免（博客单写正文与 SEO 字段、刷 sitemap、theme 两个 op 互认）被这条口径覆盖，已删；blog-publish 与 article-publish 互认保留。
+- **行为变化要知道**：Shopify 侧 collection-create、redirect-add、theme-text-edit、三个 template-assign 都是 reversible 档，申报过写操作的单里出现它们不再拦。要想某个动作重新硬拦，改政策表的档位，不要回来加名字。
+- 没做：拦下之后自动按实际行为重新定档续走（现在仍是停人补申报）；形状表认不出变量写法的漏洞不补，兜底在发布同意闸和发布后对账。
+- 测试：apply.test.js 加 1 例改 1 例（71 例全过），夹具是 #2807 #2808 真实方案里的写调用行（tests/fixtures/plan_writes_task-*.txt），外加历史三次命中回放；node tests 全套通过。PHP 没动。
+
 ### 2026-11-27 AIRA 根路径文章的发布同意认不到 + 方案快照检查误杀（ticket #71 #72，Summer 提报，Alvin 批）
 - **病一：文章不挂 /blog/ 的站，发布同意的批文和同篇卡两条路全断**。`task_blog_slug` 只认 `/blog/<slug>`，SD Aluminium 是 WordPress，文章在根路径，slug 取出来是空，`backing_publish_fact_ok` 直接判否。#2808 挂着已确认的批文在 wait-publish-consent 停了三天。改法：`[target]` 行任何路径都认（取最后一段）；发布单（ops 含 blog-publish）再兜一层结果备注里执行器写的「目标页面:」行，恰好一个网址才认；任务书的句子不拿来猜。`blog_consent_card_by_slug` 的关联从 `/blog/<slug>` 放宽到「slug 是完整一段路径」。chat 派单：发布或改稿单给了不带 /blog/ 的 target 照实落行（`normalizeSiteTarget`），提示词补了根路径的例子。执行器定位文章的逻辑没动，仍只用 /blog/ 形状的 target。
 - **病二：方案 lint 的快照规则误杀**。旧写法是「同一行有 POST 又有 /snapshots」，#2807 那行是 POST 上传封面图加 GET 快照列表回读，被当成建全站快照打回，自修修不掉，任务顶着失败的 execute 停人。改成 `postsSnapshot`：只看每个 POST 自己的请求地址，/rollback 与 /restore 不算（wordpress.md 本来就要求方案写按快照回滚，旧写法只豁免了 restore）。这条规则历史上致命命中 5 次（#83 #86 #71 #659 #2807），前 4 次在 8、9 月，未回查。

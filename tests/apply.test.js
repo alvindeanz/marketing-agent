@@ -698,8 +698,12 @@ t('publish/create/redirect/set-handle 命中，已申报的不报，meta 小改�
     'shopseo --shop sungait redirect add /old /new',
     'shopseo --shop sungait article set-meta foo --title "Bar"',
   ].join('\n');
-  assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, ['article-meta-update']).sort(),
-    ['article-publish', 'collection-create', 'redirect-add']);
+  // 2026-11-27 起比风险档：申报过写操作的单，未申报的可回滚动作（建集合、加跳转）放行留档，只拦发布
+  assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, ['article-meta-update']), ['article-publish']);
+  assert.deepStrictEqual(A.shopseoUndeclaredSplit(plan, ['article-meta-update']).covered.sort(), ['collection-create', 'redirect-add']);
+  // 零写申报（空或只读 op）照旧全拦
+  assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, []).sort(), ['article-publish', 'collection-create', 'redirect-add']);
+  assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, ['analysis-readonly']).sort(), ['article-publish', 'collection-create', 'redirect-add']);
   assert.deepStrictEqual(A.shopseoUndeclaredOps(plan, ['article-publish', 'collection-create', 'redirect-add']), []);
   assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme copy a b', ['theme-template-create']), []);
   assert.deepStrictEqual(A.shopseoUndeclaredOps('shopseo --shop x theme set-text k --jq .a --value v', []), ['theme-text-edit']);
@@ -804,6 +808,24 @@ t('CLI 与裸 REST 两种形态都命中,已申报不报,博客产线近邻豁�
   assert.deepStrictEqual(A3.wfagentUndeclaredOps('PATCH /wp-json/wf-agent/v1/seo/14935 {"title":"x"}', ['wp-seo-meta-update']), []);
   // 只读不报
   assert.deepStrictEqual(A3.wfagentUndeclaredOps('wfagent status sdalu\nwfagent content get sdalu 991\nGET /wp-json/wf-agent/v1/seo/14935', []), []);
+});
+
+t('行为闸比风险档：#2807 真实方案（发布已申报、建稿没申报）放行留档；改稿单夹带发布照拦（2026-11-27）', () => {
+  const A5 = require(path.join(__dirname, '..', 'seo-worker', 'runners', 'apply_task'));
+  const fx = (n) => require('fs').readFileSync(path.join(__dirname, 'fixtures', 'plan_writes_task-' + n + '.txt'), 'utf8');
+  const OPS = ['blog-publish', 'wp-media-upload', 'wp-seo-meta-update', 'wp-sitemap-flush'];
+  const r7 = A5.wfagentUndeclaredSplit(fx(2807), OPS);
+  assert.deepStrictEqual(r7.block, [], '#2807 不该再被拦');
+  assert.ok(r7.covered.indexOf('wp-draft-create') !== -1, '建稿要留档');
+  assert.deepStrictEqual(A5.wfagentUndeclaredSplit(fx(2808), OPS).block, []);
+  // 同一份方案，任务只申报了改稿：建稿放行，发布不放
+  assert.deepStrictEqual(A5.wfagentUndeclaredOps('POST https://x.co.nz/wp-json/wf-agent/v1/content body\nPATCH /wp-json/wf-agent/v1/content/15672 body {"status":"publish"}', ['wp-content-edit']), ['blog-publish']);
+  // 只读单出现任何写入照拦；政策表不认识的操作照拦
+  assert.deepStrictEqual(A5.wfagentUndeclaredOps('POST https://x.co.nz/wp-json/wf-agent/v1/content body', ['analysis-readonly']), ['wp-draft-create']);
+  assert.deepStrictEqual(A5.splitByRiskTier(['some-new-op', 'wp-redirect-add', 'page-publish'], ['wp-content-edit']), { block: ['some-new-op', 'page-publish'], covered: ['wp-redirect-add'] });
+  // 历史三次命中回放：#394（改已发布页后刷 sitemap）、#1097 #1098（建稿加发布后刷 sitemap）都不拦
+  assert.deepStrictEqual(A5.wfagentUndeclaredOps('wfagent content set kiaorakids 14935 --content-file b.html\nwfagent sitemap flush kiaorakids', ['wp-content-edit', 'wp-seo-meta-update']), []);
+  assert.deepStrictEqual(A5.wfagentUndeclaredOps('wfagent content create x --type post\nwfagent content set x 9 --status publish\nwfagent sitemap flush x', ['wp-draft-create', 'blog-publish']), []);
 });
 
 t('sitemap flush 随发布豁免,未申报发布时照报', () => {

@@ -132,16 +132,48 @@ const SHOPSEO_SHAPE_TO_OP = [
   [/shopseo\s[^\n]*\barticle\s+set-template\b/, 'article-template-assign'],
   [/shopseo\s[^\n]*\bproduct\s+set-template\b/, 'product-template-assign'],
 ];
-function shopseoUndeclaredOps(plan, declaredOps) {
+/* 行为闸的拦截口径：比风险档，不比名字（2026-11-27 Alvin 批，SD Aluminium #2807：发布已批、同意已到，
+   方案里一步建稿没申报就被零写入拦下；同款方案 #2808 把接口地址写成变量闸没认出来照发）。
+   管什么：方案正文里出现、任务 ops 没申报的写操作。
+   豁免面：政策表里是 reversible 档的操作，只要任务申报过至少一个写操作就放行。可逆动作有写前快照和回读对账兜底，
+     放行时审过的档位不会比它低；按「可逆性定闸级」这类走放行加抽查，不事前硬拦。
+   照拦：非 reversible 档（发布类 external、结构、花钱、不可逆）没申报；政策表不认识的操作；任务零写申报却出现写入。
+   误杀出口：补申报对应 op 重走判定与放行，或方案剔除该调用。
+   命中台账：拦下的进任务备注与 job 日志；放行的 job 日志记一行「[行为闸放行]」，抽查按这个标记捞。 */
+let RISK_POLICY_CACHE = null;
+function riskPolicy() {
+  if (RISK_POLICY_CACHE) return RISK_POLICY_CACHE;
+  let cls = {}, ro = [];
+  try {
+    const pol = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'specs', 'release_policy.json'), 'utf8'));
+    cls = pol.risk_class_by_op || {};
+    ro = (pol.readonly_ops && pol.readonly_ops.ops) || [];
+  } catch (e) { /* 政策表读不到：全部按不认识处理，即从严全拦 */ }
+  RISK_POLICY_CACHE = { cls, ro };
+  return RISK_POLICY_CACHE;
+}
+/** hits：形状表命中且没申报的 op。返回 { block, covered }。 */
+function splitByRiskTier(hits, declaredOps) {
+  const { cls, ro } = riskPolicy();
+  const declared = (declaredOps || []).map((o) => String(o).toLowerCase());
+  const hasWrite = declared.some((o) => ro.indexOf(o) === -1);
+  const block = [], covered = [];
+  for (const op of hits) {
+    if (hasWrite && cls[op] === 'reversible') covered.push(op); else block.push(op);
+  }
+  return { block, covered };
+}
+function shopseoUndeclaredSplit(plan, declaredOps) {
   const declared = (declaredOps || []).map((o) => String(o).toLowerCase());
   const hits = new Set();
   for (const [re, op] of SHOPSEO_SHAPE_TO_OP) {
     if (!re.test(String(plan))) continue;
-    // theme 族两个 op 互为近邻，任一已申报即认（copy 归 theme-template-create）
-    if (op === 'theme-text-edit' && (declared.indexOf('theme-text-edit') !== -1 || declared.indexOf('theme-template-create') !== -1)) continue;
     if (declared.indexOf(op) === -1) hits.add(op);
   }
-  return Array.from(hits);
+  return splitByRiskTier(Array.from(hits), declared);
+}
+function shopseoUndeclaredOps(plan, declaredOps) {
+  return shopseoUndeclaredSplit(plan, declaredOps).block;
 }
 
 /* 行为闸 WordPress 版形状表（2026-10-10 WP 轮前置，与 WF/Shopify 同一第一性：闸认行为不认申报）。
@@ -166,24 +198,21 @@ const WFAGENT_SHAPE_TO_OP = [
   [/POST\s+\S*\/rankmath\/redirections\b/, 'wp-redirect-add'],
   [/\/rankmath\/sitemap\/flush\b/, 'wp-sitemap-flush'],
 ];
-function wfagentUndeclaredOps(plan, declaredOps) {
+function wfagentUndeclaredSplit(plan, declaredOps) {
   const declared = (declaredOps || []).map((o) => String(o).toLowerCase());
-  const BLOGISH = ['blog-draft', 'blog-publish', 'blog-edit', 'article-publish', 'wp-draft-create'];
-  const hasBlogish = BLOGISH.some((o) => declared.indexOf(o) !== -1);
   const hits = new Set();
   for (const [re, op] of WFAGENT_SHAPE_TO_OP) {
     if (!re.test(String(plan))) continue;
-    // 博客产线近邻豁免：建稿/发布类任务对自家草稿写正文和 SEO 字段是份内事，
-    // 真正要单独把门的是发布翻转、重定向、term 级写入。
-    if ((op === 'wp-content-edit' || op === 'wp-seo-meta-update') && hasBlogish) continue;
-    // sitemap 刷新是内容写动作的随身家务（零风险、幂等、可重跑），方案申报了任何写 op
-    // 就不单独把门；只有零申报的方案里出现 flush 才报（2026-10-10 两咬：#1097 发布后 flush、
-    // #394 改已发布页后 flush，都是半误伤）。
-    if (op === 'wp-sitemap-flush' && declared.length > 0) continue;
+    // 发布翻转两个 op 是同一件事的两个名字，申报任一个都算申报了
     if (op === 'blog-publish' && declared.indexOf('article-publish') !== -1) continue;
     if (declared.indexOf(op) === -1) hits.add(op);
   }
-  return Array.from(hits);
+  /* 原先这里有三条按名字写的近邻豁免（博客单写正文与 SEO 字段、申报过写操作的单刷 sitemap），
+     都是 reversible 档，现在由风险档口径统一覆盖，不再逐条列。 */
+  return splitByRiskTier(Array.from(hits), declared);
+}
+function wfagentUndeclaredOps(plan, declaredOps) {
+  return wfagentUndeclaredSplit(plan, declaredOps).block;
 }
 
 /* ==== 博客发布形态线（2026-10-13 #1239/#1240 教训）====
@@ -1443,7 +1472,9 @@ async function runShopifyApply(ctx, workspace, profile, task, taskId) {
   /* 行为闸 Shopify 版（2026-10-10，与 WF 版同一第一性：闸认行为不认申报，#76 教训镜像）：
      方案正文里出现对外可见或结构类 shopseo 命令，而任务 ops 没申报对应 op 时，零写入中止。
      Shopify 模型靠 publish 类 op 的 external 档加批文 fact 把门，绕过申报就是绕过那道门。 */
-  const undeclaredS = shopseoUndeclaredOps(plan, taskOps(task));
+  const splitS = shopseoUndeclaredSplit(plan, taskOps(task));
+  const undeclaredS = splitS.block;
+  if (splitS.covered.length) log('task ' + taskId + '：[行为闸放行] 方案含未申报的可回滚操作 ' + splitS.covered.join('、') + '，不超过已放行的风险档，放行并留档供抽查');
   if (undeclaredS.length) {
     await fail('执行中止：方案正文含未申报的 shopseo 命令（需 op：' + undeclaredS.join('、') + '），任务 ops 没有申报，放行分档没覆盖这些动作。零写入。修法：方案剔除这些命令，或补申报对应 op 重走判定与放行。');
     throw gateError('task ' + taskId + ': plan contains undeclared shopseo ops: ' + undeclaredS.join(','));
@@ -1577,7 +1608,9 @@ async function runWordpressApply(ctx, workspace, profile, task, taskId) {
   /* 行为闸 WordPress 版（2026-10-10 WP 轮前置）：方案正文出现未申报的 wfagent 写命令
      或插件写端点时零写入中止。发布翻转（status publish）是 external 档，绕过申报
      就是绕过批文闸，与 WF/Shopify 同一条第一性。 */
-  const undeclaredW = wfagentUndeclaredOps(plan, taskOps(task));
+  const splitW = wfagentUndeclaredSplit(plan, taskOps(task));
+  const undeclaredW = splitW.block;
+  if (splitW.covered.length) log('task ' + taskId + '：[行为闸放行] 方案含未申报的可回滚操作 ' + splitW.covered.join('、') + '，不超过已放行的风险档，放行并留档供抽查');
   if (undeclaredW.length) {
     await fail('执行中止：方案正文含未申报的 WordPress 写操作（需 op：' + undeclaredW.join('、') + '），任务 ops 没有申报，放行分档没覆盖这些动作。零写入。修法：方案剔除这些调用，或补申报对应 op 重走判定与放行。');
     throw gateError('task ' + taskId + ': plan contains undeclared wf-agent ops: ' + undeclaredW.join(','));
@@ -2116,6 +2149,9 @@ module.exports = {
   blogShortcutRoute,
   planStructuralCalls,
   shopseoUndeclaredOps,
+  shopseoUndeclaredSplit,
+  wfagentUndeclaredSplit,
+  splitByRiskTier,
   wfagentUndeclaredOps,
   gateError,
   cooldownGate,

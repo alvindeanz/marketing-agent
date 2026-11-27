@@ -1,0 +1,10 @@
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" \
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" \
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" \
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" \
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -w "%{http_code}" "$BASE/rankmath/sitemap/flush"
+| 9 sitemap | 文章退回 draft 之后，执行 `curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" "$BASE/rankmath/sitemap/flush"` | post-sitemap.xml 不含 `$URL` | 91 条 loc，不含目标网址 |
+| 7 发布 | `curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" --data-binary '{"status":"draft"}' "$BASE/content/$POST_ID"` | GET `/content/$POST_ID` 的 status 为 draft，`$URL` 返回 404 | draft |
+| 6 SEO | `curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" "$BASE/snapshots/$SEO_SNAP/rollback"` | GET `/seo/$POST_ID` 三字段回到 seo_before.json 的值 | 空 |
+| 5 封面关联 | `curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" --data-binary '{"featured_media":0}' "$BASE/content/$POST_ID"` | featured_media 为 0 | 新稿没有封面 |
+| 3 封面 | `curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" "$BASE/snapshots/$COVER_SNAP/rollback"`（附件移入回收站） | 公开媒体接口查 COVER_ID 不再返回 200 | 附件不存在 |

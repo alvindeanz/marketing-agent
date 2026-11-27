@@ -1,0 +1,16 @@
+**上一轮为什么没落地**：本单 11-24 的方案在 execute（job 17432）被方案 lint 打回。原因是旧 lint 把「同一行里 POST 上传图片，后面跟 GET 快照列表做回读」误判成「POST /snapshots 建全站快照」。lint 已按 ticket #71/#72 修正，现在只看每个 POST 自己的请求地址，并且放行 `/snapshots/<id>/rollback`。本版仍然把写请求和快照回读拆到不同的行。站上没有写入（见下表）。
+| 插件 | `/status` 返回 version 1.3.4，modules 含 content、rankmath、seo；路由表有 POST `/content`、GET/POST `/content/<id>`、POST `/content/media`、GET/POST `/seo/<id>`、POST `/rankmath/sitemap/flush` | 建稿、传图、SEO、sitemap 都有端点 |
+- 写入：POST `https://sdalu.co.nz/wp-json/wf-agent/v1/content/media`（multipart，字段 file、title、alt），每张一次。
+  CODE=$(curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" \
+- 写入：POST `https://sdalu.co.nz/wp-json/wf-agent/v1/content`，请求体为步骤 6 生成的 `create.json`。字段是 post_type、title、slug、content、categories [425]、featured_media；content 的完整成品见第 3 节。
+CODE=$(curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" \
+- 写入：POST `https://sdalu.co.nz/wp-json/wf-agent/v1/seo/<POST_ID>`
+CODE=$(curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" \
+- 写入：POST `https://sdalu.co.nz/wp-json/wf-agent/v1/content/<POST_ID>`，请求体 `{"status":"publish"}`
+CODE=$(curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" \
+- 写入：POST `https://sdalu.co.nz/wp-json/wf-agent/v1/rankmath/sitemap/flush`，无请求体
+test "$(curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -o /dev/null -w "%{http_code}" "$BASE/rankmath/sitemap/flush")" = "200"
+  [ -n "$S" ] && curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -w "%{http_code}\n" "$BASE/snapshots/$S/rollback"
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -H "Content-Type: application/json" \
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -w "%{http_code}\n" "$BASE/rankmath/sitemap/flush"
+curl -s --max-time 120 -X POST -H "X-WF-Agent-Token: $WF_TOKEN" -w "%{http_code}\n" "$BASE/snapshots/$SEO_SNAP/rollback"
