@@ -457,6 +457,18 @@ t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺�
   assert.ok(E.lintPlan('- 预期响应：200\n- 回读核对：GET').some((x) => x.indexOf('涉及文件') > -1));
   assert.deepStrictEqual(E.planFiles('x\n```json\n{"files":["pages/a.html"]}\n```'), ['pages/a.html']);
 });
+t('lintPlan 快照规则只看 POST 自己的地址：#2807 真实方案行不打回，真建快照照拦，按快照回滚不拦（ticket #71 #72）', () => {
+  const real = '- 方法与路径：POST https://sdalu.co.nz/wp-json/wf-agent/v1/content/media（multipart，字段 file、alt、title），每张一次；回读 GET https://sdalu.co.nz/wp-json/wf-agent/v1/snapshots?object_type=media_upload&limit=1 和 GET https://sdalu.co.nz/wp-json/wp/v2/media/<id>';
+  assert.strictEqual(E.postsSnapshot(real), false);
+  assert.deepStrictEqual(E.lintPlan('## 2. API 调用序列\n' + real + '\n涉及文件：a'), []);
+  assert.strictEqual(E.postsSnapshot('步骤 1 POST /api/content/x/snapshots'), true);
+  assert.strictEqual(E.postsSnapshot('1. `POST https://api.webforger.ai/api/content/x/snapshots` 留底，再 PATCH /pages/home'), true);
+  assert.strictEqual(E.postsSnapshot('GET /pages/home 留档后 POST /api/content/x/snapshots'), true);
+  assert.strictEqual(E.postsSnapshot('回滚：POST /snapshots/<id>/rollback'), false);
+  assert.strictEqual(E.postsSnapshot('回滚：POST https://sdalu.co.nz/wp-json/wf-agent/v1/snapshots/8841/rollback'), false);
+  assert.strictEqual(E.postsSnapshot('回滚：POST /api/content/x/snapshots/12/restore'), false);
+  assert.strictEqual(E.postsSnapshot('GET /api/content/x/snapshots?limit=1'), false);
+});
 t('lintPlan：选择题打回，但「需要人定：无」是 prompt 要求的空章节写法不打回（2026-09-08 job549 误伤）', () => {
   const base = '## 2. API 调用序列\n- 预期响应：200\n涉及文件：a\n';
   assert.ok(E.lintPlan(base + '- 需要人定：追加的三条暂停广告是否一并对齐').some((x) => x.indexOf('选择题') > -1));

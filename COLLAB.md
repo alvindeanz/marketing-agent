@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-27 AIRA 根路径文章的发布同意认不到 + 方案快照检查误杀（ticket #71 #72，Summer 提报，Alvin 批）
+- **病一：文章不挂 /blog/ 的站，发布同意的批文和同篇卡两条路全断**。`task_blog_slug` 只认 `/blog/<slug>`，SD Aluminium 是 WordPress，文章在根路径，slug 取出来是空，`backing_publish_fact_ok` 直接判否。#2808 挂着已确认的批文在 wait-publish-consent 停了三天。改法：`[target]` 行任何路径都认（取最后一段）；发布单（ops 含 blog-publish）再兜一层结果备注里执行器写的「目标页面:」行，恰好一个网址才认；任务书的句子不拿来猜。`blog_consent_card_by_slug` 的关联从 `/blog/<slug>` 放宽到「slug 是完整一段路径」。chat 派单：发布或改稿单给了不带 /blog/ 的 target 照实落行（`normalizeSiteTarget`），提示词补了根路径的例子。执行器定位文章的逻辑没动，仍只用 /blog/ 形状的 target。
+- **病二：方案 lint 的快照规则误杀**。旧写法是「同一行有 POST 又有 /snapshots」，#2807 那行是 POST 上传封面图加 GET 快照列表回读，被当成建全站快照打回，自修修不掉，任务顶着失败的 execute 停人。改成 `postsSnapshot`：只看每个 POST 自己的请求地址，/rollback 与 /restore 不算（wordpress.md 本来就要求方案写按快照回滚，旧写法只豁免了 restore）。这条规则历史上致命命中 5 次（#83 #86 #71 #659 #2807），前 4 次在 8、9 月，未回查。
+- 坑：两处都是「拿形状当事实」。网址形状（/blog/）当文章判据，引入新平台就要全库重审；行级正则把一行当一个调用，方案一行写两个调用就错。
+- 测试：consent_verdict.test.php 加 3 例（#2808 真实任务书回放，29 例全过），tasktarget 加 1 例，consent_slug_link 加 1 例加两条源码闸，apply 加 1 例（#2807 真实方案行回放）；docker php:8.2-cli 跑 php -l 与 php 单测全套通过，node tests 全套通过。
+- 下一步：#2984 暴露的另一个缝（自带日期闸的方案被提前自动放行，撞闸后判失败停人）没在这次改，待定。
+
 ### 2026-11-26 AIRA 任务接口并发 500 + 发布闸两个不自动发开关（rev 见下，Alvin 批「开工吧」）
 - **GET /tasks 并发即 500**（rev 649d2a3，api 已部署）：`archive_closed_tasks` 挂在读接口上，每次读发两条条件 UPDATE，两个读请求同时到就互锁，未捕获异常回 internal_error。实测修前同客户 4 并发 14/24 失败、不同客户 14/24、看板加任务 6/12；改成先无锁查单号、没有就零写入、有才按主键升序更新、失败只记日志之后，同脚本全部 0。10-24 记的「并发双轮瞬断」是同一个病。复测脚本在 Aira 会话 scratchpad（race.js、race2.js），就是 Promise.all 打几个 /tasks。
 - **发布同意判定加两个开关**，都在 `blog_consent_decide` 一处：

@@ -646,6 +646,19 @@ function planCallSection(text) {
   const next = rest.search(/\n##\s*\d/);
   return next === -1 ? rest : rest.slice(0, next);
 }
+/* 这一行有没有「POST 到 /snapshots」。只看每个 POST 自己的请求地址（到同行下一个 HTTP 动词为止的第一个网址或路径），
+   同一行别的调用不算：2026-11-24 SD Aluminium #2807 一行里 POST 上传封面图、后面跟 GET 快照列表做回读，
+   旧写法「同行有 POST 又有 /snapshots」把它当成建全站快照打回，自修也修不掉（ticket #71 #72）。
+   按快照回滚（/snapshots/<id>/rollback、/restore）是能力清单要求写进方案的，不算。 */
+function postsSnapshot(line) {
+  const parts = String(line || '').split(/\b(GET|POST|PATCH|PUT|DELETE)\b/);
+  for (let i = 1; i < parts.length; i += 2) {
+    if (parts[i] !== 'POST') continue;
+    const m = /(https?:\/\/[^\s`'"）)，,；;]+|\/[A-Za-z0-9_][^\s`'"）)，,；;]*)/.exec(parts[i + 1] || '');
+    if (m && /\/snapshots(?![A-Za-z0-9_-])/i.test(m[1]) && !/\/(rollback|restore)\b/i.test(m[1])) return true;
+  }
+  return false;
+}
 function lintPlan(text) {
   const t = String(text || '');
   const problems = [];
@@ -653,7 +666,7 @@ function lintPlan(text) {
   const lines = sec.split('\n');
   const live = lines.filter((l) => !PLAN_NEGATION.test(l));
   // 1. 全站快照当步骤（大站 restore 必挂，且 changeset 才是安全网）。只认调用行，不认注释。
-  if (live.some((l) => /\bPOST\b[^\n]*\/snapshots(?![^\n]*restore)/i.test(l))) {
+  if (live.some(postsSnapshot)) {
     problems.push('方案把 POST /snapshots 写成了步骤，全站快照不许用，安全网是 changeset');
   }
   // 2. redirects 全量 PUT
@@ -3379,6 +3392,7 @@ module.exports = {
   resolveRefBlogUrl,
   parseOpsCheck,
   lintPlan,
+  postsSnapshot,
   lintReleaseCard,
   planReleaseCard,
   RELEASE_CARD_MAX_CHARS,

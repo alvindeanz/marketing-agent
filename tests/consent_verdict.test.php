@@ -34,6 +34,32 @@ t('[target] 只认独占一行的标记，句子里提到不算',function(){
     eq(task_target_of("x\n[target] https://a.co.nz/blog/b-post/\ny"),'https://a.co.nz/blog/b-post/');
     eq(task_blog_slug(['detail'=>"x\n[target] https://a.co.nz/blog/b-post/",'result_note'=>'']),'b-post');
 });
+/* 线上真实任务正文（2026-11-27 ticket #71 #72，SD Aluminium，WordPress 文章挂根路径） */
+$T2808=['id'=>2808,'ops'=>'blog-publish,wp-media-upload,wp-seo-meta-update,wp-sitemap-flush','detail'=>"按客户已审预览 https://agencyreport.horntech-dev.com/reports/sdalu/preview/task-2724.html 原样发布，不改正文。网址 /security-screen-door-vs-fly-screen-nz/，分类 Blogs；SEO title「Security Screen Door vs Fly Screen NZ: Which Mesh Door?」、审定 meta、焦点词 security screen door；上传 1 张封面，两张正文图沿用站内原图；发布后刷新 sitemap。替代 #2724（启动时归档），批文见 backing_fact。\n\n[委托单] 频道 #7160 消息 #12833/1 提议，summer 确认启动\n[授权引语] 开工吧\n[backing] content.blog_publish_approved_security_screen_door",'result_note'=>"[split-guard] chat 单实时交付不拆单\n预览: https://agencyreport.horntech-dev.com/reports/sdalu/preview/task-2808.html\n目标页面: https://sdalu.co.nz/security-screen-door-vs-fly-screen-nz/\n---\n变更方案已生成，待人工放行后由 apply_task 执行。\n  - 新文章：不存在 → 公开发布，分类 Blogs，网址 /security-screen-door-vs-fly-screen-nz/\n[wait-publish-consent] 发布凭证未到"];
+t('#2808 回放：文章挂根路径的站，发布单按「目标页面」行取到 slug',function()use($T2808){
+    eq(blog_slug_of($T2808['detail']."\n".$T2808['result_note']),'','旧取法是空，这就是病根');
+    eq(task_blog_slug($T2808),'security-screen-door-vs-fly-screen-nz');
+    eq(backing_publish_fact_ok('客户 Evengod 群内批准 security-screen-door-vs-fly-screen-nz 按预览发布',task_blog_slug($T2808)),true);
+    eq(backing_publish_fact_ok('客户批准 aluminium-fence-panels-nz-sizes-ordering-guide 按预览发布',task_blog_slug($T2808)),false,'别篇的批文不串');
+});
+t('「目标页面」兜底只给发布单用，且只认恰好一个网址',function()use($T2808){
+    $onpage=['ops'=>'wp-term-seo-update','detail'=>'改类目页','result_note'=>"目标页面: https://sdalu.co.nz/product-category/doors/\n---"];
+    eq(task_blog_slug($onpage),'','非发布单的目标页面不是文章');
+    $two=$T2808;$two['result_note']="目标页面: https://sdalu.co.nz/a-post/ , https://sdalu.co.nz/b-post/\n---";
+    eq(task_blog_slug($two),'','两个网址不猜');
+    $none=$T2808;$none['result_note']="目标页面: 未提供\n---";
+    eq(task_blog_slug($none),'');
+    $noNote=$T2808;$noNote['result_note']='';
+    eq(task_blog_slug($noNote),'','方案还没出，任务书的句子不拿来猜');
+});
+t('[target] 行不带 /blog/ 也认，取最后一段；/blog/ 的站口径不变',function(){
+    eq(task_blog_slug(['detail'=>"发布\n[target] /security-screen-door-vs-fly-screen-nz/",'result_note'=>'']),'security-screen-door-vs-fly-screen-nz');
+    eq(task_blog_slug(['detail'=>"发布\n[target] https://x.com/blogs/news/spring-sale?utm=1",'result_note'=>'']),'spring-sale');
+    eq(task_blog_slug(['detail'=>"发布\n[target] /blog/a-b/",'result_note'=>'目标页面: https://x.co.nz/blog/c-d/']),'a-b');
+    eq(path_last_slug('https://x.co.nz/'),'');
+    eq(path_last_slug('/files/cover.png'),'','带点号的是文件不是文章');
+    eq(path_last_slug('security-screen-door'),'','不是路径不认');
+});
 t('随手写的「同 #1737」「自 #2114 以来」不是凭证引用（#2174 派单闸误放行）',function()use($T2174){
     eq(consent_ref_ids($T2174),[]);
 });

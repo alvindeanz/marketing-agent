@@ -1005,10 +1005,35 @@ function task_target_of($detail){
     if(preg_match('/^\[target\][ \t]*(\S+)[ \t]*$/mu',(string)$detail,$m))return $m[1];
     return '';
 }
+/* 一个网址或站内路径的最后一段，当文章 slug 用。不像 slug 的（带点号的文件名、空路径）返回空串。 */
+function path_last_slug($u){
+    $u=preg_replace('#^https?://[^/\s]+#i','',trim((string)$u));
+    $u=preg_replace('/[?#].*$/','',$u);
+    if($u===''||$u[0]!=='/')return '';
+    $seg=explode('/',trim($u,'/'));
+    $last=(string)end($seg);
+    return preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]*$/',$last)?$last:'';
+}
+/* 文章不挂在 /blog/ 下的站（2026-11-27 ticket #71 #72，SD Aluminium #2807 #2808：WordPress 文章在根路径
+   /security-screen-door-vs-fly-screen-nz/，slug 取出来是空，批文和同篇卡两条路全断，发布单挂三天）。
+   取法按确定性从高到低：[target] 行（任何路径都认，取最后一段）→ 正文里恰好一个 /blog/<slug> →
+   发布单结果备注里执行器写的「目标页面:」行（机器写的一行一个键，恰好一个网址才认，多个不猜）。
+   第三条只对申报了 blog-publish 的单生效，别的单的目标页面是类目页产品页，不是文章。 */
 function task_blog_slug($t){
     $tg=task_target_of((string)($t['detail']??''));
-    if($tg!==''&&preg_match('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#',$tg,$m))return $m[1];
-    return blog_slug_of((string)($t['detail']??'')."\n".(string)($t['result_note']??''));
+    if($tg!==''){
+        if(preg_match('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#',$tg,$m))return $m[1];
+        $ls=path_last_slug($tg);
+        if($ls!=='')return $ls;
+    }
+    $s=blog_slug_of((string)($t['detail']??'')."\n".(string)($t['result_note']??''));
+    if($s!=='')return $s;
+    if(strpos(strtolower((string)($t['ops']??'')),'blog-publish')===false)return '';
+    if(preg_match_all('/^目标页面[:：][ \t]*(.+)$/mu',(string)($t['result_note']??''),$hm)){
+        $line=trim((string)end($hm[1]));
+        if(preg_match_all('#https?://[^\s,，]+#',$line,$um)&&count(array_unique($um[0]))===1)return path_last_slug($um[0][0]);
+    }
+    return '';
 }
 /* 显式引用的确认卡单号：只认「确认卡#N / 确认页 #N / 卡 #N / #N 确认卡 / blog_confirmation_task-N」这几种写法。
    正文里随手写的「同 #1737」不是凭证引用（#2174 实证：别篇文章的旧同意把派单闸打开了）。 */
@@ -1121,9 +1146,10 @@ function blog_consent_card_by_slug($cid,$tid,$t){
     if(strpos((string)($t['result_note']??''),'blog_confirmation_task-')!==false)return 0;
     try{
         $q=db()->prepare("SELECT id,result_note FROM seo_tasks WHERE client_id=? AND id!=? AND result_note LIKE '%blog_confirmation_task-%' AND result_note LIKE ? ORDER BY id DESC LIMIT 10");
-        $q->execute([(int)$cid,(int)$tid,'%/blog/'.$slug.'%']);
+        /* 只要求 slug 是完整的一段路径，不要求前面是 /blog/（根路径文章的站同样要能关联到卡，ticket #71） */
+        $q->execute([(int)$cid,(int)$tid,'%/'.$slug.'%']);
         foreach($q->fetchAll() as $r){
-            if(preg_match('#/blog/'.preg_quote($slug,'#').'(?![A-Za-z0-9_-])#',(string)$r['result_note']))return (int)$r['id'];
+            if(preg_match('#/'.preg_quote($slug,'#').'(?![A-Za-z0-9_-])#',(string)$r['result_note']))return (int)$r['id'];
         }
     }catch(Exception $e){/* 查不到按无关联处理 */}
     return 0;

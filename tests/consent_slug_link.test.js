@@ -20,7 +20,7 @@ function cardBySlug(tasks, self) {
   const slug = slugOf((self.detail || '') + '\n' + (self.note || ''));
   if (!slug) return 0;
   if (/blog_confirmation_task-/.test(self.note || '')) return 0;
-  const re = new RegExp('/blog/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9_-])');
+  const re = new RegExp('/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9_-])');
   const c = tasks.filter((x) => x.id !== self.id && /blog_confirmation_task-/.test(x.note || '') && re.test(x.note || ''))
     .sort((a, b) => b.id - a.id);
   return c.length ? c[0].id : 0;
@@ -67,10 +67,19 @@ t('令牌尾巴带右括号照认，位数不够或内容不对照拒', () => {
   assert.notStrictEqual(tok(k.slice(0, 31) + ')'), k);
   assert.notStrictEqual(tok('x' + k), k);
 });
+t('文章挂根路径的站：卡的备注里是 /slug/ 不带 /blog/，照样按完整一段路径关联（ticket #71）', () => {
+  const card = { id: 2724, note: '博客确认卡: https://x/blog_confirmation_task-2724.html?t=2724&k=abc\n平台预览链接：https://sdalu.co.nz/security-screen-door-vs-fly-screen-nz/?preview=1' };
+  const re = /\/security-screen-door-vs-fly-screen-nz(?![A-Za-z0-9_-])/;
+  assert.ok(re.test(card.note));
+  assert.ok(!re.test('https://sdalu.co.nz/security-screen-door-vs-fly-screen-nz-2/'));
+  assert.ok(!re.test('https://sdalu.co.nz/best-security-screen-door-vs-fly-screen-nz/'), '前面必须是斜杠');
+});
 t('源码同步闸：PHP 与 apply 两侧都接了这条口径', () => {
   const php = fs.readFileSync(path.join(__dirname, '..', 'seo-api.php'), 'utf8');
   assert.ok(php.includes("preg_match_all('#/blog/([A-Za-z0-9][A-Za-z0-9_-]*)#'"), 'blog_slug_of 正则变了');
   assert.ok(php.includes('$slug=task_blog_slug($t);'), '关联卡没先读 [target] 行');
+  assert.ok(php.includes("$q->execute([(int)$cid,(int)$tid,'%/'.$slug.'%']);"), '关联卡的 LIKE 又收回只认 /blog/ 了');
+  assert.ok(php.includes("preg_match('#/'.preg_quote($slug,'#').'(?![A-Za-z0-9_-])#'"), '关联卡的整段匹配变了');
   assert.ok(php.includes("result_note LIKE '%blog_confirmation_task-%'"), '卡任务判据变了');
   assert.ok(php.includes('ORDER BY id DESC LIMIT 10'), '最新一张的排序变了');
   assert.ok(php.includes("if(strpos((string)($t['result_note']??''),'blog_confirmation_task-')!==false)return 0;"), '自带卡不借旧卡的闸没了');

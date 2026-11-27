@@ -26,6 +26,16 @@ function normalizeBlogTarget(raw) {
   return m ? '/blog/' + m[1] + '/' : '';
 }
 
+/** 文章不挂在 /blog/ 下的站（WordPress 根路径 /post-slug/ 等，2026-11-27 ticket #71）：
+    把给定的目标规整成站内路径 /a/b/，最后一段得像个 slug。只在派单方明确给了 target 时用，不从正文猜。 */
+function normalizeSiteTarget(raw) {
+  let u = String(raw || '').trim().replace(/^https?:\/\/[^/\s]+/i, '').replace(/[?#].*$/, '');
+  if (!u || u[0] !== '/' || /\s/.test(u)) return '';
+  const seg = u.replace(/^\/+|\/+$/g, '').split('/');
+  if (!seg.length || !seg.every((x) => /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(x))) return '';
+  return '/' + seg.join('/') + '/';
+}
+
 /** 一段文字里出现的全部不同博客 slug（按出现顺序）。 */
 function blogSlugsIn(text) {
   const out = [];
@@ -77,9 +87,11 @@ function plannedNewPost(task) {
  */
 function stampTarget(draft) {
   const detail = String((draft && draft.detail) || '');
-  const existing = normalizeBlogTarget(targetOf(detail));
-  if (existing) return { detail, target: existing, error: '' };
+  const marked = targetOf(detail);
+  if (marked) return { detail, target: normalizeBlogTarget(marked) || marked, error: '' };
   let target = normalizeBlogTarget(draft && draft.target);
+  /* 发布或改已有文章的单，派单方给了不带 /blog/ 的站内路径：照实落行，服务端发布闸取最后一段当 slug */
+  if (!target && needsBlogTarget(draft && draft.ops)) target = normalizeSiteTarget(draft && draft.target);
   const blogOps = opsList(draft && draft.ops).some((o) => o.indexOf('blog-') === 0);
   const slugs = blogOps ? blogSlugsIn(String((draft && draft.title) || '') + '\n' + detail) : [];
   if (!target && slugs.length === 1) target = '/blog/' + slugs[0] + '/';
@@ -95,4 +107,4 @@ function stampTarget(draft) {
   return { detail: detail.replace(/\s+$/, '') + '\n[target] ' + target, target, error: '' };
 }
 
-module.exports = { targetOf, normalizeBlogTarget, blogSlugsIn, needsBlogTarget, declaresEdit, plannedNewPost, stampTarget, TARGET_LINE_RE };
+module.exports = { targetOf, normalizeBlogTarget, normalizeSiteTarget, blogSlugsIn, needsBlogTarget, declaresEdit, plannedNewPost, stampTarget, TARGET_LINE_RE };

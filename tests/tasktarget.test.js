@@ -63,6 +63,19 @@ t('已有 [target] 行不重复落；非博客单提到博客链接不落', () =
   assert.strictEqual(page.target, '');
   assert.strictEqual(page.detail, '产品页加内链到 /blog/a-b/');
 });
+t('文章不挂 /blog/ 的站：派单方给了 target 就照实落行（ticket #71，SD Aluminium #2808）', () => {
+  const r = T.stampTarget({ title: '发布', ops: 'blog-publish,wp-media-upload', target: 'https://sdalu.co.nz/security-screen-door-vs-fly-screen-nz/', detail: '按预览原样发布，网址 /security-screen-door-vs-fly-screen-nz/' });
+  assert.strictEqual(r.error, '');
+  assert.strictEqual(r.target, '/security-screen-door-vs-fly-screen-nz/');
+  assert.ok(/\n\[target\] \/security-screen-door-vs-fly-screen-nz\/$/.test(r.detail));
+  const again = T.stampTarget({ title: '发布', ops: 'blog-publish', target: '/x-y/', detail: r.detail });
+  assert.strictEqual((again.detail.match(/\[target\]/g) || []).length, 1, '已有行不重复落');
+  const page = T.stampTarget({ title: 'x', ops: 'page-meta-update', target: '/product-category/doors/', detail: '改类目页' });
+  assert.strictEqual(page.target, '', '非博客单不落');
+  assert.strictEqual(T.normalizeSiteTarget('随便一句话'), '');
+  assert.strictEqual(T.normalizeSiteTarget('/files/cover.png'), '');
+  assert.strictEqual(T.normalizeSiteTarget('https://x.com/blogs/news/spring-sale?x=1'), '/blogs/news/spring-sale/');
+});
 t('一篇都没出现的改稿单不拦（网址不带 /blog/ 的站照旧）', () => {
   const r = T.stampTarget({ title: '改稿 spring sale post', ops: 'blog-draft,blog-edit', detail: '改 https://x.co.nz/spring-sale-post/ 的标题' });
   assert.strictEqual(r.error, '');
