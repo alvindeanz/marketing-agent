@@ -75,18 +75,38 @@ t('GSC 窗口取数空洞（覆盖不足 5 天），宁可漏报不误报', () =
 t('询盘走 14 天窗基数 10：缺行按 0、锚取 GSC 最新日，询盘枯竭测得到', () => {
   const s = {
     gsc_clicks: series(35, () => 10), // 提供锚，自身平稳不命中
-    ga4_leads: series(35, (i) => (i < 14 ? 0 : 1)).filter((p) => p.v > 0), // 近 14 天一行都没有，前 14 天共 14 条
+    ga4_lead_sessions_organic: series(35, (i) => (i < 14 ? 0 : 1)).filter((p) => p.v > 0), // 近 14 天一行都没有，前 14 天共 14 条
   };
   const alerts = sentinel.evalSentinel(s);
   assert.strictEqual(alerts.length, 1);
-  assert.strictEqual(alerts[0].metric, 'ga4_leads');
+  assert.strictEqual(alerts[0].metric, 'ga4_lead_sessions_organic');
   assert.strictEqual(alerts[0].cur, 0);
+});
+
+t('旧口径 ga4_leads 不再触发询盘告警（Apollo #3538 回放：事件数 11 对 2，会话去重后 4 对 0）', () => {
+  const at = (idxs) => series(35, (i) => (idxs.indexOf(i) > -1 ? 1 : 0)).filter((p) => p.v > 0);
+  const s = {
+    gsc_clicks: series(35, () => 10),
+    ga4_leads: series(35, (i) => (i === 3 ? 2 : i >= 14 && i < 25 ? 1 : 0)).filter((p) => p.v > 0), // 2 对 11
+    ga4_lead_sessions_organic: at([15, 18, 21, 25]), // 0 对 4
+  };
+  assert.strictEqual(sentinel.evalSentinel(s).length, 0, '基数 4 不到 10，不开单');
+  const hint = sentinel.zeroLeadHint(s);
+  assert.ok(hint.indexOf('近 14 天为 0') > -1 && hint.indexOf('上一窗 4 条') > -1, hint);
+});
+
+t('询盘零提示的豁免面：新指标还没取过数不提，上一窗只有一两条不提，基数够大归回归规则不重复提', () => {
+  const g = { gsc_clicks: series(35, () => 10) };
+  assert.strictEqual(sentinel.zeroLeadHint(g), '');
+  assert.strictEqual(sentinel.zeroLeadHint(Object.assign({ ga4_lead_sessions_organic: series(35, (i) => (i === 20 || i === 22 ? 1 : 0)).filter((p) => p.v > 0) }, g)), '');
+  assert.strictEqual(sentinel.zeroLeadHint(Object.assign({ ga4_lead_sessions_organic: series(35, (i) => (i < 14 ? 0 : 1)).filter((p) => p.v > 0) }, g)), '');
+  assert.strictEqual(sentinel.zeroLeadHint(Object.assign({ ga4_lead_sessions_organic: series(35, (i) => (i === 2 || i === 20 || i === 22 || i === 24 ? 1 : 0)).filter((p) => p.v > 0) }, g)), '');
 });
 
 t('询盘 14 天基数 8 不足 10（泊松噪音区），不开单', () => {
   const s = {
     gsc_clicks: series(35, () => 10),
-    ga4_leads: series(35, (i) => (i >= 14 && i < 22 ? 1 : 0)).filter((p) => p.v > 0), // 前窗 8 条
+    ga4_lead_sessions_organic: series(35, (i) => (i >= 14 && i < 22 ? 1 : 0)).filter((p) => p.v > 0), // 前窗 8 条
   };
   assert.strictEqual(sentinel.evalSentinel(s).length, 0);
 });

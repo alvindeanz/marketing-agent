@@ -114,6 +114,18 @@ function currentSprint(anchor, today) {
 }
 
 /** 每个 sprint 的活博客任务数。sprint 不是 S1..S6 的（如 W38）不计入任何 sprint。 */
+/** 本季的任务面：活任务全收；已归档的只收本季方案建立之后建的。
+ *  做完的博客任务当天就归档，默认口径（不含归档）下写得越勤的客户缺口越大（2026-11-28 Dareu 实证：
+ *  S1 到 S5 五篇都写过，工具报欠 5 篇）。上一季归档单的 sprint 标签与本季同名，不能混进来顶配额。 */
+function seasonTasks(context) {
+  const plan = context && context.active_plan;
+  const since = String((plan && plan.created_at) || '');
+  return ((context && context.tasks) || []).filter((t) => {
+    if (!t || !Number(t.archived)) return true;
+    return !since || String(t.created_at || '') >= since;
+  });
+}
+
 function countBySprint(tasks) {
   const out = {};
   for (const s of SPRINTS) out[s] = [];
@@ -140,7 +152,7 @@ function gaps(context, today) {
   const anchor = plan && plan.created_at ? String(plan.created_at).slice(0, 10) : '';
   if (!anchor) return [];
   const cur = currentSprint(anchor, today);
-  const by = countBySprint(context.tasks || []);
+  const by = countBySprint(seasonTasks(context));
   const out = [];
   let required = 0;
   let have = 0;
@@ -218,6 +230,7 @@ function protectVerdicts(verdicts, context, log) {
 }
 
 module.exports = {
+  seasonTasks,
   FACT_KEY,
   CATCHUP_FROM,
   quotaOf,

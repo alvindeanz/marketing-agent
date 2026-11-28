@@ -25,7 +25,8 @@ async function main() {
   let total = 0;
   for (const c of rows) {
     const cid = Number(c.client_id);
-    const ctx = await api.getContext(cid);
+    /* 连归档一起取：做完的博客当天归档，不带归档会把已交的算成欠交（2026-11-28 Dareu）。 */
+    const ctx = await api.getContext(cid, { includeArchived: true });
     const quota = blogcadence.quotaOf(ctx);
     if (!quota) {
       if (argIds.length) console.log('[' + cid + ' ' + c.name + '] 没开博客节奏（缺 fact ' + blogcadence.FACT_KEY + '），跳过');
@@ -34,7 +35,7 @@ async function main() {
     const anchor = blogcadence.anchorNorm(ctx.active_plan && ctx.active_plan.created_at);
     const cur = blogcadence.currentSprint(anchor, today);
     const g = blogcadence.gaps(ctx, today);
-    const by = blogcadence.countBySprint(ctx.tasks || []);
+    const by = blogcadence.countBySprint(blogcadence.seasonTasks(ctx));
     const line = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'].map((s) => s + ':' + by[s].length).join(' ');
     console.log('[' + cid + ' ' + c.name + '] 每 sprint ' + quota + ' 篇，锚点 ' + anchor + '，当前 S' + cur + ' | ' + line);
     if (!g.length) { console.log('   无缺口'); continue; }

@@ -255,5 +255,22 @@ function isPendingCard(t) {
   L.push('## 桶三 到期重判（' + rejudge.length + '，下一轮自动吃掉，点名确认）');
   for (const x of rejudge) L.push('- ' + x);
   if (!rejudge.length) L.push('- 无');
+  /* 询盘零提示（2026-11-28）：小基数客户回归规则听不见，上一窗有询盘、这一窗一条都没有的在这里点名。
+     只提示不开单，零模型；任一客户取数失败跳过，不影响摘要。 */
+  const zero = [];
+  const sentinel = require('../lib/sentinel');
+  const fromD = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
+  const toD = new Date().toISOString().slice(0, 10);
+  for (const c of clients) {
+    try {
+      const m = await call('/metrics?client_id=' + c.client_id + '&from=' + fromD + '&to=' + toD + '&metrics=gsc_clicks,gsc_impressions,ga4_lead_sessions_organic');
+      const hint = sentinel.zeroLeadHint((m && m.metrics) || {});
+      if (hint) zero.push((c.name || c.client_id) + '：' + hint);
+    } catch (e) { /* 跳过 */ }
+  }
+  L.push('');
+  L.push('## 询盘零提示（' + zero.length + '，小基数客户，只提示不开单；写月报前对一下站点后台）');
+  for (const x of zero) L.push('- ' + x);
+  if (!zero.length) L.push('- 无');
   console.log(L.join('\n'));
 })().catch((e) => { console.error('fleet_digest 失败：' + e.message); process.exit(1); });

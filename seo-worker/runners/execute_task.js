@@ -1695,6 +1695,37 @@ function buildOutlinePrompt(opts) {
 }
 
 /** 审稿：机器校验过了之后，大模型按客户规则再读一遍，只出意见。回 { ok, verdict, issues } */
+/* 替换清单逐条采纳，零模型。返回 { cand, kept, total, dropped } 或 null（一条都留不下）。
+   字段改动（title 等）不参与：只叠正文替换，字段沿用修改前的值，免得半套改动把标题和正文改岔。 */
+function salvageEdits(out, baseBody, toCandidate, judgeFn) {
+  const edits = out && Array.isArray(out.edits) ? out.edits : [];
+  if (edits.length < 2) return null;
+  const keep = [];
+  const dropped = [];
+  let best = null;
+  for (let i = 0; i < edits.length; i += 1) {
+    const trial = toCandidate({ edits: keep.concat([edits[i]]), social_message: out.social_message }, baseBody);
+    if (trial && trial.ok && judgeFn(trial.draft).ok) { keep.push(edits[i]); best = trial; } else dropped.push(i);
+  }
+  if (!best || !keep.length) return null;
+  return { cand: best, kept: keep.length, total: edits.length, dropped };
+}
+
+/* 审稿官要知道内链上限（2026-11-28 Dareu #3546 到 #3550）：规范写死最多指向 3 个不同页面，审稿官不知道这条，
+   每轮都要求加链接，写手照做就超限，修改版被机器校验整版作废，审稿意见永远落不了地。 */
+function reviewLinkCapLine(body) {
+  const text = String(body || '').replace(/<script[\s\S]*?<\/script>/gi, '');
+  const hits = (text.match(/\]\((\/[^)\s]*)\)|href="(\/[^"]*)"/g) || [])
+    .map((x) => x.replace(/^\]\(|\)$|^href="|"$/g, ''))
+    .filter((x) => !/^\/assets\//.test(x))
+    .map((x) => blogcheck.normPath(x));
+  const targets = Array.from(new Set(hits));
+  return '内链硬上限：全文站内链接最多指向 3 个不同页面，本稿已用 ' + targets.length + ' 个' +
+    (targets.length ? '（' + targets.join('、') + '）' : '') +
+    '。' + (targets.length >= 3 ? '已满，' : '加到满为止，满了之后') +
+    '不许再要求加新链接，除非同一条意见里点名把现有哪一条换掉；读者需要的去处放不进链接，就要求写手用文字指路。';
+}
+
 async function reviewDraft(ctx, opts) {
   const { cfg, log } = ctx;
   const { draft, clientRules, task, workspace, taskId } = opts;
@@ -1725,6 +1756,7 @@ async function reviewDraft(ctx, opts) {
     '如果整篇选题和任务要求的主题或关键词簇不是一回事（写手自行改题），issues 第一条必须以「选题不符：」开头，这一条会让任务直接失败交人处理，不进改稿。',
     '正文第一行的 Style Roll 注释是内部元数据，写回平台前系统会自动剥掉，页面源码里不会有：不许把它列为问题，也不许要求删除。',
     '要求改内链时只点名你确信线上存在的地址；拿不准具体网址就只说该链向哪一类页面，由写手实测后定。',
+    reviewLinkCapLine(draft && draft.body_markdown),
     '只有真的必须改才 revise；措辞偏好不算。全中文，不用 emoji，不用破折号，字符串里不许有英文双引号。',
     '不要读工作目录里的文件，材料已经全在上面。',
   ].join('\n');
@@ -2289,8 +2321,22 @@ async function runBlogTask(ctx, context, workspace, task) {
           reviewNote = '审稿修改 ' + review.issues.length + ' 处。';
           log('task ' + taskId + '：定点修改后机器校验通过');
         } else {
-          reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改版没过校验，沿用修改前版本，意见附在备注。';
-          log('task ' + taskId + '：定点修改版没过校验（' + v2.errors.join(' | ') + '），沿用修改前版本');
+          /* 逐条采纳（2026-11-28）：原地改的修改版是一份替换清单，一处引入新问题不该把其余改对的一起作废。
+             零模型：按顺序一条条叠加，叠上去就出新问题的那条弃掉，其余留下。封面与字段改动只在整份能过时才收。 */
+          const kept = editMode && !cover2 ? salvageEdits(read.draft, draft.body_markdown, toCandidate, (d) => {
+                /* 字段沿用上一轮已改的值，与整份采纳时同一口径。 */
+                for (const f of ['title', 'excerpt', 'meta_description', 'cover_image']) d[f] = draft[f];
+                return judge(d, fixCtx);
+              }) : null;
+          if (kept && kept.cand) {
+            draft = kept.cand.draft;
+            for (const f of kept.cand.changed) editChanged.add(f);
+            reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改清单 ' + kept.total + ' 条里采纳 ' + kept.kept + ' 条，弃 ' + kept.dropped.length + ' 条（叠上去会引入新问题：' + v2.errors.join('；').slice(0, 200) + '），意见附在备注。';
+            log('task ' + taskId + '：定点修改版整份没过校验（' + v2.errors.join(' | ') + '），逐条采纳 ' + kept.kept + '/' + kept.total + ' 条');
+          } else {
+            reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改版没过校验，沿用修改前版本，意见附在备注。';
+            log('task ' + taskId + '：定点修改版没过校验（' + v2.errors.join(' | ') + '），沿用修改前版本');
+          }
         }
       } else {
         reviewNote = '审稿提了 ' + review.issues.length + ' 处，修改版' + (read.ok ? '替换清单套不上' : '解析失败') + '，沿用修改前版本，意见附在备注。';
@@ -3435,6 +3481,8 @@ module.exports = {
   isShopifySite,
   SHOPIFY_READ_DOCTRINE,
   liveVerifyExtraPaths,
+  salvageEdits,
+  reviewLinkCapLine,
   writebackSource,
   revisionCheck,
   resolveRefBlogUrl,

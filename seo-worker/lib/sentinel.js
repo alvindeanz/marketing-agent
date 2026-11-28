@@ -20,7 +20,10 @@ const LOOKBACK_DAYS = 35; // 询盘两个 14 天窗 28 天 + GSC 迟到缓冲
 // 永久失聪，所以收紧的是持续性不是基数，与曝光同口径，代价是报警晚一个窗）。
 const RULES = [
   { metric: 'gsc_clicks', label: '自然点击', winDays: 7, drop: 0.3, floor: 20, weeks: 2, coverage: 5 },
-  { metric: 'ga4_leads', label: '自然询盘', winDays: 14, drop: 0.5, floor: 10, weeks: 1, coverage: 0 },
+  /* 2026-11-28 换口径：原来读 ga4_leads（全渠道事件数，一次提交常记两条），名叫自然询盘却既不是自然也不是人数，
+     基数虚高后 floor 10 形同虚设（Apollo #1758、#3538，Power Dekor #3539 三次都判回小基数波动）。
+     现读自然渠道、会话去重的 ga4_lead_sessions_organic。sparse：只在有询盘的日子才有行，不能当锚。 */
+  { metric: 'ga4_lead_sessions_organic', label: '自然询盘', winDays: 14, drop: 0.5, floor: 10, weeks: 1, coverage: 0, sparse: true },
   { metric: 'gsc_impressions', label: '搜索曝光', winDays: 7, drop: 0.4, floor: 1000, weeks: 2, coverage: 5 },
 ];
 
@@ -68,7 +71,7 @@ function toByDay(pts) {
 
 /**
  * 纯函数：seriesByMetric = { metric: [{d,v},...] }，返回命中的告警数组。
- * 回归规则的锚取 GSC 系列的最新日期（ga4_leads 只在有询盘的日子才有行，缺行就是 0，
+ * 回归规则的锚取 GSC 系列的最新日期（询盘序列只在有询盘的日子才有行，缺行就是 0，
  * 不能拿它自己的最新行当锚，否则询盘枯竭这种最该报的情况反而永远测不到）。
  * 投放断流用 ads_cost 自己的锚（两套取数各有各的迟到节奏）。
  */
@@ -79,7 +82,7 @@ function evalSentinel(seriesByMetric) {
   for (const rule of RULES) {
     const { byDay, maxTs } = toByDay(src[rule.metric]);
     maps[rule.metric] = byDay;
-    if (rule.metric !== 'ga4_leads' && maxTs != null && (anchorTs == null || maxTs > anchorTs)) {
+    if (!rule.sparse && maxTs != null && (anchorTs == null || maxTs > anchorTs)) {
       anchorTs = maxTs;
     }
   }
@@ -154,6 +157,33 @@ function evalSentinel(seriesByMetric) {
   return alerts;
 }
 
+/**
+ * 小基数客户的询盘枯竭提示（纯函数，不开单）。基数不到 floor 的客户回归规则听不见，但「上一窗有、这一窗一条都没有」
+ * 这个事实值得有人知道：只回一句话给 job log 与汇总，不烧诊断。上一窗至少 ZERO_HINT_MIN 条才提，
+ * 免得本来就一两条的客户天天提。序列一行都没有（新指标还没取过数）时不提，分不清是零还是没数。
+ */
+const ZERO_HINT_MIN = 3;
+function zeroLeadHint(seriesByMetric) {
+  const src = seriesByMetric || {};
+  const rule = RULES.find((r) => r.sparse);
+  const pts = src[rule.metric] || [];
+  if (!pts.length) return '';
+  let anchorTs = null;
+  for (const r of RULES) {
+    if (r.sparse) continue;
+    const { maxTs } = toByDay(src[r.metric]);
+    if (maxTs != null && (anchorTs == null || maxTs > anchorTs)) anchorTs = maxTs;
+  }
+  if (anchorTs == null) return '';
+  const { byDay } = toByDay(pts);
+  const w0 = windowSum(byDay, anchorTs, rule.winDays);
+  const w1 = windowSum(byDay, anchorTs - rule.winDays * DAY, rule.winDays);
+  if (w0.sum === 0 && w1.sum >= ZERO_HINT_MIN && w1.sum < rule.floor) {
+    return '自然询盘近 ' + rule.winDays + ' 天为 0，上一窗 ' + w1.sum + ' 条（基数不到 ' + rule.floor + ' 不开单，仅提示，锚 ' + ymd(anchorTs) + '）';
+  }
+  return '';
+}
+
 /** 去重：同客户已有未结哨兵单，或 DEDUP_DAYS 内开过（无论结没结），都不再开。 */
 function sentinelBlocked(tasks, nowTs) {
   for (const t of tasks || []) {
@@ -170,7 +200,7 @@ function sentinelBlocked(tasks, nowTs) {
 
 function buildTask(clientName, alerts, pageLines) {
   const lines = [
-    '指标哨兵在 pull_data 收尾的周期回归里命中阈值（锚定日 ' + alerts[0].anchor + '，GSC 口径为库内非品牌剔 spam 序列）：',
+    '指标哨兵在 pull_data 收尾的周期回归里命中阈值（锚定日 ' + alerts[0].anchor + '，GSC 口径为库内非品牌剔 spam 序列；询盘口径为 GA4 自然渠道里触发过 lead 事件的会话数，已按会话去重）：',
     '',
   ];
   for (const a of alerts) lines.push('- ' + a.line);
@@ -209,10 +239,11 @@ async function check(ctx, clientId, profile, tasks) {
   const now = Date.now();
   const from = ymd(now - LOOKBACK_DAYS * DAY);
   const to = ymd(now);
-  const res = await api.getMetrics(clientId, from, to, 'gsc_clicks,gsc_impressions,ga4_leads,ads_cost');
+  const res = await api.getMetrics(clientId, from, to, 'gsc_clicks,gsc_impressions,ga4_lead_sessions_organic,ads_cost');
   const series = (res && res.metrics) || {};
   const alerts = evalSentinel(series);
-  if (!alerts.length) return '周期回归正常，不开单';
+  const hint = zeroLeadHint(series);
+  if (!alerts.length) return '周期回归正常，不开单' + (hint ? '；[询盘零提示] ' + hint : '');
   const blocked = sentinelBlocked(tasks, now);
   if (blocked) return '命中 ' + alerts.length + ' 项但去重拦下：' + blocked;
 
@@ -261,4 +292,5 @@ async function pageSplit(ctx, property, anchorYmdStr) {
     .map((r) => r.k + ' ：' + r.p + ' -> ' + r.c);
 }
 
-module.exports = { evalSentinel, sentinelBlocked, buildTask, check, TITLE_PREFIX, RULES, ADS_STOP, DEDUP_DAYS };
+module.exports = {
+  zeroLeadHint, evalSentinel, sentinelBlocked, buildTask, check, TITLE_PREFIX, RULES, ADS_STOP, DEDUP_DAYS };

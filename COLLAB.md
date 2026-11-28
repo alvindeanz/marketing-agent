@@ -20,6 +20,15 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-28 Aira：博客缺口误报、审稿意见逐条采纳、指标哨兵询盘口径（Alvin 批「按照你的规划去处理」）
+
+1. 博客缺口工具把已交的算成欠交：tools/blog_cadence.js 取任务用默认口径（不含归档），做完的博客当天归档，写得越勤缺口越大（Dareu 五篇都写过却报欠 5 篇，Apollo、Power Dekor、SD Aluminium 的假缺口同因）。修法：连归档一起取，blogcadence.seasonTasks 只收本季方案建立之后建的归档单（上一季同名 sprint 不顶本季）。全舰队重算假缺口清零。没改的：工具只数任务不数上线，Dareu 七篇草稿烂在旧后台两个月它一直显示正常，按已发布数对账是下一步。
+2. 审稿修改版一处违规整版作废：订正上一条的诊断，改稿轮本来就只拦新增问题；真矛盾是审稿官不知道「内链最多指向 3 个页面」，每轮要求加链接，写手照做即超限。修法两处：审稿 prompt 带上内链上限与本稿已用目标（reviewLinkCapLine），已满时不许要求加链接除非点名换掉哪条；原地改的修改清单整份不过时逐条采纳（salvageEdits，零模型，叠上去出新问题的那条弃掉）。新稿模式的修改版是整份 json，没有逐条可言，仍走沿用修改前版本。
+3. 改稿轮沿用原稿骨架：评估后不改。沿用是对的设计，出事的前提（第一稿抽到与任务书打架的骨架）已在 cfe637e 堵住，存量错骨架稿删掉重出。
+4. 指标哨兵「自然询盘」名不副实：读的是 ga4_leads（全渠道 eventCount，一次提交常记两条），基数虚高后 floor 10 形同虚设，Apollo #1758、#3538 与 Power Dekor #3539 三次都判回小基数波动。修法：新增指标 ga4_lead_sessions_organic（自然渠道、触发过 lead 事件的会话数，会话去重，pull_data 单独拉 35 天），哨兵询盘规则改读它；ga4_leads 定义不动，报告与曲线历史口径不变。新增 zeroLeadHint：上一窗 3 到 9 条、这一窗 0 条的小基数客户只提示不开单，进 pull_data job log 与 fleet_digest 的「询盘零提示」节。新指标三处登记：seo-api METRIC_NAMES、metrics.js METRICS、pull_data 快照字段；两面都要部署。
+测试：tests/blogcadence.test.js 加 Dareu 回放一例，新增 tests/blogsalvage.test.js 四例，tests/sentinel.test.js 加 Apollo #3538 回放与豁免面两例；JS 60 个文件与 PHP 全套加 php -l 全绿。
+坑：新指标要等各家下一次 pull_data 才有数，在那之前询盘规则与零提示都静默（序列为空分不清是零还是没数，宁漏不误报）。
+
 ### 2026-11-28 Aira：博客产线三处自相矛盾，审稿意见落不了地（rev cfe637e，两机已部署）
 
 起因：Louvresky #2558 重写单 #3545 和 Dareu 五张搬稿单 #3546 到 #3550，六篇全部「审稿提了 N 处，修改版没过校验，沿用修改前版本」，带着未落实的意见出了确认卡。

@@ -34,6 +34,7 @@ const METRICS = [
   'gsc_clicks_brand',
   'ga4_sessions_organic',
   'ga4_leads',
+  'ga4_lead_sessions_organic',
   'rank_top3',
   'rank_top10',
   'rank_top20',
@@ -468,6 +469,44 @@ async function pullGa4OrganicDaily(ctx, propertyId, range) {
 }
 
 /**
+ * 按日拉「自然渠道里触发过 lead 事件的会话数」。维度 date x sessionDefaultChannelGroup，指标 sessions，
+ * 过滤 eventName 属于 LEAD_EVENTS。
+ *
+ * 为什么另起一条而不改 ga4_leads（2026-11-28）：ga4_leads 是全渠道 eventCount 之和，一次表单提交常同时触发
+ * form_submit 与 generate_lead，记成两条；指标哨兵拿它当「自然询盘」，基数虚高后「至少 10 条才开单」的
+ * 小样本门槛形同虚设（Apollo #1758、#3538，Power Dekor #3539 三次都判回小基数波动）。sessions 按会话去重，
+ * 渠道只留 Organic Search。ga4_leads 的定义不动，报告与转化曲线的历史口径不受影响。
+ * 返回 [{ date, sessions }, ...]。
+ */
+async function pullGa4LeadSessionsOrganicDaily(ctx, propertyId, range) {
+  const { log } = ctx;
+  const byDate = new Map();
+  for (const c of chunkRange(range.start, range.end, GA4_CHUNK_DAYS)) {
+    const rows = await ga4Report(ctx, propertyId, {
+      dateRanges: [{ startDate: c.start, endDate: c.end }],
+      dimensions: [{ name: 'date' }, { name: 'sessionDefaultChannelGroup' }],
+      metrics: [{ name: 'sessions' }],
+      dimensionFilter: {
+        filter: {
+          fieldName: 'eventName',
+          inListFilter: { values: LEAD_EVENTS, caseSensitive: true },
+        },
+      },
+    });
+    for (const r of rows) {
+      const d = normalizeDate(r.date);
+      if (!d) continue;
+      if (String(r.sessionDefaultChannelGroup || '').trim().toLowerCase() !== ORGANIC_CHANNEL) continue;
+      byDate.set(d, (byDate.get(d) || 0) + (Number(r.sessions) || 0));
+    }
+  }
+  log('ga4 自然询盘会话: 覆盖 ' + byDate.size + ' 天');
+  return Array.from(byDate.entries())
+    .map(([date, sessions]) => ({ date, sessions }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/**
  * 按日拉三个 lead 事件的次数之和。维度 date x eventName，指标 eventCount。
  *
  * 为什么用 eventCount 而不是 keyEvents/conversions：keyEvents 只统计被标成
@@ -668,6 +707,10 @@ function metricsFromSnapshots(opts = {}) {
   } else {
     notes.push('ga4 快照没有 dates_leads，跳过 lead');
   }
+  if (ga4 && Array.isArray(ga4.dates_lead_sessions_organic)) {
+    for (const r of ga4.dates_lead_sessions_organic) push(r.date, 'ga4_lead_sessions_organic', r.sessions);
+    notes.push('ga4 自然询盘会话 ' + ga4.dates_lead_sessions_organic.length + ' 天');
+  }
 
   const sem = opts.semrushData;
   if (sem) {
@@ -719,6 +762,7 @@ async function postMetricRows(api, clientId, rows, log) {
 module.exports = {
   METRICS,
   LEAD_EVENTS,
+  pullGa4LeadSessionsOrganicDaily,
   ORGANIC_CHANNEL,
   GSC_ROW_LIMIT,
   GSC_QUERY_CHUNK_DAYS,

@@ -84,6 +84,8 @@ define('SNAPSHOT_SOURCES',['ga4','gsc','semrush','discovery','content_registry',
      ga4_sessions_organic                  GA4 按日 Organic Search 渠道会话
      ga4_leads                             GA4 按日 form_submit + generate_lead
                                            + click_to_call 三个事件的 eventCount 之和
+     ga4_lead_sessions_organic             GA4 按日 Organic Search 渠道里触发过上述任一 lead 事件的会话数
+                                           （会话去重、只算自然渠道；指标哨兵用它，2026-11-28）
      rank_top3 / rank_top10 / rank_top20   Semrush 自然位次分档累计值（含前档，
                                            top10 包含 top3）。只算自然结果，
                                            SERP feature 占位（AI Overview 引用那种）
@@ -96,7 +98,7 @@ define('METRIC_NAMES',[
        ads_cost 单位是账户币种的元（worker 从 cost_micros 换算），ads_conv_value 同币种。 */
     'ads_cost','ads_clicks','ads_impressions','ads_conversions','ads_conv_value',
     'gsc_impressions','gsc_clicks','gsc_impressions_brand','gsc_clicks_brand',
-    'ga4_sessions_organic','ga4_leads',
+    'ga4_sessions_organic','ga4_leads','ga4_lead_sessions_organic',
     'rank_top3','rank_top10','rank_top20','rank_tracked','ref_domains'
 ]);
 

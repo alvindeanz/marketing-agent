@@ -87,5 +87,22 @@ t('占位任务：带配额标记、ops 字符串、补交写明原 sprint', () 
   assert.ok(bc.isBlogTask(p));
 });
 
+t('缺口：本季已归档的成稿占配额，上一季归档单不顶本季（2026-11-28 Dareu 欠 5 篇误报回放）', () => {
+  // 锚点 09-18 落在 09/15-09/30 档；今天 11-28 在 S5。五篇都写完归档了，不欠。
+  const mk = (id, sp, created) => ({ id, title: sp + ' 配额博客：选题在锁定词表内自定', ops: 'blog-draft', sprint: sp, status: 'done', archived: 1, created_at: created, result_note: '[applied] 草稿已建' });
+  const done = [mk(968, 'S1', '2026-09-23 02:00:00'), mk(782, 'S2', '2026-09-23 02:00:00'), mk(969, 'S3', '2026-09-23 02:00:00'), mk(970, 'S4', '2026-09-23 02:00:00'), mk(971, 'S5', '2026-09-23 02:00:00')];
+  const live = { id: 972, title: 'S6 配额博客：选题在锁定词表内自定', ops: 'blog-draft', sprint: 'S6', status: 'proposed', archived: 0, created_at: '2026-09-23 02:00:00' };
+  assert.deepStrictEqual(bc.gaps(ctx(done.concat([live]), true, '2026-09-18'), '2026-11-28'), []);
+  // 默认口径（不带归档）就是当时的误报形状：五个空档
+  assert.strictEqual(bc.gaps(ctx([live], true, '2026-09-18'), '2026-11-28').length, 5);
+  // 上一季的归档单（建于本季方案之前）不许顶本季的 S1
+  const old = mk(100, 'S1', '2026-06-01 02:00:00');
+  const g = bc.gaps(ctx([old].concat(done.slice(1), [live]), true, '2026-09-18'), '2026-11-28');
+  assert.strictEqual(g.length, 1); assert.strictEqual(g[0].sprint, 'S1');
+  // 砍掉的归档单照旧不占
+  const dead = Object.assign(mk(971, 'S5', '2026-09-23 02:00:00'), { result_note: '[dropped] 不做' });
+  assert.strictEqual(bc.gaps(ctx(done.slice(0, 4).concat([dead, live]), true, '2026-09-18'), '2026-11-28').length, 1);
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

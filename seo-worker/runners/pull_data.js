@@ -358,6 +358,15 @@ async function pullGa4(ctx, profile, win) {
   } catch (e) {
     log('ga4: 按日 lead 事件 FAILED :: ' + e.message);
   }
+  let datesLeadSessionsOrganic = null;
+  try {
+    /* 哨兵要两个 14 天窗，锚是 GSC 最新日（迟到两三天），28 天窗口差几天凑不满上一窗；这一条单独拉 35 天。 */
+    const endTs = Date.parse(String(win.end) + 'T00:00:00Z');
+    const wide = Number.isFinite(endTs) ? { start: new Date(endTs - 34 * 86400000).toISOString().slice(0, 10), end: win.end } : win;
+    datesLeadSessionsOrganic = await metrics.pullGa4LeadSessionsOrganicDaily(ctx, propertyId, wide);
+  } catch (e) {
+    log('ga4: 按日自然询盘会话 FAILED :: ' + e.message);
+  }
 
   const totals = dates.reduce(
     (acc, r) => {
@@ -381,6 +390,8 @@ async function pullGa4(ctx, profile, win) {
     // dates_leads 是 form_submit + generate_lead + click_to_call 的按日之和。
     dates_organic: datesOrganic,
     dates_leads: datesLeads,
+    // 自然渠道里触发过 lead 事件的会话数（会话去重），指标哨兵用。
+    dates_lead_sessions_organic: datesLeadSessionsOrganic,
     lead_events: metrics.LEAD_EVENTS,
   };
 
