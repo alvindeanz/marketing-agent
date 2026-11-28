@@ -92,6 +92,11 @@ function nextSkeleton(n) {
  * opts: { postCount, previousSkeletonLabel }
  * Returns { skeleton: {n,label}, tone, opening, cta, title, density, notes: [] }
  */
+/** 任务书是否明令不写价格：否定词后 12 字内跟金额类名词。只认明令，不从选题猜。 */
+function briefBansPrices(text) {
+  return /(不出现|不写|不许写|不得写|不许出现|不得出现|禁止|不放|不列)[^。\n]{0,12}(金额|价格|单价|报价|价位)/.test(String(text || ''));
+}
+
 function roll(opts = {}) {
   const notes = [];
   let n = skeletonForIndex(opts.postCount);
@@ -102,6 +107,15 @@ function roll(opts = {}) {
       '轮换落到骨架 ' + n + '（' + skeletonByNumber(n).label + '），与上一篇相同，' +
         '按 SOP 禁止连续两篇同骨架，顺延到 ' + bumped + '（' + skeletonByNumber(bumped).label + '）'
     );
+    n = bumped;
+  }
+  /* 任务书明令不写价格时不许落到 Cost Breakdown（2026-11-28 Louvresky #2558 与 #3545）：这个骨架的机器校验
+     要求开头带价格或数字，等于逼写手把选型文写成成本文，与任务书直接打架。骨架是轮换偏好不是闸，
+     顺延一格即可；顺延后撞上一篇同骨架就再顺延一格。 */
+  if (skeletonByNumber(n).label === 'Cost Breakdown' && briefBansPrices(opts.briefText)) {
+    let bumped = nextSkeleton(n);
+    if (prev && prev.n === bumped) bumped = nextSkeleton(bumped);
+    notes.push('任务书明令不写价格，骨架 Cost Breakdown 不适用，顺延到 ' + bumped + '（' + skeletonByNumber(bumped).label + '）');
     n = bumped;
   }
   const skeleton = skeletonByNumber(n);
@@ -189,6 +203,7 @@ function stripRollComment(body) {
 }
 
 module.exports = {
+  briefBansPrices,
   SKELETONS,
   DIMENSIONS,
   CONFLICTS,

@@ -1723,6 +1723,8 @@ async function reviewDraft(ctx, opts) {
     '```',
     '或 {"verdict":"revise","issues":["具体到段落或句子的修改要求，每条一句，最多 6 条"]}。',
     '如果整篇选题和任务要求的主题或关键词簇不是一回事（写手自行改题），issues 第一条必须以「选题不符：」开头，这一条会让任务直接失败交人处理，不进改稿。',
+    '正文第一行的 Style Roll 注释是内部元数据，写回平台前系统会自动剥掉，页面源码里不会有：不许把它列为问题，也不许要求删除。',
+    '要求改内链时只点名你确信线上存在的地址；拿不准具体网址就只说该链向哪一类页面，由写手实测后定。',
     '只有真的必须改才 revise；措辞偏好不算。全中文，不用 emoji，不用破折号，字符串里不许有英文双引号。',
     '不要读工作目录里的文件，材料已经全在上面。',
   ].join('\n');
@@ -1783,7 +1785,7 @@ async function runBlogTask(ctx, context, workspace, task) {
   }
   if (previousSkeletonLabel) log('task ' + taskId + '：上一篇骨架是 ' + previousSkeletonLabel);
 
-  const roll = styleroll.roll({ postCount: posts.length, previousSkeletonLabel });
+  const roll = styleroll.roll({ postCount: posts.length, previousSkeletonLabel, briefText: String(task.title || '') + '\n' + String(task.detail || '') });
   for (const n of roll.notes) log('task ' + taskId + '：Roll 说明 ' + n);
   log('task ' + taskId + '：本篇 Style Roll ' + styleroll.rollSummary(roll));
 
@@ -2271,7 +2273,16 @@ async function runBlogTask(ctx, context, workspace, task) {
         }
         const cover2 = await coverProblem(cand2);
         if (cover2) log('task ' + taskId + '：定点修改的封面没过核对，保留上一版 :: ' + cover2);
-        const v2 = cover2 ? { ok: false, errors: [cover2] } : judge(cand2.draft, checkCtx);
+        /* 定点修改版同样走内链线上兜底（2026-11-28 Dareu #3546 到 #3550）：审稿常要求把链接换到注册表看不见的
+           /collections/* 活页，首轮有这道兜底而修改轮没有，修改版必然被白名单拦下，审稿意见永远落不了地。 */
+        let fixCtx = checkCtx;
+        try {
+          const extra2 = await liveVerifyExtraPaths(cand2.draft && cand2.draft.body_markdown, allowedPaths, profile.domain, log, taskId);
+          if (extra2.length) fixCtx = Object.assign({}, checkCtx, { allowedPaths: allowedPaths.concat(extra2) });
+        } catch (e) {
+          log('task ' + taskId + '：定点修改版内链线上兜底核验失败，退回纯白名单口径 :: ' + e.message);
+        }
+        const v2 = cover2 ? { ok: false, errors: [cover2] } : judge(cand2.draft, fixCtx);
         if (v2.ok) {
           draft = cand2.draft;
           for (const f of cand2.changed) editChanged.add(f);
