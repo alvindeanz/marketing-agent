@@ -20,6 +20,13 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
+### 2026-11-28 Aira：登记 theme-block-add（shopseo 1.18.0），人工位 26 条摸底的收编
+
+shopseo 新命令 theme add-block：往模板 JSON 里既有 section 加 block 并插 block_order。护栏四条：不建 section，不发明 blocks 与 block_order，拒绝覆盖既有 block id，block type 必须该 section 已有同类块或其 liquid schema 已登记。写前快照，写后字段级回读，回滚走 theme restore-json。实弹：Sunseeker #3544（母单 #3504）X5 商品页 FAQ 区追加四问，block_order 7 变 11，其余 24 个 section 与原 7 块逐字未变。
+三步登记：能力清单 shopify.md、release_policy.json（reversible）、capability_broadcast。两面部署。
+同批摸底的平台侧发现（不在本仓，留给 WebForger 侧）：一，WF 商城类目页四字段存在商城服务的集合记录里（apps.webforger.ai/commerce/admin/collections 可读），写接口文档未登记，Sammichelle #3542、#3119 等契约确认后补 collection 三个执行器；二，没有 contentId 的页面没有逐字子串替换通道（page-html-replace 语义），Apollo #2706 与 HornTech NZ #3132 卡在这里。
+测试：JS 全套全绿（本次无逻辑代码改动，只动 specs）。
+
 ### 2026-11-28 Aira：博客缺口误报、审稿意见逐条采纳、指标哨兵询盘口径（Alvin 批「按照你的规划去处理」）
 
 1. 博客缺口工具把已交的算成欠交：tools/blog_cadence.js 取任务用默认口径（不含归档），做完的博客当天归档，写得越勤缺口越大（Dareu 五篇都写过却报欠 5 篇，Apollo、Power Dekor、SD Aluminium 的假缺口同因）。修法：连归档一起取，blogcadence.seasonTasks 只收本季方案建立之后建的归档单（上一季同名 sprint 不顶本季）。全舰队重算假缺口清零。没改的：工具只数任务不数上线，Dareu 七篇草稿烂在旧后台两个月它一直显示正常，按已发布数对账是下一步。

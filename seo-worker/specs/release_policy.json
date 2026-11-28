@@ -122,6 +122,7 @@
     "theme-text-edit": "reversible",
     "theme-section-visibility-update": "reversible",
     "theme-section-add": "reversible",
+    "theme-block-add": "reversible",
     "theme-template-create": "reversible",
     "collection-template-assign": "reversible",
     "wp-content-edit": "reversible",
