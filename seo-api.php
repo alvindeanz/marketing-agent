@@ -1814,6 +1814,50 @@ function inbox_drafts_norm($v){
     return $out;
 }
 
+/* F2 条目就绪度，全部自动放行入口共用一份（2026-11-28，SD Aluminium #2984 学费：方案条目带
+   after:2026-11-27，频道派单那条路认条件会挂起，复审自动放行与放行官两条路不认，条件没到就排
+   apply，落地 agent 自检日期零写入中止两次后停人）。
+   管什么：自动排 apply 之前，机器条目全部带未消费前置条件且至少一条没到的，不排 apply，任务挂
+   blocked 加 [wait-condition]，由条件巡检（worker 零模型）到点续跑。授权是原来那次给的，这里只推迟时点。
+   豁免面：after: 日期已到的（UTC 当天含在内，与 worker 巡检同口径）当场消费不挂；有任一机器条目
+   不带条件的不挂（照旧由落地 agent 跳过未到条件的条目）。
+   误杀出口：人工放行按钮与看板 decide 不走这里，照常可排。
+   命中台账：audit seo_task_wait_condition，任务备注留 [wait-condition] 行。
+   返回挂起的条件清单，空数组表示没挂、调用方照常往下排。 */
+/* COND-PURE-START 纯函数块，tests/wait_condition.test.php 按标记抠出来测 */
+/* 入参是各待落机器条目的 condition 原文（空串=无条件）与 UTC 当天日期。
+   返回 [unmet 去重保序的未到条件, due 已到日期条件所在下标]；unmet 为空表示不用挂。 */
+function conditions_wait_verdict($conds,$today){
+    if(!$conds)return [[],[]];
+    $unmet=[];$due=[];
+    foreach(array_values($conds) as $i=>$cv){
+        $cv=trim((string)$cv);
+        if($cv==='')return [[],[]];
+        if(preg_match('/^after:(\d{4}-\d{2}-\d{2})$/',$cv,$dm)&&$today>=$dm[1]){$due[]=$i;continue;}
+        if(!in_array($cv,$unmet,true))$unmet[]=$cv;
+    }
+    return [$unmet,$due];
+}
+/* COND-PURE-END */
+function task_park_if_waiting($tid){
+    ensure_change_items();
+    $tid=(int)$tid;
+    $q=db()->prepare("SELECT id,condition_ready FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized')");
+    $q->execute([$tid]);
+    $rows=$q->fetchAll();
+    list($unmet,$dueIdx)=conditions_wait_verdict(array_map(function($r){return $r['condition_ready'];},$rows),gmdate('Y-m-d'));
+    if(!$unmet){
+        /* 条件全是已到的日期：消费掉，照常排 */
+        $due=array_map(function($i)use($rows){return (int)$rows[$i]['id'];},$dueIdx);
+        if($due)db()->exec("UPDATE seo_change_items SET condition_ready='' WHERE id IN (".implode(',',$due).")");
+        return [];
+    }
+    db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
+    task_append_note($tid,'[wait-condition] 等待：'.mb_substr(implode('；',$unmet),0,300,'UTF-8').'。条件满足由巡检自动续跑（授权已含在原放行里）');
+    audit('seo-worker','seo_task_wait_condition',(string)$tid,['conditions'=>$unmet]);
+    return $unmet;
+}
+
 /* Chat 分级派单的风险定级（2026-09-08 Alvin 定：决策权还给 fable，服务端只按政策分流）。
    入参：ops 数组、release_policy 解码数组、是否有客户批文背书（调用方已验 fact 存在且 confirmed）。
    返回 'auto'（全绿直落）| 'confirm'（出方案后停一句话）| 'invalid: 说明'（op 不在政策表，整单拒）。
@@ -3548,19 +3592,8 @@ if($m==='POST'&&preg_match('#^/tasks/(\d+)/result$#',$ROUTE,$mm)){
         /* F2 条目就绪度（2026-09-11，#680 教训，PJ 基准：等条件就挂起到点自己续，不硬跑一次失败）：
            机器条目全部带未消费前置条件的，不排 apply，任务挂 blocked 等条件巡检（worker 零 LLM
            轮询）到点续跑。授权是委托单那一次给的，巡检只推迟执行时点。 */
-        ensure_change_items();
-        $cqI=db()->prepare("SELECT condition_ready FROM seo_change_items WHERE task_id=? AND owner='machine' AND state IN('proposed','authorized')");
-        $cqI->execute([$tid]);
-        $mItems=$cqI->fetchAll();
-        $condsW=[];$allCondW=count($mItems)>0;
-        foreach($mItems as $miR){
-            $cv=trim((string)$miR['condition_ready']);
-            if($cv==='')$allCondW=false;
-            elseif(!in_array($cv,$condsW,true))$condsW[]=$cv;
-        }
-        if($allCondW&&$condsW){
-            db()->prepare("UPDATE seo_tasks SET status='blocked' WHERE id=?")->execute([$tid]);
-            task_append_note($tid,'[wait-condition] 等待：'.mb_substr(implode('；',$condsW),0,300,'UTF-8').'。条件满足由巡检自动续跑（授权已含在委托单里）');
+        $condsW=task_park_if_waiting($tid);
+        if($condsW){
             /* 等条件不是等人，不进频道：巡检自动续，续完收口回合说话，停滞有泳道扫帚兜底（2026-10-27） */
             res(200,['ok'=>true,'dispatch_grade'=>'wait-condition','conditions'=>$condsW]);
         }
@@ -8836,6 +8869,8 @@ if($m==='POST'&&$ROUTE==='/tasks/review_result'){
             hold_notify($tid,'本版方案已自动落地 '.$an0.' 次，第三次留人处理，方案重出后解锁');
             continue;
         }
+        /* 条件没到的不排 apply，挂起等巡检（见 task_park_if_waiting） */
+        if(task_park_if_waiting($tid))continue;
         list($aj,$askip)=queue_task_jobs($cid,'apply_task',[$tid],$mand0?'mandate-carry':'release-policy-l0','seo_tasks_release');
         if($aj){
             task_append_note($tid,$mand0
@@ -9125,6 +9160,11 @@ if($m==='POST'&&$ROUTE==='/tasks/release_review_result'){
             $errN2=task_close($tid,'accepted','无变更方案（实读对账零写入），放行官判 release 即验收（opus 放行官）：'.$reason,'opus-release');
             if($errN2){$act['skipped'][]=$tid;continue;}
             audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'nochange_accept']);
+            $act['released'][]=$tid;continue;
+        }
+        if($wc9=task_park_if_waiting($tid)){
+            task_append_note($tid,'[auto-release L2-opus '.$stamp.']'.$retryTag.' '.$reason.'（前置条件未到，到点自动落地）');
+            audit('opus-release','seo_task_release_opus',(string)$tid,['kind'=>'wait_condition','conditions'=>$wc9]);
             $act['released'][]=$tid;continue;
         }
         list($ja,)=queue_task_jobs($cid,'apply_task',[$tid],'opus-release','seo_task_release_opus');

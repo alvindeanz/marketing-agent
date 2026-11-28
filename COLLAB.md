@@ -20,7 +20,17 @@ append-only，新条目加在最上面。每条固定格式：日期、谁、干
 - 部署权：两人都可跑 deploy.sh，先 commit 再部署，部署后 check 无漂移，worker 部署前确认 running job 为 0。
 - 历史：2026-09-13 版把 Aiden 写作「MA 辅助开发」，框架错，2026-09-17 Alvin 校准如上。
 
-### 2026-11-27 AIRA 未申报操作的行为闸改成比风险档（SD Aluminium #2807 第三道卡点，Alvin 批「做吧」）
+### 2026-11-28 Aira：带日期条件的方案，自动放行两条路也认条件了；sitemap 类验收改延后复验（SD Aluminium #2984，Alvin 批）
+
+- 干了什么：
+  - seo-api.php：条目前置条件的挂起判定收成一份 `task_park_if_waiting`（纯判定 `conditions_wait_verdict` 可单测）。原先只有频道派单那条路认条件，复审自动放行（L0 与委托携带）和放行官两条路不认，条件没到就排落地。现在三个自动入口同一判定：机器条目全带条件且有没到的，任务挂 blocked 加 [wait-condition]，条件巡检到点续跑；after: 日期已到的当场消费照常排。人工放行不走这里，是误杀出口。命中记 audit `seo_task_wait_condition`。
+  - execute_task.js：方案契约补三句。after: 含当天；条件没到由调度挂起，步骤里不再自写日期自检；一个方案只有一个落地时点，后面的期次写进「剩余批次」。新 lint 第 7 条只读末尾 json 的条目账本，出现两个以上不同 after: 日期就打回（多条 ad_approved 不算分期，放过）。
+  - execute_task.js：执行后验证补一条，有平台缓存的检查（sitemap 是否含新页等）写成缓存过期后复验的延后项，不计入本轮通过与否，不许当回滚触发条件（PF Moving #3127 两次被自己的验收回滚，DEFECTS 2026-11-26）。
+- 坑：#2984 的方案把条件写得规规矩矩（条目 condition 字段两个日期），是调度没读。落地 agent 的日期自检立了功但代价是两个失败 job 加一次打回重出，最后停人。另一半病在一单两期：巡检要等全部条件满足才续，两期日期塞一单等于第一期被第二期拖到 12-11。
+- 测试：tests/wait_condition.test.php 6 条（#2984 真实条目账本回放），tests/apply.test.js 加 1 条共 72 过，node tests 全套与 php -l 全绿。
+- 下一步：#2984 重出只含第一期的方案，第二期（类目描述，最早 12-11）另建后续任务。
+
+## 2026-11-27 AIRA 未申报操作的行为闸改成比风险档（SD Aluminium #2807 第三道卡点，Alvin 批「做吧」）
 - **病**：apply 的行为闸（WordPress 与 Shopify 两张形状表）按名字比，方案里出现任务 ops 没申报的写操作就零写入中止。#2807 申报了 blog-publish，发布同意也到了，方案里一步建稿（wp-draft-create，reversible 档）没申报被拦；同款方案 #2808 把接口地址写成 `$BASE/content` 闸没认出来照发。能查到的 WordPress 命中共 4 次（#394 #1097 #1098 刷 sitemap，#2807 建稿），无一立功。
 - **改法**（`splitByRiskTier`，apply_task.js）：未申报且政策表里是 reversible 档的操作，任务申报过至少一个写操作就放行，job 日志记一行 `[行为闸放行]` 供抽查。照拦的：非 reversible 档没申报（发布、结构、花钱、不可逆）、政策表不认识的操作、零写申报（空或只读 op）的单出现写入。原先三条按名字写的近邻豁免（博客单写正文与 SEO 字段、刷 sitemap、theme 两个 op 互认）被这条口径覆盖，已删；blog-publish 与 article-publish 互认保留。
 - **行为变化要知道**：Shopify 侧 collection-create、redirect-add、theme-text-edit、三个 template-assign 都是 reversible 档，申报过写操作的单里出现它们不再拦。要想某个动作重新硬拦，改政策表的档位，不要回来加名字。

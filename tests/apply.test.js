@@ -445,6 +445,18 @@ t('compareFiles：声明里的 * 通配匹配平台生成的文件名，且不�
   assert.deepStrictEqual(r2.extra.sort(), ['assets/sub/x.jpg', 'pages/a.html']);
   assert.deepStrictEqual(r2.missing, ['assets/*.jpg']);
 });
+t('lintPlan：一个方案只许一个落地日期，#2984 真实条目账本回放', () => {
+  const real = require('fs').readFileSync(require('path').join(__dirname, 'fixtures', 'plan_items_task-2984.txt'), 'utf8');
+  assert.deepStrictEqual(E.planItemConditions(real), ['after:2026-11-27', 'after:2026-12-11']);
+  const base = '## 2. API 调用序列\n步骤 1 PATCH /x\n涉及文件：a\n';
+  assert.ok(E.lintPlan(base + real).some((x) => x.indexOf('落地日期') > -1));
+  const one = '```json\n{"items":[{"op":"a","entity":"x","condition":"after:2026-11-27"},{"op":"b","entity":"y","condition":"after:2026-11-27"},{"op":"c","entity":"z"}]}\n```';
+  assert.deepStrictEqual(E.lintPlan(base + one), []);
+  const ads = '```json\n{"items":[{"op":"a","entity":"x","condition":"ad_approved:1"},{"op":"b","entity":"y","condition":"ad_approved:2"},{"op":"c","entity":"z","condition":"after:2026-12-01"}]}\n```';
+  assert.deepStrictEqual(E.lintPlan(base + ads), []);
+  assert.deepStrictEqual(E.planItemConditions('没有 json 块'), []);
+  assert.deepStrictEqual(E.planItemConditions('```json\n{坏的\n```'), []);
+});
 t('lintPlan：快照前置、PUT redirects、禁区路径、字段断言、缺文件清单各打回一次', () => {
   const ok = '## 2. API 调用序列\n步骤 1 PATCH /api/content/x/edit\n- 预期响应：200\n- 回读核对：GET elements 比对\n涉及文件：pages/index.html\n本方案不含 `POST /snapshots`，不碰 `/api/domains/*`、`/api/admin/*`。\n## 3. 变更预览\n附：v1 的 POST /api/content/x/snapshots 已删除';
   assert.deepStrictEqual(E.lintPlan(ok), []);

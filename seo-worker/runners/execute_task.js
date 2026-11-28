@@ -497,6 +497,9 @@ function buildPreparePrompt(opts) {
     '## 5. 执行后验证',
     '编号列出 apply 阶段做完要跑的验证：回读哪个接口、比对哪个字段、哪个线上 URL 该返回什么状态码。',
     '每条验证要能机械判断通过与否，不许写"看起来正常"这种。',
+    '有平台缓存的检查（sitemap 是否已含新页、CDN 上的旧内容是否刷新）当场验不出真假：写成「缓存过期后复验」的延后项，',
+    '注明多久后复验，不计入本轮通过与否，更不许当回滚触发条件。新页解除 noindex 后在 sitemap 里暂时看不到，',
+    '不是失败，为此挂回 noindex 反而让新页永远进不了 sitemap（PF Moving #3127 两次被自己的验收回滚）。',
     '',
     '文风与约束',
     '- 方案正文用中文。会写进站点的内容（页面文案、博客正文、meta 文本）按站点语言写。',
@@ -548,7 +551,10 @@ function buildPreparePrompt(opts) {
     '  （要客户素材、要客户点头、纯人工判断）。entity 是被改对象（广告/关键词/页面，带 id 或 URL）；',
     '  target 是目标值一句话。有前置条件的写入（「过审后」「到货后」「等客户图」这类）必须把条件',
     '  结构化标在该条目的 "condition" 字段，不许只写在散文里，语法三选一：',
-    '  ad_approved:<广告id>（某广告过审后）；after:YYYY-MM-DD（某日期后）；manual_signal:<一句话>（等人来说）。',
+    '  ad_approved:<广告id>（某广告过审后）；after:YYYY-MM-DD（到该日期当天起即可落地，含当天）；manual_signal:<一句话>（等人来说）。',
+    '  条件没到时调度会把整单挂起、到点自动落地，所以步骤里不要再写日期自检或「未到期就停手」。',
+    '  一个方案只有一个落地时点：要错开时间分期做的，本方案只写最早那一期，后面的期次写进第 1 节',
+    '  「剩余批次」（写清做什么、最早哪天），由后续任务接。带两个不同 after: 日期的方案会被机械校验打回。',
     '  方案里每一处写入都必须出现在 items 里，执行状态按它逐条对账，漏一行等于那处写入不被跟踪。',
     '  无变更方案写空数组。',
     '  files 是本方案会写到的平台文件清单，与第 2 节末尾「涉及文件」一致，apply 结束用它和 changeset 比对。',
@@ -719,8 +725,39 @@ function lintPlan(text) {
     }
     if (hitLine) problems.push('方案把选择题递给了人（' + hitLine.trim().slice(0, 60) + '）。一般文案与执行决定归你，按判定原则自己选并给理由；「需要人定」一节只许写「无」，或缺客户独有信息时逐条写「等客户：要什么信息」');
   }
-  // 7. 放行卡超长或夹带代码：人读的那一节退化成论文
+  // 7. 一个方案只有一个落地时点（2026-11-28，SD Aluminium #2984：两期写入带两个日期条件塞进同一方案，
+  //    调度只能整单挂起或整单放行，落地 agent 自检日期两次零写入中止后停人）。
+  //    管什么：末尾 json 的 items 账本里出现两个以上不同的 after: 日期。只读结构化账本，不读散文。
+  //    豁免面：全部条目同一个日期、部分条目不带条件、多条 ad_approved 或 manual_signal（等齐了一起落，不是分期），都放过。
+  //    误杀出口：打回语写明改法（后期移到「剩余批次」），自修一次；仍败照旧转人工，人工放行不受本条约束。
+  //    命中台账：lint 打回原因随 job 日志与任务备注留档。
+  {
+    const conds = planItemConditions(t).filter((c) => /^after:\d{4}-\d{2}-\d{2}$/.test(c));
+    if (conds.length > 1) {
+      problems.push('方案条目带了 ' + conds.length + ' 个不同的落地日期（' + conds.join('、').slice(0, 120) +
+        '）。一个方案只有一个落地时点：本方案只留最早能落地的那一期，其余写进第 1 节「剩余批次」由后续任务接，不许在步骤里自设日期闸');
+    }
+  }
+  // 8. 放行卡超长或夹带代码：人读的那一节退化成论文
   return problems.concat(lintReleaseCard(t));
+}
+
+/* 取方案末尾 json 块 items 账本里的不同 condition（去重保序）。解析不了回空数组，不因格式问题误杀。 */
+function planItemConditions(text) {
+  const t = String(text || '');
+  const blocks = t.match(/```json\s*\n[\s\S]*?\n```/g) || [];
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    let j;
+    try { j = JSON.parse(blocks[i].replace(/^```json\s*\n/, '').replace(/\n```$/, '')); } catch (e) { continue; }
+    if (!j || !Array.isArray(j.items)) continue;
+    const out = [];
+    for (const it of j.items) {
+      const c = String((it && it.condition) || '').trim();
+      if (c && out.indexOf(c) === -1) out.push(c);
+    }
+    return out;
+  }
+  return [];
 }
 
 /** 方案末尾 json 里的 files 清单，apply 用来和 changeset 比对。没有就空数组。 */
@@ -3392,6 +3429,7 @@ module.exports = {
   resolveRefBlogUrl,
   parseOpsCheck,
   lintPlan,
+  planItemConditions,
   postsSnapshot,
   lintReleaseCard,
   planReleaseCard,
